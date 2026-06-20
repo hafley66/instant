@@ -32,31 +32,57 @@ export interface Workspace {
 export interface AppState {
   skin: Skin;
   mode: Mode;
-  active: string | null; // active tab id
+  active: string | null; // active tab id (runtime — ptys don't survive reload)
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   panel: Panel; // terminal vs worktrees table
-  worktrees: WorktreeRow[]; // last scan result
+  worktrees: WorktreeRow[]; // last scan result (runtime)
   wtView: WtView; // tree vs flat table
+  scanRoot: string; // worktrees scan path
+  sidebarWidth: number; // px
+  wtExpanded: string[]; // expanded tree node keys
 }
 
-// Durable slice, mirrored to localStorage. `active` is intentionally excluded —
-// it's session-runtime, not a preference.
-const PERSIST: (keyof AppState)[] = ["skin", "mode", "wtView"];
+// Durable slice, mirrored to localStorage. Runtime fields (active, workspaces,
+// worktrees) are excluded.
+const PERSIST: (keyof AppState)[] = [
+  "skin",
+  "mode",
+  "panel",
+  "wtView",
+  "scanRoot",
+  "sidebarWidth",
+  "wtExpanded",
+];
+
+// JSON so arrays/numbers round-trip. Falls back to the raw string for values
+// written by the old plain-string persistence (migrates skin/mode in place).
+function loadKey<T>(k: string, fallback: T): T {
+  const raw = localStorage.getItem(k);
+  if (raw === null) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return typeof fallback === "string" ? (raw as unknown as T) : fallback;
+  }
+}
 
 function load(): AppState {
   return {
-    skin: (localStorage.getItem("skin") as Skin) ?? "xp",
-    mode: (localStorage.getItem("mode") as Mode) ?? "light",
+    skin: loadKey<Skin>("skin", "xp"),
+    mode: loadKey<Mode>("mode", "light"),
     active: null,
     workspaces: [],
-    panel: "terminal",
+    panel: loadKey<Panel>("panel", "terminal"),
     worktrees: [],
-    wtView: (localStorage.getItem("wtView") as WtView) ?? "tree",
+    wtView: loadKey<WtView>("wtView", "tree"),
+    scanRoot: loadKey<string>("scanRoot", "~/projects"),
+    sidebarWidth: loadKey<number>("sidebarWidth", 150),
+    wtExpanded: loadKey<string[]>("wtExpanded", []),
   };
 }
 
 export const store = createStore<AppState>(load());
 
 store.subscribe((s) => {
-  for (const k of PERSIST) localStorage.setItem(k, String(s[k]));
+  for (const k of PERSIST) localStorage.setItem(k, JSON.stringify(s[k]));
 }, PERSIST);

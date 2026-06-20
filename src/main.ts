@@ -237,8 +237,7 @@ function prettyOrigin(url: string): string {
 }
 
 // Two views over the same rows: a collapsible fs tree, and a flat table.
-const wtExpanded = new Set<string>(); // expanded node keys (tree view, in-memory)
-
+// Expanded node keys live in the (persisted) store.
 type CloneNode = { clone: string; branch: string; worktrees: WorktreeRow[] };
 type OrgNode = { origin: string; clones: CloneNode[] };
 
@@ -315,9 +314,11 @@ function treeNode(opts: {
 function renderTree(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
+  const wtExpanded = new Set(store.get().wtExpanded);
   const toggle = (key: string) => {
-    wtExpanded.has(key) ? wtExpanded.delete(key) : wtExpanded.add(key);
-    renderWorktreesPanel();
+    const next = new Set(wtExpanded);
+    next.has(key) ? next.delete(key) : next.add(key);
+    store.set({ wtExpanded: [...next] }); // persists + re-renders via subscription
   };
 
   const wrap = document.createElement("div");
@@ -419,6 +420,7 @@ function renderWorktreesPanel() {
 
 async function scanWorktrees() {
   const root = ($("#wt-root") as HTMLInputElement).value.trim();
+  store.set({ scanRoot: root }); // remember it
   ($("#wt-count") as HTMLElement).textContent = "scanning…";
   try {
     const rows = await invoke<WorktreeRow[]>("scan_worktrees", {
@@ -516,6 +518,36 @@ async function wireDragDrop() {
   });
 }
 
+// Drag the divider to resize the sidebar; width persists in the store.
+function wireResizer() {
+  const resizer = $("#sidebar-resizer");
+  const sidebar = $(".sidebar") as HTMLElement;
+  sidebar.style.width = `${store.get().sidebarWidth}px`;
+
+  let dragging = false;
+  resizer.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    resizer.setPointerCapture(e.pointerId);
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+  });
+  resizer.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const left = sidebar.getBoundingClientRect().left;
+    const w = Math.min(420, Math.max(110, e.clientX - left));
+    sidebar.style.width = `${w}px`;
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove("dragging");
+    document.body.style.cursor = "";
+    store.set({ sidebarWidth: Math.round(sidebar.getBoundingClientRect().width) });
+  };
+  resizer.addEventListener("pointerup", end);
+  resizer.addEventListener("pointercancel", end);
+}
+
 function wireChrome() {
   $("#skin-toggle").onclick = () =>
     store.set({ skin: store.get().skin === "xp" ? "p5" : "xp" });
@@ -575,13 +607,15 @@ async function main() {
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncPanel, ["panel"]);
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
-  store.subscribe(renderWorktreesPanel, ["worktrees", "wtView"]);
+  store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncPanel(store.get());
   renderWorktreesPanel();
 
+  ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
+  wireResizer();
   wireDragDrop();
   await refreshSessions();
   await refreshWorkspaces();

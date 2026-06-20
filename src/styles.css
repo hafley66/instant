@@ -157,12 +157,25 @@ body[data-skin="p5"] .mode-toggle {
 
 /* ---- sidebar ---- */
 .sidebar {
-  width: 150px;
+  width: 150px; /* JS overrides from persisted sidebarWidth */
+  flex: none;
   display: flex;
   flex-direction: column;
   border: var(--frame-w) solid var(--frame);
   background: var(--panel-bg);
   min-height: 0;
+}
+/* Drag handle between sidebar and content. */
+.resizer {
+  flex: none;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+.resizer:hover,
+.resizer.dragging {
+  background: var(--frame);
 }
 .sidebar-head {
   font-size: 10px;
