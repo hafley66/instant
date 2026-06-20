@@ -172,12 +172,26 @@ body[data-skin="p5"] .mode-toggle {
   background: var(--head-bg);
   border-bottom: var(--frame-w) solid var(--frame);
 }
+/* Two lists (sessions + spaces) share one scroll region. */
+.sidebar-lists {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .session-list {
   list-style: none;
   margin: 0;
   padding: 2px;
-  flex: 1;
-  overflow-y: auto;
+}
+/* Repo/branch/agent stack vertically in the narrow sidebar. */
+.new-workspace {
+  flex-wrap: wrap;
+}
+.new-workspace input,
+.new-workspace select,
+.new-workspace button {
+  flex: 1 1 100%;
+  min-width: 0;
 }
 .session {
   display: flex;

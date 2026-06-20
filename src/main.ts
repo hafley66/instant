@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { store, type AppState, type Skin } from "./state";
+import { store, type AppState, type Skin, type Workspace } from "./state";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -26,6 +26,7 @@ const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const terminalsEl = $("#terminals");
 const tabsEl = $("#tabs");
 const listEl = $("#session-list") as HTMLUListElement;
+const wsListEl = $("#workspace-list") as HTMLUListElement;
 
 const sessionId = (name: string) => `s:${name}`;
 const activeId = () => store.get().active;
@@ -43,7 +44,9 @@ const QUICK_CMD: Record<string, string> = {
   opencode: "opencode",
 };
 
-function openTab(name: string) {
+// opts let a Space override the agent command and launch cwd; plain sessions
+// fall back to QUICK_CMD and the backend default (HOME).
+function openTab(name: string, opts: { command?: string | null; cwd?: string | null } = {}) {
   const id = sessionId(name);
   if (tabs.has(id)) {
     activate(id);
@@ -74,11 +77,12 @@ function openTab(name: string) {
 
   // Fit AFTER layout so the pty spawns at the real grid size, not the pre-layout
   // 80x24 default that leaves full-screen TUIs (opencode) clipped.
-  const command = QUICK_CMD[name] ?? null;
+  const command = opts.command ?? QUICK_CMD[name] ?? null;
+  const cwd = opts.cwd ?? null;
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
-    invoke("open_session", { id, name, command, cols, rows }).catch(console.error);
+    invoke("open_session", { id, name, command, cwd, cols, rows }).catch(console.error);
   });
 
   renderTabs();
@@ -140,8 +144,8 @@ function renderTabs() {
 }
 
 function renderSessionActive() {
-  listEl.querySelectorAll("li").forEach((li) => {
-    const id = (li as HTMLLIElement).dataset.id;
+  document.querySelectorAll<HTMLLIElement>(".sidebar-lists li").forEach((li) => {
+    const id = li.dataset.id;
     li.classList.toggle("active", !!id && id === activeId());
   });
 }
@@ -174,6 +178,41 @@ async function refreshSessions() {
     listEl.appendChild(li);
   }
   renderSessionActive();
+}
+
+// ---- workspaces (Spaces): a git worktree + agent, opened in its own cwd ----
+function renderWorkspaces(list: Workspace[]) {
+  wsListEl.innerHTML = "";
+  for (const ws of list) {
+    const li = document.createElement("li");
+    li.className = "session";
+    li.dataset.id = sessionId(ws.id);
+    li.innerHTML = `<span class="dot on"></span>
+      <span class="s-name">${ws.id}</span>
+      <span class="s-meta">${ws.agent}</span>`;
+    li.onclick = () => openTab(ws.id, { command: ws.agent, cwd: ws.path });
+    const rm = document.createElement("span");
+    rm.className = "tab-close";
+    rm.textContent = "×";
+    rm.title = "remove space (keeps the worktree on disk)";
+    rm.onclick = (e) => {
+      e.stopPropagation();
+      invoke("remove_workspace", { id: ws.id, deleteTree: false }).catch(
+        console.error,
+      ); // workspaces-changed refreshes the list
+    };
+    li.appendChild(rm);
+    wsListEl.appendChild(li);
+  }
+  renderSessionActive();
+}
+
+async function refreshWorkspaces() {
+  try {
+    store.set({ workspaces: await invoke<Workspace[]>("list_workspaces") });
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -272,6 +311,23 @@ function wireChrome() {
     openTab(name);
     refreshSessions();
   });
+
+  $("#new-workspace").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const repoEl = $("#ws-repo") as HTMLInputElement;
+    const branchEl = $("#ws-branch") as HTMLInputElement;
+    const repo = repoEl.value.trim();
+    const branch = branchEl.value.trim();
+    const agent = ($("#ws-agent") as HTMLSelectElement).value;
+    if (!repo || !branch) return;
+    invoke<Workspace>("create_workspace", { repo, branch, agent })
+      .then((ws) => {
+        repoEl.value = "";
+        branchEl.value = "";
+        openTab(ws.id, { command: ws.agent, cwd: ws.path });
+      })
+      .catch((err) => console.error("create_workspace:", err));
+  });
 }
 
 async function main() {
@@ -279,15 +335,22 @@ async function main() {
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncMode, ["mode"]);
+  store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   syncSkin(store.get());
   syncMode(store.get());
 
   wireChrome();
   wireDragDrop();
   await refreshSessions();
+  await refreshWorkspaces();
 
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
+  });
+
+  // Backend pushes the registry whenever a Space is created/removed.
+  await listen<Workspace[]>("workspaces-changed", (e) => {
+    store.set({ workspaces: e.payload });
   });
 
   // Summon: replay entrance animation + refocus active terminal.

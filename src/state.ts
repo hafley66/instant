@@ -6,10 +6,21 @@ import { createStore } from "./store";
 export type Skin = "xp" | "p5";
 export type Mode = "light" | "dark";
 
+// Mirror of the Rust workspace::Workspace registry (backend-owned).
+export interface Workspace {
+  id: string;
+  repo: string;
+  branch: string;
+  path: string;
+  agent: string;
+  created: number;
+}
+
 export interface AppState {
   skin: Skin;
   mode: Mode;
   active: string | null; // active tab id
+  workspaces: Workspace[]; // backend-owned, not persisted client-side
 }
 
 // Durable slice, mirrored to localStorage. `active` is intentionally excluded —
@@ -21,6 +32,7 @@ function load(): AppState {
     skin: (localStorage.getItem("skin") as Skin) ?? "xp",
     mode: (localStorage.getItem("mode") as Mode) ?? "light",
     active: null,
+    workspaces: [],
   };
 }
 

@@ -31,11 +31,24 @@
 
       <div class="window-body body">
         <aside class="sidebar">
-          <div class="sidebar-head">SESSIONS</div>
-          <ul id="session-list" class="session-list"></ul>
+          <div class="sidebar-lists">
+            <div class="sidebar-head">SESSIONS</div>
+            <ul id="session-list" class="session-list"></ul>
+            <div class="sidebar-head">SPACES</div>
+            <ul id="workspace-list" class="session-list"></ul>
+          </div>
           <form id="new-session" class="new-session">
             <input id="new-name" placeholder="new session…" autocomplete="off" />
             <button type="submit">+</button>
+          </form>
+          <form id="new-workspace" class="new-session new-workspace">
+            <input id="ws-repo" placeholder="repo path…" autocomplete="off" />
+            <input id="ws-branch" placeholder="branch…" autocomplete="off" />
+            <select id="ws-agent">
+              <option value="claude">claude</option>
+              <option value="opencode">opencode</option>
+            </select>
+            <button type="submit">+ space</button>
           </form>
         </aside>
 
