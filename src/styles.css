@@ -330,8 +330,8 @@ body[data-skin="ac3"] .mode-toggle {
   height: 100% !important;
 }
 
-/* ---- worktrees table panel (toggled via body[data-panel]) ---- */
-.worktrees-panel {
+/* ---- side panels (worktrees / spy), toggled via body[data-panel] ---- */
+.side-panel {
   display: none;
   flex: 1;
   min-height: 0;
@@ -340,11 +340,21 @@ body[data-skin="ac3"] .mode-toggle {
   background: var(--panel-bg);
   color: var(--panel-fg);
 }
-body[data-panel="worktrees"] #terminals {
+/* Any non-terminal panel hides the terminal stack; each panel shows by id. */
+body:not([data-panel="terminal"]) #terminals {
   display: none;
 }
-body[data-panel="worktrees"] .worktrees-panel {
+body[data-panel="worktrees"] #worktrees-panel,
+body[data-panel="spy"] #spy-panel {
   display: flex;
+}
+.spy-title {
+  font-size: 11px;
+  font-weight: bold;
+  opacity: 0.8;
+}
+.spy-spacer {
+  flex: 1;
 }
 .wt-scan {
   display: flex;

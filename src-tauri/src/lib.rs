@@ -1,4 +1,5 @@
 mod pty;
+mod spy;
 mod workspace;
 mod worktrees;
 
@@ -167,6 +168,13 @@ pub fn run() {
             let loaded = workspace::load(app.handle());
             *app.state::<workspace::Workspaces>().0.lock().unwrap() = loaded;
 
+            // Spy ring DB + localhost ingest endpoint for the browser extension.
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir).ok();
+            let conn = spy::open(&data_dir.join("spy.db"))?;
+            app.manage(spy::SpyDb(Mutex::new(conn)));
+            spy::spawn_server(app.handle().clone());
+
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -207,6 +215,8 @@ pub fn run() {
             workspace::create_workspace,
             workspace::remove_workspace,
             worktrees::scan_worktrees,
+            spy::spy_events,
+            spy::spy_clear,
             screenshot,
         ])
         .run(tauri::generate_context!())

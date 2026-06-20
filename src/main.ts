@@ -10,6 +10,7 @@ import {
   store,
   type AppState,
   type Skin,
+  type SpyEvent,
   type Workspace,
   type WorktreeRow,
 } from "./state";
@@ -445,14 +446,64 @@ async function scanWorktrees() {
   }
 }
 
+// ---- spy: browser events captured by the extension (localhost ingest) ----
+const SPY_CAP = 500;
+const prettyUrl = (u: string) =>
+  u.replace(/^https?:\/\//, "").replace(/^www\./, "");
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// Drop text into the active terminal (a spy row's text/url paste target).
+function pasteToActive(data: string) {
+  const id = activeId();
+  if (!id || !data) return;
+  invoke("write_pty", { id, data }).catch(console.error);
+  tabs.get(id)?.term.focus();
+}
+
+function renderSpyPanel() {
+  const { spy } = store.get();
+  ($("#spy-count") as HTMLElement).textContent = spy.length
+    ? `${spy.length} events`
+    : "";
+  const host = $("#spy-table");
+  host.innerHTML = "";
+  host.appendChild(
+    renderTable<SpyEvent>({
+      rows: spy,
+      columns: [
+        { header: "time", cell: (e) => fmtTime(e.ts) },
+        { header: "kind", cell: (e) => e.kind },
+        { header: "source", cell: (e) => e.title || prettyUrl(e.url) },
+        { header: "text", cell: (e) => e.text },
+      ],
+      rowTitle: (e) => e.url || e.text,
+      onRow: (e) => pasteToActive((e.text || e.url) + " "),
+    }),
+  );
+}
+
+async function refreshSpy() {
+  try {
+    store.set({ spy: await invoke<SpyEvent[]>("spy_events", { limit: SPY_CAP }) });
+  } catch (e) {
+    console.error("spy_events:", e);
+  }
+}
+
 function syncPanel(s: AppState) {
   document.body.dataset.panel = s.panel;
   ($("#wt-toggle") as HTMLButtonElement).classList.toggle(
     "active",
     s.panel === "worktrees",
   );
-  // Lazy first scan when the table is opened empty.
+  ($("#spy-toggle") as HTMLButtonElement).classList.toggle("active", s.panel === "spy");
+  // Lazy first load when a panel is opened empty.
   if (s.panel === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
+  if (s.panel === "spy" && store.get().spy.length === 0) refreshSpy();
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -579,6 +630,13 @@ function wireChrome() {
   $("#wt-view").onclick = () =>
     store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
 
+  $("#spy-toggle").onclick = () =>
+    store.set({ panel: store.get().panel === "spy" ? "terminal" : "spy" });
+  $("#spy-clear").onclick = () =>
+    invoke("spy_clear")
+      .then(() => store.set({ spy: [] }))
+      .catch(console.error);
+
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
   $("#hide-btn").onclick = () => getCurrentWindow().hide();
@@ -619,10 +677,12 @@ async function main() {
   store.subscribe(syncPanel, ["panel"]);
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
+  store.subscribe(renderSpyPanel, ["spy"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncPanel(store.get());
   renderWorktreesPanel();
+  renderSpyPanel();
 
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
@@ -648,6 +708,11 @@ async function main() {
   // Backend pushes the registry whenever a Space is created/removed.
   await listen<Workspace[]>("workspaces-changed", (e) => {
     store.set({ workspaces: e.payload });
+  });
+
+  // Each captured browser event arrives here; prepend, newest-first, capped.
+  await listen<SpyEvent>("spy-ingested", (e) => {
+    store.set({ spy: [e.payload, ...store.get().spy].slice(0, SPY_CAP) });
   });
 
   // Summon: replay entrance animation + refocus active terminal.

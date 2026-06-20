@@ -5,8 +5,18 @@ import { createStore } from "./store";
 
 export type Skin = "xp" | "p5" | "ac3";
 export type Mode = "light" | "dark";
-export type Panel = "terminal" | "worktrees";
+export type Panel = "terminal" | "worktrees" | "spy";
 export type WtView = "tree" | "table";
+
+// A captured browser event (Rust spy::SpyEvent), streamed from the extension.
+export interface SpyEvent {
+  id: number;
+  ts: number; // unix ms
+  kind: string; // "nav" | "selection" | "clipboard"
+  url: string;
+  title: string;
+  text: string;
+}
 
 // A reattachable tab: enough to re-`open_session` after a frontend reload. The
 // tmux session (and the agent inside) survives in the Rust backend; only the
@@ -46,6 +56,7 @@ export interface AppState {
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   panel: Panel; // terminal vs worktrees table
   worktrees: WorktreeRow[]; // last scan result (runtime)
+  spy: SpyEvent[]; // captured browser events (runtime)
   wtView: WtView; // tree vs flat table
   scanRoot: string; // worktrees scan path
   sidebarWidth: number; // px
@@ -87,6 +98,7 @@ function load(): AppState {
     workspaces: [],
     panel: loadKey<Panel>("panel", "terminal"),
     worktrees: [],
+    spy: [],
     wtView: loadKey<WtView>("wtView", "tree"),
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
