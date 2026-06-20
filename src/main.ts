@@ -225,6 +225,17 @@ async function refreshWorkspaces() {
 const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 const tmuxName = (s: string) => s.replace(/[.:\s]/g, "-");
 
+// "git@github.com:org/repo.git" / "https://host/org/repo.git" -> "org/repo"
+function prettyOrigin(url: string): string {
+  if (!url) return "(no remote)";
+  const s = url
+    .replace(/^git@/, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\.git$/, "")
+    .replace(":", "/");
+  return s.split("/").filter(Boolean).slice(-2).join("/") || s;
+}
+
 function renderWorktrees(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
@@ -250,9 +261,17 @@ function renderWorktrees(rows: WorktreeRow[]) {
     const clones = new Set(group.map((r) => r.clone)).size;
     const gh = document.createElement("tr");
     gh.className = "dtable-group";
+    if (clones > 1) gh.classList.add("multi"); // highlight the actual dupes
     const gtd = document.createElement("td");
     gtd.colSpan = 4;
-    gtd.textContent = `${origin}   ·   ${clones} clone${clones > 1 ? "s" : ""}, ${group.length} worktrees`;
+    const count =
+      clones > 1
+        ? `${clones} clones · ${group.length} worktrees`
+        : group.length > 1
+          ? `${group.length} worktrees`
+          : "";
+    gtd.textContent = count ? `${prettyOrigin(origin)}   ·   ${count}` : prettyOrigin(origin);
+    gh.title = origin;
     gh.appendChild(gtd);
     tbody.appendChild(gh);
 
