@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>instant</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body data-skin="xp">
+    <div class="window summon" id="app">
+      <div class="title-bar" data-tauri-drag-region>
+        <div class="title-bar-text">instant — summon</div>
+        <div class="title-bar-controls">
+          <button id="min-btn" aria-label="Minimize"></button>
+          <button id="max-btn" aria-label="Maximize"></button>
+          <button id="hide-btn" aria-label="Close"></button>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button id="shot-btn" class="shot-btn" title="Screenshot region into the prompt">
+          ⛶ Shot
+        </button>
+        <button id="mode-toggle" class="mode-toggle" title="Toggle dark mode">
+          ☾
+        </button>
+        <button id="skin-toggle" class="skin-toggle">P5</button>
+      </div>
+
+      <div class="window-body body">
+        <aside class="sidebar">
+          <div class="sidebar-head">SESSIONS</div>
+          <ul id="session-list" class="session-list"></ul>
+          <form id="new-session" class="new-session">
+            <input id="new-name" placeholder="new session…" autocomplete="off" />
+            <button type="submit">+</button>
+          </form>
+        </aside>
+
+        <section class="term-pane">
+          <div id="tabs" class="tabs"></div>
+          <div id="terminals" class="terminals"></div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>

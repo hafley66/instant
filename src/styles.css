@@ -1,0 +1,459 @@
+/* Window is transparent; the .window box is the visible popover. */
+/* XP chrome is light (xp.css paints buttons on a light face but sets no text
+   color, so a dark color-scheme turns ButtonText white => white-on-white). P5
+   sets its own colors, so it opts back into dark for native scrollbars. */
+:root {
+  color-scheme: light;
+}
+body[data-skin="p5"] {
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Pixelated MS Sans Serif", Tahoma, sans-serif;
+}
+
+#app.window {
+  position: fixed;
+  inset: 6px;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.title-bar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* xp.css is injected by a JS import, so it loads AFTER this stylesheet; a bare
+   `.title-bar` ties on specificity and loses, leaving its 3px padding. The
+   skin attribute outweighs it so the padding actually applies. */
+body[data-skin="xp"] .title-bar {
+  padding: 12px 10px;
+}
+body[data-skin="xp"] .title-bar-text {
+  font-size: 12px;
+  padding-left: 4px;
+}
+
+/* ---- toolbar (app actions live here, not in the window controls) ---- */
+/* Horizontal margin matches the body's inset so the window's blue inset-border
+   shows around it; without it the toolbar covers the frame and looks outset. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 3px 3px 0;
+  padding: 3px 5px;
+  background: linear-gradient(#fdfdfd, #ece9d8 60%, #d6d2c6);
+  border: 1px solid #91a7b4;
+}
+.toolbar button {
+  min-width: 0; /* xp.css forces 75px; lets the icon buttons shrink to content */
+  min-height: 22px;
+  font-weight: bold;
+}
+body[data-skin="xp"][data-mode="dark"] .toolbar {
+  background: linear-gradient(#3a3a3c, #2a2a2c);
+  border-color: #3a3a3a;
+}
+body[data-skin="p5"] .toolbar {
+  background: linear-gradient(90deg, #1a0000, #000);
+  border: 2px solid #ff1133;
+  gap: 6px;
+}
+.title-bar-controls,
+.skin-toggle,
+.mode-toggle {
+  -webkit-app-region: no-drag;
+}
+.skin-toggle {
+  min-width: 34px;
+  margin-right: 4px;
+  font-weight: bold;
+}
+.mode-toggle {
+  min-width: 26px;
+  margin-right: 4px;
+  padding: 0 4px;
+  line-height: 1;
+}
+/* Light/dark is an XP concept; P5 is its own dark world. */
+body[data-skin="p5"] .mode-toggle {
+  display: none;
+}
+
+.body.window-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  margin: 3px;
+  gap: 4px;
+}
+
+/* ---- sidebar ---- */
+.sidebar {
+  width: 150px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #7f9db9;
+  background: #fff;
+  min-height: 0;
+}
+.sidebar-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 4px 6px;
+  color: #003;
+  background: #d4d0c8;
+  border-bottom: 1px solid #7f9db9;
+}
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  flex: 1;
+  overflow-y: auto;
+}
+.session {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.session:hover {
+  background: #e8e8e8;
+}
+.session.active {
+  background: #316ac5;
+  color: #fff;
+  border-color: #1c3f7c;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #b0b0b0;
+  flex: none;
+}
+.dot.on {
+  background: #34c759;
+  box-shadow: 0 0 4px #34c759;
+}
+.s-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.s-meta {
+  font-size: 10px;
+  opacity: 0.6;
+}
+.new-session {
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border-top: 1px solid #7f9db9;
+}
+.new-session input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- terminal pane ---- */
+.term-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.tabs {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
+.tab {
+  font-size: 11px;
+  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tab-active {
+  font-weight: bold;
+}
+.tab-close {
+  opacity: 0.5;
+  cursor: pointer;
+}
+.tab-close:hover {
+  opacity: 1;
+  color: #c00;
+}
+.terminals {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid #7f9db9;
+}
+.term-host {
+  position: absolute;
+  inset: 0;
+  padding: 2px;
+}
+.term-host .xterm,
+.term-host .xterm-viewport {
+  height: 100% !important;
+}
+
+/* Entrance animation, default (XP): quick scale-up from cursor. */
+@keyframes pop-in {
+  from {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.summon-in {
+  animation: pop-in 120ms ease-out;
+  transform-origin: top left;
+}
+
+/* =========================================================
+   PERSONA 5 SKIN  — body[data-skin="p5"]
+   Red/black, hard slants, italic caps, kinetic entrance.
+   Overrides xp.css on the same DOM.
+   ========================================================= */
+body[data-skin="p5"] {
+  font-family: "Arial Black", Impact, sans-serif;
+}
+body[data-skin="p5"] #app.window {
+  background: #0a0000;
+  border: 3px solid #ff1133;
+  box-shadow:
+    0 0 0 2px #000,
+    0 12px 40px rgba(255, 0, 0, 0.35);
+  padding: 0;
+}
+body[data-skin="p5"] .title-bar {
+  background: linear-gradient(90deg, #d40019, #000);
+  color: #fff;
+  border: none;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  /* xp.css sets this on .title-bar; P5's override dropped it, collapsing the
+     title text and controls to the left. Restore it. */
+  justify-content: space-between;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 0 100%);
+}
+body[data-skin="p5"] .title-bar-text {
+  font-style: italic;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transform: skewX(-8deg);
+  padding-left: 10px;
+}
+body[data-skin="p5"] button {
+  background: #000;
+  color: #fff;
+  border: 2px solid #ff1133;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  transform: skewX(-8deg);
+  min-height: 18px;
+  box-shadow: none;
+}
+body[data-skin="p5"] button:hover {
+  background: #ff1133;
+  color: #000;
+}
+body[data-skin="p5"] .body.window-body {
+  background: #0a0000;
+}
+body[data-skin="p5"] .sidebar {
+  background: #000;
+  border: 2px solid #ff1133;
+  transform: skewX(-3deg);
+}
+body[data-skin="p5"] .sidebar-head {
+  background: #ff1133;
+  color: #000;
+  font-style: italic;
+  font-weight: 900;
+}
+body[data-skin="p5"] .session {
+  color: #fff;
+  font-style: italic;
+  font-weight: bold;
+}
+body[data-skin="p5"] .session:hover {
+  background: #2a0000;
+}
+body[data-skin="p5"] .session.active {
+  background: #ff1133;
+  color: #000;
+  clip-path: polygon(0 0, 100% 0, 96% 100%, 0 100%);
+}
+body[data-skin="p5"] .terminals {
+  border: 2px solid #ff1133;
+  background: #0a0000;
+}
+body[data-skin="p5"] .tab {
+  background: #000;
+  color: #fff;
+  border: 1px solid #ff1133;
+  font-style: italic;
+}
+body[data-skin="p5"] .tab-active {
+  background: #ff1133;
+  color: #000;
+}
+
+/* P5 entrance: harder, slammed-in from the left with a skew snap. */
+body[data-skin="p5"] .summon-in {
+  animation: p5-slam 180ms cubic-bezier(0.2, 1.4, 0.3, 1);
+}
+@keyframes p5-slam {
+  0% {
+    transform: translateX(-40px) skewX(-14deg);
+    opacity: 0;
+  }
+  60% {
+    transform: translateX(6px) skewX(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) skewX(0);
+    opacity: 1;
+  }
+}
+
+/* =========================================================
+   XP DARK MODE  — body[data-skin="xp"][data-mode="dark"]
+   Recolors only the chrome we own. xp.css buttons stay silver
+   (color-scheme is left light so their text stays dark), which
+   reads fine as classic controls on a dark surface.
+   ========================================================= */
+/* .window has its own light surface (#ece9d8) + 3px padding behind the body;
+   recolor it so the ring around the chrome isn't a pale margin. */
+body[data-skin="xp"][data-mode="dark"] #app.window {
+  background: #1e1e1e;
+}
+body[data-skin="xp"][data-mode="dark"] .body.window-body {
+  background: #1e1e1e;
+}
+body[data-skin="xp"][data-mode="dark"] .sidebar {
+  background: #252526;
+  border-color: #3a3a3a;
+}
+body[data-skin="xp"][data-mode="dark"] .sidebar-head {
+  background: #333;
+  color: #e0e0e0;
+  border-bottom-color: #3a3a3a;
+}
+body[data-skin="xp"][data-mode="dark"] .session {
+  color: #d4d4d4;
+}
+body[data-skin="xp"][data-mode="dark"] .session:hover {
+  background: #2d2d30;
+}
+body[data-skin="xp"][data-mode="dark"] .session.active {
+  background: #094771;
+  color: #fff;
+  border-color: #0a5a92;
+}
+body[data-skin="xp"][data-mode="dark"] .new-session {
+  border-top-color: #3a3a3a;
+}
+body[data-skin="xp"][data-mode="dark"] .terminals {
+  border-color: #3a3a3a;
+}
+
+/* ---- P5 polish ---- */
+/* The whole-sidebar skew aliased text and pushed it past the red frame.
+   Keep angles on accents (active row, title bar), not the container. */
+body[data-skin="p5"] .sidebar {
+  transform: none;
+  border-width: 2px;
+}
+body[data-skin="p5"] .sidebar-head {
+  letter-spacing: 2px;
+  clip-path: polygon(0 0, 100% 0, 94% 100%, 0 100%);
+}
+body[data-skin="p5"] .session {
+  border-bottom: 1px solid #1a0000;
+  border-radius: 0;
+}
+body[data-skin="p5"] .session.active {
+  box-shadow: inset 3px 0 0 #fff;
+}
+body[data-skin="p5"] .dot.on {
+  background: #ff2b2b;
+  box-shadow: 0 0 5px #ff2b2b;
+}
+/* The new-session input was a stray light XP box; make it P5. */
+body[data-skin="p5"] .new-session {
+  border-top: 2px solid #ff1133;
+}
+body[data-skin="p5"] .new-session input {
+  background: #000;
+  color: #fff;
+  border: 1px solid #ff1133;
+  font-style: italic;
+  outline: none;
+}
+body[data-skin="p5"] .new-session input::placeholder {
+  color: #a33;
+}
+body[data-skin="p5"] .tab {
+  clip-path: polygon(6% 0, 100% 0, 94% 100%, 0 100%);
+  padding: 2px 10px;
+}
+body[data-skin="p5"] .tab-active {
+  box-shadow: 0 0 8px rgba(255, 17, 51, 0.7);
+}
+body[data-skin="p5"] ::selection {
+  background: #ff1133;
+  color: #000;
+}
+/* P5 webkit scrollbars: red thumb on black. */
+body[data-skin="p5"] ::-webkit-scrollbar {
+  width: 10px;
+}
+body[data-skin="p5"] ::-webkit-scrollbar-track {
+  background: #1a0000;
+}
+body[data-skin="p5"] ::-webkit-scrollbar-thumb {
+  background: #ff1133;
+}
+
+/* The "hehe" — skew the live terminal canvas in P5, Persona-style. Kept mild
+   (-2deg): a skew shifts the canvas sideways, so xterm's outermost columns fall
+   past the pane and get cropped, and selection geometry drifts (xterm hit-tests
+   in untransformed space). Cosmetic only — switch to XP for clip-free work. */
+body[data-skin="p5"] .term-host {
+  transform: skewX(-2deg);
+  transform-origin: center;
+}
