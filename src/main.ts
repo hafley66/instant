@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { store, type AppState, type Skin } from "./state";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -17,8 +18,9 @@ type Tab = {
   el: HTMLElement;
 };
 
+// Runtime registry of live terminals. These are resources, not serializable app
+// state, so they stay out of the store; the active tab *id* lives in the store.
 const tabs = new Map<string, Tab>();
-let active: string | null = null;
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const terminalsEl = $("#terminals");
@@ -26,24 +28,14 @@ const tabsEl = $("#tabs");
 const listEl = $("#session-list") as HTMLUListElement;
 
 const sessionId = (name: string) => `s:${name}`;
+const activeId = () => store.get().active;
+const setActive = (id: string | null) => store.set({ active: id });
 
 // xterm palettes per skin. XP = classic console; P5 = blood-red on black.
-const THEMES = {
+const THEMES: Record<Skin, { background: string; foreground: string; cursor: string }> = {
   xp: { background: "#000000", foreground: "#c0c0c0", cursor: "#ffffff" },
   p5: { background: "#0a0000", foreground: "#ff2b2b", cursor: "#ff2b2b" },
-} as const;
-
-function currentSkin(): "xp" | "p5" {
-  return (document.body.dataset.skin as "xp" | "p5") ?? "xp";
-}
-
-// Light/dark applies to the XP skin only; P5 is always dark.
-function applyMode(mode: "light" | "dark") {
-  document.body.dataset.mode = mode;
-  localStorage.setItem("mode", mode);
-  ($("#mode-toggle") as HTMLButtonElement).textContent =
-    mode === "dark" ? "☀" : "☾";
-}
+};
 
 // Quick-start sessions launch their agent the first time the tmux session is created.
 const QUICK_CMD: Record<string, string> = {
@@ -53,8 +45,7 @@ const QUICK_CMD: Record<string, string> = {
 
 function openTab(name: string) {
   const id = sessionId(name);
-  const existing = tabs.get(id);
-  if (existing) {
+  if (tabs.has(id)) {
     activate(id);
     return;
   }
@@ -68,14 +59,13 @@ function openTab(name: string) {
     fontSize: 13,
     cursorBlink: true,
     allowProposedApi: true,
-    theme: THEMES[currentSkin()],
+    theme: THEMES[store.get().skin],
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(el);
 
-  const tab: Tab = { id, name, term, fit, el };
-  tabs.set(id, tab);
+  tabs.set(id, { id, name, term, fit, el });
 
   term.onData((data) => invoke("write_pty", { id, data }).catch(console.error));
   term.onResize(({ cols, rows }) =>
@@ -96,7 +86,7 @@ function openTab(name: string) {
 }
 
 function activate(id: string) {
-  active = id;
+  setActive(id);
   for (const [tid, t] of tabs) {
     t.el.style.display = tid === id ? "block" : "none";
   }
@@ -121,10 +111,11 @@ function closeTab(id: string) {
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
-  if (active === id) {
+  if (activeId() === id) {
     const next = tabs.keys().next();
-    active = next.done ? null : next.value;
-    if (active) activate(active);
+    const nextId = next.done ? null : next.value;
+    setActive(nextId);
+    if (nextId) activate(nextId);
   }
   renderTabs();
 }
@@ -133,7 +124,7 @@ function renderTabs() {
   tabsEl.innerHTML = "";
   for (const [id, t] of tabs) {
     const b = document.createElement("button");
-    b.className = "tab" + (id === active ? " tab-active" : "");
+    b.className = "tab" + (id === activeId() ? " tab-active" : "");
     b.textContent = t.name;
     b.onclick = () => activate(id);
     const x = document.createElement("span");
@@ -151,7 +142,7 @@ function renderTabs() {
 function renderSessionActive() {
   listEl.querySelectorAll("li").forEach((li) => {
     const id = (li as HTMLLIElement).dataset.id;
-    li.classList.toggle("active", !!id && id === active);
+    li.classList.toggle("active", !!id && id === activeId());
   });
 }
 
@@ -185,15 +176,20 @@ async function refreshSessions() {
   renderSessionActive();
 }
 
-function applySkin(skin: "xp" | "p5") {
-  document.body.dataset.skin = skin;
-  localStorage.setItem("skin", skin);
+// ---- store-driven view sync: skin and mode push to the DOM + controls ----
+function syncSkin(s: AppState) {
+  document.body.dataset.skin = s.skin;
   ($("#skin-toggle") as HTMLButtonElement).textContent =
-    skin === "xp" ? "P5" : "XP";
+    s.skin === "xp" ? "P5" : "XP";
   for (const t of tabs.values()) {
-    t.term.options.theme = THEMES[skin];
+    t.term.options.theme = THEMES[s.skin];
     t.fit.fit();
   }
+}
+function syncMode(s: AppState) {
+  document.body.dataset.mode = s.mode;
+  ($("#mode-toggle") as HTMLButtonElement).textContent =
+    s.mode === "dark" ? "☀" : "☾";
 }
 
 // While true, the blur-to-hide handler stands down (the screenshot crosshair
@@ -215,7 +211,7 @@ function cancelHide() {
 // Hide the popover, let the user crosshair-select a region, then type the saved
 // PNG path into the active terminal so claude/opencode can read the image.
 async function captureToPrompt() {
-  const id = active;
+  const id = activeId();
   const win = getCurrentWindow();
   capturing = true;
   await win.hide();
@@ -246,7 +242,7 @@ async function wireDragDrop() {
     // Any drag activity over the window means a drop may be coming; keep us up.
     cancelHide();
     if (e.payload.type !== "drop") return;
-    const id = active;
+    const id = activeId();
     if (!id || !e.payload.paths.length) return;
     const data = e.payload.paths.map(pathArg).join(" ") + " ";
     invoke("write_pty", { id, data }).catch(console.error);
@@ -256,10 +252,10 @@ async function wireDragDrop() {
 
 function wireChrome() {
   $("#skin-toggle").onclick = () =>
-    applySkin(currentSkin() === "xp" ? "p5" : "xp");
+    store.set({ skin: store.get().skin === "xp" ? "p5" : "xp" });
 
   $("#mode-toggle").onclick = () =>
-    applyMode(document.body.dataset.mode === "dark" ? "light" : "dark");
+    store.set({ mode: store.get().mode === "dark" ? "light" : "dark" });
 
   $("#shot-btn").onclick = captureToPrompt;
 
@@ -279,8 +275,13 @@ function wireChrome() {
 }
 
 async function main() {
-  applyMode((localStorage.getItem("mode") as "light" | "dark") ?? "light");
-  applySkin((localStorage.getItem("skin") as "xp" | "p5") ?? "xp");
+  // Skin/mode are store-driven: subscribe for changes, then apply once for the
+  // persisted initial state.
+  store.subscribe(syncSkin, ["skin"]);
+  store.subscribe(syncMode, ["mode"]);
+  syncSkin(store.get());
+  syncMode(store.get());
+
   wireChrome();
   wireDragDrop();
   await refreshSessions();
@@ -298,8 +299,9 @@ async function main() {
     refreshSessions();
     // Window may reappear at a new size/position; refit so the grid (and the
     // tmux pane behind it) matches, otherwise the TUI draws clipped.
-    if (active) {
-      const t = tabs.get(active);
+    const id = activeId();
+    if (id) {
+      const t = tabs.get(id);
       requestAnimationFrame(() => {
         t?.fit.fit();
         t?.term.focus();
@@ -308,7 +310,8 @@ async function main() {
   });
 
   new ResizeObserver(() => {
-    if (active) tabs.get(active)?.fit.fit();
+    const id = activeId();
+    if (id) tabs.get(id)?.fit.fit();
   }).observe(terminalsEl);
 
   // Esc hides the popover.

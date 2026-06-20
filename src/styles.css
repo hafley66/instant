@@ -20,12 +20,73 @@ body {
   font-family: "Pixelated MS Sans Serif", Tahoma, sans-serif;
 }
 
+/* =========================================================
+   DESIGN TOKENS
+   A skin is one block of values; components below reference only
+   var(--token). Adding a skin (e.g. AC3) means adding a block here,
+   not overriding every component. Dark mode is a token delta on XP.
+   ========================================================= */
+body[data-skin="xp"] {
+  --surface: #ece9d8; /* window + body backdrop (matches xp.css .window) */
+  --panel-bg: #fff; /* sidebar / list surfaces */
+  --panel-fg: #222;
+  --frame: #7f9db9; /* hairline borders */
+  --frame-w: 1px;
+  --head-bg: #d4d0c8; /* section headers */
+  --head-fg: #003;
+  --row-hover: #e8e8e8;
+  --row-active-bg: #316ac5;
+  --row-active-fg: #fff;
+  --row-active-bd: #1c3f7c;
+  --dot: #b0b0b0;
+  --dot-on: #34c759;
+  --term-bg: #000;
+  --term-frame: #7f9db9;
+  --toolbar-bg: linear-gradient(#fdfdfd, #ece9d8 60%, #d6d2c6);
+  --toolbar-frame: #91a7b4;
+}
+body[data-skin="xp"][data-mode="dark"] {
+  --surface: #1e1e1e;
+  --panel-bg: #252526;
+  --panel-fg: #d4d4d4;
+  --frame: #3a3a3a;
+  --head-bg: #333;
+  --head-fg: #e0e0e0;
+  --row-hover: #2d2d30;
+  --row-active-bg: #094771;
+  --row-active-fg: #fff;
+  --row-active-bd: #0a5a92;
+  --term-frame: #3a3a3a;
+  --toolbar-bg: linear-gradient(#3a3a3c, #2a2a2c);
+  --toolbar-frame: #3a3a3a;
+}
+body[data-skin="p5"] {
+  --surface: #0a0000;
+  --panel-bg: #000;
+  --panel-fg: #fff;
+  --frame: #ff1133;
+  --frame-w: 2px;
+  --head-bg: #ff1133;
+  --head-fg: #000;
+  --row-hover: #2a0000;
+  --row-active-bg: #ff1133;
+  --row-active-fg: #000;
+  --row-active-bd: transparent;
+  --dot: #b0b0b0;
+  --dot-on: #ff2b2b;
+  --term-bg: #0a0000;
+  --term-frame: #ff1133;
+  --toolbar-bg: linear-gradient(90deg, #1a0000, #000);
+  --toolbar-frame: #ff1133;
+}
+
 #app.window {
   position: fixed;
   inset: 6px;
   display: flex;
   flex-direction: column;
   margin: 0;
+  background: var(--surface);
 }
 
 .title-bar {
@@ -53,21 +114,15 @@ body[data-skin="xp"] .title-bar-text {
   flex-wrap: wrap;
   margin: 3px 3px 0;
   padding: 3px 5px;
-  background: linear-gradient(#fdfdfd, #ece9d8 60%, #d6d2c6);
-  border: 1px solid #91a7b4;
+  background: var(--toolbar-bg);
+  border: var(--frame-w) solid var(--toolbar-frame);
 }
 .toolbar button {
   min-width: 0; /* xp.css forces 75px; lets the icon buttons shrink to content */
   min-height: 22px;
   font-weight: bold;
 }
-body[data-skin="xp"][data-mode="dark"] .toolbar {
-  background: linear-gradient(#3a3a3c, #2a2a2c);
-  border-color: #3a3a3a;
-}
 body[data-skin="p5"] .toolbar {
-  background: linear-gradient(90deg, #1a0000, #000);
-  border: 2px solid #ff1133;
   gap: 6px;
 }
 .title-bar-controls,
@@ -97,6 +152,7 @@ body[data-skin="p5"] .mode-toggle {
   min-height: 0;
   margin: 3px;
   gap: 4px;
+  background: var(--surface);
 }
 
 /* ---- sidebar ---- */
@@ -104,17 +160,17 @@ body[data-skin="p5"] .mode-toggle {
   width: 150px;
   display: flex;
   flex-direction: column;
-  border: 1px solid #7f9db9;
-  background: #fff;
+  border: var(--frame-w) solid var(--frame);
+  background: var(--panel-bg);
   min-height: 0;
 }
 .sidebar-head {
   font-size: 10px;
   letter-spacing: 1px;
   padding: 4px 6px;
-  color: #003;
-  background: #d4d0c8;
-  border-bottom: 1px solid #7f9db9;
+  color: var(--head-fg);
+  background: var(--head-bg);
+  border-bottom: var(--frame-w) solid var(--frame);
 }
 .session-list {
   list-style: none;
@@ -130,26 +186,27 @@ body[data-skin="p5"] .mode-toggle {
   padding: 3px 5px;
   font-size: 12px;
   cursor: pointer;
+  color: var(--panel-fg);
   border: 1px solid transparent;
 }
 .session:hover {
-  background: #e8e8e8;
+  background: var(--row-hover);
 }
 .session.active {
-  background: #316ac5;
-  color: #fff;
-  border-color: #1c3f7c;
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+  border-color: var(--row-active-bd);
 }
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #b0b0b0;
+  background: var(--dot);
   flex: none;
 }
 .dot.on {
-  background: #34c759;
-  box-shadow: 0 0 4px #34c759;
+  background: var(--dot-on);
+  box-shadow: 0 0 4px var(--dot-on);
 }
 .s-name {
   flex: 1;
@@ -165,7 +222,7 @@ body[data-skin="p5"] .mode-toggle {
   display: flex;
   gap: 3px;
   padding: 4px;
-  border-top: 1px solid #7f9db9;
+  border-top: var(--frame-w) solid var(--frame);
 }
 .new-session input {
   flex: 1;
@@ -209,8 +266,8 @@ body[data-skin="p5"] .mode-toggle {
   position: relative;
   min-height: 0;
   overflow: hidden;
-  background: #000;
-  border: 1px solid #7f9db9;
+  background: var(--term-bg);
+  border: var(--frame-w) solid var(--term-frame);
 }
 .term-host {
   position: absolute;
@@ -240,14 +297,14 @@ body[data-skin="p5"] .mode-toggle {
 
 /* =========================================================
    PERSONA 5 SKIN  — body[data-skin="p5"]
-   Red/black, hard slants, italic caps, kinetic entrance.
-   Overrides xp.css on the same DOM.
+   Colors come from the token block above; this section is the
+   STRUCTURE that tokens can't express: fonts, slants, clip-paths,
+   glows, kinetic entrance.
    ========================================================= */
 body[data-skin="p5"] {
   font-family: "Arial Black", Impact, sans-serif;
 }
 body[data-skin="p5"] #app.window {
-  background: #0a0000;
   border: 3px solid #ff1133;
   box-shadow:
     0 0 0 2px #000,
@@ -289,134 +346,23 @@ body[data-skin="p5"] button:hover {
   background: #ff1133;
   color: #000;
 }
-body[data-skin="p5"] .body.window-body {
-  background: #0a0000;
-}
-body[data-skin="p5"] .sidebar {
-  background: #000;
-  border: 2px solid #ff1133;
-  transform: skewX(-3deg);
-}
 body[data-skin="p5"] .sidebar-head {
-  background: #ff1133;
-  color: #000;
   font-style: italic;
   font-weight: 900;
-}
-body[data-skin="p5"] .session {
-  color: #fff;
-  font-style: italic;
-  font-weight: bold;
-}
-body[data-skin="p5"] .session:hover {
-  background: #2a0000;
-}
-body[data-skin="p5"] .session.active {
-  background: #ff1133;
-  color: #000;
-  clip-path: polygon(0 0, 100% 0, 96% 100%, 0 100%);
-}
-body[data-skin="p5"] .terminals {
-  border: 2px solid #ff1133;
-  background: #0a0000;
-}
-body[data-skin="p5"] .tab {
-  background: #000;
-  color: #fff;
-  border: 1px solid #ff1133;
-  font-style: italic;
-}
-body[data-skin="p5"] .tab-active {
-  background: #ff1133;
-  color: #000;
-}
-
-/* P5 entrance: harder, slammed-in from the left with a skew snap. */
-body[data-skin="p5"] .summon-in {
-  animation: p5-slam 180ms cubic-bezier(0.2, 1.4, 0.3, 1);
-}
-@keyframes p5-slam {
-  0% {
-    transform: translateX(-40px) skewX(-14deg);
-    opacity: 0;
-  }
-  60% {
-    transform: translateX(6px) skewX(4deg);
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(0) skewX(0);
-    opacity: 1;
-  }
-}
-
-/* =========================================================
-   XP DARK MODE  — body[data-skin="xp"][data-mode="dark"]
-   Recolors only the chrome we own. xp.css buttons stay silver
-   (color-scheme is left light so their text stays dark), which
-   reads fine as classic controls on a dark surface.
-   ========================================================= */
-/* .window has its own light surface (#ece9d8) + 3px padding behind the body;
-   recolor it so the ring around the chrome isn't a pale margin. */
-body[data-skin="xp"][data-mode="dark"] #app.window {
-  background: #1e1e1e;
-}
-body[data-skin="xp"][data-mode="dark"] .body.window-body {
-  background: #1e1e1e;
-}
-body[data-skin="xp"][data-mode="dark"] .sidebar {
-  background: #252526;
-  border-color: #3a3a3a;
-}
-body[data-skin="xp"][data-mode="dark"] .sidebar-head {
-  background: #333;
-  color: #e0e0e0;
-  border-bottom-color: #3a3a3a;
-}
-body[data-skin="xp"][data-mode="dark"] .session {
-  color: #d4d4d4;
-}
-body[data-skin="xp"][data-mode="dark"] .session:hover {
-  background: #2d2d30;
-}
-body[data-skin="xp"][data-mode="dark"] .session.active {
-  background: #094771;
-  color: #fff;
-  border-color: #0a5a92;
-}
-body[data-skin="xp"][data-mode="dark"] .new-session {
-  border-top-color: #3a3a3a;
-}
-body[data-skin="xp"][data-mode="dark"] .terminals {
-  border-color: #3a3a3a;
-}
-
-/* ---- P5 polish ---- */
-/* The whole-sidebar skew aliased text and pushed it past the red frame.
-   Keep angles on accents (active row, title bar), not the container. */
-body[data-skin="p5"] .sidebar {
-  transform: none;
-  border-width: 2px;
-}
-body[data-skin="p5"] .sidebar-head {
   letter-spacing: 2px;
   clip-path: polygon(0 0, 100% 0, 94% 100%, 0 100%);
 }
 body[data-skin="p5"] .session {
+  font-style: italic;
+  font-weight: bold;
   border-bottom: 1px solid #1a0000;
   border-radius: 0;
 }
 body[data-skin="p5"] .session.active {
+  clip-path: polygon(0 0, 100% 0, 96% 100%, 0 100%);
   box-shadow: inset 3px 0 0 #fff;
 }
-body[data-skin="p5"] .dot.on {
-  background: #ff2b2b;
-  box-shadow: 0 0 5px #ff2b2b;
-}
 /* The new-session input was a stray light XP box; make it P5. */
-body[data-skin="p5"] .new-session {
-  border-top: 2px solid #ff1133;
-}
 body[data-skin="p5"] .new-session input {
   background: #000;
   color: #fff;
@@ -428,10 +374,16 @@ body[data-skin="p5"] .new-session input::placeholder {
   color: #a33;
 }
 body[data-skin="p5"] .tab {
+  background: #000;
+  color: #fff;
+  border: 1px solid #ff1133;
+  font-style: italic;
   clip-path: polygon(6% 0, 100% 0, 94% 100%, 0 100%);
   padding: 2px 10px;
 }
 body[data-skin="p5"] .tab-active {
+  background: #ff1133;
+  color: #000;
   box-shadow: 0 0 8px rgba(255, 17, 51, 0.7);
 }
 body[data-skin="p5"] ::selection {
@@ -456,4 +408,23 @@ body[data-skin="p5"] ::-webkit-scrollbar-thumb {
 body[data-skin="p5"] .term-host {
   transform: skewX(-2deg);
   transform-origin: center;
+}
+
+/* P5 entrance: harder, slammed-in from the left with a skew snap. */
+body[data-skin="p5"] .summon-in {
+  animation: p5-slam 180ms cubic-bezier(0.2, 1.4, 0.3, 1);
+}
+@keyframes p5-slam {
+  0% {
+    transform: translateX(-40px) skewX(-14deg);
+    opacity: 0;
+  }
+  60% {
+    transform: translateX(6px) skewX(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) skewX(0);
+    opacity: 1;
+  }
 }
