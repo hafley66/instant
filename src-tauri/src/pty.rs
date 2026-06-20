@@ -78,6 +78,7 @@ pub fn open_session(
     id: String,
     name: String,
     command: Option<String>,
+    cwd: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -99,13 +100,24 @@ pub fn open_session(
     // session "claude" launches `claude` the first time and just reattaches after.
     let mut cmd = CommandBuilder::new("tmux");
     cmd.args(["new-session", "-A", "-s", &name]);
+    // Start dir for a freshly-created session (a worktree path, usually). tmux
+    // ignores -c when reattaching, same as it ignores the trailing command.
+    let start_dir = cwd.as_deref().filter(|s| !s.is_empty());
+    if let Some(dir) = start_dir {
+        cmd.args(["-c", dir]);
+    }
     if let Some(run) = command.as_deref().filter(|s| !s.is_empty()) {
         cmd.arg(run);
     }
     cmd.env("PATH", path_env());
     cmd.env("TERM", "xterm-256color");
-    if let Some(home) = std::env::var_os("HOME") {
-        cmd.cwd(home);
+    match start_dir {
+        Some(dir) => cmd.cwd(dir),
+        None => {
+            if let Some(home) = std::env::var_os("HOME") {
+                cmd.cwd(home);
+            }
+        }
     }
 
     let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;

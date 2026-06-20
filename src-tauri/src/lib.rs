@@ -1,4 +1,5 @@
 mod pty;
+mod workspace;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -145,6 +146,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(pty::PtyStore::default())
+        .manage(workspace::Workspaces::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -159,6 +161,10 @@ pub fn run() {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             app.global_shortcut().register(summon)?;
             spawn_right_click_gesture(app.handle().clone());
+
+            // Hydrate the workspace registry from disk.
+            let loaded = workspace::load(app.handle());
+            *app.state::<workspace::Workspaces>().0.lock().unwrap() = loaded;
 
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -196,6 +202,9 @@ pub fn run() {
             pty::write_pty,
             pty::resize_pty,
             pty::close_pty,
+            workspace::list_workspaces,
+            workspace::create_workspace,
+            workspace::remove_workspace,
             screenshot,
         ])
         .run(tauri::generate_context!())
