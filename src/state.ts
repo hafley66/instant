@@ -6,6 +6,7 @@ import { createStore } from "./store";
 export type Skin = "xp" | "p5";
 export type Mode = "light" | "dark";
 export type Panel = "terminal" | "worktrees";
+export type WtView = "tree" | "table";
 
 // A discovered git worktree (Rust worktrees::WorktreeRow).
 export interface WorktreeRow {
@@ -35,11 +36,12 @@ export interface AppState {
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   panel: Panel; // terminal vs worktrees table
   worktrees: WorktreeRow[]; // last scan result
+  wtView: WtView; // tree vs flat table
 }
 
 // Durable slice, mirrored to localStorage. `active` is intentionally excluded —
 // it's session-runtime, not a preference.
-const PERSIST: (keyof AppState)[] = ["skin", "mode"];
+const PERSIST: (keyof AppState)[] = ["skin", "mode", "wtView"];
 
 function load(): AppState {
   return {
@@ -49,6 +51,7 @@ function load(): AppState {
     workspaces: [],
     panel: "terminal",
     worktrees: [],
+    wtView: (localStorage.getItem("wtView") as WtView) ?? "tree",
   };
 }
 

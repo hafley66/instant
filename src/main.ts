@@ -236,71 +236,185 @@ function prettyOrigin(url: string): string {
   return s.split("/").filter(Boolean).slice(-2).join("/") || s;
 }
 
-function renderWorktrees(rows: WorktreeRow[]) {
+// Two views over the same rows: a collapsible fs tree, and a flat table.
+const wtExpanded = new Set<string>(); // expanded node keys (tree view, in-memory)
+
+type CloneNode = { clone: string; branch: string; worktrees: WorktreeRow[] };
+type OrgNode = { origin: string; clones: CloneNode[] };
+
+// org/repo -> clone (fs checkout + its branch) -> worktrees
+function buildTree(rows: WorktreeRow[]): OrgNode[] {
+  const orgs = new Map<string, Map<string, CloneNode>>();
+  for (const r of rows) {
+    const okey = r.origin || "(no remote)";
+    let clones = orgs.get(okey);
+    if (!clones) orgs.set(okey, (clones = new Map()));
+    let cn = clones.get(r.clone);
+    if (!cn) clones.set(r.clone, (cn = { clone: r.clone, branch: "", worktrees: [] }));
+    cn.worktrees.push(r);
+    if (r.is_main) cn.branch = r.branch;
+  }
+  return [...orgs.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([origin, clones]) => ({
+      origin,
+      clones: [...clones.values()].sort((a, b) => a.clone.localeCompare(b.clone)),
+    }));
+}
+
+function openWorktree(clone: string, branch: string, wtPath: string) {
+  openTab(tmuxName(`${baseName(clone)}-${branch}`), { cwd: wtPath });
+  store.set({ panel: "terminal" });
+}
+
+function treeNode(opts: {
+  depth: number;
+  glyph: "+" | "-" | "";
+  label: string;
+  meta?: string;
+  multi?: boolean;
+  dirty?: boolean;
+  onGlyph?: () => void;
+  onLabel?: () => void;
+}): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "wt-node" + (opts.multi ? " multi" : "");
+  row.style.paddingLeft = `${6 + opts.depth * 16}px`;
+
+  const g = document.createElement("span");
+  g.className = "wt-glyph";
+  g.textContent = opts.glyph;
+  if (opts.onGlyph)
+    g.onclick = (e) => {
+      e.stopPropagation();
+      opts.onGlyph!();
+    };
+  row.appendChild(g);
+
+  const label = document.createElement("span");
+  label.className = "wt-label";
+  label.textContent = opts.label;
+  row.appendChild(label);
+
+  if (opts.meta) {
+    const m = document.createElement("span");
+    m.className = "wt-meta";
+    m.textContent = opts.meta;
+    row.appendChild(m);
+  }
+  if (opts.dirty) {
+    const d = document.createElement("span");
+    d.className = "wt-dirty";
+    d.textContent = "●";
+    row.appendChild(d);
+  }
+  if (opts.onLabel) row.onclick = opts.onLabel;
+  return row;
+}
+
+function renderTree(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
-  ($("#wt-count") as HTMLElement).textContent = rows.length
-    ? `${rows.length} worktrees`
-    : "";
+  const toggle = (key: string) => {
+    wtExpanded.has(key) ? wtExpanded.delete(key) : wtExpanded.add(key);
+    renderWorktreesPanel();
+  };
 
-  // Group by origin so the N-clones-of-one-repo structure is visible.
-  const byOrigin = new Map<string, WorktreeRow[]>();
-  for (const r of rows) {
-    const key = r.origin || "(no remote)";
-    (byOrigin.get(key) ?? byOrigin.set(key, []).get(key)!).push(r);
+  const wrap = document.createElement("div");
+  wrap.className = "wt-tree";
+  for (const org of buildTree(rows)) {
+    const okey = `o:${org.origin}`;
+    const oOpen = wtExpanded.has(okey);
+    wrap.appendChild(
+      treeNode({
+        depth: 0,
+        glyph: oOpen ? "-" : "+",
+        label: prettyOrigin(org.origin),
+        meta: `${org.clones.length} clone${org.clones.length > 1 ? "s" : ""}`,
+        multi: org.clones.length > 1,
+        onGlyph: () => toggle(okey),
+        onLabel: () => toggle(okey),
+      }),
+    );
+    if (!oOpen) continue;
+
+    for (const cl of org.clones) {
+      const ckey = `${okey}|c:${cl.clone}`;
+      const cOpen = wtExpanded.has(ckey);
+      wrap.appendChild(
+        treeNode({
+          depth: 1,
+          glyph: cl.worktrees.length ? (cOpen ? "-" : "+") : "",
+          label: baseName(cl.clone),
+          meta: cl.branch ? `@${cl.branch}` : "",
+          onGlyph: cl.worktrees.length ? () => toggle(ckey) : undefined,
+          onLabel: () => openWorktree(cl.clone, cl.branch, cl.clone),
+        }),
+      );
+      if (!cOpen) continue;
+
+      for (const wt of cl.worktrees) {
+        wrap.appendChild(
+          treeNode({
+            depth: 2,
+            glyph: "",
+            label: wt.is_main ? "(main)" : baseName(wt.worktree),
+            meta: `${wt.branch}  ${wt.head}`,
+            dirty: wt.dirty,
+            onLabel: () => openWorktree(cl.clone, wt.branch, wt.worktree),
+          }),
+        );
+      }
+    }
   }
+  host.appendChild(wrap);
+}
 
+function renderFlatTable(rows: WorktreeRow[]) {
+  const host = $("#wt-table");
+  host.innerHTML = "";
   const table = document.createElement("table");
   table.className = "dtable";
   table.innerHTML =
-    "<thead><tr><th>branch</th><th>clone › worktree</th><th>head</th><th></th></tr></thead>";
+    "<thead><tr><th>org/repo</th><th>clone</th><th>worktree</th><th>branch</th><th>head</th><th></th></tr></thead>";
   const tbody = document.createElement("tbody");
-
-  for (const [origin, group] of byOrigin) {
-    group.sort((a, b) => a.clone.localeCompare(b.clone) || (b.is_main ? 1 : 0) - (a.is_main ? 1 : 0));
-    const clones = new Set(group.map((r) => r.clone)).size;
-    const gh = document.createElement("tr");
-    gh.className = "dtable-group";
-    if (clones > 1) gh.classList.add("multi"); // highlight the actual dupes
-    const gtd = document.createElement("td");
-    gtd.colSpan = 4;
-    const count =
-      clones > 1
-        ? `${clones} clones · ${group.length} worktrees`
-        : group.length > 1
-          ? `${group.length} worktrees`
-          : "";
-    gtd.textContent = count ? `${prettyOrigin(origin)}   ·   ${count}` : prettyOrigin(origin);
-    gh.title = origin;
-    gh.appendChild(gtd);
-    tbody.appendChild(gh);
-
-    for (const r of group) {
-      const tr = document.createElement("tr");
-      tr.className = "dtable-row";
-      const loc = `${baseName(r.clone)} › ${r.is_main ? "(main)" : baseName(r.worktree)}`;
-      const cells = [
-        r.branch,
-        loc,
-        r.head,
-        r.dirty ? "●" : "",
-      ];
-      cells.forEach((c, i) => {
-        const td = document.createElement("td");
-        td.textContent = c;
-        if (i === 3 && r.dirty) td.className = "wt-dirty";
-        tr.appendChild(td);
-      });
-      tr.title = r.worktree + (r.dirty ? "  (uncommitted changes)" : "");
-      tr.onclick = () => {
-        openTab(tmuxName(`${baseName(r.clone)}-${r.branch}`), { cwd: r.worktree });
-        store.set({ panel: "terminal" });
-      };
-      tbody.appendChild(tr);
-    }
+  const sorted = [...rows].sort(
+    (a, b) => a.origin.localeCompare(b.origin) || a.clone.localeCompare(b.clone),
+  );
+  for (const r of sorted) {
+    const tr = document.createElement("tr");
+    tr.className = "dtable-row";
+    const cells = [
+      prettyOrigin(r.origin),
+      baseName(r.clone),
+      r.is_main ? "(main)" : baseName(r.worktree),
+      r.branch,
+      r.head,
+      r.dirty ? "●" : "",
+    ];
+    cells.forEach((c, i) => {
+      const td = document.createElement("td");
+      td.textContent = c;
+      if (i === 5 && r.dirty) td.className = "wt-dirty";
+      tr.appendChild(td);
+    });
+    tr.title = r.worktree;
+    tr.onclick = () => openWorktree(r.clone, r.branch, r.worktree);
+    tbody.appendChild(tr);
   }
   table.appendChild(tbody);
   host.appendChild(table);
+}
+
+function renderWorktreesPanel() {
+  const { worktrees, wtView } = store.get();
+  ($("#wt-count") as HTMLElement).textContent = worktrees.length
+    ? `${worktrees.length} worktrees`
+    : "";
+  ($("#wt-view") as HTMLButtonElement).textContent =
+    wtView === "tree" ? "Table" : "Tree";
+  if (wtView === "tree") renderTree(worktrees);
+  else renderFlatTable(worktrees);
 }
 
 async function scanWorktrees() {
@@ -419,6 +533,8 @@ function wireChrome() {
     e.preventDefault();
     scanWorktrees();
   });
+  $("#wt-view").onclick = () =>
+    store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
 
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
@@ -459,10 +575,11 @@ async function main() {
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncPanel, ["panel"]);
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
-  store.subscribe((s) => renderWorktrees(s.worktrees), ["worktrees"]);
+  store.subscribe(renderWorktreesPanel, ["worktrees", "wtView"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncPanel(store.get());
+  renderWorktreesPanel();
 
   wireChrome();
   wireDragDrop();

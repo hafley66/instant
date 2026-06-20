@@ -385,6 +385,45 @@ body[data-panel="worktrees"] .worktrees-panel {
   text-align: center;
 }
 
+/* ---- worktrees tree view ---- */
+.wt-tree {
+  font-family: "Menlo", "Consolas", monospace;
+  font-style: normal;
+  font-weight: normal;
+  font-size: 11px;
+  padding: 2px 0;
+}
+.wt-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wt-node:hover {
+  background: var(--row-hover);
+}
+.wt-glyph {
+  width: 11px;
+  flex: none;
+  text-align: center;
+  opacity: 0.7;
+  user-select: none;
+}
+.wt-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wt-node.multi > .wt-label {
+  color: var(--row-active-bg);
+  font-weight: bold;
+}
+.wt-meta {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
 /* Entrance animation, default (XP): quick scale-up from cursor. */
 @keyframes pop-in {
   from {
