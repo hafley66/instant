@@ -6,7 +6,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { store, type AppState, type Skin, type Workspace } from "./state";
+import {
+  store,
+  type AppState,
+  type Skin,
+  type Workspace,
+  type WorktreeRow,
+} from "./state";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -215,6 +221,94 @@ async function refreshWorkspaces() {
   }
 }
 
+// ---- worktrees table: discover existing worktrees across N repo clones ----
+const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
+const tmuxName = (s: string) => s.replace(/[.:\s]/g, "-");
+
+function renderWorktrees(rows: WorktreeRow[]) {
+  const host = $("#wt-table");
+  host.innerHTML = "";
+  ($("#wt-count") as HTMLElement).textContent = rows.length
+    ? `${rows.length} worktrees`
+    : "";
+
+  // Group by origin so the N-clones-of-one-repo structure is visible.
+  const byOrigin = new Map<string, WorktreeRow[]>();
+  for (const r of rows) {
+    const key = r.origin || "(no remote)";
+    (byOrigin.get(key) ?? byOrigin.set(key, []).get(key)!).push(r);
+  }
+
+  const table = document.createElement("table");
+  table.className = "dtable";
+  table.innerHTML =
+    "<thead><tr><th>branch</th><th>clone › worktree</th><th>head</th><th></th></tr></thead>";
+  const tbody = document.createElement("tbody");
+
+  for (const [origin, group] of byOrigin) {
+    group.sort((a, b) => a.clone.localeCompare(b.clone) || (b.is_main ? 1 : 0) - (a.is_main ? 1 : 0));
+    const clones = new Set(group.map((r) => r.clone)).size;
+    const gh = document.createElement("tr");
+    gh.className = "dtable-group";
+    const gtd = document.createElement("td");
+    gtd.colSpan = 4;
+    gtd.textContent = `${origin}   ·   ${clones} clone${clones > 1 ? "s" : ""}, ${group.length} worktrees`;
+    gh.appendChild(gtd);
+    tbody.appendChild(gh);
+
+    for (const r of group) {
+      const tr = document.createElement("tr");
+      tr.className = "dtable-row";
+      const loc = `${baseName(r.clone)} › ${r.is_main ? "(main)" : baseName(r.worktree)}`;
+      const cells = [
+        r.branch,
+        loc,
+        r.head,
+        r.dirty ? "●" : "",
+      ];
+      cells.forEach((c, i) => {
+        const td = document.createElement("td");
+        td.textContent = c;
+        if (i === 3 && r.dirty) td.className = "wt-dirty";
+        tr.appendChild(td);
+      });
+      tr.title = r.worktree + (r.dirty ? "  (uncommitted changes)" : "");
+      tr.onclick = () => {
+        openTab(tmuxName(`${baseName(r.clone)}-${r.branch}`), { cwd: r.worktree });
+        store.set({ panel: "terminal" });
+      };
+      tbody.appendChild(tr);
+    }
+  }
+  table.appendChild(tbody);
+  host.appendChild(table);
+}
+
+async function scanWorktrees() {
+  const root = ($("#wt-root") as HTMLInputElement).value.trim();
+  ($("#wt-count") as HTMLElement).textContent = "scanning…";
+  try {
+    const rows = await invoke<WorktreeRow[]>("scan_worktrees", {
+      roots: root ? [root] : [],
+      maxDepth: null,
+    });
+    store.set({ worktrees: rows });
+  } catch (e) {
+    console.error("scan_worktrees:", e);
+    ($("#wt-count") as HTMLElement).textContent = "scan failed";
+  }
+}
+
+function syncPanel(s: AppState) {
+  document.body.dataset.panel = s.panel;
+  ($("#wt-toggle") as HTMLButtonElement).classList.toggle(
+    "active",
+    s.panel === "worktrees",
+  );
+  // Lazy first scan when the table is opened empty.
+  if (s.panel === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
+}
+
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
 function syncSkin(s: AppState) {
   document.body.dataset.skin = s.skin;
@@ -298,6 +392,15 @@ function wireChrome() {
 
   $("#shot-btn").onclick = captureToPrompt;
 
+  $("#wt-toggle").onclick = () =>
+    store.set({
+      panel: store.get().panel === "worktrees" ? "terminal" : "worktrees",
+    });
+  $("#wt-scan").addEventListener("submit", (e) => {
+    e.preventDefault();
+    scanWorktrees();
+  });
+
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
   $("#hide-btn").onclick = () => getCurrentWindow().hide();
@@ -335,9 +438,12 @@ async function main() {
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncMode, ["mode"]);
+  store.subscribe(syncPanel, ["panel"]);
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
+  store.subscribe((s) => renderWorktrees(s.worktrees), ["worktrees"]);
   syncSkin(store.get());
   syncMode(store.get());
+  syncPanel(store.get());
 
   wireChrome();
   wireDragDrop();

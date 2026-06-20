@@ -26,6 +26,7 @@
         <button id="mode-toggle" class="mode-toggle" title="Toggle dark mode">
           ☾
         </button>
+        <button id="wt-toggle" class="wt-toggle" title="Worktrees table">⊞ Worktrees</button>
         <button id="skin-toggle" class="skin-toggle">P5</button>
       </div>
 
@@ -55,6 +56,14 @@
         <section class="term-pane">
           <div id="tabs" class="tabs"></div>
           <div id="terminals" class="terminals"></div>
+          <div id="worktrees-panel" class="worktrees-panel">
+            <form id="wt-scan" class="wt-scan">
+              <input id="wt-root" value="~/projects" autocomplete="off" />
+              <button type="submit">Scan</button>
+              <span id="wt-count" class="wt-count"></span>
+            </form>
+            <div id="wt-table" class="wt-table"></div>
+          </div>
         </section>
       </div>
     </div>

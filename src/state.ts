@@ -5,6 +5,18 @@ import { createStore } from "./store";
 
 export type Skin = "xp" | "p5";
 export type Mode = "light" | "dark";
+export type Panel = "terminal" | "worktrees";
+
+// A discovered git worktree (Rust worktrees::WorktreeRow).
+export interface WorktreeRow {
+  origin: string;
+  clone: string;
+  worktree: string;
+  branch: string;
+  head: string;
+  is_main: boolean;
+  dirty: boolean;
+}
 
 // Mirror of the Rust workspace::Workspace registry (backend-owned).
 export interface Workspace {
@@ -21,6 +33,8 @@ export interface AppState {
   mode: Mode;
   active: string | null; // active tab id
   workspaces: Workspace[]; // backend-owned, not persisted client-side
+  panel: Panel; // terminal vs worktrees table
+  worktrees: WorktreeRow[]; // last scan result
 }
 
 // Durable slice, mirrored to localStorage. `active` is intentionally excluded —
@@ -33,6 +47,8 @@ function load(): AppState {
     mode: (localStorage.getItem("mode") as Mode) ?? "light",
     active: null,
     workspaces: [],
+    panel: "terminal",
+    worktrees: [],
   };
 }
 

@@ -1,5 +1,6 @@
 mod pty;
 mod workspace;
+mod worktrees;
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -205,6 +206,7 @@ pub fn run() {
             workspace::list_workspaces,
             workspace::create_workspace,
             workspace::remove_workspace,
+            worktrees::scan_worktrees,
             screenshot,
         ])
         .run(tauri::generate_context!())

@@ -293,6 +293,83 @@ body[data-skin="p5"] .mode-toggle {
   height: 100% !important;
 }
 
+/* ---- worktrees table panel (toggled via body[data-panel]) ---- */
+.worktrees-panel {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  border: var(--frame-w) solid var(--term-frame);
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+}
+body[data-panel="worktrees"] #terminals {
+  display: none;
+}
+body[data-panel="worktrees"] .worktrees-panel {
+  display: flex;
+}
+.wt-scan {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px;
+  border-bottom: var(--frame-w) solid var(--frame);
+}
+.wt-scan input {
+  flex: 1;
+  min-width: 0;
+}
+.wt-count {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.wt-table {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.dtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.dtable th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 3px 6px;
+  background: var(--head-bg);
+  color: var(--head-fg);
+  border-bottom: 1px solid var(--frame);
+}
+.dtable-group td {
+  padding: 4px 6px;
+  font-weight: bold;
+  background: var(--row-hover);
+  color: var(--panel-fg);
+  border-top: 1px solid var(--frame);
+  white-space: nowrap;
+}
+.dtable-row td {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--frame);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+.dtable-row {
+  cursor: pointer;
+}
+.dtable-row:hover td {
+  background: var(--row-hover);
+}
+.wt-dirty {
+  color: var(--dot-on);
+  text-align: center;
+}
+
 /* Entrance animation, default (XP): quick scale-up from cursor. */
 @keyframes pop-in {
   from {
