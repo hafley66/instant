@@ -13,6 +13,7 @@ import {
   type Workspace,
   type WorktreeRow,
 } from "./state";
+import { renderTable } from "./table";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -38,11 +39,28 @@ const sessionId = (name: string) => `s:${name}`;
 const activeId = () => store.get().active;
 const setActive = (id: string | null) => store.set({ active: id });
 
-// xterm palettes per skin. XP = classic console; P5 = blood-red on black.
+// Persisted open-tab list (for reattach after reload). Keyed by tab name.
+function recordTab(name: string, command: string | null, cwd: string | null) {
+  const cur = store.get().openTabs;
+  if (cur.some((t) => t.name === name)) return;
+  store.set({ openTabs: [...cur, { name, command, cwd }] });
+}
+function forgetTab(id: string) {
+  store.set({ openTabs: store.get().openTabs.filter((t) => sessionId(t.name) !== id) });
+}
+
+// xterm palettes per skin. XP = classic console; P5 = blood-red on black;
+// AC3 = mecha-HUD amber-on-deep-blue.
 const THEMES: Record<Skin, { background: string; foreground: string; cursor: string }> = {
   xp: { background: "#000000", foreground: "#c0c0c0", cursor: "#ffffff" },
   p5: { background: "#0a0000", foreground: "#ff2b2b", cursor: "#ff2b2b" },
+  ac3: { background: "#04070c", foreground: "#b8c7d6", cursor: "#ffb000" },
 };
+
+// Skin cycle order for the toolbar toggle (XP -> P5 -> AC3 -> XP).
+const SKIN_CYCLE: Skin[] = ["xp", "p5", "ac3"];
+const nextSkin = (s: Skin): Skin =>
+  SKIN_CYCLE[(SKIN_CYCLE.indexOf(s) + 1) % SKIN_CYCLE.length];
 
 // Quick-start sessions launch their agent the first time the tmux session is created.
 const QUICK_CMD: Record<string, string> = {
@@ -85,6 +103,7 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   // 80x24 default that leaves full-screen TUIs (opencode) clipped.
   const command = opts.command ?? QUICK_CMD[name] ?? null;
   const cwd = opts.cwd ?? null;
+  recordTab(name, command, cwd); // survives reload; tmux session outlives the webview
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
@@ -121,6 +140,7 @@ function closeTab(id: string) {
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
+  forgetTab(id); // don't reattach a tab the user closed
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -374,37 +394,28 @@ function renderTree(rows: WorktreeRow[]) {
 function renderFlatTable(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
-  const table = document.createElement("table");
-  table.className = "dtable";
-  table.innerHTML =
-    "<thead><tr><th>org/repo</th><th>clone</th><th>worktree</th><th>branch</th><th>head</th><th></th></tr></thead>";
-  const tbody = document.createElement("tbody");
   const sorted = [...rows].sort(
     (a, b) => a.origin.localeCompare(b.origin) || a.clone.localeCompare(b.clone),
   );
-  for (const r of sorted) {
-    const tr = document.createElement("tr");
-    tr.className = "dtable-row";
-    const cells = [
-      prettyOrigin(r.origin),
-      baseName(r.clone),
-      r.is_main ? "(main)" : baseName(r.worktree),
-      r.branch,
-      r.head,
-      r.dirty ? "●" : "",
-    ];
-    cells.forEach((c, i) => {
-      const td = document.createElement("td");
-      td.textContent = c;
-      if (i === 5 && r.dirty) td.className = "wt-dirty";
-      tr.appendChild(td);
-    });
-    tr.title = r.worktree;
-    tr.onclick = () => openWorktree(r.clone, r.branch, r.worktree);
-    tbody.appendChild(tr);
-  }
-  table.appendChild(tbody);
-  host.appendChild(table);
+  host.appendChild(
+    renderTable<WorktreeRow>({
+      rows: sorted,
+      columns: [
+        { header: "org/repo", cell: (r) => prettyOrigin(r.origin) },
+        { header: "clone", cell: (r) => baseName(r.clone) },
+        { header: "worktree", cell: (r) => (r.is_main ? "(main)" : baseName(r.worktree)) },
+        { header: "branch", cell: (r) => r.branch },
+        { header: "head", cell: (r) => r.head },
+        {
+          header: "",
+          cell: (r) => (r.dirty ? "●" : ""),
+          cellClass: (r) => (r.dirty ? "wt-dirty" : undefined),
+        },
+      ],
+      rowTitle: (r) => r.worktree,
+      onRow: (r) => openWorktree(r.clone, r.branch, r.worktree),
+    }),
+  );
 }
 
 function renderWorktreesPanel() {
@@ -447,8 +458,8 @@ function syncPanel(s: AppState) {
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
 function syncSkin(s: AppState) {
   document.body.dataset.skin = s.skin;
-  ($("#skin-toggle") as HTMLButtonElement).textContent =
-    s.skin === "xp" ? "P5" : "XP";
+  // Button shows the skin it switches TO.
+  ($("#skin-toggle") as HTMLButtonElement).textContent = nextSkin(s.skin).toUpperCase();
   for (const t of tabs.values()) {
     t.term.options.theme = THEMES[s.skin];
     t.fit.fit();
@@ -550,7 +561,7 @@ function wireResizer() {
 
 function wireChrome() {
   $("#skin-toggle").onclick = () =>
-    store.set({ skin: store.get().skin === "xp" ? "p5" : "xp" });
+    store.set({ skin: nextSkin(store.get().skin) });
 
   $("#mode-toggle").onclick = () =>
     store.set({ mode: store.get().mode === "dark" ? "light" : "dark" });
@@ -623,6 +634,16 @@ async function main() {
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
   });
+
+  // Reattach tabs that were open before the reload. The tmux sessions (and the
+  // agents inside) are still alive in the Rust backend; `tmux new-session -A`
+  // reattaches. Capture the wanted active id first — openTab() flips active as
+  // it replays — then restore it once all tabs exist.
+  const wantActive = store.get().active;
+  for (const t of store.get().openTabs) {
+    openTab(t.name, { command: t.command, cwd: t.cwd });
+  }
+  if (wantActive && tabs.has(wantActive)) activate(wantActive);
 
   // Backend pushes the registry whenever a Space is created/removed.
   await listen<Workspace[]>("workspaces-changed", (e) => {

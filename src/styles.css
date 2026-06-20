@@ -79,6 +79,29 @@ body[data-skin="p5"] {
   --toolbar-bg: linear-gradient(90deg, #1a0000, #000);
   --toolbar-frame: #ff1133;
 }
+/* AC3: PS2-era mecha garage HUD — amber readouts on deep blue-black steel. */
+body[data-skin="ac3"] {
+  --surface: #070b11;
+  --panel-bg: #0b1019;
+  --panel-fg: #c9d4e0;
+  --frame: #2a4a5c; /* steel-blue hairline */
+  --frame-w: 1px;
+  --head-bg: #11202c;
+  --head-fg: #ffb000; /* amber */
+  --row-hover: #122436;
+  --row-active-bg: #16334a;
+  --row-active-fg: #ffce5c;
+  --row-active-bd: #36c5f0; /* cyan accent */
+  --dot: #3a5160;
+  --dot-on: #5fe0a0;
+  --term-bg: #04070c;
+  --term-frame: #2a4a5c;
+  --toolbar-bg: linear-gradient(#0d1622, #070d15);
+  --toolbar-frame: #2a4a5c;
+}
+body[data-skin="ac3"] {
+  color-scheme: dark;
+}
 
 #app.window {
   position: fixed;
@@ -141,8 +164,9 @@ body[data-skin="p5"] .toolbar {
   padding: 0 4px;
   line-height: 1;
 }
-/* Light/dark is an XP concept; P5 is its own dark world. */
-body[data-skin="p5"] .mode-toggle {
+/* Light/dark is an XP concept; P5 and AC3 are their own dark worlds. */
+body[data-skin="p5"] .mode-toggle,
+body[data-skin="ac3"] .mode-toggle {
   display: none;
 }
 
@@ -583,6 +607,203 @@ body[data-skin="p5"] .summon-in {
   }
   100% {
     transform: translateX(0) skewX(0);
+    opacity: 1;
+  }
+}
+
+/* =========================================================
+   ARMORED CORE 3 SKIN  — body[data-skin="ac3"]
+   PS2-era mecha garage HUD: amber-on-deep-blue, octagonal
+   panel cuts, amber corner brackets, faint CRT scanlines,
+   hex bullets, uppercase technical mono. Colors come from the
+   token block above; this is the structure tokens can't carry.
+   ========================================================= */
+body[data-skin="ac3"] {
+  font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+  letter-spacing: 0.4px;
+}
+/* Steel frame + faint scanlines bleeding through the surface gaps. */
+body[data-skin="ac3"] #app.window {
+  border: 1px solid #2a4a5c;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(54, 197, 240, 0.035) 0 1px,
+      transparent 1px 3px
+    ),
+    var(--surface);
+  box-shadow:
+    inset 0 0 0 1px #0c1a24,
+    0 0 0 1px #000,
+    0 14px 50px rgba(0, 0, 0, 0.7);
+}
+/* L-shaped amber corner brackets framing the unit (HUD reticle). */
+body[data-skin="ac3"] #app.window::before,
+body[data-skin="ac3"] #app.window::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  z-index: 5;
+}
+body[data-skin="ac3"] #app.window::before {
+  top: 3px;
+  left: 3px;
+  border-top: 2px solid #ffb000;
+  border-left: 2px solid #ffb000;
+}
+body[data-skin="ac3"] #app.window::after {
+  bottom: 3px;
+  right: 3px;
+  border-bottom: 2px solid #ffb000;
+  border-right: 2px solid #ffb000;
+}
+body[data-skin="ac3"] .title-bar {
+  background: linear-gradient(180deg, #11202c, #0a141c);
+  border: none;
+  border-bottom: 1px solid #2a4a5c;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* clipped lower-left corner, garage-panel style */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+body[data-skin="ac3"] .title-bar-text {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: #ffb000;
+  text-shadow: 0 0 6px rgba(255, 176, 0, 0.5);
+  padding-left: 12px;
+}
+body[data-skin="ac3"] .title-bar-text::before {
+  content: "◈ ";
+  color: #36c5f0;
+}
+/* Octagonal cut buttons with amber-glow hover. */
+body[data-skin="ac3"] button {
+  background: linear-gradient(180deg, #12202c, #0a151d);
+  color: #cfe2f0;
+  border: 1px solid #2a4a5c;
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  min-height: 20px;
+  box-shadow: none;
+  clip-path: polygon(
+    7px 0,
+    100% 0,
+    100% calc(100% - 7px),
+    calc(100% - 7px) 100%,
+    0 100%,
+    0 7px
+  );
+}
+body[data-skin="ac3"] button:hover {
+  border-color: #ffb000;
+  color: #ffce5c;
+  box-shadow: inset 0 0 8px rgba(255, 176, 0, 0.25);
+}
+body[data-skin="ac3"] button:active {
+  background: #16334a;
+}
+body[data-skin="ac3"] .toolbar button.active {
+  border-color: #36c5f0;
+  color: #8fe3ff;
+}
+body[data-skin="ac3"] .sidebar-head {
+  color: #ffb000;
+  background: #0c1822;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  border-bottom: 1px solid #2a4a5c;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+body[data-skin="ac3"] .sidebar-head::before {
+  content: "▎";
+  color: #36c5f0;
+  margin-right: 4px;
+}
+body[data-skin="ac3"] .session {
+  border-bottom: 1px solid #0e1a24;
+  border-radius: 0;
+}
+body[data-skin="ac3"] .session.active {
+  box-shadow: inset 3px 0 0 #ffb000;
+  border-color: #36c5f0;
+}
+/* Hexagon status pip. */
+body[data-skin="ac3"] .dot {
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+body[data-skin="ac3"] input,
+body[data-skin="ac3"] select {
+  background: #060d14;
+  color: #cfe2f0;
+  border: 1px solid #2a4a5c;
+  font-family: inherit;
+  outline: none;
+}
+body[data-skin="ac3"] input::placeholder {
+  color: #45627a;
+}
+body[data-skin="ac3"] input:focus,
+body[data-skin="ac3"] select:focus {
+  border-color: #ffb000;
+}
+body[data-skin="ac3"] .tab {
+  background: #0b151d;
+  color: #aebfcd;
+  border: 1px solid #2a4a5c;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  padding: 2px 12px;
+}
+body[data-skin="ac3"] .tab-active {
+  color: #ffce5c;
+  border-color: #ffb000;
+  box-shadow: inset 0 -2px 0 #ffb000;
+}
+body[data-skin="ac3"] .terminals {
+  box-shadow: inset 0 0 12px rgba(54, 197, 240, 0.06);
+}
+body[data-skin="ac3"] ::selection {
+  background: #ffb000;
+  color: #04070c;
+}
+body[data-skin="ac3"] ::-webkit-scrollbar {
+  width: 10px;
+}
+body[data-skin="ac3"] ::-webkit-scrollbar-track {
+  background: #0a141c;
+}
+body[data-skin="ac3"] ::-webkit-scrollbar-thumb {
+  background: #2a4a5c;
+  border: 1px solid #0a141c;
+}
+body[data-skin="ac3"] ::-webkit-scrollbar-thumb:hover {
+  background: #ffb000;
+}
+/* AC3 entrance: HUD wipe-in from a flat line. */
+body[data-skin="ac3"] .summon-in {
+  animation: ac3-boot 200ms ease-out;
+}
+@keyframes ac3-boot {
+  0% {
+    transform: scaleY(0.02);
+    opacity: 0;
+  }
+  45% {
+    transform: scaleY(1.03);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(1);
     opacity: 1;
   }
 }

@@ -3,10 +3,19 @@
 // (sessions, panels, layout) get added to AppState and listed in PERSIST.
 import { createStore } from "./store";
 
-export type Skin = "xp" | "p5";
+export type Skin = "xp" | "p5" | "ac3";
 export type Mode = "light" | "dark";
 export type Panel = "terminal" | "worktrees";
 export type WtView = "tree" | "table";
+
+// A reattachable tab: enough to re-`open_session` after a frontend reload. The
+// tmux session (and the agent inside) survives in the Rust backend; only the
+// xterm wiring is lost on reload, so we replay these on boot.
+export interface OpenTab {
+  name: string;
+  command: string | null;
+  cwd: string | null;
+}
 
 // A discovered git worktree (Rust worktrees::WorktreeRow).
 export interface WorktreeRow {
@@ -32,7 +41,8 @@ export interface Workspace {
 export interface AppState {
   skin: Skin;
   mode: Mode;
-  active: string | null; // active tab id (runtime — ptys don't survive reload)
+  active: string | null; // active tab id (persisted; replayed against reattached tabs)
+  openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   panel: Panel; // terminal vs worktrees table
   worktrees: WorktreeRow[]; // last scan result (runtime)
@@ -47,6 +57,8 @@ export interface AppState {
 const PERSIST: (keyof AppState)[] = [
   "skin",
   "mode",
+  "active",
+  "openTabs",
   "panel",
   "wtView",
   "scanRoot",
@@ -70,7 +82,8 @@ function load(): AppState {
   return {
     skin: loadKey<Skin>("skin", "xp"),
     mode: loadKey<Mode>("mode", "light"),
-    active: null,
+    active: loadKey<string | null>("active", null),
+    openTabs: loadKey<OpenTab[]>("openTabs", []),
     workspaces: [],
     panel: loadKey<Panel>("panel", "terminal"),
     worktrees: [],
