@@ -95,11 +95,15 @@ pub fn open_session(
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
 
-    // `-A` attaches if the session exists, else creates it. When creating, the
-    // trailing command runs inside; on reattach tmux ignores it. So a quick-start
-    // session "claude" launches `claude` the first time and just reattaches after.
+    // When creating, the trailing command runs inside; on reattach tmux ignores
+    // it. So a quick-start session "claude" launches `claude` the first time and
+    // just reattaches after.
+    // `-A` attaches if it exists else creates; `-D` detaches any OTHER client on
+    // attach. Without -D, a leaked client from a prior webview reload stays
+    // attached at its old 80x24 size and, under `window-size latest`, strands a
+    // ghost status line. -D guarantees one client, so one size.
     let mut cmd = CommandBuilder::new("tmux");
-    cmd.args(["new-session", "-A", "-s", &name]);
+    cmd.args(["new-session", "-A", "-D", "-s", &name]);
     // Start dir for a freshly-created session (a worktree path, usually). tmux
     // ignores -c when reattaching, same as it ignores the trailing command.
     let start_dir = cwd.as_deref().filter(|s| !s.is_empty());
