@@ -79,25 +79,26 @@ body[data-skin="p5"] {
   --toolbar-bg: linear-gradient(90deg, #1a0000, #000);
   --toolbar-frame: #ff1133;
 }
-/* AC3: PS2-era mecha garage HUD — amber readouts on deep blue-black steel. */
+/* AC3: PS2 garage UI — phosphor-green readouts on near-black, with a solid
+   orange bar for the current selection (the game's signature highlight). */
 body[data-skin="ac3"] {
-  --surface: #070b11;
-  --panel-bg: #0b1019;
-  --panel-fg: #c9d4e0;
-  --frame: #2a4a5c; /* steel-blue hairline */
+  --surface: #070b07; /* green-tinted black */
+  --panel-bg: #0a0f0a;
+  --panel-fg: #aed47e; /* soft green body text */
+  --frame: #2f5a2a; /* dim green hairline */
   --frame-w: 1px;
-  --head-bg: #11202c;
-  --head-fg: #ffb000; /* amber */
-  --row-hover: #122436;
-  --row-active-bg: #16334a;
-  --row-active-fg: #ffce5c;
-  --row-active-bd: #36c5f0; /* cyan accent */
-  --dot: #3a5160;
-  --dot-on: #5fe0a0;
-  --term-bg: #04070c;
-  --term-frame: #2a4a5c;
-  --toolbar-bg: linear-gradient(#0d1622, #070d15);
-  --toolbar-frame: #2a4a5c;
+  --head-bg: #0e1a0c;
+  --head-fg: #9bd34a; /* bright green label */
+  --row-hover: #14240f;
+  --row-active-bg: #ff8c1a; /* orange selection bar */
+  --row-active-fg: #0a0a0a; /* black text on the bar */
+  --row-active-bd: #ffb35c;
+  --dot: #3a5a30;
+  --dot-on: #9bd34a;
+  --term-bg: #050805;
+  --term-frame: #2f5a2a;
+  --toolbar-bg: linear-gradient(#0e160c, #070b07);
+  --toolbar-frame: #2f5a2a;
 }
 body[data-skin="ac3"] {
   color-scheme: dark;
@@ -623,183 +624,200 @@ body[data-skin="p5"] .summon-in {
 
 /* =========================================================
    ARMORED CORE 3 SKIN  — body[data-skin="ac3"]
-   PS2-era mecha garage HUD: amber-on-deep-blue, octagonal
-   panel cuts, amber corner brackets, faint CRT scanlines,
-   hex bullets, uppercase technical mono. Colors come from the
-   token block above; this is the structure tokens can't carry.
+   PS2 garage UI, from the actual game's look: phosphor-green
+   readouts on near-black, condensed sans, thin green dividers,
+   and a SOLID ORANGE bar for the current selection (the AC3
+   menu-cursor highlight). Rectilinear with small corner cuts,
+   not the sci-fi octagons of the first pass. Colors come from
+   the token block; this is the structure tokens can't carry.
    ========================================================= */
 body[data-skin="ac3"] {
-  font-family: ui-monospace, "SF Mono", "Menlo", monospace;
-  letter-spacing: 0.4px;
+  font-family: "DIN Condensed", "DIN Alternate", "Bahnschrift", "Oswald",
+    "Helvetica Neue", system-ui, sans-serif;
+  letter-spacing: 0.3px;
 }
-/* Steel frame + faint scanlines bleeding through the surface gaps. */
+/* Green hairline frame + very faint phosphor scanlines. */
 body[data-skin="ac3"] #app.window {
-  border: 1px solid #2a4a5c;
+  border: 1px solid var(--frame);
   background:
     repeating-linear-gradient(
       0deg,
-      rgba(54, 197, 240, 0.035) 0 1px,
+      rgba(155, 211, 74, 0.03) 0 1px,
       transparent 1px 3px
     ),
     var(--surface);
   box-shadow:
-    inset 0 0 0 1px #0c1a24,
+    inset 0 0 0 1px #0c160a,
     0 0 0 1px #000,
     0 14px 50px rgba(0, 0, 0, 0.7);
 }
-/* L-shaped amber corner brackets framing the unit (HUD reticle). */
+/* L-shaped green corner brackets — the targeting-frame motif. */
 body[data-skin="ac3"] #app.window::before,
 body[data-skin="ac3"] #app.window::after {
   content: "";
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   pointer-events: none;
   z-index: 5;
 }
 body[data-skin="ac3"] #app.window::before {
   top: 3px;
   left: 3px;
-  border-top: 2px solid #ffb000;
-  border-left: 2px solid #ffb000;
+  border-top: 2px solid #9bd34a;
+  border-left: 2px solid #9bd34a;
 }
 body[data-skin="ac3"] #app.window::after {
   bottom: 3px;
   right: 3px;
-  border-bottom: 2px solid #ffb000;
-  border-right: 2px solid #ffb000;
+  border-bottom: 2px solid #9bd34a;
+  border-right: 2px solid #9bd34a;
 }
 body[data-skin="ac3"] .title-bar {
-  background: linear-gradient(180deg, #11202c, #0a141c);
+  background: linear-gradient(180deg, #102008, #0a1207);
   border: none;
-  border-bottom: 1px solid #2a4a5c;
+  border-bottom: 1px solid var(--frame);
   height: 26px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* clipped lower-left corner, garage-panel style */
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 14px 100%, 0 calc(100% - 14px));
 }
 body[data-skin="ac3"] .title-bar-text {
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 3px;
-  color: #ffb000;
-  text-shadow: 0 0 6px rgba(255, 176, 0, 0.5);
+  letter-spacing: 4px;
+  color: #9bd34a;
+  text-shadow: 0 0 6px rgba(155, 211, 74, 0.4);
   padding-left: 12px;
 }
+/* Small square cursor block before the title, AC menu-marker style. */
 body[data-skin="ac3"] .title-bar-text::before {
-  content: "◈ ";
-  color: #36c5f0;
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  background: #ff8c1a;
+  vertical-align: middle;
 }
-/* Octagonal cut buttons with amber-glow hover. */
+/* Flat buttons, green outline, one clipped top-left corner. Hover lifts to
+   orange (the selection color); pressed fills green. */
 body[data-skin="ac3"] button {
-  background: linear-gradient(180deg, #12202c, #0a151d);
-  color: #cfe2f0;
-  border: 1px solid #2a4a5c;
+  background: #0c160a;
+  color: #aed47e;
+  border: 1px solid var(--frame);
   font-family: inherit;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  font-weight: 700;
+  letter-spacing: 1.5px;
+  font-weight: 600;
   min-height: 20px;
   box-shadow: none;
-  clip-path: polygon(
-    7px 0,
-    100% 0,
-    100% calc(100% - 7px),
-    calc(100% - 7px) 100%,
-    0 100%,
-    0 7px
-  );
+  clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
 }
 body[data-skin="ac3"] button:hover {
-  border-color: #ffb000;
-  color: #ffce5c;
-  box-shadow: inset 0 0 8px rgba(255, 176, 0, 0.25);
+  border-color: #ff8c1a;
+  color: #ffb35c;
 }
 body[data-skin="ac3"] button:active {
-  background: #16334a;
+  background: #ff8c1a;
+  color: #0a0a0a;
+  border-color: #ff8c1a;
 }
+/* Toggled-on panel button = solid orange tab. */
 body[data-skin="ac3"] .toolbar button.active {
-  border-color: #36c5f0;
-  color: #8fe3ff;
+  background: #ff8c1a;
+  color: #0a0a0a;
+  border-color: #ff8c1a;
 }
 body[data-skin="ac3"] .sidebar-head {
-  color: #ffb000;
-  background: #0c1822;
+  color: #9bd34a;
+  background: #0c160a;
   text-transform: uppercase;
-  letter-spacing: 2px;
-  border-bottom: 1px solid #2a4a5c;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  letter-spacing: 3px;
+  border-bottom: 1px solid var(--frame);
 }
+/* Green block marker, like an AC menu category tab. */
 body[data-skin="ac3"] .sidebar-head::before {
-  content: "▎";
-  color: #36c5f0;
-  margin-right: 4px;
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 9px;
+  margin-right: 6px;
+  background: #9bd34a;
+  vertical-align: middle;
 }
 body[data-skin="ac3"] .session {
-  border-bottom: 1px solid #0e1a24;
+  border-bottom: 1px solid #0f1c0b;
   border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
+/* Active row = full orange bar (token), plus a left chevron menu-cursor. */
 body[data-skin="ac3"] .session.active {
-  box-shadow: inset 3px 0 0 #ffb000;
-  border-color: #36c5f0;
+  border-color: transparent;
 }
-/* Hexagon status pip. */
+body[data-skin="ac3"] .session.active .s-name::before {
+  content: "▶ ";
+  color: #0a0a0a;
+}
+/* Hexagon status pip in green. */
 body[data-skin="ac3"] .dot {
   border-radius: 0;
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
 body[data-skin="ac3"] input,
 body[data-skin="ac3"] select {
-  background: #060d14;
-  color: #cfe2f0;
-  border: 1px solid #2a4a5c;
+  background: #060a05;
+  color: #aed47e;
+  border: 1px solid var(--frame);
   font-family: inherit;
   outline: none;
 }
 body[data-skin="ac3"] input::placeholder {
-  color: #45627a;
+  color: #4a6638;
 }
 body[data-skin="ac3"] input:focus,
 body[data-skin="ac3"] select:focus {
-  border-color: #ffb000;
+  border-color: #ff8c1a;
 }
+/* Rectangular tabs; active tab is the orange selection bar. */
 body[data-skin="ac3"] .tab {
-  background: #0b151d;
-  color: #aebfcd;
-  border: 1px solid #2a4a5c;
+  background: #0c160a;
+  color: #aed47e;
+  border: 1px solid var(--frame);
   text-transform: uppercase;
   letter-spacing: 1px;
-  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
   padding: 2px 12px;
 }
 body[data-skin="ac3"] .tab-active {
-  color: #ffce5c;
-  border-color: #ffb000;
-  box-shadow: inset 0 -2px 0 #ffb000;
+  background: #ff8c1a;
+  color: #0a0a0a;
+  border-color: #ff8c1a;
 }
-body[data-skin="ac3"] .terminals {
-  box-shadow: inset 0 0 12px rgba(54, 197, 240, 0.06);
+/* Terminal pane: faint green inner glow + a bright data-rule along the top,
+   echoing the stat-readout strips in the garage. */
+body[data-skin="ac3"] .terminals,
+body[data-skin="ac3"] .side-panel {
+  box-shadow: inset 0 2px 0 #2f5a2a, inset 0 0 12px rgba(155, 211, 74, 0.05);
 }
 body[data-skin="ac3"] ::selection {
-  background: #ffb000;
-  color: #04070c;
+  background: #ff8c1a;
+  color: #050805;
 }
 body[data-skin="ac3"] ::-webkit-scrollbar {
   width: 10px;
 }
 body[data-skin="ac3"] ::-webkit-scrollbar-track {
-  background: #0a141c;
+  background: #0a140a;
 }
 body[data-skin="ac3"] ::-webkit-scrollbar-thumb {
-  background: #2a4a5c;
-  border: 1px solid #0a141c;
+  background: #2f5a2a;
+  border: 1px solid #0a140a;
 }
 body[data-skin="ac3"] ::-webkit-scrollbar-thumb:hover {
-  background: #ffb000;
+  background: #9bd34a;
 }
-/* AC3 entrance: HUD wipe-in from a flat line. */
+/* AC3 entrance: HUD wipe-in from a flat scanline. */
 body[data-skin="ac3"] .summon-in {
   animation: ac3-boot 200ms ease-out;
 }

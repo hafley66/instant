@@ -51,11 +51,11 @@ function forgetTab(id: string) {
 }
 
 // xterm palettes per skin. XP = classic console; P5 = blood-red on black;
-// AC3 = mecha-HUD amber-on-deep-blue.
+// AC3 = phosphor-green garage readout with an orange cursor.
 const THEMES: Record<Skin, { background: string; foreground: string; cursor: string }> = {
   xp: { background: "#000000", foreground: "#c0c0c0", cursor: "#ffffff" },
   p5: { background: "#0a0000", foreground: "#ff2b2b", cursor: "#ff2b2b" },
-  ac3: { background: "#04070c", foreground: "#b8c7d6", cursor: "#ffb000" },
+  ac3: { background: "#050805", foreground: "#b8e08a", cursor: "#ff8c1a" },
 };
 
 // Skin cycle order for the toolbar toggle (XP -> P5 -> AC3 -> XP).
