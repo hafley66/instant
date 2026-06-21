@@ -196,27 +196,111 @@ body[data-skin="ac3"] .mode-toggle {
   background: var(--surface);
 }
 
-/* ---- sidebar ---- */
-.sidebar {
-  width: 150px; /* JS overrides from persisted sidebarWidth */
+/* ---- dock zones (left / center / right / bottom) ---- */
+/* .body.window-body is the flex row: zone-left | div | zmid | div | zone-right.
+   zmid stacks zone-center over zone-bottom. Widths/heights are set inline by
+   dock.ts; center + zmid flex to fill. */
+.zone {
   flex: none;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   border: var(--frame-w) solid var(--frame);
   background: var(--panel-bg);
+  overflow: hidden;
+}
+.zone.empty {
+  display: none;
+}
+#zmid {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 4px;
+}
+#zone-center {
+  flex: 1 1 0;
+}
+.zbody {
+  flex: 1;
+  display: flex;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
-/* Drag handle between sidebar and content. */
-.resizer {
+.panel.hidden {
+  display: none;
+}
+
+/* zone tab strip — also the drag handle for re-docking a panel */
+.ztabs {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 2px;
+  background: var(--head-bg);
+  border-bottom: var(--frame-w) solid var(--frame);
+}
+.ztab {
+  font-size: 11px;
+  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: var(--head-fg);
+  border: 1px solid transparent;
+  user-select: none;
+}
+.ztab:hover {
+  background: var(--row-hover);
+}
+.ztab.active {
+  background: var(--row-active-bg, #316ac5);
+  color: var(--row-active-fg, #fff);
+  font-weight: bold;
+}
+.ztab-close {
+  opacity: 0.5;
+}
+.ztab-close:hover {
+  opacity: 1;
+  color: #c00;
+}
+
+/* zone dividers */
+.zdiv {
   flex: none;
-  width: 5px;
-  cursor: col-resize;
   background: transparent;
   -webkit-app-region: no-drag;
 }
-.resizer:hover,
-.resizer.dragging {
+.zdiv-v {
+  width: 5px;
+  cursor: col-resize;
+}
+.zdiv-h {
+  height: 5px;
+  cursor: row-resize;
+}
+.zdiv:hover,
+.zdiv.dragging {
   background: var(--frame);
+}
+
+/* drop target while dragging a tab between zones */
+.zone.drop-hover {
+  outline: 2px dashed var(--row-active-bg, #316ac5);
+  outline-offset: -2px;
 }
 
 /* ---- window resize grips ---- */
@@ -412,26 +496,8 @@ body[data-skin="ac3"] .mode-toggle {
   height: 100% !important;
 }
 
-/* ---- side panels (worktrees / spy), toggled via body[data-panel] ---- */
-.side-panel {
-  display: none;
-  flex: 1;
-  min-height: 0;
-  flex-direction: column;
-  border: var(--frame-w) solid var(--term-frame);
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-}
-/* Any non-terminal panel hides the terminal stack; each panel shows by id. */
-body:not([data-panel="terminal"]) #terminals {
-  display: none;
-}
-body[data-panel="worktrees"] #worktrees-panel,
-body[data-panel="activity"] #activity-panel,
-body[data-panel="files"] #files-panel,
-body[data-panel="config"] #config-panel {
-  display: flex;
-}
+/* Panels now live in dock zones (see .panel / .zone); visibility is the active
+   tab's .hidden toggle, not a body[data-panel] swap. */
 .spy-spacer {
   flex: 1;
 }

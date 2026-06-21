@@ -33,8 +33,38 @@
         <button id="skin-toggle" class="skin-toggle">P5</button>
       </div>
 
-      <div class="window-body body">
-        <aside class="sidebar">
+      <!-- Dock: four resizable zones filled by dock.ts. Each zone gets a tab
+           strip + body; panels are moved in from #panel-pool. -->
+      <div class="window-body body dock" id="dock">
+        <div class="zone" id="zone-left" data-zone="left">
+          <div class="ztabs"></div>
+          <div class="zbody"></div>
+        </div>
+        <div class="zdiv zdiv-v" data-edge="left" title="Resize"></div>
+        <div class="zmid" id="zmid">
+          <div class="zone" id="zone-center" data-zone="center">
+            <div class="ztabs"></div>
+            <div class="zbody"></div>
+          </div>
+          <div class="zdiv zdiv-h" data-edge="bottom" title="Resize"></div>
+          <div class="zone" id="zone-bottom" data-zone="bottom">
+            <div class="ztabs"></div>
+            <div class="zbody"></div>
+          </div>
+        </div>
+        <div class="zdiv zdiv-v" data-edge="right" title="Resize"></div>
+        <div class="zone" id="zone-right" data-zone="right">
+          <div class="ztabs"></div>
+          <div class="zbody"></div>
+        </div>
+      </div>
+
+      <!-- Panel pool: holds every dockable panel's DOM. dock.ts moves a panel
+           into a zone body; undocked panels park here (display:none) so their
+           live state (xterm, listeners) survives. Inner ids are unchanged, so
+           all panel logic in main.ts keeps targeting them. -->
+      <div id="panel-pool" hidden>
+        <section class="panel" id="panel-sessions" data-panel="sessions" data-label="Sessions">
           <div class="sidebar-lists">
             <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span></div>
             <ul id="session-list" class="session-list"></ul>
@@ -63,72 +93,74 @@
               </form>
             </details>
           </div>
-        </aside>
+        </section>
 
-        <div id="sidebar-resizer" class="resizer"></div>
-
-        <section class="term-pane">
+        <section class="panel" id="panel-terminal" data-panel="terminal" data-label="Terminal">
           <div id="tabs" class="tabs"></div>
           <div id="terminals" class="terminals"></div>
-          <div id="worktrees-panel" class="side-panel worktrees-panel">
-            <form id="wt-scan" class="wt-scan">
-              <input id="wt-root" value="~/projects" autocomplete="off" />
-              <button type="submit">Scan</button>
-              <button id="wt-view" type="button">Table</button>
-              <span id="wt-count" class="wt-count"></span>
-            </form>
-            <div id="wt-table" class="wt-table"></div>
+        </section>
+
+        <section class="panel" id="panel-worktrees" data-panel="worktrees" data-label="Worktrees">
+          <form id="wt-scan" class="wt-scan">
+            <input id="wt-root" value="~/projects" autocomplete="off" />
+            <button type="submit">Scan</button>
+            <button id="wt-view" type="button">Table</button>
+            <span id="wt-count" class="wt-count"></span>
+          </form>
+          <div id="wt-table" class="wt-table"></div>
+        </section>
+
+        <section class="panel" id="panel-files" data-panel="files" data-label="Files">
+          <div class="fs-bar">
+            <button id="fs-up" type="button" title="Up one folder">↑</button>
+            <input id="fs-path" autocomplete="off" spellcheck="false" />
+            <button id="fs-go" type="button">Go</button>
           </div>
-          <div id="files-panel" class="side-panel files-panel">
-            <div class="fs-bar">
-              <button id="fs-up" type="button" title="Up one folder">↑</button>
-              <input id="fs-path" autocomplete="off" spellcheck="false" />
-              <button id="fs-go" type="button">Go</button>
-            </div>
-            <div class="fs-body">
-              <div id="fs-list" class="fs-list"></div>
-              <div id="fs-preview" class="fs-preview"></div>
-            </div>
+          <div class="fs-body">
+            <div id="fs-list" class="fs-list"></div>
+            <div id="fs-preview" class="fs-preview"></div>
           </div>
-          <div id="activity-panel" class="side-panel activity-panel">
-            <div class="act-bar">
-              <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
-              <span id="activity-count" class="wt-count"></span>
-              <span class="spy-spacer"></span>
-              <button id="activity-record" type="button" class="act-record">○ Record</button>
-              <button id="activity-clear" type="button">Clear</button>
-            </div>
-            <div class="act-chips">
-              <button class="act-chip" data-src="all" type="button">all</button>
-              <button class="act-chip" data-src="session" type="button">sessions</button>
-              <button class="act-chip" data-src="browser" type="button">browser</button>
-              <button class="act-chip" data-src="os" type="button">screen</button>
-              <button class="act-chip" data-src="files" type="button">files</button>
-            </div>
-            <div class="act-chips act-types">
-              <button class="act-chip" data-type="all" type="button">all</button>
-              <button class="act-chip" data-type="highlight" type="button">highlighted</button>
-              <button class="act-chip" data-type="clip" type="button">copy/paste</button>
-              <button class="act-chip" data-type="image" type="button">images</button>
-              <button class="act-chip" data-type="file" type="button">files</button>
-              <button class="act-chip" data-type="url" type="button">urls</button>
-              <button class="act-chip" data-type="click" type="button">clicks</button>
-            </div>
-            <div class="fs-body">
-              <div id="activity-table" class="fs-list"></div>
-              <div id="activity-preview" class="fs-preview"></div>
-            </div>
+        </section>
+
+        <section class="panel" id="panel-activity" data-panel="activity" data-label="Activity">
+          <div class="act-bar">
+            <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
+            <span id="activity-count" class="wt-count"></span>
+            <span class="spy-spacer"></span>
+            <button id="activity-record" type="button" class="act-record">○ Record</button>
+            <button id="activity-clear" type="button">Clear</button>
           </div>
-          <div id="config-panel" class="side-panel config-panel">
-            <div class="act-bar">
-              <span class="spy-title">config</span>
-              <span id="config-meta" class="wt-count"></span>
-              <span class="spy-spacer"></span>
-              <button id="config-reload" type="button">Reload</button>
-              <button id="config-open" type="button">Open file</button>
-            </div>
-            <div id="config-body" class="cfg-body"></div>
+          <div class="act-chips">
+            <button class="act-chip" data-src="all" type="button">all</button>
+            <button class="act-chip" data-src="session" type="button">sessions</button>
+            <button class="act-chip" data-src="browser" type="button">browser</button>
+            <button class="act-chip" data-src="os" type="button">screen</button>
+            <button class="act-chip" data-src="files" type="button">files</button>
           </div>
+          <div class="act-chips act-types">
+            <button class="act-chip" data-type="all" type="button">all</button>
+            <button class="act-chip" data-type="highlight" type="button">highlighted</button>
+            <button class="act-chip" data-type="clip" type="button">copy/paste</button>
+            <button class="act-chip" data-type="image" type="button">images</button>
+            <button class="act-chip" data-type="file" type="button">files</button>
+            <button class="act-chip" data-type="url" type="button">urls</button>
+            <button class="act-chip" data-type="click" type="button">clicks</button>
+          </div>
+          <div class="fs-body">
+            <div id="activity-table" class="fs-list"></div>
+            <div id="activity-preview" class="fs-preview"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-config" data-panel="config" data-label="Config">
+          <div class="act-bar">
+            <span class="spy-title">config</span>
+            <span id="config-meta" class="wt-count"></span>
+            <span class="spy-spacer"></span>
+            <button id="config-reload" type="button">Reload</button>
+            <button id="config-open" type="button">Open file</button>
+          </div>
+          <div id="config-body" class="cfg-body"></div>
         </section>
       </div>
 

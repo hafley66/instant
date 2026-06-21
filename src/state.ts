@@ -5,7 +5,40 @@ import { createStore } from "./store";
 
 export type Skin = "xp" | "p5" | "ac3";
 export type Mode = "light" | "dark";
-export type Panel = "terminal" | "worktrees" | "activity" | "files" | "config";
+// Dockable surfaces. Each is a DOM subtree that lives in one zone at a time.
+export type PanelId =
+  | "terminal"
+  | "sessions"
+  | "worktrees"
+  | "activity"
+  | "files"
+  | "config";
+export type Zone = "left" | "center" | "right" | "bottom";
+
+// A VS Code / tmux-style dock: four resizable zones, each holding a tab list of
+// panels (empty zone collapses). center always holds the terminal.
+export interface DockLayout {
+  slots: Record<Zone, PanelId[]>;
+  active: Record<Zone, number>; // selected tab index per zone
+  sizes: { left: number; right: number; bottom: number }; // px; center flexes
+}
+
+export const DEFAULT_DOCK: DockLayout = {
+  slots: { left: ["sessions"], center: ["terminal"], right: [], bottom: [] },
+  active: { left: 0, center: 0, right: 0, bottom: 0 },
+  sizes: { left: 170, right: 300, bottom: 200 },
+};
+
+// Where a panel re-docks when toggled on from the toolbar.
+export const DEFAULT_ZONE: Record<PanelId, Zone> = {
+  terminal: "center",
+  sessions: "left",
+  worktrees: "right",
+  activity: "right",
+  files: "right",
+  config: "right",
+};
+
 export type WtView = "tree" | "table";
 export type ActivitySource = "all" | "browser" | "os" | "files" | "session";
 export type ActivityType =
@@ -97,7 +130,7 @@ export interface AppState {
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
   workspaces: Workspace[]; // backend-owned, not persisted client-side
-  panel: Panel; // terminal vs worktrees table
+  dock: DockLayout; // zone layout (persisted)
   worktrees: WorktreeRow[]; // last scan result (runtime)
   activity: Event[]; // unified activity timeline (runtime)
   activitySource: ActivitySource; // source filter chip (persisted)
@@ -121,7 +154,7 @@ const PERSIST: (keyof AppState)[] = [
   "mode",
   "active",
   "openTabs",
-  "panel",
+  "dock",
   "activitySource",
   "activityType",
   "captureEnabled",
@@ -144,9 +177,15 @@ function loadKey<T>(k: string, fallback: T): T {
   }
 }
 
-// The old "spy" panel was renamed "activity"; migrate any persisted value.
-function migratePanel(p: Panel | "spy"): Panel {
-  return p === "spy" ? "activity" : p;
+// Merge a persisted dock over the defaults so a newly-added zone/field can't be
+// missing after an upgrade. Shallow per-key is enough for the flat shape.
+function loadDock(): DockLayout {
+  const d = loadKey<Partial<DockLayout>>("dock", DEFAULT_DOCK);
+  return {
+    slots: { ...DEFAULT_DOCK.slots, ...(d.slots ?? {}) },
+    active: { ...DEFAULT_DOCK.active, ...(d.active ?? {}) },
+    sizes: { ...DEFAULT_DOCK.sizes, ...(d.sizes ?? {}) },
+  };
 }
 
 function load(): AppState {
@@ -156,7 +195,7 @@ function load(): AppState {
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),
     workspaces: [],
-    panel: migratePanel(loadKey<Panel>("panel", "terminal")),
+    dock: loadDock(),
     worktrees: [],
     activity: [],
     activitySource: loadKey<ActivitySource>("activitySource", "all"),

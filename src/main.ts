@@ -15,6 +15,7 @@ import {
   type DirListing,
   type Event,
   type FsEntry,
+  type PanelId,
   type Skin,
   type Workspace,
   type WorktreeRow,
@@ -22,6 +23,7 @@ import {
 import { renderTable } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, type CtxItem } from "./ctxmenu";
+import { wireDock, mountDock, togglePanel, isOpen, setDockHooks } from "./dock";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -363,8 +365,8 @@ function buildTree(rows: WorktreeRow[]): OrgNode[] {
 }
 
 function openWorktree(clone: string, branch: string, wtPath: string) {
+  // Terminal lives permanently in the center zone now, so just open the tab.
   openTab(tmuxName(`${baseName(clone)}-${branch}`), { cwd: wtPath });
-  store.set({ panel: "terminal" });
 }
 
 function treeNode(opts: {
@@ -946,29 +948,26 @@ function renderFilesPanel() {
   renderPreview(fsSelected, files);
 }
 
-function syncPanel(s: AppState) {
-  document.body.dataset.panel = s.panel;
-  ($("#wt-toggle") as HTMLButtonElement).classList.toggle(
-    "active",
-    s.panel === "worktrees",
-  );
-  ($("#activity-toggle") as HTMLButtonElement).classList.toggle(
-    "active",
-    s.panel === "activity",
-  );
-  ($("#files-toggle") as HTMLButtonElement).classList.toggle(
-    "active",
-    s.panel === "files",
-  );
-  ($("#config-toggle") as HTMLButtonElement).classList.toggle(
-    "active",
-    s.panel === "config",
-  );
-  // Lazy first load when a panel is opened empty.
-  if (s.panel === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
-  if (s.panel === "activity" && store.get().activity.length === 0) refreshActivity();
-  if (s.panel === "files" && !store.get().files) browseTo(store.get().fsCwd);
-  if (s.panel === "config" && !store.get().config) refreshConfig();
+// Lazy first load when a panel becomes the active tab in its zone. Idempotent:
+// each loader guards on its own already-loaded state. Wired into dock via
+// setDockHooks so it fires wherever the panel is docked.
+function onPanelShown(id: PanelId) {
+  if (id === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
+  else if (id === "activity" && store.get().activity.length === 0) refreshActivity();
+  else if (id === "files" && !store.get().files) browseTo(store.get().fsCwd);
+  else if (id === "config" && !store.get().config) refreshConfig();
+}
+
+// Reflect which panels are docked on the toolbar toggles.
+function syncToggles() {
+  const m: [string, PanelId][] = [
+    ["#wt-toggle", "worktrees"],
+    ["#activity-toggle", "activity"],
+    ["#files-toggle", "files"],
+    ["#config-toggle", "config"],
+  ];
+  for (const [sel, id] of m)
+    ($(sel) as HTMLButtonElement).classList.toggle("active", isOpen(id));
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -1051,35 +1050,6 @@ async function wireDragDrop() {
 }
 
 // Drag the divider to resize the sidebar; width persists in the store.
-function wireResizer() {
-  const resizer = $("#sidebar-resizer");
-  const sidebar = $(".sidebar") as HTMLElement;
-  sidebar.style.width = `${store.get().sidebarWidth}px`;
-
-  let dragging = false;
-  resizer.addEventListener("pointerdown", (e) => {
-    dragging = true;
-    resizer.setPointerCapture(e.pointerId);
-    resizer.classList.add("dragging");
-    document.body.style.cursor = "col-resize";
-  });
-  resizer.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    const left = sidebar.getBoundingClientRect().left;
-    const w = Math.min(420, Math.max(110, e.clientX - left));
-    sidebar.style.width = `${w}px`;
-  });
-  const end = () => {
-    if (!dragging) return;
-    dragging = false;
-    resizer.classList.remove("dragging");
-    document.body.style.cursor = "";
-    store.set({ sidebarWidth: Math.round(sidebar.getBoundingClientRect().width) });
-  };
-  resizer.addEventListener("pointerup", end);
-  resizer.addEventListener("pointercancel", end);
-}
-
 // Window edge/corner grips. decorations:false means macOS gives no native
 // resize handles, so each grip hands the drag to Tauri's startResizeDragging.
 // The data-dir strings match Tauri's ResizeDirection enum values exactly.
@@ -1174,10 +1144,7 @@ function wireChrome() {
 
   $("#shot-btn").onclick = captureToPrompt;
 
-  $("#wt-toggle").onclick = () =>
-    store.set({
-      panel: store.get().panel === "worktrees" ? "terminal" : "worktrees",
-    });
+  $("#wt-toggle").onclick = () => togglePanel("worktrees");
   $("#wt-scan").addEventListener("submit", (e) => {
     e.preventDefault();
     scanWorktrees();
@@ -1185,10 +1152,7 @@ function wireChrome() {
   $("#wt-view").onclick = () =>
     store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
 
-  $("#activity-toggle").onclick = () =>
-    store.set({
-      panel: store.get().panel === "activity" ? "terminal" : "activity",
-    });
+  $("#activity-toggle").onclick = () => togglePanel("activity");
   $("#activity-clear").onclick = () =>
     invoke("activity_clear")
       .then(() => {
@@ -1218,16 +1182,14 @@ function wireChrome() {
     b.onclick = () => store.set({ activityType: b.dataset.type as ActivityType });
   });
 
-  $("#config-toggle").onclick = () =>
-    store.set({ panel: store.get().panel === "config" ? "terminal" : "config" });
+  $("#config-toggle").onclick = () => togglePanel("config");
   $("#config-reload").onclick = () =>
     invoke<ConfigView>("config_reload")
       .then((view) => store.set({ config: view }))
       .catch(console.error);
   $("#config-open").onclick = () => invoke("config_open").catch(console.error);
 
-  $("#files-toggle").onclick = () =>
-    store.set({ panel: store.get().panel === "files" ? "terminal" : "files" });
+  $("#files-toggle").onclick = () => togglePanel("files");
   $("#fs-up").onclick = () => {
     const f = store.get().files;
     if (f?.parent) browseTo(f.parent);
@@ -1285,7 +1247,18 @@ async function main() {
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncMode, ["mode"]);
-  store.subscribe(syncPanel, ["panel"]);
+  // Dock changes re-mount the zones, refresh the toolbar toggles, and refit the
+  // active terminal (its zone/size may have changed).
+  setDockHooks({ onShow: onPanelShown });
+  store.subscribe(() => {
+    mountDock();
+    syncToggles();
+    const t = activeId() ? tabs.get(activeId()!) : undefined;
+    if (t) requestAnimationFrame(() => {
+      t.fit.fit();
+      invoke("resize_pty", { id: t.id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
+    });
+  }, ["dock"]);
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
   store.subscribe(renderActivityPanel, [
@@ -1299,7 +1272,7 @@ async function main() {
   store.subscribe(renderFilesPanel, ["files", "fsSelected"]);
   syncSkin(store.get());
   syncMode(store.get());
-  syncPanel(store.get());
+  syncToggles();
   renderWorktreesPanel();
   renderActivityPanel();
   renderFilesPanel();
@@ -1311,7 +1284,7 @@ async function main() {
 
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
-  wireResizer();
+  wireDock();
   wireWindowResize();
   wireDragDrop();
   wireContextMenu(ctxItemsFor);
