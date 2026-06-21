@@ -1080,6 +1080,22 @@ function wireResizer() {
   resizer.addEventListener("pointercancel", end);
 }
 
+// Window edge/corner grips. decorations:false means macOS gives no native
+// resize handles, so each grip hands the drag to Tauri's startResizeDragging.
+// The data-dir strings match Tauri's ResizeDirection enum values exactly.
+function wireWindowResize() {
+  const win = getCurrentWindow();
+  document.querySelectorAll<HTMLElement>(".rz").forEach((grip) => {
+    grip.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      // ResizeDirection is an internal union; dataset.dir already holds a valid
+      // member ('North' | 'SouthEast' | …) so cast through the param type.
+      win.startResizeDragging(grip.dataset.dir as never).catch(console.error);
+    });
+  });
+}
+
 // Contextual right-click items, keyed off what the click landed on. Row data is
 // recovered from the row's title attr (file rows carry the path, activity rows
 // the shot/url/text), so no per-row wiring is needed.
@@ -1296,6 +1312,7 @@ async function main() {
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
   wireResizer();
+  wireWindowResize();
   wireDragDrop();
   wireContextMenu(ctxItemsFor);
   await refreshSessions();

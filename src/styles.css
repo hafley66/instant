@@ -115,7 +115,14 @@ body[data-skin="ac3"] {
 
 .title-bar {
   -webkit-app-region: drag;
+}
+/* Kill text selection on the whole bar (incl. the text node xp.css styles), so
+   a drag from the title moves the window instead of highlighting the caption. */
+.title-bar,
+.title-bar * {
   user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
 }
 /* xp.css is injected by a JS import, so it loads AFTER this stylesheet; a bare
    `.title-bar` ties on specificity and loses, leaving its 3px padding. The
@@ -209,6 +216,23 @@ body[data-skin="ac3"] .mode-toggle {
 .resizer.dragging {
   background: var(--frame);
 }
+
+/* ---- window resize grips ---- */
+/* Decorations are off; these overlay the four edges + corners and start a
+   native resize drag. 6px hit zone, corners win via larger size + higher z. */
+.rz {
+  position: absolute;
+  z-index: 50;
+  -webkit-app-region: no-drag;
+}
+.rz[data-dir="North"]  { top: 0; left: 6px; right: 6px; height: 6px; cursor: ns-resize; }
+.rz[data-dir="South"]  { bottom: 0; left: 6px; right: 6px; height: 6px; cursor: ns-resize; }
+.rz[data-dir="West"]   { left: 0; top: 6px; bottom: 6px; width: 6px; cursor: ew-resize; }
+.rz[data-dir="East"]   { right: 0; top: 6px; bottom: 6px; width: 6px; cursor: ew-resize; }
+.rz[data-dir="NorthWest"] { top: 0; left: 0; width: 8px; height: 8px; cursor: nwse-resize; z-index: 51; }
+.rz[data-dir="NorthEast"] { top: 0; right: 0; width: 8px; height: 8px; cursor: nesw-resize; z-index: 51; }
+.rz[data-dir="SouthWest"] { bottom: 0; left: 0; width: 8px; height: 8px; cursor: nesw-resize; z-index: 51; }
+.rz[data-dir="SouthEast"] { bottom: 0; right: 0; width: 8px; height: 8px; cursor: nwse-resize; z-index: 51; }
 .sidebar-head {
   font-size: 10px;
   letter-spacing: 1px;
