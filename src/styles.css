@@ -154,8 +154,10 @@ body[data-skin="xp"] .title-bar-text {
   font-weight: bold;
 }
 /* Active panel toggle: xp.css's pressed box-shadow alone is too subtle, so fill
-   with the skin accent (same readable selection the activity chips use). */
-.toolbar button.active {
+   with the skin accent (same readable selection the activity chips use). The
+   `body[data-skin]` prefix (0,3,1) outranks xp.css's `button:not(:disabled).active`
+   (0,2,1), which loads after us and would otherwise force its grey pressed look. */
+body[data-skin] .toolbar button.active {
   background: var(--row-active-bg, #316ac5);
   color: var(--row-active-fg, #fff);
   box-shadow: none;
