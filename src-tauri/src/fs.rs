@@ -1,0 +1,159 @@
+// Filesystem browsing for the Files panel (a Windows-Explorer-style view).
+// list_dir returns one directory's entries (dirs first, then files); read_image
+// returns a data URL so the preview pane can show media without the asset
+// protocol. Custom commands need no capability entry — they're gated by being
+// in the invoke handler.
+
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct Entry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+    modified: i64, // unix ms, 0 if unknown
+    ext: String, // lowercased extension, "" for dirs / none
+}
+
+#[derive(Serialize)]
+pub struct DirListing {
+    path: String, // canonical dir shown
+    parent: Option<String>, // parent dir, None at root
+    entries: Vec<Entry>,
+}
+
+// Expand a leading ~ and fall back to HOME for empty/None input.
+fn resolve(input: Option<String>) -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let raw = input.unwrap_or_default();
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return home.unwrap_or_else(|| PathBuf::from("/"));
+    }
+    if raw == "~" {
+        return home.unwrap_or_else(|| PathBuf::from("/"));
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(h) = home {
+            return h.join(rest);
+        }
+    }
+    PathBuf::from(raw)
+}
+
+fn modified_ms(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn ext_of(path: &Path, is_dir: bool) -> String {
+    if is_dir {
+        return String::new();
+    }
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn list_dir(path: Option<String>) -> Result<DirListing, String> {
+    let dir = resolve(path);
+    let canon = dir.canonicalize().unwrap_or(dir);
+    let rd = std::fs::read_dir(&canon).map_err(|e| format!("{}: {e}", canon.display()))?;
+
+    let mut entries: Vec<Entry> = Vec::new();
+    for item in rd.flatten() {
+        let p = item.path();
+        let meta = match item.metadata() {
+            Ok(m) => m,
+            Err(_) => continue, // skip unreadable (e.g. broken symlink)
+        };
+        let is_dir = meta.is_dir();
+        entries.push(Entry {
+            name: item.file_name().to_string_lossy().into_owned(),
+            path: p.to_string_lossy().into_owned(),
+            is_dir,
+            size: if is_dir { 0 } else { meta.len() },
+            modified: modified_ms(&meta),
+            ext: ext_of(&p, is_dir),
+        });
+    }
+    // Dirs first, then files; case-insensitive by name within each group.
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(DirListing {
+        parent: canon.parent().map(|p| p.to_string_lossy().into_owned()),
+        path: canon.to_string_lossy().into_owned(),
+        entries,
+    })
+}
+
+const MAX_PREVIEW: u64 = 12 * 1024 * 1024; // 12 MB cap for inline previews
+
+fn mime_for(ext: &str) -> Option<&'static str> {
+    match ext {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "svg" => Some("image/svg+xml"),
+        "ico" => Some("image/x-icon"),
+        "avif" => Some("image/avif"),
+        _ => None,
+    }
+}
+
+/// Read a (small) image file as a `data:` URL for the preview pane. Errors if
+/// the extension isn't a known image type or the file is over the size cap.
+#[tauri::command]
+pub fn read_image(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    let ext = ext_of(&p, false);
+    let mime = mime_for(&ext).ok_or_else(|| "not an image".to_string())?;
+    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_PREVIEW {
+        return Err("image too large to preview".into());
+    }
+    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    Ok(format!("data:{mime};base64,{}", base64(&bytes)))
+}
+
+// Minimal base64 (standard alphabet) — avoids pulling a crate for one use.
+fn base64(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(A[((n >> 18) & 63) as usize] as char);
+        out.push(A[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            A[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            A[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}

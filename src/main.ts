@@ -9,6 +9,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   store,
   type AppState,
+  type DirListing,
+  type FsEntry,
   type Skin,
   type SpyEvent,
   type Workspace,
@@ -464,6 +466,29 @@ function pasteToActive(data: string) {
   tabs.get(id)?.term.focus();
 }
 
+// Shown in the Spy panel before any event arrives: how to wire the extension
+// to the localhost ingest server (which is already running while the app is up).
+function spySetupCard(): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "empty-help";
+  el.innerHTML = `
+    <h3>browser spy — setup</h3>
+    <p>The ingest server is <b>already running</b> at <code>127.0.0.1:8787</code>
+       while instant is open. Install the extension to start capturing:</p>
+    <ol>
+      <li>Open <code>chrome://extensions</code></li>
+      <li>Enable <b>Developer mode</b> (top-right)</li>
+      <li><b>Load unpacked</b> → pick the <code>extension/</code> folder in the instant repo</li>
+    </ol>
+    <p>Page loads, text selections, and copies then stream into this table.
+       Click any row to paste its text/url into the active terminal.</p>
+    <p class="muted">Test it without the browser:</p>
+    <pre>curl -XPOST 127.0.0.1:8787/ingest \\
+  -H 'content-type: application/json' \\
+  -d '{"kind":"nav","url":"https://example.com","title":"Example"}'</pre>`;
+  return el;
+}
+
 function renderSpyPanel() {
   const { spy } = store.get();
   ($("#spy-count") as HTMLElement).textContent = spy.length
@@ -471,6 +496,10 @@ function renderSpyPanel() {
     : "";
   const host = $("#spy-table");
   host.innerHTML = "";
+  if (spy.length === 0) {
+    host.appendChild(spySetupCard());
+    return;
+  }
   host.appendChild(
     renderTable<SpyEvent>({
       rows: spy,
@@ -494,6 +523,109 @@ async function refreshSpy() {
   }
 }
 
+// ---- files: a Windows-Explorer-style filesystem browser + media preview ----
+const IMAGE_EXTS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif",
+]);
+
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 ? 1 : 0)} ${u[i]}`;
+}
+function fmtDate(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function fileGlyph(e: FsEntry): string {
+  if (e.is_dir) return "📁";
+  if (IMAGE_EXTS.has(e.ext)) return "🖼";
+  return "📄";
+}
+function typeLabel(e: FsEntry): string {
+  if (e.is_dir) return "Folder";
+  return e.ext ? `${e.ext.toUpperCase()} file` : "File";
+}
+
+async function browseTo(path: string) {
+  try {
+    const listing = await invoke<DirListing>("list_dir", { path });
+    store.set({ files: listing, fsCwd: listing.path, fsSelected: null });
+  } catch (e) {
+    console.error("list_dir:", e);
+    ($("#fs-list") as HTMLElement).innerHTML =
+      `<div class="empty-help">Can't open<br><code>${path}</code><br>${e}</div>`;
+  }
+}
+
+// Render the image (or a placeholder) for the selected entry into the preview
+// pane. Guards against a newer selection landing while read_image is in flight.
+async function renderPreview(sel: string | null, files: DirListing) {
+  const pane = $("#fs-preview");
+  const entry = sel ? files.entries.find((e) => e.path === sel) : null;
+  if (!entry) {
+    pane.innerHTML = `<div class="fs-preview-empty">select a file</div>`;
+    return;
+  }
+  const meta = `<div class="fs-preview-meta">${entry.name}<br><span>${typeLabel(entry)} · ${fmtSize(entry.size)}</span></div>`;
+  if (!IMAGE_EXTS.has(entry.ext)) {
+    pane.innerHTML = meta + `<div class="fs-preview-empty">no preview</div>`;
+    return;
+  }
+  pane.innerHTML = meta + `<div class="fs-preview-empty">loading…</div>`;
+  try {
+    const url = await invoke<string>("read_image", { path: entry.path });
+    if (store.get().fsSelected !== entry.path) return; // selection moved on
+    pane.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
+  } catch (e) {
+    pane.innerHTML = meta + `<div class="fs-preview-empty">${e}</div>`;
+  }
+}
+
+function renderFilesPanel() {
+  const { files, fsSelected } = store.get();
+  ($("#fs-path") as HTMLInputElement).value = files?.path ?? store.get().fsCwd;
+  const host = $("#fs-list");
+  if (!files) {
+    host.innerHTML = "";
+    return;
+  }
+  const scroll = host.scrollTop; // selection re-renders the table; keep the view
+  host.innerHTML = "";
+  host.appendChild(
+    renderTable<FsEntry>({
+      rows: files.entries,
+      rowClass: (e) => (e.path === fsSelected ? "fs-selected" : undefined),
+      columns: [
+        { header: "Name", cell: (e) => `${fileGlyph(e)}  ${e.name}` },
+        { header: "Date modified", cell: (e) => fmtDate(e.modified) },
+        { header: "Type", cell: (e) => typeLabel(e) },
+        {
+          header: "Size",
+          cell: (e) => (e.is_dir ? "" : fmtSize(e.size)),
+          cellClass: () => "fs-size",
+        },
+      ],
+      rowTitle: (e) => e.path,
+      // Folders open on a single click; files select (preview) then paste-on-open.
+      onRow: (e) => (e.is_dir ? browseTo(e.path) : store.set({ fsSelected: e.path })),
+      onRowDblClick: (e) => {
+        if (!e.is_dir) pasteToActive(pathArg(e.path) + " ");
+      },
+    }),
+  );
+  host.scrollTop = scroll;
+  renderPreview(fsSelected, files);
+}
+
 function syncPanel(s: AppState) {
   document.body.dataset.panel = s.panel;
   ($("#wt-toggle") as HTMLButtonElement).classList.toggle(
@@ -501,9 +633,14 @@ function syncPanel(s: AppState) {
     s.panel === "worktrees",
   );
   ($("#spy-toggle") as HTMLButtonElement).classList.toggle("active", s.panel === "spy");
+  ($("#files-toggle") as HTMLButtonElement).classList.toggle(
+    "active",
+    s.panel === "files",
+  );
   // Lazy first load when a panel is opened empty.
   if (s.panel === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
   if (s.panel === "spy" && store.get().spy.length === 0) refreshSpy();
+  if (s.panel === "files" && !store.get().files) browseTo(store.get().fsCwd);
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -637,6 +774,18 @@ function wireChrome() {
       .then(() => store.set({ spy: [] }))
       .catch(console.error);
 
+  $("#files-toggle").onclick = () =>
+    store.set({ panel: store.get().panel === "files" ? "terminal" : "files" });
+  $("#fs-up").onclick = () => {
+    const f = store.get().files;
+    if (f?.parent) browseTo(f.parent);
+  };
+  const goPath = () => browseTo(($("#fs-path") as HTMLInputElement).value);
+  $("#fs-go").onclick = goPath;
+  $("#fs-path").addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter") goPath();
+  });
+
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
   $("#hide-btn").onclick = () => getCurrentWindow().hide();
@@ -678,11 +827,13 @@ async function main() {
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
   store.subscribe(renderSpyPanel, ["spy"]);
+  store.subscribe(renderFilesPanel, ["files", "fsSelected"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncPanel(store.get());
   renderWorktreesPanel();
   renderSpyPanel();
+  renderFilesPanel();
 
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();

@@ -5,8 +5,25 @@ import { createStore } from "./store";
 
 export type Skin = "xp" | "p5" | "ac3";
 export type Mode = "light" | "dark";
-export type Panel = "terminal" | "worktrees" | "spy";
+export type Panel = "terminal" | "worktrees" | "spy" | "files";
 export type WtView = "tree" | "table";
+
+// A filesystem entry (Rust fs::Entry) for the Files explorer.
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified: number; // unix ms
+  ext: string;
+}
+
+// One directory listing (Rust fs::DirListing).
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
+}
 
 // A captured browser event (Rust spy::SpyEvent), streamed from the extension.
 export interface SpyEvent {
@@ -57,8 +74,11 @@ export interface AppState {
   panel: Panel; // terminal vs worktrees table
   worktrees: WorktreeRow[]; // last scan result (runtime)
   spy: SpyEvent[]; // captured browser events (runtime)
+  files: DirListing | null; // current Files explorer listing (runtime)
+  fsSelected: string | null; // selected file path in the explorer (runtime)
   wtView: WtView; // tree vs flat table
   scanRoot: string; // worktrees scan path
+  fsCwd: string; // Files explorer current directory (persisted)
   sidebarWidth: number; // px
   wtExpanded: string[]; // expanded tree node keys
 }
@@ -73,6 +93,7 @@ const PERSIST: (keyof AppState)[] = [
   "panel",
   "wtView",
   "scanRoot",
+  "fsCwd",
   "sidebarWidth",
   "wtExpanded",
 ];
@@ -99,8 +120,11 @@ function load(): AppState {
     panel: loadKey<Panel>("panel", "terminal"),
     worktrees: [],
     spy: [],
+    files: null,
+    fsSelected: null,
     wtView: loadKey<WtView>("wtView", "tree"),
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
+    fsCwd: loadKey<string>("fsCwd", "~"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
   };

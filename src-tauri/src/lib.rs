@@ -1,3 +1,4 @@
+mod fs;
 mod pty;
 mod spy;
 mod workspace;
@@ -217,6 +218,8 @@ pub fn run() {
             worktrees::scan_worktrees,
             spy::spy_events,
             spy::spy_clear,
+            fs::list_dir,
+            fs::read_image,
             screenshot,
         ])
         .run(tauri::generate_context!())

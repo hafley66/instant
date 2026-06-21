@@ -13,11 +13,14 @@ export interface TableOpts<T> {
   columns: Column<T>[];
   rows: T[];
   onRow?: (row: T) => void;
+  onRowDblClick?: (row: T) => void;
   rowTitle?: (row: T) => string;
+  // Class applied to a row's <tr> (e.g. to mark the selected row).
+  rowClass?: (row: T) => string | undefined;
 }
 
 export function renderTable<T>(opts: TableOpts<T>): HTMLTableElement {
-  const { columns, rows, onRow, rowTitle } = opts;
+  const { columns, rows, onRow, onRowDblClick, rowTitle, rowClass } = opts;
   const table = document.createElement("table");
   table.className = "dtable";
 
@@ -35,6 +38,8 @@ export function renderTable<T>(opts: TableOpts<T>): HTMLTableElement {
   for (const row of rows) {
     const tr = document.createElement("tr");
     tr.className = "dtable-row";
+    const extra = rowClass?.(row);
+    if (extra) tr.className += ` ${extra}`;
     for (const col of columns) {
       const td = document.createElement("td");
       td.textContent = col.cell(row);
@@ -44,6 +49,7 @@ export function renderTable<T>(opts: TableOpts<T>): HTMLTableElement {
     }
     if (rowTitle) tr.title = rowTitle(row);
     if (onRow) tr.onclick = () => onRow(row);
+    if (onRowDblClick) tr.ondblclick = () => onRowDblClick(row);
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
