@@ -237,6 +237,9 @@ body[data-skin="ac3"] .mode-toggle {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* Panels carry the skin's body color; without it table/list text falls back
+     to xp.css's black and vanishes on the dark panel background. */
+  color: var(--panel-fg);
 }
 .panel.hidden {
   display: none;
