@@ -1366,9 +1366,16 @@ async function main() {
     }
   });
 
+  // Reflow xterm AND push the new grid to the pty, else tmux keeps its old size
+  // and strands a stale status line mid-screen after a window resize.
   new ResizeObserver(() => {
     const id = activeId();
-    if (id) tabs.get(id)?.fit.fit();
+    const t = id ? tabs.get(id) : undefined;
+    if (!t) return;
+    t.fit.fit();
+    invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(
+      () => {},
+    );
   }).observe(terminalsEl);
 
   // Esc hides the popover.
