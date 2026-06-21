@@ -28,31 +28,41 @@
         </button>
         <button id="files-toggle" class="files-toggle" title="File explorer">📁 Files</button>
         <button id="wt-toggle" class="wt-toggle" title="Worktrees table">⊞ Worktrees</button>
-        <button id="spy-toggle" class="spy-toggle" title="Captured browser events">◉ Spy</button>
+        <button id="activity-toggle" class="activity-toggle" title="Activity history (captures, browser, files)">◉ Activity</button>
+        <button id="config-toggle" class="config-toggle" title="Config & observation filters">⚙ Config</button>
         <button id="skin-toggle" class="skin-toggle">P5</button>
       </div>
 
       <div class="window-body body">
         <aside class="sidebar">
           <div class="sidebar-lists">
-            <div class="sidebar-head">SESSIONS</div>
+            <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span></div>
             <ul id="session-list" class="session-list"></ul>
             <div class="sidebar-head">SPACES</div>
             <ul id="workspace-list" class="session-list"></ul>
           </div>
-          <form id="new-session" class="new-session">
-            <input id="new-name" placeholder="new session…" autocomplete="off" />
-            <button type="submit">+</button>
-          </form>
-          <form id="new-workspace" class="new-session new-workspace">
-            <input id="ws-repo" placeholder="repo path…" autocomplete="off" />
-            <input id="ws-branch" placeholder="branch…" autocomplete="off" />
-            <select id="ws-agent">
-              <option value="claude">claude</option>
-              <option value="opencode">opencode</option>
-            </select>
-            <button type="submit">+ space</button>
-          </form>
+          <div class="sidebar-create">
+            <div class="quick-launch">
+              <button id="ql-claude" type="button" class="ql-btn">+ claude</button>
+              <button id="ql-opencode" type="button" class="ql-btn">+ opencode</button>
+            </div>
+            <form id="new-session" class="new-session">
+              <input id="new-name" placeholder="new shell…" autocomplete="off" />
+              <button type="submit">+</button>
+            </form>
+            <details class="space-create">
+              <summary>+ new space (worktree + agent)</summary>
+              <form id="new-workspace" class="new-session new-workspace">
+                <input id="ws-repo" placeholder="repo path…" autocomplete="off" />
+                <input id="ws-branch" placeholder="branch…" autocomplete="off" />
+                <select id="ws-agent">
+                  <option value="claude">claude</option>
+                  <option value="opencode">opencode</option>
+                </select>
+                <button type="submit">+ space</button>
+              </form>
+            </details>
+          </div>
         </aside>
 
         <div id="sidebar-resizer" class="resizer"></div>
@@ -80,14 +90,44 @@
               <div id="fs-preview" class="fs-preview"></div>
             </div>
           </div>
-          <div id="spy-panel" class="side-panel spy-panel">
-            <div class="wt-scan">
-              <span class="spy-title">browser spy</span>
-              <span id="spy-count" class="wt-count"></span>
+          <div id="activity-panel" class="side-panel activity-panel">
+            <div class="act-bar">
+              <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
+              <span id="activity-count" class="wt-count"></span>
               <span class="spy-spacer"></span>
-              <button id="spy-clear" type="button">Clear</button>
+              <button id="activity-record" type="button" class="act-record">○ Record</button>
+              <button id="activity-clear" type="button">Clear</button>
             </div>
-            <div id="spy-table" class="wt-table"></div>
+            <div class="act-chips">
+              <button class="act-chip" data-src="all" type="button">all</button>
+              <button class="act-chip" data-src="session" type="button">sessions</button>
+              <button class="act-chip" data-src="browser" type="button">browser</button>
+              <button class="act-chip" data-src="os" type="button">screen</button>
+              <button class="act-chip" data-src="files" type="button">files</button>
+            </div>
+            <div class="act-chips act-types">
+              <button class="act-chip" data-type="all" type="button">all</button>
+              <button class="act-chip" data-type="highlight" type="button">highlighted</button>
+              <button class="act-chip" data-type="clip" type="button">copy/paste</button>
+              <button class="act-chip" data-type="image" type="button">images</button>
+              <button class="act-chip" data-type="file" type="button">files</button>
+              <button class="act-chip" data-type="url" type="button">urls</button>
+              <button class="act-chip" data-type="click" type="button">clicks</button>
+            </div>
+            <div class="fs-body">
+              <div id="activity-table" class="fs-list"></div>
+              <div id="activity-preview" class="fs-preview"></div>
+            </div>
+          </div>
+          <div id="config-panel" class="side-panel config-panel">
+            <div class="act-bar">
+              <span class="spy-title">config</span>
+              <span id="config-meta" class="wt-count"></span>
+              <span class="spy-spacer"></span>
+              <button id="config-reload" type="button">Reload</button>
+              <button id="config-open" type="button">Open file</button>
+            </div>
+            <div id="config-body" class="cfg-body"></div>
           </div>
         </section>
       </div>

@@ -8,15 +8,20 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   store,
+  type ActivitySource,
+  type ActivityType,
   type AppState,
+  type ConfigView,
   type DirListing,
+  type Event,
   type FsEntry,
   type Skin,
-  type SpyEvent,
   type Workspace,
   type WorktreeRow,
 } from "./state";
 import { renderTable } from "./table";
+import { fuzzyFilter } from "./fuzzy";
+import { wireContextMenu, type CtxItem } from "./ctxmenu";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -50,6 +55,22 @@ function recordTab(name: string, command: string | null, cwd: string | null) {
 }
 function forgetTab(id: string) {
   store.set({ openTabs: store.get().openTabs.filter((t) => sessionId(t.name) !== id) });
+}
+
+// Browser-like history of which session you went to and when. Logged into the
+// unified activity store (source='session'), deduped on consecutive same-tab,
+// suppressed during boot replay so restoring tabs doesn't spam the timeline.
+let replaying = false;
+let lastVisited: string | null = null;
+function logTabVisit(name: string) {
+  if (replaying || name === lastVisited) return;
+  lastVisited = name;
+  invoke("activity_log", {
+    source: "session",
+    kind: "focus",
+    title: name,
+    text: `went to ${name}`,
+  }).catch(() => {});
 }
 
 // xterm palettes per skin. XP = classic console; P5 = blood-red on black;
@@ -102,6 +123,30 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     invoke("resize_pty", { id, cols, rows }).catch(console.error),
   );
 
+  // iTerm2-style word/line editing. xterm doesn't emit these by default on mac,
+  // so we intercept and write the readline/emacs control sequences the shell
+  // (and claude/opencode) understand. Returning false stops xterm's own handling
+  // (e.g. Alt+b inserting "∫").
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown") return true;
+    const send = (data: string) => {
+      invoke("write_pty", { id, data }).catch(console.error);
+      return false;
+    };
+    const only = (a: boolean, b: boolean, c: boolean) => a && !b && !c;
+    if (only(e.altKey, e.metaKey, e.ctrlKey)) {
+      if (e.key === "ArrowLeft") return send("\x1bb"); // word back
+      if (e.key === "ArrowRight") return send("\x1bf"); // word forward
+      if (e.key === "Backspace") return send("\x1b\x7f"); // delete word back
+    }
+    if (only(e.metaKey, e.altKey, e.ctrlKey)) {
+      if (e.key === "ArrowLeft") return send("\x01"); // line start (Ctrl-A)
+      if (e.key === "ArrowRight") return send("\x05"); // line end (Ctrl-E)
+      if (e.key === "Backspace") return send("\x15"); // kill to line start (Ctrl-U)
+    }
+    return true;
+  });
+
   // Fit AFTER layout so the pty spawns at the real grid size, not the pre-layout
   // 80x24 default that leaves full-screen TUIs (opencode) clipped.
   const command = opts.command ?? QUICK_CMD[name] ?? null;
@@ -124,6 +169,7 @@ function activate(id: string) {
   }
   const t = tabs.get(id);
   if (t) {
+    logTabVisit(t.name);
     requestAnimationFrame(() => {
       t.fit.fit();
       invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(
@@ -179,6 +225,9 @@ function renderSessionActive() {
   });
 }
 
+// The sidebar SESSIONS list mirrors the live tmux sessions (the real running
+// shells/agents), not a creator. Click a row to attach/resume it into a tab;
+// launching new ones is the job of the quick-launch buttons + new-shell input.
 async function refreshSessions() {
   let live: Session[] = [];
   try {
@@ -187,23 +236,52 @@ async function refreshSessions() {
     console.error(e);
   }
 
-  // Quick-starts always offered; if a tmux session of that name exists it merges.
-  const quick = ["claude", "opencode"];
-  const names = new Set<string>(quick);
-  for (const s of live) names.add(s.name);
-
-  const byName = new Map(live.map((s) => [s.name, s]));
+  ($("#session-count") as HTMLElement).textContent = live.length
+    ? String(live.length)
+    : "";
 
   listEl.innerHTML = "";
-  for (const name of names) {
-    const s = byName.get(name);
+  if (live.length === 0) {
     const li = document.createElement("li");
-    li.dataset.id = sessionId(name);
+    li.className = "session-empty";
+    li.textContent = "no live sessions — launch one below";
+    listEl.appendChild(li);
+  }
+  for (const s of live) {
+    const open = tabs.has(sessionId(s.name));
+    const li = document.createElement("li");
+    li.dataset.id = sessionId(s.name);
     li.className = "session";
-    li.innerHTML = `<span class="dot ${s?.attached ? "on" : ""}"></span>
-      <span class="s-name">${name}</span>
-      <span class="s-meta">${s ? `${s.windows}w` : "new"}</span>`;
-    li.onclick = () => openTab(name);
+    li.innerHTML = `<span class="dot ${s.attached ? "on" : ""}"></span>
+      <span class="s-name">${s.name}</span>
+      <span class="s-meta">${s.windows}w${open ? " · open" : ""}</span>`;
+    li.onclick = () => openTab(s.name); // attaches (tmux new-session -A) / focuses
+    const kill = document.createElement("span");
+    kill.className = "tab-close";
+    kill.textContent = "×";
+    kill.title = "kill this tmux session";
+    kill.onclick = (e) => {
+      e.stopPropagation();
+      const id = sessionId(s.name);
+      if (tabs.has(id)) {
+        // closeTab also forgets + disposes the tab; then kill the tmux session.
+        const t = tabs.get(id)!;
+        t.term.dispose();
+        t.el.remove();
+        tabs.delete(id);
+        forgetTab(id);
+        if (activeId() === id) {
+          const next = tabs.keys().next();
+          setActive(next.done ? null : next.value);
+          if (!next.done) activate(next.value);
+        }
+        renderTabs();
+      }
+      invoke("kill_session", { name: s.name })
+        .then(() => refreshSessions())
+        .catch(console.error);
+    };
+    li.appendChild(kill);
     listEl.appendChild(li);
   }
   renderSessionActive();
@@ -448,8 +526,8 @@ async function scanWorktrees() {
   }
 }
 
-// ---- spy: browser events captured by the extension (localhost ingest) ----
-const SPY_CAP = 500;
+// ---- activity: unified timeline of browser + os-capture + file events ----
+const ACTIVITY_CAP = 2000;
 const prettyUrl = (u: string) =>
   u.replace(/^https?:\/\//, "").replace(/^www\./, "");
 function fmtTime(ts: number): string {
@@ -458,7 +536,7 @@ function fmtTime(ts: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-// Drop text into the active terminal (a spy row's text/url paste target).
+// Drop text into the active terminal (a row's text/url paste target).
 function pasteToActive(data: string) {
   const id = activeId();
   if (!id || !data) return;
@@ -466,61 +544,291 @@ function pasteToActive(data: string) {
   tabs.get(id)?.term.focus();
 }
 
-// Shown in the Spy panel before any event arrives: how to wire the extension
-// to the localhost ingest server (which is already running while the app is up).
-function spySetupCard(): HTMLElement {
+// Where a row came from, for the source column: os captures show the frontmost
+// app, browser rows the page title/host, file rows the file name.
+function eventSource(e: Event): string {
+  if (e.source === "os") return e.app || "screen";
+  if (e.source === "files") return e.title || "file";
+  return e.title || prettyUrl(e.url);
+}
+// The free-text payload fuzzy search runs over (and the search-key for a row).
+function eventText(e: Event): string {
+  return e.text || e.url || e.title;
+}
+function activityKey(e: Event): string {
+  return `${e.kind} ${e.source} ${eventSource(e)} ${eventText(e)}`;
+}
+
+// Shown in the Activity panel before any event arrives: how to turn on capture
+// and wire the extension (the ingest server is already running while up).
+function activitySetupCard(): HTMLElement {
   const el = document.createElement("div");
   el.className = "empty-help";
   el.innerHTML = `
-    <h3>browser spy — setup</h3>
-    <p>The ingest server is <b>already running</b> at <code>127.0.0.1:8787</code>
-       while instant is open. Install the extension to start capturing:</p>
+    <h3>activity — setup</h3>
+    <p>A searchable history of what you touch: screen captures on mouse/key
+       gestures, plus browser navigation/clicks and the files you open.</p>
+    <p><b>Screen capture (OS):</b> flip <b>Recording</b> on (top-right of this
+       panel). The first shot prompts for <b>Screen Recording</b> permission —
+       grant it, then double-clicks, drags, and ⌘C/⌘V each save a screenshot
+       tagged with the frontmost app. Default off; only ⌘C/⌘V keys are read.</p>
+    <p><b>Browser:</b> the ingest server runs at <code>127.0.0.1:8787</code>
+       while instant is open. Install the extension:</p>
     <ol>
       <li>Open <code>chrome://extensions</code></li>
       <li>Enable <b>Developer mode</b> (top-right)</li>
       <li><b>Load unpacked</b> → pick the <code>extension/</code> folder in the instant repo</li>
     </ol>
-    <p>Page loads, text selections, and copies then stream into this table.
-       Click any row to paste its text/url into the active terminal.</p>
-    <p class="muted">Test it without the browser:</p>
+    <p>Click any row to paste its text/url into the active terminal; click a
+       screenshot row to preview it. Search filters fzf-style.</p>
+    <p class="muted">Test the browser ingest without Chrome:</p>
     <pre>curl -XPOST 127.0.0.1:8787/ingest \\
   -H 'content-type: application/json' \\
   -d '{"kind":"nav","url":"https://example.com","title":"Example"}'</pre>`;
   return el;
 }
 
-function renderSpyPanel() {
-  const { spy } = store.get();
-  ($("#spy-count") as HTMLElement).textContent = spy.length
-    ? `${spy.length} events`
+// Event-type sub-filters: cross-cut the source axis by what the event IS.
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|heic|tiff?)$/i;
+const ACT_TYPE_MATCH: Record<ActivityType, (e: Event) => boolean> = {
+  all: () => true,
+  highlight: (e) => e.kind === "selection",
+  clip: (e) => e.kind === "clipboard" || e.kind === "copy" || e.kind === "paste",
+  // A screenshot, or any row pointing at an image file.
+  image: (e) => !!e.shot || IMG_EXT.test(e.text) || IMG_EXT.test(e.title),
+  file: (e) => e.source === "files" || e.kind === "open",
+  url: (e) => e.kind === "nav" || e.kind.startsWith("tab") || (e.source === "browser" && !!e.url),
+  click: (e) => e.kind === "click" || e.kind === "dblclick" || e.kind === "ctrlclick",
+};
+
+// The visible rows: source chip, then type chip, then fuzzy search box.
+function visibleActivity(): Event[] {
+  const { activity, activitySource, activityType, activityQuery } = store.get();
+  const typeMatch = ACT_TYPE_MATCH[activityType];
+  const filtered = activity.filter(
+    (e) =>
+      (activitySource === "all" || e.source === activitySource) && typeMatch(e),
+  );
+  return fuzzyFilter(activityQuery, filtered, activityKey);
+}
+
+let activitySelected: number | null = null; // selected row id (for the preview pane)
+
+function renderActivityPanel() {
+  const { activity, activitySource, activityType } = store.get();
+  // Chips reflect the active filter. Use `.on` (not `.active`) — xp.css owns
+  // button.active and would force the pressed-silver look over our color.
+  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-src]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.src === activitySource);
+  });
+  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-type]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.type === activityType);
+  });
+  const rows = visibleActivity();
+  ($("#activity-count") as HTMLElement).textContent = activity.length
+    ? `${rows.length}/${activity.length}`
     : "";
-  const host = $("#spy-table");
+
+  const host = $("#activity-table");
   host.innerHTML = "";
-  if (spy.length === 0) {
-    host.appendChild(spySetupCard());
+  if (activity.length === 0) {
+    host.appendChild(activitySetupCard());
+    renderActivityPreview();
     return;
   }
   host.appendChild(
-    renderTable<SpyEvent>({
-      rows: spy,
+    renderTable<Event>({
+      rows,
+      rowClass: (e) => (e.id === activitySelected ? "fs-selected" : undefined),
       columns: [
         { header: "time", cell: (e) => fmtTime(e.ts) },
+        { header: "src", cell: (e) => e.source },
         { header: "kind", cell: (e) => e.kind },
-        { header: "source", cell: (e) => e.title || prettyUrl(e.url) },
-        { header: "text", cell: (e) => e.text },
+        { header: "where", cell: (e) => eventSource(e) },
+        { header: "what", cell: (e) => eventText(e) },
       ],
-      rowTitle: (e) => e.url || e.text,
-      onRow: (e) => pasteToActive((e.text || e.url) + " "),
+      rowTitle: (e) => e.shot || e.url || e.text || e.title,
+      onRow: (e) => {
+        activitySelected = e.id;
+        renderActivityPanel();
+      },
+      onRowDblClick: (e) => {
+        const data = eventText(e);
+        if (data) pasteToActive(data + " ");
+      },
     }),
   );
+  renderActivityPreview();
 }
 
-async function refreshSpy() {
-  try {
-    store.set({ spy: await invoke<SpyEvent[]>("spy_events", { limit: SPY_CAP }) });
-  } catch (e) {
-    console.error("spy_events:", e);
+// Preview pane: a screenshot thumbnail for os rows, the url/title for browser,
+// the path for files. Guards a newer selection landing mid-load.
+async function renderActivityPreview() {
+  const pane = $("#activity-preview");
+  const sel = store.get().activity.find((e) => e.id === activitySelected);
+  if (!sel) {
+    pane.innerHTML = `<div class="fs-preview-empty">select an event</div>`;
+    return;
   }
+  const head = `<div class="fs-preview-meta">${sel.kind} · ${eventSource(sel)}<br>
+    <span>${fmtTime(sel.ts)}</span></div>`;
+  if (sel.shot) {
+    pane.innerHTML = head + `<div class="fs-preview-empty">loading…</div>`;
+    try {
+      const url = await invoke<string>("read_image", { path: sel.shot });
+      if (activitySelected !== sel.id) return; // selection moved on
+      pane.innerHTML = head + `<img class="fs-preview-img" src="${url}" alt="" />`;
+    } catch (e) {
+      pane.innerHTML = head + `<div class="fs-preview-empty">${e}</div>`;
+    }
+    return;
+  }
+  const body = sel.url
+    ? `<div class="fs-preview-meta"><span>${sel.url}</span></div>`
+    : "";
+  const text = sel.text
+    ? `<div class="fs-preview-meta">${sel.text}</div>`
+    : "";
+  pane.innerHTML = head + body + text || head + `<div class="fs-preview-empty">no preview</div>`;
+}
+
+// Load all sources once; the chip + search filter client-side (visibleActivity).
+async function refreshActivity() {
+  try {
+    store.set({
+      activity: await invoke<Event[]>("activity_events", {
+        limit: ACTIVITY_CAP,
+        source: null,
+      }),
+    });
+  } catch (e) {
+    console.error("activity_events:", e);
+  }
+}
+
+// ---- config: observation filters (config.json), editable readout ----
+async function refreshConfig() {
+  try {
+    store.set({ config: await invoke<ConfigView>("config_get") });
+  } catch (e) {
+    console.error("config_get:", e);
+  }
+}
+
+// Persist a full set of rule lists and refresh the view from the backend.
+async function applyConfig(sites: string[], files: string[], apps: string[]) {
+  try {
+    const view = await invoke<ConfigView>("config_set", {
+      excludeSites: sites,
+      excludeFiles: files,
+      excludeApps: apps,
+    });
+    store.set({ config: view });
+  } catch (e) {
+    console.error("config_set:", e);
+  }
+}
+
+// One editable rule group: removable chips + an add input. onChange gets the
+// full next list for this group.
+function cfgGroup(
+  title: string,
+  hint: string,
+  items: string[],
+  onChange: (next: string[]) => void,
+): HTMLElement {
+  const sec = document.createElement("div");
+  sec.className = "cfg-group";
+  const h = document.createElement("div");
+  h.className = "cfg-group-head";
+  h.innerHTML = `<b>${title}</b> <span class="muted">${hint}</span>`;
+  sec.appendChild(h);
+
+  const list = document.createElement("div");
+  list.className = "cfg-chips";
+  items.forEach((pat, i) => {
+    const chip = document.createElement("span");
+    chip.className = "cfg-chip";
+    chip.textContent = pat;
+    const x = document.createElement("span");
+    x.className = "cfg-x";
+    x.textContent = "×";
+    x.onclick = () => onChange(items.filter((_, j) => j !== i));
+    chip.appendChild(x);
+    list.appendChild(chip);
+  });
+  sec.appendChild(list);
+
+  const form = document.createElement("form");
+  form.className = "cfg-add";
+  const input = document.createElement("input");
+  input.placeholder = "add pattern…";
+  input.autocomplete = "off";
+  const add = document.createElement("button");
+  add.type = "submit";
+  add.textContent = "+";
+  form.appendChild(input);
+  form.appendChild(add);
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const v = input.value.trim();
+    if (v && !items.includes(v)) onChange([...items, v]);
+    input.value = "";
+  };
+  sec.appendChild(form);
+  return sec;
+}
+
+function renderConfigPanel() {
+  const cfg = store.get().config;
+  const meta = $("#config-meta") as HTMLElement;
+  const body = $("#config-body");
+  if (!cfg) {
+    meta.textContent = "";
+    body.innerHTML = `<div class="empty-help">loading…</div>`;
+    return;
+  }
+  meta.textContent =
+    `${cfg.source}` + (cfg.excluded_count ? ` · ${cfg.excluded_count} blocked` : "");
+  body.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "cfg-status";
+  const errLine = cfg.error
+    ? `<div class="cfg-err">⚠ ${cfg.error} — using defaults</div>`
+    : "";
+  head.innerHTML = `
+    <div>loaded from <b>${cfg.source}</b></div>
+    <code>${cfg.path}</code>
+    ${errLine}
+    <div class="muted">${cfg.excluded_count} events blocked since launch ·
+      patterns are case-insensitive; <code>*</code> is a wildcard</div>`;
+  body.appendChild(head);
+
+  body.appendChild(
+    cfgGroup(
+      "Sites",
+      "browser URLs to ignore (e.g. mail.google.com, *.bank.com)",
+      cfg.exclude_sites,
+      (next) => applyConfig(next, cfg.exclude_files, cfg.exclude_apps),
+    ),
+  );
+  body.appendChild(
+    cfgGroup(
+      "Files",
+      "file paths to ignore (e.g. /secret/, *.env)",
+      cfg.exclude_files,
+      (next) => applyConfig(cfg.exclude_sites, next, cfg.exclude_apps),
+    ),
+  );
+  body.appendChild(
+    cfgGroup(
+      "Apps",
+      "never screenshot while these apps are frontmost (e.g. 1Password)",
+      cfg.exclude_apps,
+      (next) => applyConfig(cfg.exclude_sites, cfg.exclude_files, next),
+    ),
+  );
 }
 
 // ---- files: a Windows-Explorer-style filesystem browser + media preview ----
@@ -553,6 +861,16 @@ function fileGlyph(e: FsEntry): string {
 function typeLabel(e: FsEntry): string {
   if (e.is_dir) return "Folder";
   return e.ext ? `${e.ext.toUpperCase()} file` : "File";
+}
+
+// Record a file reference in the unified activity store (source='files').
+function logFileOpen(e: FsEntry) {
+  invoke("activity_log", {
+    source: "files",
+    kind: "open",
+    title: e.name,
+    text: e.path,
+  }).catch(console.error);
 }
 
 async function browseTo(path: string) {
@@ -618,7 +936,9 @@ function renderFilesPanel() {
       // Folders open on a single click; files select (preview) then paste-on-open.
       onRow: (e) => (e.is_dir ? browseTo(e.path) : store.set({ fsSelected: e.path })),
       onRowDblClick: (e) => {
-        if (!e.is_dir) pasteToActive(pathArg(e.path) + " ");
+        if (e.is_dir) return;
+        pasteToActive(pathArg(e.path) + " ");
+        logFileOpen(e); // joins the unified activity history
       },
     }),
   );
@@ -632,15 +952,23 @@ function syncPanel(s: AppState) {
     "active",
     s.panel === "worktrees",
   );
-  ($("#spy-toggle") as HTMLButtonElement).classList.toggle("active", s.panel === "spy");
+  ($("#activity-toggle") as HTMLButtonElement).classList.toggle(
+    "active",
+    s.panel === "activity",
+  );
   ($("#files-toggle") as HTMLButtonElement).classList.toggle(
     "active",
     s.panel === "files",
   );
+  ($("#config-toggle") as HTMLButtonElement).classList.toggle(
+    "active",
+    s.panel === "config",
+  );
   // Lazy first load when a panel is opened empty.
   if (s.panel === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
-  if (s.panel === "spy" && store.get().spy.length === 0) refreshSpy();
+  if (s.panel === "activity" && store.get().activity.length === 0) refreshActivity();
   if (s.panel === "files" && !store.get().files) browseTo(store.get().fsCwd);
+  if (s.panel === "config" && !store.get().config) refreshConfig();
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -657,6 +985,11 @@ function syncMode(s: AppState) {
   document.body.dataset.mode = s.mode;
   ($("#mode-toggle") as HTMLButtonElement).textContent =
     s.mode === "dark" ? "☀" : "☾";
+}
+function syncRecord(s: AppState) {
+  const b = $("#activity-record") as HTMLButtonElement;
+  b.classList.toggle("recording", s.captureEnabled);
+  b.textContent = s.captureEnabled ? "● Recording" : "○ Record";
 }
 
 // While true, the blur-to-hide handler stands down (the screenshot crosshair
@@ -747,6 +1080,75 @@ function wireResizer() {
   resizer.addEventListener("pointercancel", end);
 }
 
+// Contextual right-click items, keyed off what the click landed on. Row data is
+// recovered from the row's title attr (file rows carry the path, activity rows
+// the shot/url/text), so no per-row wiring is needed.
+function ctxItemsFor(target: HTMLElement): CtxItem[] {
+  const copy = (s: string) => navigator.clipboard.writeText(s).catch(() => {});
+
+  // A file row in the Files explorer.
+  const fsRow = target.closest("#fs-list tr.dtable-row") as HTMLElement | null;
+  if (fsRow?.title) {
+    const path = fsRow.title;
+    return [
+      { label: "Open (paste path)", action: () => pasteToActive(pathArg(path) + " ") },
+      { label: "Copy path", action: () => copy(path) },
+      { sep: true },
+      { label: "Up one folder", action: () => $("#fs-up").click() },
+    ];
+  }
+
+  // An activity-timeline row.
+  const actRow = target.closest("#activity-table tr.dtable-row") as HTMLElement | null;
+  if (actRow?.title) {
+    const data = actRow.title;
+    return [
+      { label: "Paste", action: () => pasteToActive(data + " ") },
+      { label: "Copy", action: () => copy(data) },
+    ];
+  }
+
+  // Inside a terminal.
+  if (target.closest(".term-host")) {
+    return [
+      {
+        label: "Paste",
+        action: async () => {
+          try {
+            pasteToActive(await navigator.clipboard.readText());
+          } catch {
+            /* clipboard blocked */
+          }
+        },
+      },
+      {
+        label: "Clear",
+        action: () => {
+          const id = activeId();
+          if (id) tabs.get(id)?.term.clear();
+        },
+      },
+      { sep: true },
+      { label: "Screenshot region", action: captureToPrompt },
+    ];
+  }
+
+  // Default: window-level actions.
+  return [
+    {
+      label: "New session",
+      action: () => ($("#new-name") as HTMLInputElement).focus(),
+    },
+    { sep: true },
+    { label: "Cycle skin", action: () => store.set({ skin: nextSkin(store.get().skin) }) },
+    {
+      label: store.get().mode === "dark" ? "Light mode" : "Dark mode",
+      action: () =>
+        store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }),
+    },
+  ];
+}
+
 function wireChrome() {
   $("#skin-toggle").onclick = () =>
     store.set({ skin: nextSkin(store.get().skin) });
@@ -767,12 +1169,46 @@ function wireChrome() {
   $("#wt-view").onclick = () =>
     store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
 
-  $("#spy-toggle").onclick = () =>
-    store.set({ panel: store.get().panel === "spy" ? "terminal" : "spy" });
-  $("#spy-clear").onclick = () =>
-    invoke("spy_clear")
-      .then(() => store.set({ spy: [] }))
+  $("#activity-toggle").onclick = () =>
+    store.set({
+      panel: store.get().panel === "activity" ? "terminal" : "activity",
+    });
+  $("#activity-clear").onclick = () =>
+    invoke("activity_clear")
+      .then(() => {
+        activitySelected = null;
+        store.set({ activity: [] });
+      })
       .catch(console.error);
+
+  // Recording toggle mirrors backend CaptureEnabled (flag persisted on front).
+  $("#activity-record").onclick = () => {
+    const on = !store.get().captureEnabled;
+    store.set({ captureEnabled: on });
+    invoke("capture_set_enabled", { on }).catch(console.error);
+  };
+
+  // fzf search box filters live (runtime-only state).
+  $("#activity-search").addEventListener("input", (e) => {
+    store.set({ activityQuery: (e.target as HTMLInputElement).value });
+  });
+
+  // Source + type filter chips.
+  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-src]").forEach((b) => {
+    b.onclick = () =>
+      store.set({ activitySource: b.dataset.src as ActivitySource });
+  });
+  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-type]").forEach((b) => {
+    b.onclick = () => store.set({ activityType: b.dataset.type as ActivityType });
+  });
+
+  $("#config-toggle").onclick = () =>
+    store.set({ panel: store.get().panel === "config" ? "terminal" : "config" });
+  $("#config-reload").onclick = () =>
+    invoke<ConfigView>("config_reload")
+      .then((view) => store.set({ config: view }))
+      .catch(console.error);
+  $("#config-open").onclick = () => invoke("config_open").catch(console.error);
 
   $("#files-toggle").onclick = () =>
     store.set({ panel: store.get().panel === "files" ? "terminal" : "files" });
@@ -790,13 +1226,23 @@ function wireChrome() {
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
   $("#hide-btn").onclick = () => getCurrentWindow().hide();
 
+  // Quick-launch an agent session (creates the tmux session running the agent).
+  $("#ql-claude").onclick = () => {
+    openTab("claude", { command: "claude" });
+    refreshSessions();
+  };
+  $("#ql-opencode").onclick = () => {
+    openTab("opencode", { command: "opencode" });
+    refreshSessions();
+  };
+
   $("#new-session").addEventListener("submit", (e) => {
     e.preventDefault();
     const input = $("#new-name") as HTMLInputElement;
     const name = input.value.trim();
     if (!name) return;
     input.value = "";
-    openTab(name);
+    openTab(name); // plain shell (no agent command)
     refreshSessions();
   });
 
@@ -826,19 +1272,32 @@ async function main() {
   store.subscribe(syncPanel, ["panel"]);
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
-  store.subscribe(renderSpyPanel, ["spy"]);
+  store.subscribe(renderActivityPanel, [
+    "activity",
+    "activitySource",
+    "activityType",
+    "activityQuery",
+  ]);
+  store.subscribe(syncRecord, ["captureEnabled"]);
+  store.subscribe(renderConfigPanel, ["config"]);
   store.subscribe(renderFilesPanel, ["files", "fsSelected"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncPanel(store.get());
   renderWorktreesPanel();
-  renderSpyPanel();
+  renderActivityPanel();
   renderFilesPanel();
+  syncRecord(store.get());
+  // Re-apply the persisted recording flag to the backend (default off there).
+  invoke("capture_set_enabled", { on: store.get().captureEnabled }).catch(
+    console.error,
+  );
 
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
   wireResizer();
   wireDragDrop();
+  wireContextMenu(ctxItemsFor);
   await refreshSessions();
   await refreshWorkspaces();
 
@@ -851,9 +1310,11 @@ async function main() {
   // reattaches. Capture the wanted active id first — openTab() flips active as
   // it replays — then restore it once all tabs exist.
   const wantActive = store.get().active;
+  replaying = true; // don't log restored tabs as fresh visits
   for (const t of store.get().openTabs) {
     openTab(t.name, { command: t.command, cwd: t.cwd });
   }
+  replaying = false;
   if (wantActive && tabs.has(wantActive)) activate(wantActive);
 
   // Backend pushes the registry whenever a Space is created/removed.
@@ -861,9 +1322,12 @@ async function main() {
     store.set({ workspaces: e.payload });
   });
 
-  // Each captured browser event arrives here; prepend, newest-first, capped.
-  await listen<SpyEvent>("spy-ingested", (e) => {
-    store.set({ spy: [e.payload, ...store.get().spy].slice(0, SPY_CAP) });
+  // Each new activity row (browser ingest, os capture, file open) arrives here;
+  // prepend, newest-first, capped.
+  await listen<Event>("activity-added", (e) => {
+    store.set({
+      activity: [e.payload, ...store.get().activity].slice(0, ACTIVITY_CAP),
+    });
   });
 
   // Summon: replay entrance animation + refocus active terminal.

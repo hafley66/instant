@@ -5,8 +5,17 @@ import { createStore } from "./store";
 
 export type Skin = "xp" | "p5" | "ac3";
 export type Mode = "light" | "dark";
-export type Panel = "terminal" | "worktrees" | "spy" | "files";
+export type Panel = "terminal" | "worktrees" | "activity" | "files" | "config";
 export type WtView = "tree" | "table";
+export type ActivitySource = "all" | "browser" | "os" | "files" | "session";
+export type ActivityType =
+  | "all"
+  | "highlight"
+  | "clip"
+  | "image"
+  | "file"
+  | "url"
+  | "click";
 
 // A filesystem entry (Rust fs::Entry) for the Files explorer.
 export interface FsEntry {
@@ -25,14 +34,31 @@ export interface DirListing {
   entries: FsEntry[];
 }
 
-// A captured browser event (Rust spy::SpyEvent), streamed from the extension.
-export interface SpyEvent {
+// One row of the unified activity store (Rust activity::Event). Sources: a
+// browser DOM/tab event (extension), an os screen capture (gesture), or a file
+// open (Files panel).
+export interface Event {
   id: number;
   ts: number; // unix ms
-  kind: string; // "nav" | "selection" | "clipboard"
+  source: "browser" | "os" | "files" | "session";
+  kind: string; // nav|click|dblclick|drag|copy|paste|tabopen|open|focus|…
+  app: string; // frontmost app (os captures)
   url: string;
-  title: string;
-  text: string;
+  title: string; // browser title / file name
+  text: string; // selection/clipboard / file path / dom context
+  shot: string; // screenshot path (os captures)
+}
+
+// Resolved observation config (Rust config::ConfigView). Edited in the Config
+// panel; written back to config.json via config_set.
+export interface ConfigView {
+  path: string;
+  source: "file" | "default";
+  error: string | null;
+  exclude_sites: string[];
+  exclude_files: string[];
+  exclude_apps: string[];
+  excluded_count: number;
 }
 
 // A reattachable tab: enough to re-`open_session` after a frontend reload. The
@@ -73,7 +99,12 @@ export interface AppState {
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   panel: Panel; // terminal vs worktrees table
   worktrees: WorktreeRow[]; // last scan result (runtime)
-  spy: SpyEvent[]; // captured browser events (runtime)
+  activity: Event[]; // unified activity timeline (runtime)
+  activitySource: ActivitySource; // source filter chip (persisted)
+  activityType: ActivityType; // event-type sub-filter chip (persisted)
+  activityQuery: string; // fuzzy search box (runtime)
+  captureEnabled: boolean; // screen-capture recording on/off (persisted, mirrors backend)
+  config: ConfigView | null; // resolved observation config (runtime)
   files: DirListing | null; // current Files explorer listing (runtime)
   fsSelected: string | null; // selected file path in the explorer (runtime)
   wtView: WtView; // tree vs flat table
@@ -91,6 +122,9 @@ const PERSIST: (keyof AppState)[] = [
   "active",
   "openTabs",
   "panel",
+  "activitySource",
+  "activityType",
+  "captureEnabled",
   "wtView",
   "scanRoot",
   "fsCwd",
@@ -110,6 +144,11 @@ function loadKey<T>(k: string, fallback: T): T {
   }
 }
 
+// The old "spy" panel was renamed "activity"; migrate any persisted value.
+function migratePanel(p: Panel | "spy"): Panel {
+  return p === "spy" ? "activity" : p;
+}
+
 function load(): AppState {
   return {
     skin: loadKey<Skin>("skin", "xp"),
@@ -117,9 +156,14 @@ function load(): AppState {
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),
     workspaces: [],
-    panel: loadKey<Panel>("panel", "terminal"),
+    panel: migratePanel(loadKey<Panel>("panel", "terminal")),
     worktrees: [],
-    spy: [],
+    activity: [],
+    activitySource: loadKey<ActivitySource>("activitySource", "all"),
+    activityType: loadKey<ActivityType>("activityType", "all"),
+    activityQuery: "",
+    captureEnabled: loadKey<boolean>("captureEnabled", false),
+    config: null,
     files: null,
     fsSelected: null,
     wtView: loadKey<WtView>("wtView", "tree"),

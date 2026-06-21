@@ -175,3 +175,15 @@ pub fn resize_pty(store: State<PtyStore>, id: String, cols: u16, rows: u16) -> R
 pub fn close_pty(store: State<PtyStore>, id: String) {
     store.0.lock().unwrap().remove(&id);
 }
+
+/// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
+#[tauri::command]
+pub fn kill_session(store: State<PtyStore>, name: String) -> Result<(), String> {
+    std::process::Command::new("tmux")
+        .args(["kill-session", "-t", &name])
+        .env("PATH", path_env())
+        .status()
+        .map_err(|e| e.to_string())?;
+    store.0.lock().unwrap().remove(&format!("s:{name}"));
+    Ok(())
+}

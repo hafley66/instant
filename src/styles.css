@@ -146,6 +146,13 @@ body[data-skin="xp"] .title-bar-text {
   min-height: 22px;
   font-weight: bold;
 }
+/* Active panel toggle: xp.css's pressed box-shadow alone is too subtle, so fill
+   with the skin accent (same readable selection the activity chips use). */
+.toolbar button.active {
+  background: var(--row-active-bg, #316ac5);
+  color: var(--row-active-fg, #fff);
+  box-shadow: none;
+}
 body[data-skin="p5"] .toolbar {
   gap: 6px;
 }
@@ -281,6 +288,51 @@ body[data-skin="ac3"] .mode-toggle {
   min-width: 0;
 }
 
+/* ---- session creator: quick-launch + collapsible space form ---- */
+.head-count {
+  opacity: 0.5;
+  font-weight: normal;
+}
+.session-empty {
+  list-style: none;
+  padding: 6px 7px;
+  font-size: 11px;
+  opacity: 0.5;
+}
+.sidebar-create {
+  border-top: var(--frame-w) solid var(--frame);
+}
+.quick-launch {
+  display: flex;
+  gap: 3px;
+  padding: 4px 4px 0;
+}
+.ql-btn {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+}
+.new-session {
+  border-top: none;
+}
+.space-create {
+  font-size: 11px;
+  padding: 0 4px 4px;
+}
+.space-create summary {
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 3px 2px;
+  list-style: revert;
+}
+.space-create summary:hover {
+  opacity: 1;
+}
+.space-create .new-workspace {
+  padding: 4px 0 0;
+  border-top: none;
+}
+
 /* ---- terminal pane ---- */
 .term-pane {
   flex: 1;
@@ -304,6 +356,9 @@ body[data-skin="ac3"] .mode-toggle {
 }
 .tab-active {
   font-weight: bold;
+  background: var(--row-active-bg, #316ac5);
+  color: var(--row-active-fg, #fff);
+  box-shadow: none;
 }
 .tab-close {
   opacity: 0.5;
@@ -346,17 +401,175 @@ body:not([data-panel="terminal"]) #terminals {
   display: none;
 }
 body[data-panel="worktrees"] #worktrees-panel,
-body[data-panel="spy"] #spy-panel,
-body[data-panel="files"] #files-panel {
+body[data-panel="activity"] #activity-panel,
+body[data-panel="files"] #files-panel,
+body[data-panel="config"] #config-panel {
   display: flex;
+}
+.spy-spacer {
+  flex: 1;
 }
 .spy-title {
   font-size: 11px;
   font-weight: bold;
   opacity: 0.8;
 }
-.spy-spacer {
+
+/* ---- config panel: observation-filter editor ---- */
+.cfg-body {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.cfg-status {
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.cfg-status code {
+  background: var(--row-hover);
+  padding: 1px 4px;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 10px;
+  word-break: break-all;
+}
+.cfg-status .muted {
+  opacity: 0.6;
+  margin-top: 4px;
+}
+.cfg-err {
+  color: #c0392b;
+  margin-top: 4px;
+}
+.cfg-group {
+  margin-bottom: 14px;
+}
+.cfg-group-head {
+  margin-bottom: 4px;
+}
+.cfg-group-head .muted {
+  opacity: 0.55;
+  font-size: 11px;
+}
+.cfg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+.cfg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  background: var(--row-hover);
+  border: var(--frame-w) solid var(--frame);
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+}
+.cfg-x {
+  cursor: pointer;
+  font-weight: bold;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+.cfg-x:hover {
+  opacity: 1;
+  color: #c0392b;
+}
+.cfg-add {
+  display: flex;
+  gap: 4px;
+}
+.cfg-add input {
+  flex: 1;
+  min-width: 0;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+}
+.cfg-add button {
+  min-width: 24px;
+}
+
+/* ---- activity timeline: search bar + source chips + record toggle ---- */
+.act-bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px;
+  border-bottom: var(--frame-w) solid var(--frame);
+}
+.act-search {
+  flex: 1;
+  min-width: 0;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+}
+.act-record.recording {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+  font-weight: bold;
+}
+.act-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-bottom: var(--frame-w) solid var(--frame);
+}
+/* Second row (event-type sub-filter) reads as a quieter sub-level. */
+.act-types {
+  opacity: 0.92;
+}
+.act-chip {
+  font-size: 10px;
+  padding: 1px 8px;
+  opacity: 0.7;
+}
+/* Scoped + fallback so it beats xp.css's button rules and never renders the
+   selection as light-on-light. */
+.act-chips .act-chip.on {
+  opacity: 1;
+  background: var(--row-active-bg, #316ac5);
+  color: var(--row-active-fg, #fff);
+  box-shadow: none;
+  font-weight: bold;
+}
+
+/* ---- right-click context menu (XP classic; themed per skin via tokens) ---- */
+.ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 160px;
+  padding: 2px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  border: var(--frame-w) solid var(--frame);
+  box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+  user-select: none;
+}
+.ctx-item {
+  padding: 3px 22px;
+  cursor: default;
+  white-space: nowrap;
+}
+.ctx-item:hover {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+}
+.ctx-disabled {
+  opacity: 0.4;
+}
+.ctx-disabled:hover {
+  background: transparent;
+  color: var(--panel-fg);
+}
+.ctx-sep {
+  height: 0;
+  margin: 3px 2px;
+  border-top: 1px solid var(--frame);
 }
 
 /* ---- files explorer (Windows-Explorer-style details view + preview) ---- */

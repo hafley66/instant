@@ -1,16 +1,19 @@
+mod activity;
+mod capture;
+mod config;
 mod fs;
 mod pty;
-mod spy;
 mod workspace;
 mod worktrees;
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use core_foundation::runloop::CFRunLoop;
 use core_graphics::event::{
-    CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
-    CallbackResult,
+    CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventType, CallbackResult, EventField,
 };
 use mouse_position::mouse_position::Mouse;
 use tauri::menu::{Menu, MenuItem};
@@ -20,40 +23,119 @@ use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 // Two right-clicks closer than this count as a double-right-click summon gesture.
 const DOUBLE_RIGHT_MS: u128 = 350;
+// Global throttle between screen captures, across all gesture kinds.
+const MIN_GAP: Duration = Duration::from_millis(350);
 
-/// Listen for a global double-right-click on a dedicated thread running its own
-/// CFRunLoop. The tap subscribes to RightMouseDown only — listening to keyboard
-/// events here would crash, since rdev/TIS keycode translation must run on the
-/// main thread. Listen-only, so it never swallows the click and context menus
-/// still work. Needs Accessibility / Input Monitoring permission, same as the hotkey.
-fn spawn_right_click_gesture(app: AppHandle) {
+// Tap-thread gesture state (behind a Mutex, since with_enabled takes `impl Fn`).
+#[derive(Default)]
+struct Gesture {
+    last_capture: Option<Instant>,
+    drag_active: bool,
+    last_right_down: Option<Instant>,
+}
+
+// Throttled capture trigger: spawn the screenshot OFF the tap thread so input
+// latency isn't affected by screencapture's ~100-300ms.
+fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, kind: &str) {
+    if !enabled.load(Ordering::Relaxed) {
+        return;
+    }
+    let now = Instant::now();
+    if let Some(t) = g.last_capture {
+        if now.duration_since(t) < MIN_GAP {
+            return;
+        }
+    }
+    g.last_capture = Some(now);
+    let app = app.clone();
+    let kind = kind.to_string();
+    std::thread::spawn(move || capture::take(app, &kind));
+}
+
+/// Global input tap on a dedicated thread running its own CFRunLoop. Handles the
+/// double-right-click summon (unchanged) plus event-driven capture: drag edges,
+/// clicks/dbl-clicks, and Cmd+C / Cmd+V. Listen-only, so it never swallows input
+/// and the webview's own context menu still works. We read raw event fields
+/// (click-state, keycode, flags) directly — NO TIS/TSM keycode translation — so
+/// the old rdev-on-a-background-thread crash does not recur. Needs Accessibility
+/// / Input Monitoring permission, same as the hotkey.
+fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        let last = Mutex::new(None::<Instant>);
+        let g = Mutex::new(Gesture::default());
         let res = CGEventTap::with_enabled(
             CGEventTapLocation::HID,
             CGEventTapPlacement::HeadInsertEventTap,
             CGEventTapOptions::ListenOnly,
-            vec![CGEventType::RightMouseDown],
-            |_proxy, _ty, _event| {
-                let now = Instant::now();
-                let mut last = last.lock().unwrap();
-                let is_double = last
-                    .map(|t| now.duration_since(t) < Duration::from_millis(DOUBLE_RIGHT_MS as u64))
-                    .unwrap_or(false);
-                if is_double {
-                    *last = None; // reset so a triple-click isn't two doubles
-                    let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || toggle_window(&handle));
-                } else {
-                    *last = Some(now);
+            vec![
+                CGEventType::RightMouseDown,
+                CGEventType::LeftMouseDown,
+                CGEventType::LeftMouseDragged,
+                CGEventType::LeftMouseUp,
+                CGEventType::KeyDown,
+            ],
+            |_proxy, ty, event| {
+                let mut g = g.lock().unwrap();
+                match ty {
+                    CGEventType::RightMouseDown => {
+                        let now = Instant::now();
+                        let is_double = g
+                            .last_right_down
+                            .map(|t| {
+                                now.duration_since(t)
+                                    < Duration::from_millis(DOUBLE_RIGHT_MS as u64)
+                            })
+                            .unwrap_or(false);
+                        if is_double {
+                            g.last_right_down = None; // reset so a triple isn't two doubles
+                            let handle = app.clone();
+                            let _ = app.run_on_main_thread(move || toggle_window(&handle));
+                        } else {
+                            g.last_right_down = Some(now);
+                        }
+                    }
+                    CGEventType::LeftMouseDown => g.drag_active = false,
+                    CGEventType::LeftMouseDragged => {
+                        if !g.drag_active {
+                            g.drag_active = true; // leading edge of a drag burst
+                            maybe_capture(&mut g, &app, &enabled, "drag");
+                        }
+                    }
+                    CGEventType::LeftMouseUp => {
+                        if g.drag_active {
+                            g.drag_active = false; // trailing edge
+                            maybe_capture(&mut g, &app, &enabled, "drag-end");
+                        } else {
+                            let cs = event
+                                .get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
+                            maybe_capture(
+                                &mut g,
+                                &app,
+                                &enabled,
+                                if cs >= 2 { "dblclick" } else { "click" },
+                            );
+                        }
+                    }
+                    CGEventType::KeyDown => {
+                        if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
+                            // 8 = C, 9 = V (ANSI keycodes). Only these two — not a keylogger.
+                            match event
+                                .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
+                            {
+                                8 => maybe_capture(&mut g, &app, &enabled, "copy"),
+                                9 => maybe_capture(&mut g, &app, &enabled, "paste"),
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                CallbackResult::Keep // passive: pass the click through unchanged
+                CallbackResult::Keep // passive: pass every event through unchanged
             },
             || CFRunLoop::run_current(),
         );
         if res.is_err() {
             eprintln!(
-                "right-click gesture disabled: event tap creation failed \
+                "input taps disabled: event tap creation failed \
                  (grant Accessibility / Input Monitoring permission)"
             );
         }
@@ -163,18 +245,46 @@ pub fn run() {
         .setup(move |app| {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             app.global_shortcut().register(summon)?;
-            spawn_right_click_gesture(app.handle().clone());
+
+            // Capture flag, shared with the tap thread. Default OFF; the front
+            // re-enables it on boot if the user had recording on.
+            let enabled = Arc::new(AtomicBool::new(false));
+            app.manage(activity::CaptureEnabled(enabled.clone()));
+            spawn_input_taps(app.handle().clone(), enabled);
+
+            // Track focus on our own window so the capture worker can skip
+            // gestures made inside instant (clicking rows/chips shouldn't record).
+            let focused = Arc::new(AtomicBool::new(false));
+            app.manage(capture::WindowFocused(focused.clone()));
+            if let Some(win) = app.get_webview_window("main") {
+                win.on_window_event(move |e| {
+                    if let tauri::WindowEvent::Focused(f) = e {
+                        focused.store(*f, Ordering::Relaxed);
+                    }
+                });
+            }
 
             // Hydrate the workspace registry from disk.
             let loaded = workspace::load(app.handle());
             *app.state::<workspace::Workspaces>().0.lock().unwrap() = loaded;
 
-            // Spy ring DB + localhost ingest endpoint for the browser extension.
+            // Unified activity store + localhost ingest endpoint for the extension.
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir).ok();
-            let conn = spy::open(&data_dir.join("spy.db"))?;
-            app.manage(spy::SpyDb(Mutex::new(conn)));
-            spy::spawn_server(app.handle().clone());
+            let conn = activity::open(&data_dir.join("activity.db"))?;
+            app.manage(activity::ActivityDb(Mutex::new(conn)));
+
+            // Observation filters (config.json, created with empty lists if absent).
+            let cfg_path = data_dir.join("config.json");
+            let (cfg, status) = config::read_or_default(&cfg_path);
+            app.manage(config::ConfigState {
+                config: Mutex::new(cfg),
+                path: cfg_path,
+                status: Mutex::new(status),
+                excluded_count: std::sync::atomic::AtomicU64::new(0),
+            });
+
+            activity::spawn_server(app.handle().clone());
 
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -212,12 +322,20 @@ pub fn run() {
             pty::write_pty,
             pty::resize_pty,
             pty::close_pty,
+            pty::kill_session,
             workspace::list_workspaces,
             workspace::create_workspace,
             workspace::remove_workspace,
             worktrees::scan_worktrees,
-            spy::spy_events,
-            spy::spy_clear,
+            activity::activity_events,
+            activity::activity_clear,
+            activity::activity_log,
+            activity::capture_set_enabled,
+            activity::capture_enabled,
+            config::config_get,
+            config::config_set,
+            config::config_reload,
+            config::config_open,
             fs::list_dir,
             fs::read_image,
             screenshot,
