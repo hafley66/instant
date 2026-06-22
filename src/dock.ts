@@ -22,8 +22,8 @@ import type { PanelId } from "./state";
 import { DEFAULT_DIR } from "./state";
 
 // Bump when the default layout shape changes so stale/corrupt saved layouts are
-// discarded instead of restored.
-const LAYOUT_VERSION = 2;
+// discarded instead of restored. (v3: discard the blank-render v2 saves.)
+const LAYOUT_VERSION = 3;
 
 // Tools share one side group (tab together) instead of each spawning a column.
 const TOOLS: PanelId[] = ["files", "activity", "config", "worktrees"];
@@ -82,6 +82,11 @@ export function wireDock() {
     applyLayout(buildDefault);
   }
 
+  // The terminal is mandatory: a restored layout (or a bad fromJSON) might not
+  // contain it, which would make every position:{referencePanel:"terminal"}
+  // throw. Guarantee it exists before anything references it.
+  ensureTerminal();
+
   api.onDidLayoutChange(() => {
     if (!saving) persist();
   });
@@ -112,12 +117,29 @@ function applyLayout(fn: () => void) {
 function buildDefault() {
   api.clear();
   api.addPanel({ id: "terminal", component: "host", title: titleOf("terminal") });
-  api.addPanel({
-    id: "sessions",
-    component: "host",
-    title: titleOf("sessions"),
-    position: { referencePanel: "terminal", direction: "left" },
-  });
+  if (api.getPanel("terminal")) {
+    api.addPanel({
+      id: "sessions",
+      component: "host",
+      title: titleOf("sessions"),
+      position: { referencePanel: "terminal", direction: "left" },
+    });
+  }
+}
+
+function ensureTerminal() {
+  if (api.getPanel("terminal")) return;
+  saving = true;
+  api.addPanel({ id: "terminal", component: "host", title: titleOf("terminal") });
+  saving = false;
+  persist();
+}
+
+// A panel id safe to dock against: prefer the terminal, else any open panel,
+// else nothing (caller omits position -> dockview picks a default slot).
+function anchorId(): string | undefined {
+  if (api.getPanel("terminal")) return "terminal";
+  return api.panels[0]?.id;
 }
 
 // Rail toggle: close the panel if open, else open it. Sessions docks left as its
@@ -130,25 +152,24 @@ export function togglePanel(id: PanelId) {
     api.removePanel(existing);
     return;
   }
+
+  // Build a position that never references a missing panel (omit it entirely if
+  // there's no anchor; dockview then drops the panel in a default slot).
+  let position:
+    | { referencePanel: string; direction: "left" | "right" | "below" | "within" }
+    | undefined;
   if (id === "sessions") {
-    api.addPanel({
-      id,
-      component: "host",
-      title: titleOf(id),
-      position: { referencePanel: "terminal", direction: "left" },
-    });
-    return;
+    const ref = anchorId();
+    if (ref) position = { referencePanel: ref, direction: "left" };
+  } else {
+    const sibling = TOOLS.find((t) => t !== id && api.getPanel(t));
+    if (sibling) position = { referencePanel: sibling, direction: "within" };
+    else {
+      const ref = anchorId();
+      if (ref) position = { referencePanel: ref, direction: DEFAULT_DIR[id] };
+    }
   }
-  // Tool: tab into an already-open tool's group, else start a new right column.
-  const sibling = TOOLS.find((t) => t !== id && api.getPanel(t));
-  api.addPanel({
-    id,
-    component: "host",
-    title: titleOf(id),
-    position: sibling
-      ? { referencePanel: sibling, direction: "within" }
-      : { referencePanel: "terminal", direction: DEFAULT_DIR[id] },
-  });
+  api.addPanel({ id, component: "host", title: titleOf(id), ...(position ? { position } : {}) });
 }
 
 export function isOpen(id: PanelId): boolean {
