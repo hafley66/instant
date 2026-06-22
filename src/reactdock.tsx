@@ -76,7 +76,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
   );
 }
 
-const LAYOUT_VERSION = 5; // bump to discard older saved layouts
+const LAYOUT_VERSION = 6; // bump to discard older saved layouts (6: drop floating groups)
 const TOOLS: PanelId[] = ["files", "activity", "config", "worktrees"];
 
 // Each tmux terminal is its own dockview panel, id `term:<sessionId>`. Its
@@ -326,6 +326,9 @@ function DockApp() {
     theme: themeLight,
     onReady,
     className: "dv-fill",
+    // Dragging a tab out spawned a detached floating panel that read as broken.
+    // Keep docking/split/reorder drags; just disable the float-out mode.
+    disableFloatingGroups: true,
   });
 }
 
