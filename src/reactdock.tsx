@@ -182,10 +182,14 @@ function onReady(e: DockviewReadyEvent) {
     }
 
     api.onDidActivePanelChange((p) => {
-      if (p && isTerm(p.id)) hooks.onTermActivate(termSid(p.id));
+      if (p && isTerm(p.id)) {
+        lastActiveTermId = p.id; // new terminals open into this group
+        hooks.onTermActivate(termSid(p.id));
+      }
     });
     api.onDidRemovePanel((p) => {
       if (isTerm(p.id)) {
+        if (lastActiveTermId === p.id) lastActiveTermId = null;
         dynamicNodes.delete(p.id);
         hooks.onTermClose(termSid(p.id));
       }
@@ -212,6 +216,15 @@ function onReady(e: DockviewReadyEvent) {
 // as a flat, draggable/splittable dockview tab next to its siblings.
 const firstTermPanel = () => api?.panels.find((p) => isTerm(p.id))?.id;
 
+// Last terminal panel that held focus. New terminals open as a tab in this
+// panel's group, so they land where you were working instead of spawning a new
+// column. Cleared when that panel closes; falls back to the first terminal.
+let lastActiveTermId: string | null = null;
+const anchorTermPanel = (): string | undefined => {
+  if (lastActiveTermId && api?.getPanel(lastActiveTermId)) return lastActiveTermId;
+  return firstTermPanel();
+};
+
 export function addTermPanel(sid: string, title: string, el: HTMLElement) {
   if (!api) return;
   const pid = TERM + sid;
@@ -221,7 +234,7 @@ export function addTermPanel(sid: string, title: string, el: HTMLElement) {
     existing.api.setActive();
     return;
   }
-  const anchor = firstTermPanel();
+  const anchor = anchorTermPanel();
   let position:
     | { referencePanel: string; direction: "within" | "right" }
     | undefined;
