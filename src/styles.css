@@ -153,6 +153,58 @@ body[data-skin="xp"] .title-bar-text {
   min-height: 22px;
   font-weight: bold;
 }
+/* Split companion to Shot: a narrow ▾ that opens the send-to picker. */
+.send-menu-btn {
+  min-width: 18px;
+  padding: 0 4px;
+  margin-left: -2px;
+}
+
+/* "Send to" picker popover: a compact terminal table near the ▾ button. */
+.send-picker {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 3px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  border: var(--frame-w) solid var(--frame);
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+}
+.send-picker-head {
+  padding: 2px 6px 4px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  opacity: 0.6;
+}
+.send-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+}
+.send-row:hover {
+  background: var(--row-hover);
+}
+.send-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.send-act {
+  min-width: 0;
+  min-height: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.send-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 /* Active panel toggle: xp.css's pressed box-shadow alone is too subtle, so fill
    with the skin accent (same readable selection the activity chips use). The
    `body[data-skin]` prefix (0,3,1) outranks xp.css's `button:not(:disabled).active`
@@ -191,8 +243,10 @@ body[data-skin="ac3"] .mode-toggle {
   flex: 1;
   display: flex;
   min-height: 0;
-  margin: 3px;
-  gap: 4px;
+  /* No top margin: the workbench sits flush under the toolbar so the rail and
+     toolbar read as one connected block, not two floating boxes. */
+  margin: 0 3px 3px;
+  gap: 0;
   background: var(--surface);
 }
 
@@ -205,10 +259,13 @@ body[data-skin="ac3"] .mode-toggle {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px;
-  background: var(--head-bg);
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface);
   border: var(--frame-w) solid var(--frame);
+  /* top border is covered by the toolbar's bottom border (flush); right side
+     abuts the dock. */
+  border-top: none;
   border-right: none;
 }
 .actbar[data-mode="big"] {
@@ -261,6 +318,8 @@ body[data-skin] .actbar-item.active {
   position: relative;
   min-width: 0;
   min-height: 0;
+  /* divider between the rail and the content area (rail has border-right:none) */
+  border-left: var(--frame-w) solid var(--frame);
 }
 /* Map dockview's chrome to the skin tokens. dockview sets --dv-* on its theme
    shell element, so we must out-specify that: #dock + the theme class (1-1-0)
@@ -268,7 +327,7 @@ body[data-skin] .actbar-item.active {
 #dock.dockview-theme-light,
 #dock .dockview-theme-light {
   --dv-group-view-background-color: var(--panel-bg);
-  --dv-tabs-and-actions-container-background-color: var(--head-bg);
+  --dv-tabs-and-actions-container-background-color: var(--surface);
   --dv-activegroup-visiblepanel-tab-background-color: var(--row-active-bg);
   --dv-activegroup-visiblepanel-tab-color: var(--row-active-fg);
   --dv-activegroup-hiddenpanel-tab-background-color: var(--head-bg);
@@ -334,7 +393,7 @@ body[data-skin] .actbar-item.active {
    rounded tops; the active tab is the Luna blue gradient, lifted to merge with
    the content below. */
 body[data-skin="xp"] #dock .dv-tabs-and-actions-container {
-  background: linear-gradient(#f3f1e6, #dcd8cb);
+  background: var(--surface);
   border-bottom: 1px solid #7f9db9;
   align-items: flex-end;
   height: 32px;
@@ -370,7 +429,7 @@ body[data-skin="xp"] #dock .dv-active-tab .dv-default-tab-action {
    glow white on the dark panel). Active tab keeps the Luna blue, which reads
    fine on dark. */
 body[data-skin="xp"][data-mode="dark"] #dock .dv-tabs-and-actions-container {
-  background: linear-gradient(#34343a, #232327);
+  background: var(--surface);
   border-bottom: 1px solid #0d4ec0;
 }
 body[data-skin="xp"][data-mode="dark"] #dock .dv-tab {
@@ -461,6 +520,19 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   color: var(--head-fg);
   background: var(--head-bg);
   border-bottom: var(--frame-w) solid var(--frame);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Sessions sort picker sits at the right edge of the SESSIONS head. */
+.session-sort {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0;
+  padding: 0 2px;
+  color: var(--panel-fg);
+  background: var(--panel-bg);
+  border: 1px solid var(--frame);
 }
 /* Two lists (sessions + spaces) share one scroll region. */
 .sidebar-lists {
@@ -1046,6 +1118,24 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   color: var(--head-fg);
   border-bottom: 1px solid var(--frame);
 }
+/* Sortable column header: clickable, with the active column accented and an
+   arrow marking direction. */
+.dtable th.dtable-th-sort {
+  cursor: pointer;
+  user-select: none;
+}
+.dtable th.dtable-th-sort:hover {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg, #fff);
+}
+.dtable th.sorted {
+  color: var(--row-active-bg);
+}
+.dtable-sort-mark {
+  font-size: 9px;
+  opacity: 0.85;
+}
+
 /* Quiet section label, not a banner — most repos are a single worktree, so a
    loud header per repo is the cram. Only true multi-clone repos get the accent. */
 .dtable-group td {
@@ -1078,7 +1168,8 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   background: var(--row-hover);
 }
 .wt-dirty {
-  color: var(--dot-on);
+  /* amber: uncommitted changes (green read as "clean", which is backwards) */
+  color: #e6a23c;
   text-align: center;
 }
 
@@ -1119,6 +1210,44 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 .wt-meta {
   font-size: 10px;
   opacity: 0.6;
+}
+
+/* Row actions sit at the right edge, revealed on row hover to keep the tree
+   quiet. The +worktree / open / resume buttons share a compact pill look. */
+.wt-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  flex: none;
+  opacity: 0;
+}
+.wt-node:hover .wt-actions,
+.wt-actions:focus-within {
+  opacity: 1;
+}
+.wt-act {
+  font-family: inherit;
+  font-size: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 1px 7px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.wt-act.wt-resume {
+  color: var(--row-active-bg);
+  font-weight: bold;
+}
+/* Inline branch input for "+ worktree". */
+.wt-add-input {
+  margin-left: auto;
+  width: 140px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 4px;
+  color: var(--panel-fg);
+  background: var(--panel-bg);
+  border: 1px solid var(--frame);
 }
 
 /* Entrance animation, default (XP): quick scale-up from cursor. */

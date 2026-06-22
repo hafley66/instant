@@ -19,9 +19,14 @@ import {
   type Workspace,
   type WorktreeRow,
 } from "./state";
-import { renderTable, virtualTable, type VirtualTable } from "./table";
+import {
+  renderTable,
+  virtualTable,
+  type VirtualTable,
+  type SortState,
+} from "./table";
 import { fuzzyFilter } from "./fuzzy";
-import { wireContextMenu, type CtxItem } from "./ctxmenu";
+import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import {
   mountReactDock,
   togglePanel,
@@ -42,6 +47,8 @@ type Session = {
   name: string;
   windows: number;
   attached: boolean;
+  activity: number; // unix seconds of last activity (tmux #{session_activity})
+  created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees in refreshSessions
 };
 
@@ -56,6 +63,13 @@ type Tab = {
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 const tabs = new Map<string, Tab>();
+
+// Open-tab ids in most-recently-focused order (front = newest). Drives the
+// "send to" picker's ordering; updated whenever a terminal becomes active.
+let tabRecency: string[] = [];
+function touchTab(id: string) {
+  tabRecency = [id, ...tabRecency.filter((x) => x !== id)];
+}
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const listEl = $("#session-list") as HTMLUListElement;
@@ -126,7 +140,13 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   document.getElementById("panel-pool")!.appendChild(el);
 
   const term = new Terminal({
-    fontFamily: "Menlo, monospace",
+    // Menlo renders the body text; the rest are per-glyph fallbacks for
+    // powerline separators + Nerd Font icons (PUA codepoints Menlo lacks). The
+    // "Nerd Font" names win if installed; "for Powerline" is the guaranteed
+    // separator fallback already on disk. Install full icons with:
+    //   brew install --cask font-hack-nerd-font
+    fontFamily:
+      'Menlo, "Hack Nerd Font Mono", "MesloLGS NF", "DejaVu Sans Mono for Powerline", monospace',
     fontSize: 13,
     cursorBlink: true,
     allowProposedApi: true,
@@ -196,6 +216,7 @@ function onTermShown(id: string) {
   const t = tabs.get(id);
   if (!t) return;
   setActive(id);
+  touchTab(id);
   logTabVisit(t.name);
   requestAnimationFrame(() => {
     t.fit.fit();
@@ -265,6 +286,19 @@ function worktreesForPaths(paths: string[], rows: WorktreeRow[]): string[] {
 // The sidebar SESSIONS list mirrors the live tmux sessions (the real running
 // shells/agents), not a creator. Click a row to attach/resume it into a tab;
 // launching new ones is the job of the quick-launch buttons + new-shell input.
+// Order the launcher rows per store.sessionSort. Name is the stable tiebreak.
+function sortSessions(live: Session[]): Session[] {
+  const { key, dir } = store.get().sessionSort;
+  const sign = dir === "asc" ? 1 : -1;
+  return [...live].sort((a, b) => {
+    let c = 0;
+    if (key === "name") c = a.name.localeCompare(b.name, undefined, { numeric: true });
+    else if (key === "windows") c = a.windows - b.windows;
+    else c = a.activity - b.activity;
+    return c !== 0 ? c * sign : a.name.localeCompare(b.name, undefined, { numeric: true });
+  });
+}
+
 async function refreshSessions() {
   let live: Session[] = [];
   try {
@@ -288,6 +322,13 @@ async function refreshSessions() {
   if (!countEl || !listEl) return; // panel DOM not mounted yet; a later show re-runs
   countEl.textContent = live.length ? String(live.length) : "";
 
+  // Reflect the persisted sort in the control, then render in that order.
+  const sortSel = document.querySelector<HTMLSelectElement>("#session-sort");
+  if (sortSel) {
+    const { key, dir } = store.get().sessionSort;
+    sortSel.value = `${key}:${dir}`;
+  }
+
   listEl.innerHTML = "";
   if (live.length === 0) {
     const li = document.createElement("li");
@@ -295,7 +336,7 @@ async function refreshSessions() {
     li.textContent = "no live sessions — launch one below";
     listEl.appendChild(li);
   }
-  for (const s of live) {
+  for (const s of sortSessions(live)) {
     const open = tabs.has(sessionId(s.name));
     const current = new Set(worktreesForPaths(s.paths ?? [], rows)); // where it is now
     const chips = (sw[s.name] ?? [])
@@ -406,10 +447,77 @@ function buildTree(rows: WorktreeRow[]): OrgNode[] {
     }));
 }
 
-function openWorktree(clone: string, branch: string, wtPath: string) {
-  // Terminal lives permanently in the center zone now, so just open the tab.
-  openTab(tmuxName(`${baseName(clone)}-${branch}`), { cwd: wtPath });
+// Open (or attach) a tmux session for a worktree, optionally launching an agent
+// the first time the session is created. The session name is derived from the
+// checkout + branch so the same worktree always maps to the same session.
+function openWorktree(clone: string, branch: string, wtPath: string, command?: string) {
+  openTab(tmuxName(`${baseName(clone)}-${branch}`), { cwd: wtPath, command });
 }
+
+// AI agents offered by the worktree "open ▾" menu. A plain shell is always
+// appended (see showAgentMenu) so you can drop into a new tmux session there.
+const WT_AGENTS: { label: string; command: string }[] = [
+  { label: "claude", command: "claude" },
+  { label: "opencode", command: "opencode" },
+];
+
+// The agent picker for a worktree: launch a session here running the chosen
+// agent, or a plain new tmux shell. Anchored at (x,y) — a button corner or the
+// cursor. When the worktree is dirty the shell option calls that out, since
+// "drop into a shell to inspect/commit" is the common move there.
+function showAgentMenu(
+  x: number,
+  y: number,
+  clone: string,
+  branch: string,
+  wtPath: string,
+  dirty: boolean,
+) {
+  const items: CtxItem[] = WT_AGENTS.map((a) => ({
+    label: a.label,
+    action: () => openWorktree(clone, branch, wtPath, a.command),
+  }));
+  items.push({ sep: true });
+  items.push({
+    label: dirty ? "new shell · uncommitted changes" : "new shell",
+    action: () => openWorktree(clone, branch, wtPath, undefined),
+  });
+  showContextMenu(x, y, items);
+}
+
+// Live tmux sessions whose panes currently sit inside `wtPath` — the candidates
+// for "resume existing" on a worktree row.
+function sessionsForWorktree(wtPath: string): Session[] {
+  return store.get().sessions.filter((s) =>
+    (s.paths ?? []).some((p) => p === wtPath || p.startsWith(wtPath + "/")),
+  );
+}
+
+// Which checkout row is mid-add (its branch input is showing), by clone path.
+let wtAddingClone: string | null = null;
+
+function submitAddWorktree(clone: string, branch: string) {
+  if (!branch) {
+    wtAddingClone = null;
+    renderWorktreesPanel();
+    return;
+  }
+  invoke<string>("add_worktree", { repo: clone, branch })
+    .then(() => {
+      wtAddingClone = null;
+      return scanWorktrees(); // rescan picks up the new worktree row
+    })
+    .catch((e) => showError("worktree", String(e)));
+}
+
+// A trailing row action: a small button on the right edge of a tree row. The
+// `menu` variant opens a context menu anchored to the button (the AI picker).
+type RowAction = {
+  label: string;
+  title: string;
+  cls?: string;
+  onClick: (anchor: HTMLElement) => void;
+};
 
 function treeNode(opts: {
   depth: number;
@@ -419,7 +527,11 @@ function treeNode(opts: {
   multi?: boolean;
   dirty?: boolean;
   onGlyph?: () => void;
-  onLabel?: () => void;
+  onLabel?: (e: MouseEvent) => void;
+  actions?: RowAction[];
+  // Inline editor shown in place of the meta (e.g. the new-worktree branch
+  // input). When present the row renders an <input> and forwards submit/cancel.
+  editor?: { placeholder: string; onSubmit: (value: string) => void; onCancel: () => void };
 }): HTMLElement {
   const row = document.createElement("div");
   row.className = "wt-node" + (opts.multi ? " multi" : "");
@@ -452,7 +564,38 @@ function treeNode(opts: {
     d.textContent = "●";
     row.appendChild(d);
   }
-  if (opts.onLabel) row.onclick = opts.onLabel;
+
+  if (opts.editor) {
+    const inp = document.createElement("input");
+    inp.className = "wt-add-input";
+    inp.placeholder = opts.editor.placeholder;
+    inp.onclick = (e) => e.stopPropagation();
+    inp.onkeydown = (e) => {
+      if (e.key === "Enter") opts.editor!.onSubmit(inp.value.trim());
+      else if (e.key === "Escape") opts.editor!.onCancel();
+    };
+    row.appendChild(inp);
+    queueMicrotask(() => inp.focus());
+  }
+
+  if (opts.actions?.length) {
+    const acts = document.createElement("span");
+    acts.className = "wt-actions";
+    for (const a of opts.actions) {
+      const b = document.createElement("button");
+      b.className = "wt-act" + (a.cls ? ` ${a.cls}` : "");
+      b.textContent = a.label;
+      b.title = a.title;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        a.onClick(b);
+      };
+      acts.appendChild(b);
+    }
+    row.appendChild(acts);
+  }
+
+  if (opts.onLabel) row.onclick = (e) => opts.onLabel!(e);
   return row;
 }
 
@@ -487,19 +630,64 @@ function renderTree(rows: WorktreeRow[]) {
     for (const cl of org.clones) {
       const ckey = `${okey}|c:${cl.clone}`;
       const cOpen = wtExpanded.has(ckey);
+      const adding = wtAddingClone === cl.clone;
       wrap.appendChild(
         treeNode({
           depth: 1,
           glyph: cl.worktrees.length ? (cOpen ? "-" : "+") : "",
           label: baseName(cl.clone),
-          meta: cl.branch ? `@${cl.branch}` : "",
+          meta: adding ? undefined : cl.branch ? `@${cl.branch}` : "",
           onGlyph: cl.worktrees.length ? () => toggle(ckey) : undefined,
-          onLabel: () => openWorktree(cl.clone, cl.branch, cl.clone),
+          onLabel: cl.worktrees.length && !adding ? () => toggle(ckey) : undefined,
+          // "+ worktree": reveal an inline branch input on this checkout row.
+          actions: adding
+            ? undefined
+            : [
+                {
+                  label: "+ worktree",
+                  title: "add a git worktree under this checkout",
+                  cls: "wt-add",
+                  onClick: () => {
+                    wtAddingClone = cl.clone;
+                    if (!cOpen) toggle(ckey); // expand so the new row is visible
+                    else renderWorktreesPanel();
+                  },
+                },
+              ],
+          editor: adding
+            ? {
+                placeholder: "branch name…",
+                onSubmit: (v) => submitAddWorktree(cl.clone, v),
+                onCancel: () => {
+                  wtAddingClone = null;
+                  renderWorktreesPanel();
+                },
+              }
+            : undefined,
         }),
       );
       if (!cOpen) continue;
 
       for (const wt of cl.worktrees) {
+        const live = sessionsForWorktree(wt.worktree);
+        const actions: RowAction[] = [
+          {
+            label: "open ▾",
+            title: "open a session here (pick an agent)",
+            cls: "wt-open",
+            onClick: (anchor) => {
+              const r = anchor.getBoundingClientRect();
+              showAgentMenu(r.left, r.bottom, cl.clone, wt.branch, wt.worktree, wt.dirty);
+            },
+          },
+        ];
+        if (live.length)
+          actions.push({
+            label: "resume",
+            title: `attach existing session: ${live.map((s) => s.name).join(", ")}`,
+            cls: "wt-resume",
+            onClick: () => openTab(live[0].name),
+          });
         wrap.appendChild(
           treeNode({
             depth: 2,
@@ -507,7 +695,10 @@ function renderTree(rows: WorktreeRow[]) {
             label: wt.is_main ? "(main)" : baseName(wt.worktree),
             meta: `${wt.branch}  ${wt.head}`,
             dirty: wt.dirty,
-            onLabel: () => openWorktree(cl.clone, wt.branch, wt.worktree),
+            actions,
+            // Click (or double-click) the leaf to open the same agent menu.
+            onLabel: (e) =>
+              showAgentMenu(e.clientX, e.clientY, cl.clone, wt.branch, wt.worktree, wt.dirty),
           }),
         );
       }
@@ -516,25 +707,40 @@ function renderTree(rows: WorktreeRow[]) {
   host.appendChild(wrap);
 }
 
+// Per-dtable sort state lives in store.tableSort keyed by a table id, so it
+// survives the panel re-renders that selection/refresh trigger.
+function tableSortFor(id: string, fallback: SortState): SortState {
+  return store.get().tableSort[id] ?? fallback;
+}
+function onTableSort(id: string, s: SortState, rerender: () => void) {
+  store.set({ tableSort: { ...store.get().tableSort, [id]: s } });
+  rerender();
+}
+
 function renderFlatTable(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
-  const sorted = [...rows].sort(
-    (a, b) => a.origin.localeCompare(b.origin) || a.clone.localeCompare(b.clone),
-  );
+  const sort = tableSortFor("worktrees", { col: 0, dir: "asc" });
   host.appendChild(
     renderTable<WorktreeRow>({
-      rows: sorted,
+      rows,
+      sort,
+      onSort: (s) => onTableSort("worktrees", s, () => renderFlatTable(store.get().worktrees)),
       columns: [
-        { header: "org/repo", cell: (r) => prettyOrigin(r.origin) },
-        { header: "clone", cell: (r) => baseName(r.clone) },
-        { header: "worktree", cell: (r) => (r.is_main ? "(main)" : baseName(r.worktree)) },
-        { header: "branch", cell: (r) => r.branch },
-        { header: "head", cell: (r) => r.head },
+        { header: "org/repo", cell: (r) => prettyOrigin(r.origin), sortKey: (r) => r.origin },
+        { header: "clone", cell: (r) => baseName(r.clone), sortKey: (r) => baseName(r.clone) },
+        {
+          header: "worktree",
+          cell: (r) => (r.is_main ? "(main)" : baseName(r.worktree)),
+          sortKey: (r) => (r.is_main ? "" : baseName(r.worktree)),
+        },
+        { header: "branch", cell: (r) => r.branch, sortKey: (r) => r.branch },
+        { header: "head", cell: (r) => r.head, sortKey: (r) => r.head },
         {
           header: "",
           cell: (r) => (r.dirty ? "●" : ""),
           cellClass: (r) => (r.dirty ? "wt-dirty" : undefined),
+          sortKey: (r) => (r.dirty ? 0 : 1), // dirty rows first on asc
         },
       ],
       rowTitle: (r) => r.worktree,
@@ -695,11 +901,18 @@ function renderActivityPanel() {
     activityTable?.destroy();
     activityTable = virtualTable<Event>(host, {
       rowClass: (e) => (e.id === activitySelected ? "fs-selected" : undefined),
+      defaultSort: tableSortFor("activity", { col: 0, dir: "desc" }),
+      onSort: (s) => store.set({ tableSort: { ...store.get().tableSort, activity: s } }),
       columns: [
-        { header: "time", cell: (e) => fmtTime(e.ts) },
-        { header: "src", cell: (e) => SRC_LABEL[e.source], cellClass: () => "act-src" },
-        { header: "action", cell: (e) => actionVerb(e) },
-        { header: "target", cell: (e) => eventSource(e) },
+        { header: "time", cell: (e) => fmtTime(e.ts), sortKey: (e) => e.ts },
+        {
+          header: "src",
+          cell: (e) => SRC_LABEL[e.source],
+          cellClass: () => "act-src",
+          sortKey: (e) => SRC_LABEL[e.source],
+        },
+        { header: "action", cell: (e) => actionVerb(e), sortKey: (e) => actionVerb(e) },
+        { header: "target", cell: (e) => eventSource(e), sortKey: (e) => eventSource(e) },
       ],
       rowTitle: (e) => e.shot || e.url || e.text || e.title,
       onRow: (e) => {
@@ -1050,14 +1263,22 @@ function renderFilesPanel() {
     renderTable<FsEntry>({
       rows: files.entries,
       rowClass: (e) => (e.path === fsSelected ? "fs-selected" : undefined),
+      sort: tableSortFor("files", { col: 0, dir: "asc" }),
+      onSort: (s) => onTableSort("files", s, () => renderFilesPanel()),
       columns: [
-        { header: "Name", cell: (e) => `${fileGlyph(e)}  ${e.name}` },
-        { header: "Date modified", cell: (e) => fmtDate(e.modified) },
-        { header: "Type", cell: (e) => typeLabel(e) },
+        {
+          header: "Name",
+          cell: (e) => `${fileGlyph(e)}  ${e.name}`,
+          // Folders sort before files, then by name (Explorer-style).
+          sortKey: (e) => `${e.is_dir ? 0 : 1}\t${e.name.toLowerCase()}`,
+        },
+        { header: "Date modified", cell: (e) => fmtDate(e.modified), sortKey: (e) => e.modified },
+        { header: "Type", cell: (e) => typeLabel(e), sortKey: (e) => typeLabel(e) },
         {
           header: "Size",
           cell: (e) => (e.is_dir ? "" : fmtSize(e.size)),
           cellClass: () => "fs-size",
+          sortKey: (e) => (e.is_dir ? -1 : e.size),
         },
       ],
       rowTitle: (e) => e.path,
@@ -1149,10 +1370,11 @@ function cancelHide() {
   }
 }
 
-// Hide the popover, let the user crosshair-select a region, then type the saved
-// PNG path into the active terminal so claude/opencode can read the image.
-async function captureToPrompt() {
-  const id = activeId();
+// Hide the popover, let the user crosshair-select a region, return the saved PNG
+// path (null on Esc / missing Screen Recording permission). Window is restored
+// before returning; the blur guard stays up briefly so the focus settling after
+// show() doesn't trip click-outside-to-hide.
+async function captureRegion(): Promise<string | null> {
   const win = getCurrentWindow();
   capturing = true;
   await win.hide();
@@ -1160,17 +1382,105 @@ async function captureToPrompt() {
   try {
     path = await invoke<string>("screenshot");
   } catch (e) {
-    console.error("screenshot:", e); // Esc, or no Screen Recording permission
+    console.error("screenshot:", e);
   }
   await win.show();
   await win.setFocus();
-  // Keep the blur guard up briefly so the focus settling after show() doesn't
-  // immediately trip click-outside-to-hide.
   setTimeout(() => (capturing = false), 300);
-  if (path && id) {
-    await invoke("write_pty", { id, data: path + " " }).catch(console.error);
-    tabs.get(id)?.term.focus();
+  return path;
+}
+
+// Write text into a terminal's pty (path or selection, space-terminated so the
+// next token is separate) and focus it.
+async function sendTextToTab(id: string, text: string) {
+  if (!tabs.has(id)) return;
+  await invoke("write_pty", { id, data: text }).catch(console.error);
+  tabs.get(id)?.term.focus();
+}
+
+// Main Shot button: capture a region and send its path to the active terminal.
+async function captureToPrompt() {
+  const id = activeId();
+  const path = await captureRegion();
+  if (path && id) await sendTextToTab(id, path + " ");
+}
+
+// Open terminals in most-recently-focused order, for the send picker.
+function recentTabs(): Tab[] {
+  const seen = new Set<string>();
+  const out: Tab[] = [];
+  for (const id of tabRecency) {
+    const t = tabs.get(id);
+    if (t && !seen.has(id)) {
+      seen.add(id);
+      out.push(t);
+    }
   }
+  // Any open tab not yet in the recency list (e.g. reattached on boot) trails.
+  for (const [id, t] of tabs) if (!seen.has(id)) out.push(t);
+  return out;
+}
+
+// "Send to" picker: a popover table of open terminals (recent first). Each row
+// can receive a fresh screenshot or the active terminal's current selection.
+function openSendPicker(anchor: HTMLElement) {
+  document.querySelector("#send-picker")?.remove();
+  const list = recentTabs();
+  const pop = document.createElement("div");
+  pop.id = "send-picker";
+  pop.className = "send-picker";
+
+  const sel = tabs.get(activeId() ?? "")?.term.getSelection() ?? "";
+  const head = document.createElement("div");
+  head.className = "send-picker-head";
+  head.textContent = list.length ? "send to terminal" : "no open terminals";
+  pop.appendChild(head);
+
+  const close = () => pop.remove();
+  for (const t of list) {
+    const row = document.createElement("div");
+    row.className = "send-row";
+    const name = document.createElement("span");
+    name.className = "send-name";
+    name.textContent = t.name + (t.id === activeId() ? " ·" : "");
+    row.appendChild(name);
+
+    const shot = document.createElement("button");
+    shot.className = "send-act";
+    shot.textContent = "📷 shot";
+    shot.title = "screenshot a region and send it here";
+    shot.onclick = async () => {
+      close();
+      const path = await captureRegion();
+      if (path) await sendTextToTab(t.id, path + " ");
+    };
+    row.appendChild(shot);
+
+    const sendSel = document.createElement("button");
+    sendSel.className = "send-act";
+    sendSel.textContent = "✎ selection";
+    sendSel.title = sel ? "send the highlighted text here" : "no text selected";
+    sendSel.disabled = !sel;
+    sendSel.onclick = () => {
+      close();
+      if (sel) sendTextToTab(t.id, sel + " ");
+    };
+    row.appendChild(sendSel);
+    pop.appendChild(row);
+  }
+
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)}px`;
+  pop.style.top = `${r.bottom + 2}px`;
+
+  const onOutside = (e: PointerEvent) => {
+    if (!pop.contains(e.target as Node)) {
+      close();
+      document.removeEventListener("pointerdown", onOutside, true);
+    }
+  };
+  setTimeout(() => document.addEventListener("pointerdown", onOutside, true), 0);
 }
 
 function pathArg(p: string): string {
@@ -1287,6 +1597,7 @@ function wireChrome() {
     store.set({ mode: store.get().mode === "dark" ? "light" : "dark" });
 
   $("#shot-btn").onclick = captureToPrompt;
+  $("#send-menu-btn").onclick = (e) => openSendPicker(e.currentTarget as HTMLElement);
 
   $("#sessions-toggle").onclick = () => togglePanel("sessions");
   $("#actbar-toggle").onclick = () =>
@@ -1299,6 +1610,15 @@ function wireChrome() {
   });
   $("#wt-view").onclick = () =>
     store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
+
+  $("#session-sort").addEventListener("change", (e) => {
+    const [key, dir] = (e.target as HTMLSelectElement).value.split(":") as [
+      "name" | "activity" | "windows",
+      "asc" | "desc",
+    ];
+    store.set({ sessionSort: { key, dir } });
+    refreshSessions();
+  });
 
   $("#activity-toggle").onclick = () => togglePanel("activity");
   $("#activity-clear").onclick = () =>
@@ -1497,6 +1817,16 @@ async function main() {
   // Esc hides the popover.
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") getCurrentWindow().hide();
+  });
+
+  // Right-⌘ + Right-⇧ + V: the native tap (lib.rs) swallows the combo, copies
+  // the focused app's selection, and emits the text here. Write it straight into
+  // the active terminal (no picker).
+  await listen<string>("send-highlight-text", (e) => {
+    const id = activeId();
+    const text = e.payload;
+    if (!text || !text.trim()) return showError("highlight", "nothing selected to send");
+    if (id) sendTextToTab(id, text + " ");
   });
 
   // Click-outside dismiss: hide when the window loses focus. Gated on a prior

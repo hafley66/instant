@@ -14,6 +14,16 @@ export interface Column<T> {
   cell: (row: T) => string;
   // Class applied to this column's <td> for a given row (e.g. a dirty flag).
   cellClass?: (row: T) => string | undefined;
+  // When present the column header is clickable to sort by this value. Numbers
+  // sort numerically; strings use a numeric-aware localeCompare; null/undefined
+  // sink to the bottom.
+  sortKey?: (row: T) => string | number | null | undefined;
+}
+
+// Which column index is the sort key and which way. `col` indexes into columns.
+export interface SortState {
+  col: number;
+  dir: "asc" | "desc";
 }
 
 export interface TableOpts<T> {
@@ -24,9 +34,42 @@ export interface TableOpts<T> {
   rowTitle?: (row: T) => string;
   // Class applied to a row's <tr> (e.g. to mark the selected row).
   rowClass?: (row: T) => string | undefined;
+  // Active sort + a callback to request a new one (caller persists, re-renders).
+  sort?: SortState;
+  onSort?: (s: SortState) => void;
 }
 
 type RowOpts<T> = Omit<TableOpts<T>, "rows">;
+
+// Compare two sortKey values: numeric when both numbers, else numeric-aware
+// string compare; null/undefined always sink last (before dir is applied).
+function cmpKey(
+  a: string | number | null | undefined,
+  b: string | number | null | undefined,
+): number {
+  const an = a === null || a === undefined;
+  const bn = b === null || b === undefined;
+  if (an && bn) return 0;
+  if (an) return 1;
+  if (bn) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), undefined, { numeric: true });
+}
+
+// Stable sort of a copy of `rows` by the active column's sortKey.
+export function sortRows<T>(rows: T[], columns: Column<T>[], sort?: SortState): T[] {
+  if (!sort) return rows;
+  const key = columns[sort.col]?.sortKey;
+  if (!key) return rows;
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => {
+      const c = cmpKey(key(a.row), key(b.row));
+      return c !== 0 ? c * sign : a.i - b.i; // index tiebreak keeps it stable
+    })
+    .map((x) => x.row);
+}
 
 // Build one <tr> from a row. Shared by the static and virtual tables so their
 // cell/handler/selection behavior is identical.
@@ -49,14 +92,35 @@ function buildRow<T>(row: T, opts: RowOpts<T>): HTMLTableRowElement {
   return tr;
 }
 
-function buildHead<T>(columns: Column<T>[]): HTMLTableSectionElement {
+// Header row. Columns with a sortKey render a clickable th: click the active
+// column to flip direction, a new column to sort it ascending. The ▲/▼ marker
+// shows the current sort.
+function buildHead<T>(
+  columns: Column<T>[],
+  sort?: SortState,
+  onSort?: (s: SortState) => void,
+): HTMLTableSectionElement {
   const thead = document.createElement("thead");
   const htr = document.createElement("tr");
-  for (const col of columns) {
+  columns.forEach((col, i) => {
     const th = document.createElement("th");
     th.textContent = col.header;
+    if (col.sortKey && onSort) {
+      th.className = "dtable-th-sort";
+      if (sort?.col === i) {
+        th.classList.add("sorted");
+        const mark = document.createElement("span");
+        mark.className = "dtable-sort-mark";
+        mark.textContent = sort.dir === "asc" ? " ▲" : " ▼";
+        th.appendChild(mark);
+      }
+      th.onclick = () => {
+        const dir = sort?.col === i && sort.dir === "asc" ? "desc" : "asc";
+        onSort({ col: i, dir });
+      };
+    }
     htr.appendChild(th);
-  }
+  });
   thead.appendChild(htr);
   return thead;
 }
@@ -64,9 +128,10 @@ function buildHead<T>(columns: Column<T>[]): HTMLTableSectionElement {
 export function renderTable<T>(opts: TableOpts<T>): HTMLTableElement {
   const table = document.createElement("table");
   table.className = "dtable";
-  table.appendChild(buildHead(opts.columns));
+  table.appendChild(buildHead(opts.columns, opts.sort, opts.onSort));
   const tbody = document.createElement("tbody");
-  for (const row of opts.rows) tbody.appendChild(buildRow(row, opts));
+  for (const row of sortRows(opts.rows, opts.columns, opts.sort))
+    tbody.appendChild(buildRow(row, opts));
   table.appendChild(tbody);
   return table;
 }
@@ -81,17 +146,38 @@ export interface VirtualTable<T> {
   destroy(): void;
 }
 
-export function virtualTable<T>(host: HTMLElement, opts: RowOpts<T>): VirtualTable<T> {
+// virtualTable owns its own sort state (it is long-lived, recreated rarely), so
+// header clicks re-sort in place and survive setRows. `defaultSort` seeds it;
+// `onSort` lets the caller persist the choice.
+export interface VirtualOpts<T> extends RowOpts<T> {
+  defaultSort?: SortState;
+}
+
+export function virtualTable<T>(host: HTMLElement, opts: VirtualOpts<T>): VirtualTable<T> {
   const { columns } = opts;
+  let sort = opts.defaultSort;
 
   const table = document.createElement("table");
   table.className = "dtable";
-  table.appendChild(buildHead(columns));
   const tbody = document.createElement("tbody");
-  table.appendChild(tbody);
+  table.appendChild(tbody); // thead is inserted before it by renderHead
+
+  const renderHead = () => {
+    const head = buildHead(columns, sort, (s) => {
+      sort = s;
+      opts.onSort?.(s);
+      renderHead();
+      reflow();
+    });
+    const old = table.querySelector("thead");
+    if (old) table.replaceChild(head, old);
+    else table.insertBefore(head, tbody);
+  };
+  renderHead();
   host.replaceChildren(table);
 
-  let rows: T[] = [];
+  let raw: T[] = []; // insertion order, as handed to setRows
+  let rows: T[] = []; // sorted view
   let rowH = 0; // measured lazily from a real row; 0 until a visible measure
 
   const spacer = (h: number): HTMLTableRowElement => {
@@ -130,6 +216,15 @@ export function virtualTable<T>(host: HTMLElement, opts: RowOpts<T>): VirtualTab
     tbody.replaceChildren(frag);
   }
 
+  // Re-derive the sorted view from raw + current sort, then repaint.
+  function reflow() {
+    rows = sortRows(raw, columns, sort);
+    ensureRowH();
+    virtualizer.setOptions({ ...virtualizer.options, count: rows.length });
+    virtualizer._willUpdate();
+    paint();
+  }
+
   const virtualizer = new Virtualizer<HTMLElement, HTMLTableRowElement>({
     count: 0,
     getScrollElement: () => host,
@@ -145,11 +240,8 @@ export function virtualTable<T>(host: HTMLElement, opts: RowOpts<T>): VirtualTab
 
   return {
     setRows(next) {
-      rows = next;
-      ensureRowH();
-      virtualizer.setOptions({ ...virtualizer.options, count: next.length });
-      virtualizer._willUpdate();
-      paint();
+      raw = next;
+      reflow();
     },
     destroy() {
       cleanup();

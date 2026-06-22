@@ -20,8 +20,11 @@
       </div>
 
       <div class="toolbar">
-        <button id="shot-btn" class="shot-btn" title="Screenshot region into the prompt">
+        <button id="shot-btn" class="shot-btn" title="Screenshot region into the active terminal">
           ⛶ Shot
+        </button>
+        <button id="send-menu-btn" class="send-menu-btn" title="Send a screenshot or selection to a terminal…">
+          ▾
         </button>
         <button id="mode-toggle" class="mode-toggle" title="Toggle dark mode">
           ☾
@@ -65,7 +68,15 @@
       <div id="panel-pool" hidden>
         <section class="panel" id="panel-sessions" data-panel="sessions" data-label="Sessions">
           <div class="sidebar-lists">
-            <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span></div>
+            <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span>
+              <select id="session-sort" class="session-sort" title="sort sessions">
+                <option value="activity:desc">recent</option>
+                <option value="activity:asc">oldest</option>
+                <option value="name:asc">name a–z</option>
+                <option value="name:desc">name z–a</option>
+                <option value="windows:desc">windows</option>
+              </select>
+            </div>
             <ul id="session-list" class="session-list"></ul>
             <div class="sidebar-head">SPACES</div>
             <ul id="workspace-list" class="session-list"></ul>

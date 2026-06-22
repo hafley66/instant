@@ -37,6 +37,10 @@ pub struct Session {
     name: String,
     windows: u32,
     attached: bool,
+    /// Unix seconds of the session's last activity / creation. The frontend
+    /// sorts the launcher by these (most-recent first by default).
+    activity: i64,
+    created: i64,
     /// Distinct current working directories across this session's panes. The
     /// frontend maps these to worktrees (longest-prefix match) to relate a
     /// session to the worktrees it has touched.
@@ -56,7 +60,7 @@ pub fn list_sessions() -> Vec<Session> {
         .args([
             "list-sessions",
             "-F",
-            "#{session_name}\t#{session_windows}\t#{session_attached}",
+            "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{session_created}",
         ])
         .env("PATH", path_env())
         .output();
@@ -70,8 +74,12 @@ pub fn list_sessions() -> Vec<Session> {
             let name = it.next()?.to_string();
             let windows = it.next()?.parse().unwrap_or(1);
             let attached = it.next()? != "0";
+            // tmux activity/created are ms-since-epoch on newer builds, seconds
+            // on older; both fit i64 and the frontend only orders by them.
+            let activity = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let created = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let paths = paths.remove(&name).unwrap_or_default();
-            Some(Session { name, windows, attached, paths })
+            Some(Session { name, windows, attached, activity, created, paths })
         })
         .collect()
 }

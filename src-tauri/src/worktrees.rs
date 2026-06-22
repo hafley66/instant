@@ -47,6 +47,38 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
+fn basename(p: &str) -> String {
+    Path::new(p)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(p)
+        .to_string()
+}
+
+/// Add a git worktree for `branch` under the checkout `repo`. If `branch`
+/// already exists it is checked out; otherwise it is created off HEAD. The
+/// worktree dir is `<parent>/.worktrees/<repo-basename>-<branch>` (matching the
+/// Spaces convention). Returns the new worktree path; the caller rescans.
+#[tauri::command]
+pub fn add_worktree(repo: String, branch: String) -> Result<String, String> {
+    let repo_path = Path::new(&repo);
+    git(repo_path, &["rev-parse", "--is-inside-work-tree"])
+        .map_err(|_| format!("{repo} is not a git repository"))?;
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err("branch name is empty".into());
+    }
+    let id = format!("{}-{}", basename(&repo), branch.replace('/', "-"));
+    let parent = repo_path.parent().ok_or("repo has no parent dir")?;
+    let path = parent.join(".worktrees").join(&id);
+    let path_str = path.to_string_lossy().to_string();
+    // Existing branch -> plain checkout; else create it off HEAD.
+    if git(repo_path, &["worktree", "add", &path_str, branch]).is_err() {
+        git(repo_path, &["worktree", "add", "-b", branch, &path_str, "HEAD"])?;
+    }
+    Ok(path_str)
+}
+
 fn expand(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix('~') {
         if let Some(home) = std::env::var_os("HOME") {

@@ -329,8 +329,9 @@ pub fn activity_log(
 }
 
 #[tauri::command]
-pub fn capture_set_enabled(state: State<CaptureEnabled>, on: bool) {
+pub fn capture_set_enabled(app: AppHandle, state: State<CaptureEnabled>, on: bool) {
     state.0.store(on, std::sync::atomic::Ordering::Relaxed);
+    crate::set_recording_indicator(&app, on);
 }
 
 #[tauri::command]

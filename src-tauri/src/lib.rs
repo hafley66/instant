@@ -12,9 +12,10 @@ use std::time::{Duration, Instant};
 
 use core_foundation::runloop::CFRunLoop;
 use core_graphics::event::{
-    CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventType, CallbackResult, EventField,
 };
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use mouse_position::mouse_position::Mouse;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -29,6 +30,8 @@ const DOUBLE_RCMD_MS: u128 = 400;
 // IOKit device-dependent flag bit for the RIGHT command key (NX_DEVICERCMDKEYMASK).
 // Present in HID-tap event flags, so it isolates right ⌘ from left ⌘.
 const RCMD_BIT: u64 = 0x10;
+// IOKit device-dependent flag bit for the RIGHT shift key (NX_DEVICERSHIFTKEYMASK).
+const RSHIFT_BIT: u64 = 0x04;
 // Global throttle between screen captures, across all gesture kinds.
 const MIN_GAP: Duration = Duration::from_millis(350);
 
@@ -74,7 +77,10 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
         let res = CGEventTap::with_enabled(
             CGEventTapLocation::HID,
             CGEventTapPlacement::HeadInsertEventTap,
-            CGEventTapOptions::ListenOnly,
+            // Active (not ListenOnly) so the send-highlight combo can be dropped
+            // before the focused app turns it into its own paste. Every other
+            // event returns Keep, so pass-through is unchanged.
+            CGEventTapOptions::Default,
             vec![
                 CGEventType::RightMouseDown,
                 CGEventType::LeftMouseDown,
@@ -148,11 +154,22 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
                         g.right_cmd_down = rcmd;
                     }
                     CGEventType::KeyDown => {
+                        let flags = event.get_flags().bits();
+                        let keycode = event
+                            .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                        // Right-⌘ + Right-⇧ + V (keycode 9): grab the current
+                        // selection from the focused app and send it to the
+                        // active instant session. Right-side device bits isolate
+                        // this from the plain Cmd+V capture below. Drop the event
+                        // so the focused app doesn't also paste.
+                        if keycode == 9 && flags & RCMD_BIT != 0 && flags & RSHIFT_BIT != 0 {
+                            let handle = app.clone();
+                            std::thread::spawn(move || grab_and_send_selection(&handle));
+                            return CallbackResult::Drop;
+                        }
                         if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
                             // 8 = C, 9 = V (ANSI keycodes). Only these two — not a keylogger.
-                            match event
-                                .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
-                            {
+                            match keycode {
                                 8 => maybe_capture(&mut g, &app, &enabled, "copy"),
                                 9 => maybe_capture(&mut g, &app, &enabled, "paste"),
                                 _ => {}
@@ -172,6 +189,73 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
             );
         }
     });
+}
+
+/// Build a filled-circle tray icon in `color`, transparent outside the disc.
+fn dot_icon(color: [u8; 3]) -> tauri::image::Image<'static> {
+    const N: usize = 32;
+    let mut buf = vec![0u8; N * N * 4];
+    let c = (N as f32 - 1.0) / 2.0;
+    for y in 0..N {
+        for x in 0..N {
+            let (dx, dy) = (x as f32 - c, y as f32 - c);
+            if (dx * dx + dy * dy).sqrt() <= c - 1.0 {
+                let i = (y * N + x) * 4;
+                buf[i] = color[0];
+                buf[i + 1] = color[1];
+                buf[i + 2] = color[2];
+                buf[i + 3] = 255;
+            }
+        }
+    }
+    tauri::image::Image::new_owned(buf, N as u32, N as u32)
+}
+
+/// Reflect capture state in the menu bar: a red dot while recording, the default
+/// app icon when idle. Called from `capture_set_enabled`.
+pub fn set_recording_indicator(app: &AppHandle, on: bool) {
+    let Some(tray) = app.tray_by_id("main") else { return };
+    if on {
+        let _ = tray.set_icon(Some(dot_icon([220, 40, 40])));
+    } else {
+        let _ = tray.set_icon(app.default_window_icon().cloned());
+    }
+    let _ = tray.set_icon_as_template(false); // keep the red colored, not monochrome
+}
+
+/// Synthesize a ⌘C keystroke so the focused app copies its current selection to
+/// the pasteboard. Plain (left) Command flag, so it doesn't re-trigger the
+/// right-side send-highlight combo in our own tap.
+fn synth_copy() {
+    let Ok(src) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) else { return };
+    const KC_C: u16 = 8;
+    if let Ok(ev) = CGEvent::new_keyboard_event(src.clone(), KC_C, true) {
+        ev.set_flags(CGEventFlags::CGEventFlagCommand);
+        ev.post(CGEventTapLocation::HID);
+    }
+    if let Ok(ev) = CGEvent::new_keyboard_event(src, KC_C, false) {
+        ev.set_flags(CGEventFlags::CGEventFlagCommand);
+        ev.post(CGEventTapLocation::HID);
+    }
+}
+
+fn read_clipboard() -> String {
+    std::process::Command::new("pbpaste")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default()
+}
+
+/// Copy the focused app's selection, then hand the text to the webview, which
+/// writes it into the active session. Runs off the tap thread (it sleeps for the
+/// copy to land). Overwrites the pasteboard, same as a manual ⌘C.
+fn grab_and_send_selection(app: &AppHandle) {
+    synth_copy();
+    std::thread::sleep(Duration::from_millis(120)); // let the copy reach the pasteboard
+    let text = read_clipboard();
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit("send-highlight-text", text);
+    }
 }
 
 /// Toggle the summon window. When showing, anchor it to the mouse cursor.
@@ -324,7 +408,7 @@ pub fn run() {
             let toggle_i = MenuItem::with_id(app, "toggle", "Summon / Hide", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&toggle_i, &quit_i])?;
-            TrayIconBuilder::new()
+            TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -359,6 +443,7 @@ pub fn run() {
             workspace::create_workspace,
             workspace::remove_workspace,
             worktrees::scan_worktrees,
+            worktrees::add_worktree,
             activity::activity_events,
             activity::activity_clear,
             activity::activity_log,

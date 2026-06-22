@@ -2,6 +2,16 @@
 // xterm Terminals) stay in their own registry in main.ts. New durable fields
 // (sessions, panels, layout) get added to AppState and listed in PERSIST.
 import { createStore } from "./store";
+import type { SortState } from "./table";
+
+export type { SortState };
+
+// How the sessions launcher orders its rows. "activity" = tmux last-activity.
+export type SessionSortKey = "name" | "activity" | "windows";
+export interface SessionSort {
+  key: SessionSortKey;
+  dir: "asc" | "desc";
+}
 
 export type Skin = "xp" | "p5" | "ac3";
 export type Mode = "light" | "dark";
@@ -97,6 +107,9 @@ export interface Session {
   name: string;
   windows: number;
   attached: boolean;
+  activity: number; // unix seconds of last activity (tmux #{session_activity})
+  created: number; // unix seconds the session was created
+  paths: string[]; // distinct pane cwds; mapped to worktrees it has touched
 }
 
 // One open terminal tab (its xterm lives in the engine registry, keyed by id).
@@ -146,6 +159,8 @@ export interface AppState {
   config: ConfigView | null; // resolved observation config (runtime)
   files: DirListing | null; // current Files explorer listing (runtime)
   fsSelected: string | null; // selected file path in the explorer (runtime)
+  sessionSort: SessionSort; // sessions launcher ordering (persisted)
+  tableSort: Record<string, SortState>; // per-dtable sort, keyed by table id (persisted)
   wtView: WtView; // tree vs flat table
   scanRoot: string; // worktrees scan path
   fsCwd: string; // Files explorer current directory (persisted)
@@ -166,6 +181,8 @@ const PERSIST: (keyof AppState)[] = [
   "activitySource",
   "activityType",
   "captureEnabled",
+  "sessionSort",
+  "tableSort",
   "wtView",
   "scanRoot",
   "fsCwd",
@@ -203,6 +220,8 @@ function load(): AppState {
     activityType: loadKey<ActivityType>("activityType", "all"),
     activityQuery: "",
     captureEnabled: loadKey<boolean>("captureEnabled", false),
+    sessionSort: loadKey<SessionSort>("sessionSort", { key: "activity", dir: "desc" }),
+    tableSort: loadKey<Record<string, SortState>>("tableSort", {}),
     config: null,
     files: null,
     fsSelected: null,
