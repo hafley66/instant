@@ -42,6 +42,10 @@ function HostPanel(props: IDockviewPanelProps) {
   const id = props.params.panelId as PanelId;
 
   useEffect(() => {
+    // Capture the node now. On unmount React removes this host div (and the
+    // adopted panel inside it) from the document BEFORE cleanup runs, so a
+    // getElementById in cleanup returns null and the panel would be destroyed
+    // instead of pooled. The captured reference stays valid while detached.
     const node = document.getElementById(`panel-${id}`);
     if (node && ref.current) ref.current.appendChild(node);
     hooks.onShow(id); // lazy-load; the node is in the document now
@@ -55,8 +59,7 @@ function HostPanel(props: IDockviewPanelProps) {
     return () => {
       sub?.dispose();
       const pool = document.getElementById("panel-pool");
-      const n = document.getElementById(`panel-${id}`);
-      if (pool && n) pool.appendChild(n); // park it; survives for re-open
+      if (pool && node) pool.appendChild(node); // park the captured node for re-open
     };
   }, [id]);
 

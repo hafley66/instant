@@ -244,9 +244,9 @@ async function refreshSessions() {
     console.error(e);
   }
 
-  ($("#session-count") as HTMLElement).textContent = live.length
-    ? String(live.length)
-    : "";
+  const countEl = document.querySelector("#session-count");
+  if (!countEl || !listEl) return; // panel DOM not mounted yet; a later show re-runs
+  countEl.textContent = live.length ? String(live.length) : "";
 
   listEl.innerHTML = "";
   if (live.length === 0) {
@@ -958,7 +958,10 @@ function renderFilesPanel() {
 // each loader guards on its own already-loaded state. Wired into dock via
 // setDockHooks so it fires wherever the panel is docked.
 function onPanelShown(id: PanelId) {
-  if (id === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
+  // The panel's DOM just mounted into the dock; re-run its renderer so anything
+  // that bailed earlier (DOM not present) now paints.
+  if (id === "sessions") refreshSessions();
+  else if (id === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
   else if (id === "activity" && store.get().activity.length === 0) refreshActivity();
   else if (id === "files" && !store.get().files) browseTo(store.get().fsCwd);
   else if (id === "config" && !store.get().config) refreshConfig();
