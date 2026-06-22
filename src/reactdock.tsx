@@ -23,7 +23,6 @@ import "dockview/dist/styles/dockview.css";
 
 import { store } from "./state";
 import type { PanelId } from "./state";
-import { DEFAULT_DIR } from "./state";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 
 type SplitDir = "left" | "right" | "above" | "below";
@@ -77,7 +76,6 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
 }
 
 const LAYOUT_VERSION = 6; // bump to discard older saved layouts (6: drop floating groups)
-const TOOLS: PanelId[] = ["files", "activity", "config", "worktrees"];
 
 // Each tmux terminal is its own dockview panel, id `term:<sessionId>`. Its
 // content is a live xterm host element registered here by main.ts (it isn't a
@@ -182,14 +180,12 @@ function onReady(e: DockviewReadyEvent) {
     }
 
     api.onDidActivePanelChange((p) => {
-      if (p && isTerm(p.id)) {
-        lastActiveTermId = p.id; // new terminals open into this group
-        hooks.onTermActivate(termSid(p.id));
-      }
+      if (p) lastActivePanelId = p.id; // new panels open into this group
+      if (p && isTerm(p.id)) hooks.onTermActivate(termSid(p.id));
     });
     api.onDidRemovePanel((p) => {
+      if (lastActivePanelId === p.id) lastActivePanelId = null;
       if (isTerm(p.id)) {
-        if (lastActiveTermId === p.id) lastActiveTermId = null;
         dynamicNodes.delete(p.id);
         hooks.onTermClose(termSid(p.id));
       }
@@ -216,13 +212,13 @@ function onReady(e: DockviewReadyEvent) {
 // as a flat, draggable/splittable dockview tab next to its siblings.
 const firstTermPanel = () => api?.panels.find((p) => isTerm(p.id))?.id;
 
-// Last terminal panel that held focus. New terminals open as a tab in this
-// panel's group, so they land where you were working instead of spawning a new
-// column. Cleared when that panel closes; falls back to the first terminal.
-let lastActiveTermId: string | null = null;
-const anchorTermPanel = (): string | undefined => {
-  if (lastActiveTermId && api?.getPanel(lastActiveTermId)) return lastActiveTermId;
-  return firstTermPanel();
+// Last panel (terminal OR tool) that held focus. New panels open as a tab in
+// this panel's group, so they land where you were working instead of spawning a
+// new column. Falls back to the first terminal, then any panel.
+let lastActivePanelId: string | null = null;
+const anchorPanel = (): string | undefined => {
+  if (lastActivePanelId && api?.getPanel(lastActivePanelId)) return lastActivePanelId;
+  return firstTermPanel() ?? api?.panels[0]?.id;
 };
 
 export function addTermPanel(sid: string, title: string, el: HTMLElement) {
@@ -234,13 +230,11 @@ export function addTermPanel(sid: string, title: string, el: HTMLElement) {
     existing.api.setActive();
     return;
   }
-  const anchor = anchorTermPanel();
+  const anchor = anchorPanel();
   let position:
     | { referencePanel: string; direction: "within" | "right" }
     | undefined;
   if (anchor) position = { referencePanel: anchor, direction: "within" };
-  else if (api.getPanel("sessions"))
-    position = { referencePanel: "sessions", direction: "right" };
   api.addPanel({
     id: pid,
     component: "host",
@@ -298,21 +292,12 @@ export function togglePanel(id: PanelId) {
     api.removePanel(existing);
     return;
   }
-  const anchor = () => firstTermPanel() ?? api!.panels[0]?.id;
-  let position:
-    | { referencePanel: string; direction: "left" | "right" | "below" | "within" }
-    | undefined;
-  if (id === "sessions") {
-    const ref = anchor();
-    if (ref) position = { referencePanel: ref, direction: "left" };
-  } else {
-    const sibling = TOOLS.find((t) => t !== id && api!.getPanel(t));
-    if (sibling) position = { referencePanel: sibling, direction: "within" };
-    else {
-      const ref = anchor();
-      if (ref) position = { referencePanel: ref, direction: DEFAULT_DIR[id] };
-    }
-  }
+  // Insert as a tab in the last-focused group — no new column. The user docks
+  // panels into columns themselves by dragging; toggling one on never splits.
+  const ref = anchorPanel();
+  const position = ref
+    ? { referencePanel: ref, direction: "within" as const }
+    : undefined;
   api.addPanel({
     id,
     component: "host",
