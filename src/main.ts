@@ -1173,14 +1173,16 @@ async function captureToPrompt() {
   }
 }
 
-// Drag an image (or any file) onto the window -> drop its path into the active
-// terminal, same idea as the screenshot button but without hiding the window.
 function pathArg(p: string): string {
   return /\s/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p;
 }
+// Finder-drag-a-file-into-the-terminal is OFF: it needs Tauri's native drag
+// handler (dragDropEnabled), which on macOS swallows the in-page HTML5 drag
+// events dockview uses to drag/split tabs. Tab dragging won out. Paths still
+// reach the terminal via the Shot button and the right-click "paste path" menu.
+// This listener is inert while dragDropEnabled is false; kept for an easy flip.
 async function wireDragDrop() {
   await getCurrentWebview().onDragDropEvent((e) => {
-    // Any drag activity over the window means a drop may be coming; keep us up.
     cancelHide();
     if (e.payload.type !== "drop") return;
     const id = activeId();
