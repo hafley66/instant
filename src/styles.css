@@ -284,11 +284,39 @@ body[data-skin] .actbar-item.active {
   --dv-icon-hover-background-color: var(--row-hover);
   --dv-drag-over-background-color: rgba(49, 106, 197, 0.25);
   --dv-paneview-header-border-color: var(--frame);
+  /* Compact, square tabs that read like the skin's chrome, not VS Code's. */
+  --dv-tabs-and-actions-container-height: 24px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tab-font-size: 11px;
+  --dv-tab-close-icon-size: 11px;
+  --dv-tab-border-radius: 0;
+  --dv-tab-margin: 0;
 }
 /* dockview-react fills #dock; its panel host fills the group. */
 .dv-fill {
   width: 100%;
   height: 100%;
+}
+/* Tab chrome: skin font, square edges, hairline dividers, quiet close icon. */
+#dock .dv-tab {
+  font-family: inherit;
+  padding: 0 6px;
+  border-right: 1px solid var(--frame);
+}
+#dock .dv-tab.dv-active-tab {
+  font-weight: bold;
+}
+#dock .dv-default-tab-content {
+  padding-right: 6px;
+}
+/* The close ✕ is loud by default — dim it, brighten only on hover. */
+#dock .dv-default-tab-action {
+  opacity: 0.5;
+  padding: 0 2px;
+}
+#dock .dv-tab:hover .dv-default-tab-action,
+#dock .dv-default-tab-action:hover {
+  opacity: 1;
 }
 .dv-host {
   width: 100%;
