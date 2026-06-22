@@ -21,6 +21,13 @@ import { store } from "./state";
 import type { PanelId } from "./state";
 import { DEFAULT_DIR } from "./state";
 
+// Bump when the default layout shape changes so stale/corrupt saved layouts are
+// discarded instead of restored.
+const LAYOUT_VERSION = 2;
+
+// Tools share one side group (tab together) instead of each spawning a column.
+const TOOLS: PanelId[] = ["files", "activity", "config", "worktrees"];
+
 let api: DockviewApi;
 let saving = false; // guard: don't persist while we're applying a load
 
@@ -42,6 +49,7 @@ function hostRenderer(id: PanelId): IContentRenderer {
     element,
     init() {
       element.appendChild(panelNode(id));
+      hooks.onShow(id); // lazy-load on first mount (onShow isn't guaranteed)
     },
     onShow() {
       hooks.onShow(id);
@@ -64,10 +72,10 @@ export function wireDock() {
     createComponent: (o) => hostRenderer(o.id as PanelId),
   });
 
-  const saved = store.get().dockJSON;
-  if (saved) {
+  const saved = store.get().dockJSON as { v?: number; layout?: unknown } | null;
+  if (saved && saved.v === LAYOUT_VERSION && saved.layout) {
     try {
-      applyLayout(() => api.fromJSON(saved as never));
+      applyLayout(() => api.fromJSON(saved.layout as never));
     } catch {
       applyLayout(buildDefault);
     }
@@ -76,7 +84,7 @@ export function wireDock() {
   }
 
   api.onDidLayoutChange(() => {
-    if (!saving) store.set({ dockJSON: api.toJSON() });
+    if (!saving) persist();
   });
 
   // The terminal is required. dockview tabs render their own close (×); if the
@@ -90,11 +98,15 @@ export function wireDock() {
   });
 }
 
+function persist() {
+  store.set({ dockJSON: { v: LAYOUT_VERSION, layout: api.toJSON() } });
+}
+
 function applyLayout(fn: () => void) {
   saving = true;
   fn();
   saving = false;
-  store.set({ dockJSON: api.toJSON() });
+  persist();
 }
 
 // First-run layout: terminal in the center, sessions docked left.
@@ -109,7 +121,9 @@ function buildDefault() {
   });
 }
 
-// Toolbar toggle: open the panel next to the terminal, or close it if open.
+// Rail toggle: close the panel if open, else open it. Sessions docks left as its
+// own group; tools (files/activity/config/worktrees) tab into a single shared
+// side group so toggling doesn't spray a new column per panel.
 export function togglePanel(id: PanelId) {
   if (id === "terminal") return; // always present
   const existing = api.getPanel(id);
@@ -117,11 +131,24 @@ export function togglePanel(id: PanelId) {
     api.removePanel(existing);
     return;
   }
+  if (id === "sessions") {
+    api.addPanel({
+      id,
+      component: "host",
+      title: titleOf(id),
+      position: { referencePanel: "terminal", direction: "left" },
+    });
+    return;
+  }
+  // Tool: tab into an already-open tool's group, else start a new right column.
+  const sibling = TOOLS.find((t) => t !== id && api.getPanel(t));
   api.addPanel({
     id,
     component: "host",
     title: titleOf(id),
-    position: { referencePanel: "terminal", direction: DEFAULT_DIR[id] },
+    position: sibling
+      ? { referencePanel: sibling, direction: "within" }
+      : { referencePanel: "terminal", direction: DEFAULT_DIR[id] },
   });
 }
 
