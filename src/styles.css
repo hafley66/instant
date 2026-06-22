@@ -241,7 +241,9 @@ body[data-skin="ac3"] .mode-toggle {
 .actbar[data-mode="compact"] .actbar-item .al {
   display: none;
 }
-.actbar-item.active {
+/* body[data-skin] prefix (0,3,0) outranks xp.css's button:not(:disabled).active
+   (0,2,1), which would otherwise force its grey pressed look (unreadable icon). */
+body[data-skin] .actbar-item.active {
   background: var(--row-active-bg, #316ac5);
   color: var(--row-active-fg, #fff);
   box-shadow: none;

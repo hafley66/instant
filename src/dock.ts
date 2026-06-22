@@ -53,7 +53,9 @@ function hostRenderer(id: PanelId): IContentRenderer {
     element,
     init() {
       element.appendChild(node);
-      hooks.onShow(id); // lazy-load on first mount (onShow isn't guaranteed)
+      // Defer: at init the host isn't in the document yet, so panel logic that
+      // queries by id (e.g. scanWorktrees reading #wt-root) would hit null.
+      requestAnimationFrame(() => hooks.onShow(id));
     },
     onShow() {
       hooks.onShow(id);
