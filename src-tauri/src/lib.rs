@@ -406,14 +406,23 @@ pub fn run() {
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let toggle_i = MenuItem::with_id(app, "toggle", "Summon / Hide", true, None::<&str>)?;
+            let record_i =
+                MenuItem::with_id(app, "record", "Toggle Recording", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toggle_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&toggle_i, &record_i, &quit_i])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "toggle" => toggle_window(app),
+                    // Route through the webview so the persisted flag stays the
+                    // single source of truth; capture_set_enabled swaps the icon.
+                    "record" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.emit("toggle-record", ());
+                        }
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })

@@ -1398,6 +1398,15 @@ async function sendTextToTab(id: string, text: string) {
   tabs.get(id)?.term.focus();
 }
 
+// Flip screen-capture recording on/off. Front owns the persisted flag; the
+// backend mirrors it (and swaps the menu-bar icon) via capture_set_enabled.
+// Shared by the Activity panel button and the tray menu item.
+function toggleRecording() {
+  const on = !store.get().captureEnabled;
+  store.set({ captureEnabled: on });
+  invoke("capture_set_enabled", { on }).catch(console.error);
+}
+
 // Main Shot button: capture a region and send its path to the active terminal.
 async function captureToPrompt() {
   const id = activeId();
@@ -1630,11 +1639,7 @@ function wireChrome() {
       .catch(console.error);
 
   // Recording toggle mirrors backend CaptureEnabled (flag persisted on front).
-  $("#activity-record").onclick = () => {
-    const on = !store.get().captureEnabled;
-    store.set({ captureEnabled: on });
-    invoke("capture_set_enabled", { on }).catch(console.error);
-  };
+  $("#activity-record").onclick = toggleRecording;
 
   // fzf search box filters live (runtime-only state).
   $("#activity-search").addEventListener("input", (e) => {
@@ -1828,6 +1833,9 @@ async function main() {
     if (!text || !text.trim()) return showError("highlight", "nothing selected to send");
     if (id) sendTextToTab(id, text + " ");
   });
+
+  // Tray menu "Recording" item toggles capture (same path as the panel button).
+  await listen("toggle-record", () => toggleRecording());
 
   // Click-outside dismiss: hide when the window loses focus. Gated on a prior
   // focus so it doesn't self-hide at launch, and suppressed during screenshot.
