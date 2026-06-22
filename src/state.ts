@@ -135,6 +135,7 @@ export interface AppState {
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   dockJSON: unknown; // serialized dockview layout (persisted); null until first save
   sessions: Session[]; // live tmux sessions (runtime)
+  sessionWorktrees: Record<string, string[]>; // session name -> worktree paths it has touched (persisted, accumulated)
   terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
   activity: Event[]; // unified activity timeline (runtime)
@@ -161,6 +162,7 @@ const PERSIST: (keyof AppState)[] = [
   "active",
   "openTabs",
   "dockJSON",
+  "sessionWorktrees",
   "activitySource",
   "activityType",
   "captureEnabled",
@@ -193,6 +195,7 @@ function load(): AppState {
     workspaces: [],
     dockJSON: loadKey<unknown>("dockJSON", null),
     sessions: [],
+    sessionWorktrees: loadKey<Record<string, string[]>>("sessionWorktrees", {}),
     terminalTabs: [],
     worktrees: [],
     activity: [],

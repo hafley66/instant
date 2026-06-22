@@ -37,6 +37,10 @@ pub struct Session {
     name: String,
     windows: u32,
     attached: bool,
+    /// Distinct current working directories across this session's panes. The
+    /// frontend maps these to worktrees (longest-prefix match) to relate a
+    /// session to the worktrees it has touched.
+    paths: Vec<String>,
 }
 
 /// Emitted to the webview as `pty-data`.
@@ -57,6 +61,7 @@ pub fn list_sessions() -> Vec<Session> {
         .env("PATH", path_env())
         .output();
 
+    let mut paths = session_pane_paths();
     let Ok(out) = out else { return Vec::new() };
     String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -65,9 +70,55 @@ pub fn list_sessions() -> Vec<Session> {
             let name = it.next()?.to_string();
             let windows = it.next()?.parse().unwrap_or(1);
             let attached = it.next()? != "0";
-            Some(Session { name, windows, attached })
+            let paths = paths.remove(&name).unwrap_or_default();
+            Some(Session { name, windows, attached, paths })
         })
         .collect()
+}
+
+/// session_name -> distinct pane cwds, from one `tmux list-panes -a` call. Empty
+/// on any failure (the session list still renders, just without worktree links).
+fn session_pane_paths() -> HashMap<String, Vec<String>> {
+    let out = std::process::Command::new("tmux")
+        .args(["list-panes", "-a", "-F", "#{session_name}\t#{pane_current_path}"])
+        .env("PATH", path_env())
+        .output();
+    let Ok(out) = out else { return HashMap::new() };
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.split('\t');
+        let (Some(name), Some(path)) = (it.next(), it.next()) else { continue };
+        if path.is_empty() {
+            continue;
+        }
+        let v = map.entry(name.to_string()).or_default();
+        if !v.iter().any(|p| p == path) {
+            v.push(path.to_string());
+        }
+    }
+    map
+}
+
+/// Turn on mouse mode for a session so the wheel scrolls the pane / forwards to
+/// mouse-aware TUIs (claude, opencode). Per-session (not `-g`) to leave the
+/// user's other tmux sessions alone. Retries: a freshly-created session may not
+/// exist yet the instant new-session is spawned.
+fn enable_mouse(name: &str) {
+    let name = name.to_string();
+    std::thread::spawn(move || {
+        for _ in 0..15 {
+            let ok = std::process::Command::new("tmux")
+                .args(["set-option", "-t", &name, "mouse", "on"])
+                .env("PATH", path_env())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if ok {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+    });
 }
 
 /// Open (or reattach to) a tmux session in a fresh pty bound to webview id `id`.
@@ -87,6 +138,7 @@ pub fn open_session(
         let map = store.0.lock().unwrap();
         if map.contains_key(&id) {
             drop(map);
+            enable_mouse(&name);
             return resize_pty(store, id, cols, rows);
         }
     }
@@ -135,6 +187,8 @@ pub fn open_session(
         .lock()
         .unwrap()
         .insert(id.clone(), PtyHandle { writer, master: pair.master });
+
+    enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
 
     // Reader thread: pump pty -> webview until EOF (session detached/killed).
     std::thread::spawn(move || {

@@ -19,7 +19,7 @@ import {
   type Workspace,
   type WorktreeRow,
 } from "./state";
-import { renderTable } from "./table";
+import { renderTable, virtualTable, type VirtualTable } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, type CtxItem } from "./ctxmenu";
 import {
@@ -38,7 +38,12 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { codeToHtml } from "shiki";
 
-type Session = { name: string; windows: number; attached: boolean };
+type Session = {
+  name: string;
+  windows: number;
+  attached: boolean;
+  paths: string[]; // distinct pane cwds; mapped to worktrees in refreshSessions
+};
 
 type Tab = {
   id: string;
@@ -241,6 +246,22 @@ function renderSessionActive() {
   });
 }
 
+// Map pane cwds to worktrees by longest-prefix match against scanned rows.
+// Returns the distinct worktree paths those cwds fall under.
+function worktreesForPaths(paths: string[], rows: WorktreeRow[]): string[] {
+  const out = new Set<string>();
+  for (const cwd of paths) {
+    let best: WorktreeRow | undefined;
+    for (const w of rows) {
+      if (cwd === w.worktree || cwd.startsWith(w.worktree + "/")) {
+        if (!best || w.worktree.length > best.worktree.length) best = w;
+      }
+    }
+    if (best) out.add(best.worktree);
+  }
+  return [...out];
+}
+
 // The sidebar SESSIONS list mirrors the live tmux sessions (the real running
 // shells/agents), not a creator. Click a row to attach/resume it into a tab;
 // launching new ones is the job of the quick-launch buttons + new-shell input.
@@ -251,6 +272,17 @@ async function refreshSessions() {
   } catch (e) {
     console.error(e);
   }
+
+  // Relate sessions to worktrees and accumulate the touched set (persisted).
+  // Pure data; runs even when the panel is closed.
+  const rows = store.get().worktrees;
+  const sw = { ...store.get().sessionWorktrees };
+  for (const s of live) {
+    const matched = worktreesForPaths(s.paths ?? [], rows);
+    if (matched.length)
+      sw[s.name] = [...new Set([...(sw[s.name] ?? []), ...matched])];
+  }
+  store.set({ sessions: live, sessionWorktrees: sw });
 
   const countEl = document.querySelector("#session-count");
   if (!countEl || !listEl) return; // panel DOM not mounted yet; a later show re-runs
@@ -265,12 +297,21 @@ async function refreshSessions() {
   }
   for (const s of live) {
     const open = tabs.has(sessionId(s.name));
+    const current = new Set(worktreesForPaths(s.paths ?? [], rows)); // where it is now
+    const chips = (sw[s.name] ?? [])
+      .map((p) => {
+        const w = rows.find((r) => r.worktree === p);
+        const label = w ? w.branch : baseName(p);
+        return `<span class="wt-chip${current.has(p) ? " current" : ""}" title="${p}">${label}</span>`;
+      })
+      .join("");
     const li = document.createElement("li");
     li.dataset.id = sessionId(s.name);
     li.className = "session";
     li.innerHTML = `<span class="dot ${s.attached ? "on" : ""}"></span>
       <span class="s-name">${s.name}</span>
-      <span class="s-meta">${s.windows}w${open ? " · open" : ""}</span>`;
+      <span class="s-meta">${s.windows}w${open ? " · open" : ""}</span>
+      ${chips ? `<span class="s-worktrees">${chips}</span>` : ""}`;
     li.onclick = () => openTab(s.name); // attaches (tmux new-session -A) / focuses
     const kill = document.createElement("span");
     kill.className = "tab-close";
@@ -628,6 +669,10 @@ function visibleActivity(): Event[] {
 }
 
 let activitySelected: number | null = null; // selected row id (for the preview pane)
+// One virtualized table bound to #activity-table, created on first render and
+// reused (the pooled host node survives panel open/close). Only visible rows
+// are in the DOM, so 2000-row updates stay cheap.
+let activityTable: VirtualTable<Event> | null = null;
 
 function renderActivityPanel() {
   // The panel DOM may be detached (panel closed, or mid-remount) when an
@@ -644,15 +689,11 @@ function renderActivityPanel() {
   const count = document.querySelector<HTMLElement>("#activity-count");
   if (count) count.textContent = activity.length ? `${rows.length}/${activity.length}` : "";
 
-  host.innerHTML = "";
-  if (activity.length === 0) {
-    host.appendChild(activitySetupCard());
-    renderActivityPreview();
-    return;
-  }
-  host.appendChild(
-    renderTable<Event>({
-      rows,
+  // (Re)create the virtual table if it isn't mounted in the current host (first
+  // render, or the host node was swapped out for the setup card).
+  if (!activityTable || host.firstElementChild?.tagName !== "TABLE") {
+    activityTable?.destroy();
+    activityTable = virtualTable<Event>(host, {
       rowClass: (e) => (e.id === activitySelected ? "fs-selected" : undefined),
       columns: [
         { header: "time", cell: (e) => fmtTime(e.ts) },
@@ -669,8 +710,21 @@ function renderActivityPanel() {
         const data = eventText(e);
         if (data) pasteToActive(data + " ");
       },
-    }),
-  );
+    });
+  }
+  activityTable.setRows(rows);
+
+  // Setup card sits after the (empty) table until the first event arrives.
+  let card = host.querySelector("#activity-setup");
+  if (activity.length === 0) {
+    if (!card) {
+      card = activitySetupCard();
+      card.id = "activity-setup";
+      host.appendChild(card);
+    }
+  } else if (card) {
+    card.remove();
+  }
   renderActivityPreview();
 }
 
@@ -1383,6 +1437,9 @@ async function main() {
   wireContextMenu(ctxItemsFor);
   await refreshSessions();
   await refreshWorkspaces();
+  // Scan worktrees in the background so session rows can show which worktrees
+  // they've touched; re-relate sessions once the scan lands.
+  scanWorktrees().then(refreshSessions).catch(() => {});
 
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
