@@ -45,10 +45,14 @@ const titleOf = (id: PanelId) => panelNode(id).dataset.label ?? id;
 function hostRenderer(id: PanelId): IContentRenderer {
   const element = document.createElement("div");
   element.className = "dv-host";
+  // Capture the node reference now. dockview detaches the host (and this node)
+  // from the document BEFORE calling dispose, so a getElementById there returns
+  // null; the captured reference stays valid while detached.
+  const node = panelNode(id);
   return {
     element,
     init() {
-      element.appendChild(panelNode(id));
+      element.appendChild(node);
       hooks.onShow(id); // lazy-load on first mount (onShow isn't guaranteed)
     },
     onShow() {
@@ -59,7 +63,7 @@ function hostRenderer(id: PanelId): IContentRenderer {
     },
     dispose() {
       // Return the subtree to the pool so it (and its xterm) survives removal.
-      document.getElementById("panel-pool")?.appendChild(panelNode(id));
+      document.getElementById("panel-pool")?.appendChild(node);
     },
   };
 }
