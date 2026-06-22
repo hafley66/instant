@@ -14,11 +14,17 @@
     "@tauri-apps/plugin-opener": "^2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "dockview": "^6.6.1",
     "dockview-core": "^6.6.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "xp.css": "^0.2.6"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3"
   }

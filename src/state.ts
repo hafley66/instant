@@ -90,6 +90,19 @@ export interface OpenTab {
   cwd: string | null;
 }
 
+// A live tmux session row (Rust pty::Session).
+export interface Session {
+  name: string;
+  windows: number;
+  attached: boolean;
+}
+
+// One open terminal tab (its xterm lives in the engine registry, keyed by id).
+export interface TabMeta {
+  id: string;
+  name: string;
+}
+
 // A discovered git worktree (Rust worktrees::WorktreeRow).
 export interface WorktreeRow {
   origin: string;
@@ -119,6 +132,8 @@ export interface AppState {
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
   workspaces: Workspace[]; // backend-owned, not persisted client-side
   dockJSON: unknown; // serialized dockview layout (persisted); null until first save
+  sessions: Session[]; // live tmux sessions (runtime)
+  terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
   activity: Event[]; // unified activity timeline (runtime)
   activitySource: ActivitySource; // source filter chip (persisted)
@@ -175,6 +190,8 @@ function load(): AppState {
     openTabs: loadKey<OpenTab[]>("openTabs", []),
     workspaces: [],
     dockJSON: loadKey<unknown>("dockJSON", null),
+    sessions: [],
+    terminalTabs: [],
     worktrees: [],
     activity: [],
     activitySource: loadKey<ActivitySource>("activitySource", "all"),

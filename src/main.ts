@@ -23,7 +23,13 @@ import {
 import { renderTable } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, type CtxItem } from "./ctxmenu";
-import { wireDock, togglePanel, isOpen, setDockHooks, onDockChange } from "./dock";
+import {
+  mountReactDock,
+  togglePanel,
+  isOpen,
+  setDockHooks,
+  onDockChange,
+} from "./Dock";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -1299,9 +1305,9 @@ async function main() {
   wireChrome();
   // A dock failure must not abort the rest of boot (sessions, pty listeners).
   try {
-    wireDock();
-    syncToggles(); // reflect which panels the restored dockview layout has open
     onDockChange(syncToggles); // keep rail highlights in sync as panels open/close
+    mountReactDock($("#dock")); // dockview-react renders + adopts the pooled panels
+    syncToggles();
   } catch (e) {
     showError("wireDock", e);
   }
