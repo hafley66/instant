@@ -98,24 +98,35 @@ function ensureTerminal() {
 }
 
 function onReady(e: DockviewReadyEvent) {
-  api = e.api;
-  const saved = store.get().dockJSON as { v?: number; layout?: unknown } | null;
-  if (saved && saved.v === LAYOUT_VERSION && saved.layout) {
-    try {
-      applyLayout(() => api!.fromJSON(saved.layout as never));
-    } catch {
+  try {
+    api = e.api;
+    const saved = store.get().dockJSON as { v?: number; layout?: unknown } | null;
+    if (saved && saved.v === LAYOUT_VERSION && saved.layout) {
+      try {
+        applyLayout(() => api!.fromJSON(saved.layout as never));
+      } catch {
+        applyLayout(buildDefault);
+      }
+    } else {
       applyLayout(buildDefault);
     }
-  } else {
-    applyLayout(buildDefault);
-  }
-  ensureTerminal();
+    ensureTerminal();
 
-  api.onDidLayoutChange(() => {
-    if (!saving) persist();
-    for (const fn of changeSubs) fn();
-  });
-  for (const fn of changeSubs) fn(); // initial highlight sync
+    api.onDidLayoutChange(() => {
+      if (!saving) persist();
+      for (const fn of changeSubs) fn();
+    });
+    for (const fn of changeSubs) fn(); // initial highlight sync
+  } catch (err) {
+    // onReady runs inside React's render commit; a throw here is swallowed and
+    // leaves an empty dock. Surface it where it can be seen.
+    const msg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
+    const el = document.getElementById("dock");
+    if (el)
+      el.innerHTML =
+        `<pre style="color:#fff;background:#a00;padding:8px;margin:0;white-space:pre-wrap;font:11px monospace">[dock onReady] ${msg}</pre>`;
+    console.error("[dock onReady]", err);
+  }
 }
 
 // ---- public api for main.ts (rail toggles, highlights) ----
@@ -180,4 +191,12 @@ function DockApp() {
 
 export function mountReactDock(el: HTMLElement) {
   createRoot(el).render(createElement(DockApp));
+  // Diagnostic: if onReady never fires, the dock stays empty silently.
+  setTimeout(() => {
+    if (!api)
+      el.insertAdjacentHTML(
+        "afterbegin",
+        `<pre style="color:#fff;background:#a06000;padding:8px;margin:0;font:11px monospace">[dock] onReady never fired — DockviewReact didn't initialize</pre>`,
+      );
+  }, 1500);
 }
