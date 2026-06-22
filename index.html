@@ -26,37 +26,36 @@
         <button id="mode-toggle" class="mode-toggle" title="Toggle dark mode">
           ☾
         </button>
-        <button id="files-toggle" class="files-toggle" title="File explorer">📁 Files</button>
-        <button id="wt-toggle" class="wt-toggle" title="Worktrees table">⊞ Worktrees</button>
-        <button id="activity-toggle" class="activity-toggle" title="Activity history (captures, browser, files)">◉ Activity</button>
-        <button id="config-toggle" class="config-toggle" title="Config & observation filters">⚙ Config</button>
+        <span class="toolbar-spacer"></span>
         <button id="skin-toggle" class="skin-toggle">P5</button>
       </div>
 
-      <!-- Dock: four resizable zones filled by dock.ts. Each zone gets a tab
-           strip + body; panels are moved in from #panel-pool. -->
-      <div class="window-body body dock" id="dock">
-        <div class="zone" id="zone-left" data-zone="left">
-          <div class="ztabs"></div>
-          <div class="zbody"></div>
-        </div>
-        <div class="zdiv zdiv-v" data-edge="left" title="Resize"></div>
-        <div class="zmid" id="zmid">
-          <div class="zone" id="zone-center" data-zone="center">
-            <div class="ztabs"></div>
-            <div class="zbody"></div>
-          </div>
-          <div class="zdiv zdiv-h" data-edge="bottom" title="Resize"></div>
-          <div class="zone" id="zone-bottom" data-zone="bottom">
-            <div class="ztabs"></div>
-            <div class="zbody"></div>
-          </div>
-        </div>
-        <div class="zdiv zdiv-v" data-edge="right" title="Resize"></div>
-        <div class="zone" id="zone-right" data-zone="right">
-          <div class="ztabs"></div>
-          <div class="zbody"></div>
-        </div>
+      <!-- Workbench: VS Code-style activity rail + the dockview surface. The
+           rail's buttons toggle dockable panels (ids match wireChrome). The
+           rail collapses to icons (compact) or expands with labels (big). -->
+      <div class="window-body body" id="workbench">
+        <nav class="actbar" id="actbar">
+          <button class="actbar-item" id="sessions-toggle" data-panel="sessions" title="Sessions">
+            <span class="ai">▦</span><span class="al">Sessions</span>
+          </button>
+          <button class="actbar-item" id="files-toggle" data-panel="files" title="Files">
+            <span class="ai">📁</span><span class="al">Files</span>
+          </button>
+          <button class="actbar-item" id="wt-toggle" data-panel="worktrees" title="Worktrees">
+            <span class="ai">⊞</span><span class="al">Worktrees</span>
+          </button>
+          <button class="actbar-item" id="activity-toggle" data-panel="activity" title="Activity">
+            <span class="ai">◉</span><span class="al">Activity</span>
+          </button>
+          <button class="actbar-item" id="config-toggle" data-panel="config" title="Config">
+            <span class="ai">⚙</span><span class="al">Config</span>
+          </button>
+          <span class="actbar-spacer"></span>
+          <button class="actbar-item" id="actbar-toggle" title="Toggle compact/expanded">
+            <span class="ai">⇆</span><span class="al">Collapse</span>
+          </button>
+        </nav>
+        <div class="dock" id="dock"></div>
       </div>
 
       <!-- Panel pool: holds every dockable panel's DOM. dock.ts moves a panel

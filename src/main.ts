@@ -23,7 +23,7 @@ import {
 import { renderTable } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, type CtxItem } from "./ctxmenu";
-import { wireDock, mountDock, togglePanel, isOpen, setDockHooks } from "./dock";
+import { wireDock, togglePanel, isOpen, setDockHooks, onDockChange } from "./dock";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -958,9 +958,10 @@ function onPanelShown(id: PanelId) {
   else if (id === "config" && !store.get().config) refreshConfig();
 }
 
-// Reflect which panels are docked on the toolbar toggles.
+// Reflect which panels are docked on the activity-rail buttons.
 function syncToggles() {
   const m: [string, PanelId][] = [
+    ["#sessions-toggle", "sessions"],
     ["#wt-toggle", "worktrees"],
     ["#activity-toggle", "activity"],
     ["#files-toggle", "files"],
@@ -968,6 +969,22 @@ function syncToggles() {
   ];
   for (const [sel, id] of m)
     ($(sel) as HTMLButtonElement).classList.toggle("active", isOpen(id));
+}
+
+// Refit the active terminal — dockview calls this via onTerminalLayout whenever
+// the terminal group is resized or re-laid-out.
+function fitActiveTerm() {
+  const t = activeId() ? tabs.get(activeId()!) : undefined;
+  if (!t) return;
+  requestAnimationFrame(() => {
+    t.fit.fit();
+    invoke("resize_pty", { id: t.id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
+  });
+}
+
+// Activity rail compact (icons) vs big (icons + labels).
+function syncSidebar(s: AppState) {
+  $("#actbar").dataset.mode = s.sidebar;
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -1144,6 +1161,10 @@ function wireChrome() {
 
   $("#shot-btn").onclick = captureToPrompt;
 
+  $("#sessions-toggle").onclick = () => togglePanel("sessions");
+  $("#actbar-toggle").onclick = () =>
+    store.set({ sidebar: store.get().sidebar === "big" ? "compact" : "big" });
+
   $("#wt-toggle").onclick = () => togglePanel("worktrees");
   $("#wt-scan").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1247,18 +1268,10 @@ async function main() {
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncMode, ["mode"]);
-  // Dock changes re-mount the zones, refresh the toolbar toggles, and refit the
-  // active terminal (its zone/size may have changed).
-  setDockHooks({ onShow: onPanelShown });
-  store.subscribe(() => {
-    mountDock();
-    syncToggles();
-    const t = activeId() ? tabs.get(activeId()!) : undefined;
-    if (t) requestAnimationFrame(() => {
-      t.fit.fit();
-      invoke("resize_pty", { id: t.id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
-    });
-  }, ["dock"]);
+  store.subscribe(syncSidebar, ["sidebar"]);
+  // dockview owns the layout; we only react: lazy-load a panel when it's first
+  // shown, and refit the active terminal whenever dockview re-lays-out a group.
+  setDockHooks({ onShow: onPanelShown, onTerminalLayout: fitActiveTerm });
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
   store.subscribe(renderActivityPanel, [
@@ -1272,7 +1285,7 @@ async function main() {
   store.subscribe(renderFilesPanel, ["files", "fsSelected"]);
   syncSkin(store.get());
   syncMode(store.get());
-  syncToggles();
+  syncSidebar(store.get());
   renderWorktreesPanel();
   renderActivityPanel();
   renderFilesPanel();
@@ -1285,6 +1298,8 @@ async function main() {
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
   wireDock();
+  syncToggles(); // reflect which panels the restored dockview layout has open
+  onDockChange(syncToggles); // keep rail highlights in sync as panels open/close
   wireWindowResize();
   wireDragDrop();
   wireContextMenu(ctxItemsFor);

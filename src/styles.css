@@ -196,39 +196,97 @@ body[data-skin="ac3"] .mode-toggle {
   background: var(--surface);
 }
 
-/* ---- dock zones (left / center / right / bottom) ---- */
-/* .body.window-body is the flex row: zone-left | div | zmid | div | zone-right.
-   zmid stacks zone-center over zone-bottom. Widths/heights are set inline by
-   dock.ts; center + zmid flex to fill. */
-.zone {
+/* ---- workbench: activity rail + dockview surface ---- */
+/* .body.window-body sets the flex row + margin; rail (fixed) then dock (flex). */
+#workbench {
+  gap: 0;
+}
+.actbar {
   flex: none;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  min-height: 0;
+  gap: 2px;
+  padding: 4px;
+  background: var(--head-bg);
   border: var(--frame-w) solid var(--frame);
-  background: var(--panel-bg);
-  overflow: hidden;
+  border-right: none;
 }
-.zone.empty {
+.actbar[data-mode="big"] {
+  width: 148px;
+}
+.actbar[data-mode="compact"] {
+  width: 44px;
+}
+.actbar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.actbar[data-mode="compact"] .actbar-item {
+  justify-content: center;
+  padding: 2px 0;
+}
+.actbar-item .ai {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+.actbar[data-mode="compact"] .actbar-item .al {
   display: none;
 }
-#zmid {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
+.actbar-item.active {
+  background: var(--row-active-bg, #316ac5);
+  color: var(--row-active-fg, #fff);
+  box-shadow: none;
+}
+.actbar-spacer {
+  flex: 1;
+}
+.toolbar-spacer {
+  flex: 1;
+}
+
+/* dockview fills the rest; each panel host is absolutely-filled. */
+#dock {
+  flex: 1;
+  position: relative;
   min-width: 0;
   min-height: 0;
-  gap: 4px;
 }
-#zone-center {
-  flex: 1 1 0;
+/* Map dockview's chrome to the skin tokens. dockview sets --dv-* on its theme
+   shell element, so we must out-specify that: #dock + the theme class (1-1-0)
+   beats the bare .dockview-theme-light (0-1-0). Skin/mode then flow through. */
+#dock.dockview-theme-light,
+#dock .dockview-theme-light {
+  --dv-group-view-background-color: var(--panel-bg);
+  --dv-tabs-and-actions-container-background-color: var(--head-bg);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--row-active-bg);
+  --dv-activegroup-visiblepanel-tab-color: var(--row-active-fg);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--head-bg);
+  --dv-activegroup-hiddenpanel-tab-color: var(--head-fg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--row-active-bg);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--row-active-fg);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--head-bg);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--head-fg);
+  --dv-separator-border: var(--frame);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--row-active-bg);
+  --dv-tab-divider-color: var(--frame);
+  --dv-icon-hover-background-color: var(--row-hover);
+  --dv-drag-over-background-color: rgba(49, 106, 197, 0.25);
+  --dv-paneview-header-border-color: var(--frame);
 }
-.zbody {
-  flex: 1;
+.dv-host {
+  position: absolute;
+  inset: 0;
   display: flex;
-  position: relative;
-  min-height: 0;
   overflow: hidden;
 }
 .panel {
@@ -237,73 +295,10 @@ body[data-skin="ac3"] .mode-toggle {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /* Panels carry the skin's body color; without it table/list text falls back
-     to xp.css's black and vanishes on the dark panel background. */
+  /* Carry the skin body color + bg; without color, table/list text falls back
+     to xp.css's black and vanishes on a dark panel. */
   color: var(--panel-fg);
-}
-.panel.hidden {
-  display: none;
-}
-
-/* zone tab strip — also the drag handle for re-docking a panel */
-.ztabs {
-  display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
-  padding: 2px;
-  background: var(--head-bg);
-  border-bottom: var(--frame-w) solid var(--frame);
-}
-.ztab {
-  font-size: 11px;
-  padding: 2px 7px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  color: var(--head-fg);
-  border: 1px solid transparent;
-  user-select: none;
-}
-.ztab:hover {
-  background: var(--row-hover);
-}
-.ztab.active {
-  background: var(--row-active-bg, #316ac5);
-  color: var(--row-active-fg, #fff);
-  font-weight: bold;
-}
-.ztab-close {
-  opacity: 0.5;
-}
-.ztab-close:hover {
-  opacity: 1;
-  color: #c00;
-}
-
-/* zone dividers */
-.zdiv {
-  flex: none;
-  background: transparent;
-  -webkit-app-region: no-drag;
-}
-.zdiv-v {
-  width: 5px;
-  cursor: col-resize;
-}
-.zdiv-h {
-  height: 5px;
-  cursor: row-resize;
-}
-.zdiv:hover,
-.zdiv.dragging {
-  background: var(--frame);
-}
-
-/* drop target while dragging a tab between zones */
-.zone.drop-hover {
-  outline: 2px dashed var(--row-active-bg, #316ac5);
-  outline-offset: -2px;
+  background: var(--panel-bg);
 }
 
 /* ---- window resize grips ---- */
