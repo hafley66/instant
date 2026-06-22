@@ -885,6 +885,7 @@ function renderActivityPanel() {
   // activity-added event fires this. Bail; a later show re-runs the render.
   const host = document.querySelector<HTMLElement>("#activity-table");
   if (!host) return;
+  syncRecord(store.get()); // record button may be stale if toggled from the tray while closed
   const { activity, activitySource } = store.get();
   // Chips reflect the active source filter. Use `.on` (not `.active`) — xp.css
   // owns button.active and would force the pressed-silver look over our color.
@@ -1349,7 +1350,9 @@ function syncMode(s: AppState) {
     s.mode === "dark" ? "☀" : "☾";
 }
 function syncRecord(s: AppState) {
-  const b = $("#activity-record") as HTMLButtonElement;
+  // Panel may be closed (e.g. toggled from the tray); bail and repaint on show.
+  const b = document.querySelector<HTMLButtonElement>("#activity-record");
+  if (!b) return;
   b.classList.toggle("recording", s.captureEnabled);
   b.textContent = s.captureEnabled ? "● Recording" : "○ Record";
 }
