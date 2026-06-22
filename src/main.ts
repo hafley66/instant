@@ -29,7 +29,7 @@ import {
   isOpen,
   setDockHooks,
   onDockChange,
-} from "./Dock";
+} from "./reactdock";
 
 type Session = { name: string; windows: number; attached: boolean };
 
