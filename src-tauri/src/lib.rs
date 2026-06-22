@@ -23,6 +23,12 @@ use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 // Two right-clicks closer than this count as a double-right-click summon gesture.
 const DOUBLE_RIGHT_MS: u128 = 350;
+// Two right-⌘ taps closer than this count as a double-right-cmd summon. Modifier
+// taps run a touch slower than mouse clicks, so the window is a bit wider.
+const DOUBLE_RCMD_MS: u128 = 400;
+// IOKit device-dependent flag bit for the RIGHT command key (NX_DEVICERCMDKEYMASK).
+// Present in HID-tap event flags, so it isolates right ⌘ from left ⌘.
+const RCMD_BIT: u64 = 0x10;
 // Global throttle between screen captures, across all gesture kinds.
 const MIN_GAP: Duration = Duration::from_millis(350);
 
@@ -32,6 +38,9 @@ struct Gesture {
     last_capture: Option<Instant>,
     drag_active: bool,
     last_right_down: Option<Instant>,
+    // Right-⌘ double-tap summon: track press edges + the previous tap time.
+    right_cmd_down: bool,
+    last_right_cmd: Option<Instant>,
 }
 
 // Throttled capture trigger: spawn the screenshot OFF the tap thread so input
@@ -72,6 +81,7 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
                 CGEventType::LeftMouseDragged,
                 CGEventType::LeftMouseUp,
                 CGEventType::KeyDown,
+                CGEventType::FlagsChanged,
             ],
             |_proxy, ty, event| {
                 let mut g = g.lock().unwrap();
@@ -114,6 +124,28 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
                                 if cs >= 2 { "dblclick" } else { "click" },
                             );
                         }
+                    }
+                    CGEventType::FlagsChanged => {
+                        // Right ⌘ has its own device bit, so this is unambiguous
+                        // even while left ⌘ is held. Act only on the press edge
+                        // (released -> pressed); a second tap within the window
+                        // summons. We read one modifier bit, not key content.
+                        let rcmd = event.get_flags().bits() & RCMD_BIT != 0;
+                        if rcmd && !g.right_cmd_down {
+                            let now = Instant::now();
+                            let is_double = g
+                                .last_right_cmd
+                                .map(|t| now.duration_since(t) < Duration::from_millis(DOUBLE_RCMD_MS as u64))
+                                .unwrap_or(false);
+                            if is_double {
+                                g.last_right_cmd = None; // reset so a triple isn't two doubles
+                                let handle = app.clone();
+                                let _ = app.run_on_main_thread(move || toggle_window(&handle));
+                            } else {
+                                g.last_right_cmd = Some(now);
+                            }
+                        }
+                        g.right_cmd_down = rcmd;
                     }
                     CGEventType::KeyDown => {
                         if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
