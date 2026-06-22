@@ -131,6 +131,23 @@ pub fn read_image(path: String) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{}", base64(&bytes)))
 }
 
+/// Read a UTF-8 text file for the preview pane. Caps size, rejects binary
+/// (any NUL in the first 8 KB) and non-UTF-8 so the webview never gets a blob
+/// it can't render.
+#[tauri::command]
+pub fn read_text(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+    if meta.len() > 2 * 1024 * 1024 {
+        return Err("file too large to preview".into());
+    }
+    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    if bytes.iter().take(8192).any(|&b| b == 0) {
+        return Err("binary file".into());
+    }
+    String::from_utf8(bytes).map_err(|_| "not valid UTF-8".to_string())
+}
+
 // Minimal base64 (standard alphabet) — avoids pulling a crate for one use.
 fn base64(data: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

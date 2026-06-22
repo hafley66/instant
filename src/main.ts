@@ -9,7 +9,6 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   store,
   type ActivitySource,
-  type ActivityType,
   type AppState,
   type ConfigView,
   type DirListing,
@@ -29,7 +28,15 @@ import {
   isOpen,
   setDockHooks,
   onDockChange,
+  ensurePreview,
+  closePreview,
+  addTermPanel,
+  focusTermPanel,
+  removeTermPanel,
 } from "./reactdock";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+import { codeToHtml } from "shiki";
 
 type Session = { name: string; windows: number; attached: boolean };
 
@@ -46,8 +53,6 @@ type Tab = {
 const tabs = new Map<string, Tab>();
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
-const terminalsEl = $("#terminals");
-const tabsEl = $("#tabs");
 const listEl = $("#session-list") as HTMLUListElement;
 const wsListEl = $("#workspace-list") as HTMLUListElement;
 
@@ -111,7 +116,9 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
 
   const el = document.createElement("div");
   el.className = "term-host";
-  terminalsEl.appendChild(el);
+  // Live in the pool (in-document, so xterm can measure) until dockview adopts
+  // it into the terminal's panel.
+  document.getElementById("panel-pool")!.appendChild(el);
 
   const term = new Terminal({
     fontFamily: "Menlo, monospace",
@@ -166,31 +173,42 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     invoke("open_session", { id, name, command, cwd, cols, rows }).catch(console.error);
   });
 
-  renderTabs();
+  // Hand the host element to dockview as a flat, draggable/splittable panel.
+  // Adding it makes it active, which fires onTermActivate -> onTermShown.
+  addTermPanel(id, name, el);
   activate(id);
 }
 
+// Make a terminal the active dockview panel. The store/active-sync + focus is
+// done in onTermShown when dockview reports the active change.
 function activate(id: string) {
-  setActive(id);
-  for (const [tid, t] of tabs) {
-    t.el.style.display = tid === id ? "block" : "none";
-  }
+  if (tabs.has(id)) focusTermPanel(id);
+}
+
+// dockview reports a terminal panel became active (tab click, open, or a
+// neighbour closing). Sync the store, log the visit, refit, focus.
+function onTermShown(id: string) {
   const t = tabs.get(id);
-  if (t) {
-    logTabVisit(t.name);
-    requestAnimationFrame(() => {
-      t.fit.fit();
-      invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(
-        () => {},
-      );
-      t.term.focus();
-    });
-  }
-  renderTabs();
+  if (!t) return;
+  setActive(id);
+  logTabVisit(t.name);
+  requestAnimationFrame(() => {
+    t.fit.fit();
+    invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
+    t.term.focus();
+  });
   renderSessionActive();
 }
 
+// Close a terminal: remove its dockview panel; dockview then fires
+// onDidRemovePanel -> onTermClosed which disposes the xterm + pty.
 function closeTab(id: string) {
+  if (tabs.has(id)) removeTermPanel(id);
+}
+
+// dockview removed a terminal panel (close button, menu, or closeTab). Tear
+// down the live resources and re-point active at a surviving terminal.
+function onTermClosed(id: string) {
   const t = tabs.get(id);
   if (!t) return;
   invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
@@ -204,26 +222,16 @@ function closeTab(id: string) {
     setActive(nextId);
     if (nextId) activate(nextId);
   }
-  renderTabs();
+  renderSessionActive();
+  refreshSessions();
 }
 
-function renderTabs() {
-  tabsEl.innerHTML = "";
-  for (const [id, t] of tabs) {
-    const b = document.createElement("button");
-    b.className = "tab" + (id === activeId() ? " tab-active" : "");
-    b.textContent = t.name;
-    b.onclick = () => activate(id);
-    const x = document.createElement("span");
-    x.className = "tab-close";
-    x.textContent = "×";
-    x.onclick = (e) => {
-      e.stopPropagation();
-      closeTab(id);
-    };
-    b.appendChild(x);
-    tabsEl.appendChild(b);
-  }
+// Refit one terminal (dockview reports its panel group resized).
+function fitTerm(id: string) {
+  const t = tabs.get(id);
+  if (!t) return;
+  t.fit.fit();
+  invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
 }
 
 function renderSessionActive() {
@@ -270,21 +278,8 @@ async function refreshSessions() {
     kill.title = "kill this tmux session";
     kill.onclick = (e) => {
       e.stopPropagation();
-      const id = sessionId(s.name);
-      if (tabs.has(id)) {
-        // closeTab also forgets + disposes the tab; then kill the tmux session.
-        const t = tabs.get(id)!;
-        t.term.dispose();
-        t.el.remove();
-        tabs.delete(id);
-        forgetTab(id);
-        if (activeId() === id) {
-          const next = tabs.keys().next();
-          setActive(next.done ? null : next.value);
-          if (!next.done) activate(next.value);
-        }
-        renderTabs();
-      }
+      // closeTab removes the panel + disposes the xterm; then kill the tmux session.
+      closeTab(sessionId(s.name));
       invoke("kill_session", { name: s.name })
         .then(() => refreshSessions())
         .catch(console.error);
@@ -508,10 +503,11 @@ function renderFlatTable(rows: WorktreeRow[]) {
 }
 
 function renderWorktreesPanel() {
+  // Panel may be closed / mid-remount when a store change fires this; bail.
+  const count = document.querySelector<HTMLElement>("#wt-count");
+  if (!count) return;
   const { worktrees, wtView } = store.get();
-  ($("#wt-count") as HTMLElement).textContent = worktrees.length
-    ? `${worktrees.length} worktrees`
-    : "";
+  count.textContent = worktrees.length ? `${worktrees.length} worktrees` : "";
   ($("#wt-view") as HTMLButtonElement).textContent =
     wtView === "tree" ? "Table" : "Tree";
   if (wtView === "tree") renderTree(worktrees);
@@ -519,9 +515,16 @@ function renderWorktreesPanel() {
 }
 
 async function scanWorktrees() {
-  const root = ($("#wt-root") as HTMLInputElement).value.trim();
+  // Read from the panel input when it's mounted, else fall back to the persisted
+  // root: onPanelShown can fire this before the worktrees DOM is queryable.
+  const input = document.querySelector<HTMLInputElement>("#wt-root");
+  const root = (input?.value ?? store.get().scanRoot).trim();
   store.set({ scanRoot: root }); // remember it
-  ($("#wt-count") as HTMLElement).textContent = "scanning…";
+  const setCount = (s: string) => {
+    const c = document.querySelector<HTMLElement>("#wt-count");
+    if (c) c.textContent = s;
+  };
+  setCount("scanning…");
   try {
     const rows = await invoke<WorktreeRow[]>("scan_worktrees", {
       roots: root ? [root] : [],
@@ -530,7 +533,7 @@ async function scanWorktrees() {
     store.set({ worktrees: rows });
   } catch (e) {
     console.error("scan_worktrees:", e);
-    ($("#wt-count") as HTMLElement).textContent = "scan failed";
+    setCount("scan failed");
   }
 }
 
@@ -596,26 +599,30 @@ function activitySetupCard(): HTMLElement {
   return el;
 }
 
-// Event-type sub-filters: cross-cut the source axis by what the event IS.
-const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|heic|tiff?)$/i;
-const ACT_TYPE_MATCH: Record<ActivityType, (e: Event) => boolean> = {
-  all: () => true,
-  highlight: (e) => e.kind === "selection",
-  clip: (e) => e.kind === "clipboard" || e.kind === "copy" || e.kind === "paste",
-  // A screenshot, or any row pointing at an image file.
-  image: (e) => !!e.shot || IMG_EXT.test(e.text) || IMG_EXT.test(e.title),
-  file: (e) => e.source === "files" || e.kind === "open",
-  url: (e) => e.kind === "nav" || e.kind.startsWith("tab") || (e.source === "browser" && !!e.url),
-  click: (e) => e.kind === "click" || e.kind === "dblclick" || e.kind === "ctrlclick",
+// Short source label for the row (the panel's one filter axis is source).
+const SRC_LABEL: Record<Event["source"], string> = {
+  os: "screen",
+  browser: "web",
+  files: "file",
+  session: "session",
 };
+// Normalize the raw kind grab-bag into a small set of verbs for the row.
+const ACTION_VERB: Record<string, string> = {
+  nav: "visit",
+  tabopen: "tab",
+  tabclose: "tab",
+  dblclick: "click",
+  ctrlclick: "click",
+  selection: "select",
+  clipboard: "copy",
+};
+const actionVerb = (e: Event): string => ACTION_VERB[e.kind] ?? e.kind;
 
-// The visible rows: source chip, then type chip, then fuzzy search box.
+// The visible rows: source chip, then fuzzy search box.
 function visibleActivity(): Event[] {
-  const { activity, activitySource, activityType, activityQuery } = store.get();
-  const typeMatch = ACT_TYPE_MATCH[activityType];
+  const { activity, activitySource, activityQuery } = store.get();
   const filtered = activity.filter(
-    (e) =>
-      (activitySource === "all" || e.source === activitySource) && typeMatch(e),
+    (e) => activitySource === "all" || e.source === activitySource,
   );
   return fuzzyFilter(activityQuery, filtered, activityKey);
 }
@@ -623,21 +630,20 @@ function visibleActivity(): Event[] {
 let activitySelected: number | null = null; // selected row id (for the preview pane)
 
 function renderActivityPanel() {
-  const { activity, activitySource, activityType } = store.get();
-  // Chips reflect the active filter. Use `.on` (not `.active`) — xp.css owns
-  // button.active and would force the pressed-silver look over our color.
+  // The panel DOM may be detached (panel closed, or mid-remount) when an
+  // activity-added event fires this. Bail; a later show re-runs the render.
+  const host = document.querySelector<HTMLElement>("#activity-table");
+  if (!host) return;
+  const { activity, activitySource } = store.get();
+  // Chips reflect the active source filter. Use `.on` (not `.active`) — xp.css
+  // owns button.active and would force the pressed-silver look over our color.
   document.querySelectorAll<HTMLButtonElement>(".act-chip[data-src]").forEach((b) => {
     b.classList.toggle("on", b.dataset.src === activitySource);
   });
-  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-type]").forEach((b) => {
-    b.classList.toggle("on", b.dataset.type === activityType);
-  });
   const rows = visibleActivity();
-  ($("#activity-count") as HTMLElement).textContent = activity.length
-    ? `${rows.length}/${activity.length}`
-    : "";
+  const count = document.querySelector<HTMLElement>("#activity-count");
+  if (count) count.textContent = activity.length ? `${rows.length}/${activity.length}` : "";
 
-  const host = $("#activity-table");
   host.innerHTML = "";
   if (activity.length === 0) {
     host.appendChild(activitySetupCard());
@@ -650,10 +656,9 @@ function renderActivityPanel() {
       rowClass: (e) => (e.id === activitySelected ? "fs-selected" : undefined),
       columns: [
         { header: "time", cell: (e) => fmtTime(e.ts) },
-        { header: "src", cell: (e) => e.source },
-        { header: "kind", cell: (e) => e.kind },
-        { header: "where", cell: (e) => eventSource(e) },
-        { header: "what", cell: (e) => eventText(e) },
+        { header: "src", cell: (e) => SRC_LABEL[e.source], cellClass: () => "act-src" },
+        { header: "action", cell: (e) => actionVerb(e) },
+        { header: "target", cell: (e) => eventSource(e) },
       ],
       rowTitle: (e) => e.shot || e.url || e.text || e.title,
       onRow: (e) => {
@@ -672,10 +677,13 @@ function renderActivityPanel() {
 // Preview pane: a screenshot thumbnail for os rows, the url/title for browser,
 // the path for files. Guards a newer selection landing mid-load.
 async function renderActivityPreview() {
-  const pane = $("#activity-preview");
+  const pane = document.querySelector<HTMLElement>("#activity-preview");
+  if (!pane) return; // panel detached; a later show re-renders
   const sel = store.get().activity.find((e) => e.id === activitySelected);
+  // No selection -> collapse the preview so the list isn't cramped.
+  pane.classList.toggle("preview-collapsed", !sel);
   if (!sel) {
-    pane.innerHTML = `<div class="fs-preview-empty">select an event</div>`;
+    pane.innerHTML = "";
     return;
   }
   const head = `<div class="fs-preview-meta">${sel.kind} · ${eventSource(sel)}<br>
@@ -788,9 +796,10 @@ function cfgGroup(
 }
 
 function renderConfigPanel() {
+  const meta = document.querySelector<HTMLElement>("#config-meta");
+  const body = document.querySelector<HTMLElement>("#config-body");
+  if (!meta || !body) return; // panel detached; a later show re-renders
   const cfg = store.get().config;
-  const meta = $("#config-meta") as HTMLElement;
-  const body = $("#config-body");
   if (!cfg) {
     meta.textContent = "";
     body.innerHTML = `<div class="empty-help">loading…</div>`;
@@ -885,41 +894,98 @@ async function browseTo(path: string) {
   try {
     const listing = await invoke<DirListing>("list_dir", { path });
     store.set({ files: listing, fsCwd: listing.path, fsSelected: null });
+    closePreview(); // selection cleared -> hide the preview pane
   } catch (e) {
     console.error("list_dir:", e);
-    ($("#fs-list") as HTMLElement).innerHTML =
-      `<div class="empty-help">Can't open<br><code>${path}</code><br>${e}</div>`;
+    const host = document.querySelector<HTMLElement>("#fs-list");
+    if (host)
+      host.innerHTML = `<div class="empty-help">Can't open<br><code>${path}</code><br>${e}</div>`;
   }
 }
 
-// Render the image (or a placeholder) for the selected entry into the preview
-// pane. Guards against a newer selection landing while read_image is in flight.
+// File extension -> shiki language id. Anything not listed falls back to plain
+// text (shiki still renders it, just unhighlighted).
+const MD_EXTS = new Set(["md", "markdown", "mdx"]);
+const SHIKI_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", mts: "typescript", cts: "typescript",
+  js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
+  json: "json", jsonc: "json", css: "css", scss: "scss", less: "less",
+  html: "html", xml: "xml", svg: "xml", vue: "vue", svelte: "svelte",
+  rs: "rust", py: "python", rb: "ruby", go: "go", php: "php", java: "java",
+  kt: "kotlin", swift: "swift", c: "c", h: "c", cpp: "cpp", hpp: "cpp",
+  cc: "cpp", cs: "csharp", sh: "bash", bash: "bash", zsh: "bash",
+  yml: "yaml", yaml: "yaml", toml: "toml", sql: "sql", lua: "lua",
+  dockerfile: "docker", makefile: "makefile",
+};
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Render the selected entry into the preview pane: images via read_image,
+// markdown via marked, everything else via shiki syntax highlighting. Each path
+// re-checks fsSelected after its async hop so a newer selection wins.
 async function renderPreview(sel: string | null, files: DirListing) {
-  const pane = $("#fs-preview");
+  const pane = document.querySelector<HTMLElement>("#fs-preview");
+  if (!pane) return; // preview pane closed; reopens + re-renders on next select
+  const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
   const entry = sel ? files.entries.find((e) => e.path === sel) : null;
   if (!entry) {
-    pane.innerHTML = `<div class="fs-preview-empty">select a file</div>`;
+    pane.innerHTML = empty("select a file");
     return;
   }
   const meta = `<div class="fs-preview-meta">${entry.name}<br><span>${typeLabel(entry)} · ${fmtSize(entry.size)}</span></div>`;
-  if (!IMAGE_EXTS.has(entry.ext)) {
-    pane.innerHTML = meta + `<div class="fs-preview-empty">no preview</div>`;
+  if (entry.is_dir) {
+    pane.innerHTML = meta + empty("folder");
     return;
   }
-  pane.innerHTML = meta + `<div class="fs-preview-empty">loading…</div>`;
+
+  if (IMAGE_EXTS.has(entry.ext)) {
+    pane.innerHTML = meta + empty("loading…");
+    try {
+      const url = await invoke<string>("read_image", { path: entry.path });
+      if (store.get().fsSelected !== entry.path) return;
+      pane.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
+    } catch (e) {
+      pane.innerHTML = meta + empty(String(e));
+    }
+    return;
+  }
+
+  pane.innerHTML = meta + empty("loading…");
+  let text: string;
   try {
-    const url = await invoke<string>("read_image", { path: entry.path });
-    if (store.get().fsSelected !== entry.path) return; // selection moved on
-    pane.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
+    text = await invoke<string>("read_text", { path: entry.path });
   } catch (e) {
-    pane.innerHTML = meta + `<div class="fs-preview-empty">${e}</div>`;
+    pane.innerHTML = meta + empty(String(e));
+    return;
+  }
+  if (store.get().fsSelected !== entry.path) return;
+
+  if (MD_EXTS.has(entry.ext)) {
+    const html = DOMPurify.sanitize(await marked.parse(text));
+    if (store.get().fsSelected !== entry.path) return;
+    pane.innerHTML = meta + `<div class="md-body">${html}</div>`;
+    return;
+  }
+
+  const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
+  const lang = SHIKI_LANG[entry.ext] || SHIKI_LANG[entry.name.toLowerCase()] || "text";
+  try {
+    const html = await codeToHtml(text, { lang, theme });
+    if (store.get().fsSelected !== entry.path) return;
+    pane.innerHTML = meta + `<div class="code-body">${html}</div>`;
+  } catch {
+    if (store.get().fsSelected !== entry.path) return;
+    pane.innerHTML = meta + `<pre class="code-plain">${escapeHtml(text)}</pre>`;
   }
 }
 
 function renderFilesPanel() {
+  const host = document.querySelector<HTMLElement>("#fs-list");
+  const pathEl = document.querySelector<HTMLInputElement>("#fs-path");
+  if (!host || !pathEl) return; // panel detached; a later show re-renders
   const { files, fsSelected } = store.get();
-  ($("#fs-path") as HTMLInputElement).value = files?.path ?? store.get().fsCwd;
-  const host = $("#fs-list");
+  pathEl.value = files?.path ?? store.get().fsCwd;
   if (!files) {
     host.innerHTML = "";
     return;
@@ -941,8 +1007,14 @@ function renderFilesPanel() {
         },
       ],
       rowTitle: (e) => e.path,
-      // Folders open on a single click; files select (preview) then paste-on-open.
-      onRow: (e) => (e.is_dir ? browseTo(e.path) : store.set({ fsSelected: e.path })),
+      // Folders open on a single click; files select + open the preview pane.
+      onRow: (e) => {
+        if (e.is_dir) browseTo(e.path);
+        else {
+          store.set({ fsSelected: e.path });
+          ensurePreview();
+        }
+      },
       onRowDblClick: (e) => {
         if (e.is_dir) return;
         pasteToActive(pathArg(e.path) + " ");
@@ -964,6 +1036,7 @@ function onPanelShown(id: PanelId) {
   else if (id === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
   else if (id === "activity" && store.get().activity.length === 0) refreshActivity();
   else if (id === "files" && !store.get().files) browseTo(store.get().fsCwd);
+  else if (id === "preview") renderPreview(store.get().fsSelected, store.get().files ?? { path: "", parent: null, entries: [] });
   else if (id === "config" && !store.get().config) refreshConfig();
 }
 
@@ -978,17 +1051,6 @@ function syncToggles() {
   ];
   for (const [sel, id] of m)
     ($(sel) as HTMLButtonElement).classList.toggle("active", isOpen(id));
-}
-
-// Refit the active terminal — dockview calls this via onTerminalLayout whenever
-// the terminal group is resized or re-laid-out.
-function fitActiveTerm() {
-  const t = activeId() ? tabs.get(activeId()!) : undefined;
-  if (!t) return;
-  requestAnimationFrame(() => {
-    t.fit.fit();
-    invoke("resize_pty", { id: t.id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
-  });
 }
 
 // Activity rail compact (icons) vs big (icons + labels).
@@ -1203,13 +1265,10 @@ function wireChrome() {
     store.set({ activityQuery: (e.target as HTMLInputElement).value });
   });
 
-  // Source + type filter chips.
+  // Source filter chips (the panel's single filter axis).
   document.querySelectorAll<HTMLButtonElement>(".act-chip[data-src]").forEach((b) => {
     b.onclick = () =>
       store.set({ activitySource: b.dataset.src as ActivitySource });
-  });
-  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-type]").forEach((b) => {
-    b.onclick = () => store.set({ activityType: b.dataset.type as ActivityType });
   });
 
   $("#config-toggle").onclick = () => togglePanel("config");
@@ -1280,7 +1339,12 @@ async function main() {
   store.subscribe(syncSidebar, ["sidebar"]);
   // dockview owns the layout; we only react: lazy-load a panel when it's first
   // shown, and refit the active terminal whenever dockview re-lays-out a group.
-  setDockHooks({ onShow: onPanelShown, onTerminalLayout: fitActiveTerm });
+  setDockHooks({
+    onShow: onPanelShown,
+    onTermActivate: onTermShown,
+    onTermClose: onTermClosed,
+    onTermLayout: fitTerm,
+  });
   store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
   store.subscribe(renderActivityPanel, [
@@ -1368,17 +1432,8 @@ async function main() {
     }
   });
 
-  // Reflow xterm AND push the new grid to the pty, else tmux keeps its old size
-  // and strands a stale status line mid-screen after a window resize.
-  new ResizeObserver(() => {
-    const id = activeId();
-    const t = id ? tabs.get(id) : undefined;
-    if (!t) return;
-    t.fit.fit();
-    invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(
-      () => {},
-    );
-  }).observe(terminalsEl);
+  // Each terminal panel refits itself via dockview's onDidDimensionsChange
+  // (wired through onTermLayout -> fitTerm), so no global ResizeObserver here.
 
   // Esc hides the popover.
   window.addEventListener("keydown", (e) => {

@@ -370,6 +370,7 @@ pub fn run() {
             config::config_open,
             fs::list_dir,
             fs::read_image,
+            fs::read_text,
             screenshot,
         ])
         .run(tauri::generate_context!())

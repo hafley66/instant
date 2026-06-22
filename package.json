@@ -16,8 +16,11 @@
     "@xterm/xterm": "^6.0.0",
     "dockview": "^6.6.1",
     "dockview-core": "^6.6.1",
+    "dompurify": "^3.4.11",
+    "marked": "^18.0.5",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "shiki": "^4.2.0",
     "xp.css": "^0.2.6"
   },
   "devDependencies": {

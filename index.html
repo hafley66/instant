@@ -94,11 +94,6 @@
           </div>
         </section>
 
-        <section class="panel" id="panel-terminal" data-panel="terminal" data-label="Terminal">
-          <div id="tabs" class="tabs"></div>
-          <div id="terminals" class="terminals"></div>
-        </section>
-
         <section class="panel" id="panel-worktrees" data-panel="worktrees" data-label="Worktrees">
           <form id="wt-scan" class="wt-scan">
             <input id="wt-root" value="~/projects" autocomplete="off" />
@@ -117,8 +112,11 @@
           </div>
           <div class="fs-body">
             <div id="fs-list" class="fs-list"></div>
-            <div id="fs-preview" class="fs-preview"></div>
           </div>
+        </section>
+
+        <section class="panel" id="panel-preview" data-panel="preview" data-label="Preview">
+          <div id="fs-preview" class="fs-preview"></div>
         </section>
 
         <section class="panel" id="panel-activity" data-panel="activity" data-label="Activity">
@@ -131,19 +129,10 @@
           </div>
           <div class="act-chips">
             <button class="act-chip" data-src="all" type="button">all</button>
-            <button class="act-chip" data-src="session" type="button">sessions</button>
-            <button class="act-chip" data-src="browser" type="button">browser</button>
             <button class="act-chip" data-src="os" type="button">screen</button>
+            <button class="act-chip" data-src="browser" type="button">browser</button>
             <button class="act-chip" data-src="files" type="button">files</button>
-          </div>
-          <div class="act-chips act-types">
-            <button class="act-chip" data-type="all" type="button">all</button>
-            <button class="act-chip" data-type="highlight" type="button">highlighted</button>
-            <button class="act-chip" data-type="clip" type="button">copy/paste</button>
-            <button class="act-chip" data-type="image" type="button">images</button>
-            <button class="act-chip" data-type="file" type="button">files</button>
-            <button class="act-chip" data-type="url" type="button">urls</button>
-            <button class="act-chip" data-type="click" type="button">clicks</button>
+            <button class="act-chip" data-src="session" type="button">sessions</button>
           </div>
           <div class="fs-body">
             <div id="activity-table" class="fs-list"></div>

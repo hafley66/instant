@@ -511,18 +511,17 @@ body[data-skin] .actbar-item.active {
   opacity: 1;
   color: #c00;
 }
-.terminals {
+/* Each terminal is its own dockview panel now; the host fills the panel's
+   .dv-host (a flex box) instead of stacking inside a .terminals container. */
+.term-host {
   flex: 1;
-  position: relative;
+  min-width: 0;
   min-height: 0;
+  position: relative;
   overflow: hidden;
+  padding: 2px;
   background: var(--term-bg);
   border: var(--frame-w) solid var(--term-frame);
-}
-.term-host {
-  position: absolute;
-  inset: 0;
-  padding: 2px;
 }
 .term-host .xterm,
 .term-host .xterm-viewport {
@@ -740,6 +739,18 @@ body[data-skin] .actbar-item.active {
   margin: auto;
   text-align: center;
 }
+/* No selection -> drop out of the flex row so the list spans full width. */
+.fs-preview.preview-collapsed {
+  display: none;
+}
+/* The activity preview stays embedded beside its list; let the user drag it
+   wider. (The Files preview is its own dockview pane, resized by the sash.) */
+#activity-preview {
+  width: 240px;
+  resize: horizontal;
+  min-width: 160px;
+  max-width: 65%;
+}
 .fs-preview-meta {
   font-size: 11px;
   word-break: break-all;
@@ -752,12 +763,79 @@ body[data-skin] .actbar-item.active {
   height: auto;
   border: var(--frame-w) solid var(--frame);
 }
+
+/* The preview is its own dockview panel now; fill it instead of the fixed
+   180px column it used while embedded beside the Files list. The activity
+   panel still embeds .fs-preview in a split, so scope this to the panel. */
+#panel-preview .fs-preview {
+  width: auto;
+  flex: 1;
+  border-left: none;
+}
+
+/* Rendered markdown (marked + DOMPurify). */
+.md-body {
+  font-size: 12px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+.md-body h1, .md-body h2, .md-body h3 { margin: 0.6em 0 0.3em; line-height: 1.25; }
+.md-body h1 { font-size: 1.5em; }
+.md-body h2 { font-size: 1.3em; }
+.md-body h3 { font-size: 1.1em; }
+.md-body p, .md-body ul, .md-body ol, .md-body pre, .md-body blockquote { margin: 0.4em 0; }
+.md-body ul, .md-body ol { padding-left: 1.4em; }
+.md-body code {
+  font-family: Menlo, monospace;
+  font-size: 0.92em;
+  background: rgba(127, 127, 127, 0.18);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+.md-body pre {
+  background: rgba(127, 127, 127, 0.14);
+  padding: 8px;
+  overflow: auto;
+}
+.md-body pre code { background: none; padding: 0; }
+.md-body blockquote {
+  border-left: 3px solid var(--frame);
+  padding-left: 8px;
+  opacity: 0.85;
+}
+.md-body a { color: var(--row-active-bg, #316ac5); }
+.md-body img { max-width: 100%; }
+.md-body table { border-collapse: collapse; }
+.md-body th, .md-body td { border: 1px solid var(--frame); padding: 2px 6px; }
+
+/* Shiki syntax-highlighted code. Shiki sets its own bg/fg on the <pre>. */
+.code-body { font-size: 12px; }
+.code-body pre.shiki {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 3px;
+  font-family: Menlo, monospace;
+  line-height: 1.45;
+}
+.code-plain {
+  font-family: Menlo, monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow: auto;
+  margin: 0;
+}
 .dtable-row.fs-selected td {
   background: var(--row-active-bg);
   color: var(--row-active-fg);
 }
 .fs-size {
   text-align: right;
+}
+/* Activity rows: the source column is a quiet tag, the action verb reads bold. */
+.act-src {
+  opacity: 0.6;
+  font-size: 11px;
 }
 
 /* ---- empty-state setup cards (Spy, Files errors) ---- */
@@ -1237,7 +1315,7 @@ body[data-skin="ac3"] .tab-active {
 }
 /* Terminal pane: faint green inner glow + a bright data-rule along the top,
    echoing the stat-readout strips in the garage. */
-body[data-skin="ac3"] .terminals,
+body[data-skin="ac3"] .term-host,
 body[data-skin="ac3"] .side-panel {
   box-shadow: inset 0 2px 0 #2f5a2a, inset 0 0 12px rgba(155, 211, 74, 0.05);
 }
