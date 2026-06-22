@@ -284,8 +284,8 @@ body[data-skin="ac3"] .mode-toggle {
   --dv-paneview-header-border-color: var(--frame);
 }
 .dv-host {
-  position: absolute;
-  inset: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   overflow: hidden;
 }

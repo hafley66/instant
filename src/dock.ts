@@ -4,8 +4,8 @@
 //
 // Each dockable surface is a DOM subtree parked in #panel-pool. A dockview
 // "host" component wraps one and appends it on init, so ids / listeners / the
-// live xterm survive being moved between groups. defaultRenderer:"always" keeps
-// hidden tabs mounted (xterm must not be destroyed when its tab is inactive).
+// live xterm survive being moved between groups. On dispose (panel closed) the
+// subtree is returned to the pool, so re-opening re-adopts the same live nodes.
 //
 // Persistence is dockview's own toJSON/fromJSON, stored as state.dockJSON.
 
@@ -68,7 +68,6 @@ export function wireDock() {
   const el = document.getElementById("dock")!;
   api = createDockview(el, {
     theme: themeLight, // colors are overridden per-skin via #dock CSS vars
-    defaultRenderer: "always",
     createComponent: (o) => hostRenderer(o.id as PanelId),
   });
 
