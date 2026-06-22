@@ -1297,9 +1297,14 @@ async function main() {
 
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
-  wireDock();
-  syncToggles(); // reflect which panels the restored dockview layout has open
-  onDockChange(syncToggles); // keep rail highlights in sync as panels open/close
+  // A dock failure must not abort the rest of boot (sessions, pty listeners).
+  try {
+    wireDock();
+    syncToggles(); // reflect which panels the restored dockview layout has open
+    onDockChange(syncToggles); // keep rail highlights in sync as panels open/close
+  } catch (e) {
+    showError("wireDock", e);
+  }
   wireWindowResize();
   wireDragDrop();
   wireContextMenu(ctxItemsFor);
@@ -1389,4 +1394,22 @@ async function main() {
   });
 }
 
-main();
+// Surface any boot/runtime error as a visible banner — the webview console
+// isn't reachable from the terminal, so this is how errors get seen.
+function showError(label: string, err: unknown) {
+  const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+  let el = document.getElementById("boot-error");
+  if (!el) {
+    el = document.createElement("pre");
+    el.id = "boot-error";
+    el.style.cssText =
+      "position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;max-height:40%;overflow:auto;margin:0;padding:8px;background:#a00;color:#fff;font:11px/1.4 Menlo,monospace;white-space:pre-wrap;border:2px solid #fff;";
+    document.body.appendChild(el);
+  }
+  el.textContent = `[${label}] ${msg}`;
+  console.error(label, err);
+}
+window.addEventListener("error", (e) => showError("error", e.error ?? e.message));
+window.addEventListener("unhandledrejection", (e) => showError("promise", e.reason));
+
+main().catch((e) => showError("main", e));
