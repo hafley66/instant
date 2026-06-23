@@ -18,25 +18,9 @@ export type Mode = "light" | "dark";
 export type Sidebar = "compact" | "big"; // activity rail: icons-only vs labelled
 // Dockable surfaces. Each is a DOM subtree that lives in one zone at a time.
 // Dockable tool/sessions panels. Terminals are separate dynamic panels
-// (id `term:<sessionId>`), not part of this union.
-export type PanelId =
-  | "sessions"
-  | "worktrees"
-  | "activity"
-  | "files"
-  | "preview"
-  | "config";
-// Direction a panel docks toward when toggled on from the toolbar (relative to
-// the terminal). Consumed by dock.ts -> dockview addPanel position.
-export type DockDir = "left" | "right" | "below";
-export const DEFAULT_DIR: Record<PanelId, DockDir> = {
-  sessions: "left",
-  worktrees: "right",
-  activity: "right",
-  files: "right",
-  preview: "right",
-  config: "right",
-};
+// (id `term:<sessionId>`), not part of this union. Panel ids are now
+// registered through the plugin registry (plugin.tsx) — not a hardcoded union.
+export type PanelId = string;
 
 export type WtView = "tree" | "table";
 export type ActivitySource = "all" | "browser" | "os" | "files" | "session";

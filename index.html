@@ -33,26 +33,9 @@
         <button id="skin-toggle" class="skin-toggle">P5</button>
       </div>
 
-      <!-- Workbench: VS Code-style activity rail + the dockview surface. The
-           rail's buttons toggle dockable panels (ids match wireChrome). The
-           rail collapses to icons (compact) or expands with labels (big). -->
       <div class="window-body body" id="workbench">
         <nav class="actbar" id="actbar">
-          <button class="actbar-item" id="sessions-toggle" data-panel="sessions" title="Sessions">
-            <span class="ai">▦</span><span class="al">Sessions</span>
-          </button>
-          <button class="actbar-item" id="files-toggle" data-panel="files" title="Files">
-            <span class="ai">📁</span><span class="al">Files</span>
-          </button>
-          <button class="actbar-item" id="wt-toggle" data-panel="worktrees" title="Worktrees">
-            <span class="ai">⊞</span><span class="al">Worktrees</span>
-          </button>
-          <button class="actbar-item" id="activity-toggle" data-panel="activity" title="Activity">
-            <span class="ai">◉</span><span class="al">Activity</span>
-          </button>
-          <button class="actbar-item" id="config-toggle" data-panel="config" title="Config">
-            <span class="ai">⚙</span><span class="al">Config</span>
-          </button>
+          <!-- actbar-panels injected by plugin.tsx buildActivityRail() -->
           <span class="actbar-spacer"></span>
           <button class="actbar-item" id="actbar-toggle" title="Toggle compact/expanded">
             <span class="ai">⇆</span><span class="al">Collapse</span>
@@ -61,110 +44,11 @@
         <div class="dock" id="dock"></div>
       </div>
 
-      <!-- Panel pool: holds every dockable panel's DOM. dock.ts moves a panel
-           into a zone body; undocked panels park here (display:none) so their
-           live state (xterm, listeners) survives. Inner ids are unchanged, so
-           all panel logic in main.ts keeps targeting them. -->
-      <div id="panel-pool" hidden>
-        <section class="panel" id="panel-sessions" data-panel="sessions" data-label="Sessions">
-          <div class="sidebar-lists">
-            <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span>
-              <select id="session-sort" class="session-sort" title="sort sessions">
-                <option value="activity:desc">recent</option>
-                <option value="activity:asc">oldest</option>
-                <option value="name:asc">name a–z</option>
-                <option value="name:desc">name z–a</option>
-                <option value="windows:desc">windows</option>
-              </select>
-            </div>
-            <ul id="session-list" class="session-list"></ul>
-            <div class="sidebar-head">SPACES</div>
-            <ul id="workspace-list" class="session-list"></ul>
-          </div>
-          <div class="sidebar-create">
-            <div class="quick-launch">
-              <button id="ql-claude" type="button" class="ql-btn">+ claude</button>
-              <button id="ql-opencode" type="button" class="ql-btn">+ opencode</button>
-            </div>
-            <form id="new-session" class="new-session">
-              <input id="new-name" placeholder="new shell…" autocomplete="off" />
-              <button type="submit">+</button>
-            </form>
-            <details class="space-create">
-              <summary>+ new space (worktree + agent)</summary>
-              <form id="new-workspace" class="new-session new-workspace">
-                <input id="ws-repo" placeholder="repo path…" autocomplete="off" />
-                <input id="ws-branch" placeholder="branch…" autocomplete="off" />
-                <select id="ws-agent">
-                  <option value="claude">claude</option>
-                  <option value="opencode">opencode</option>
-                </select>
-                <button type="submit">+ space</button>
-              </form>
-            </details>
-          </div>
-        </section>
+      <!-- Panel pool: holds terminal host el parking. Panel DOM is injected
+           by plugin.tsx injectPanelHtml(). Terminals park here between
+           dockview mounts. -->
+      <div id="panel-pool" hidden></div>
 
-        <section class="panel" id="panel-worktrees" data-panel="worktrees" data-label="Worktrees">
-          <form id="wt-scan" class="wt-scan">
-            <input id="wt-root" value="~/projects" autocomplete="off" />
-            <button type="submit">Scan</button>
-            <button id="wt-view" type="button">Table</button>
-            <span id="wt-count" class="wt-count"></span>
-          </form>
-          <div id="wt-table" class="wt-table"></div>
-        </section>
-
-        <section class="panel" id="panel-files" data-panel="files" data-label="Files">
-          <div class="fs-bar">
-            <button id="fs-up" type="button" title="Up one folder">↑</button>
-            <input id="fs-path" autocomplete="off" spellcheck="false" />
-            <button id="fs-go" type="button">Go</button>
-          </div>
-          <div class="fs-body">
-            <div id="fs-list" class="fs-list"></div>
-          </div>
-        </section>
-
-        <section class="panel" id="panel-preview" data-panel="preview" data-label="Preview">
-          <div id="fs-preview" class="fs-preview"></div>
-        </section>
-
-        <section class="panel" id="panel-activity" data-panel="activity" data-label="Activity">
-          <div class="act-bar">
-            <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
-            <span id="activity-count" class="wt-count"></span>
-            <span class="spy-spacer"></span>
-            <button id="activity-record" type="button" class="act-record">○ Record</button>
-            <button id="activity-clear" type="button">Clear</button>
-          </div>
-          <div class="act-chips">
-            <button class="act-chip" data-src="all" type="button">all</button>
-            <button class="act-chip" data-src="os" type="button">screen</button>
-            <button class="act-chip" data-src="browser" type="button">browser</button>
-            <button class="act-chip" data-src="files" type="button">files</button>
-            <button class="act-chip" data-src="session" type="button">sessions</button>
-          </div>
-          <div class="fs-body">
-            <div id="activity-table" class="fs-list"></div>
-            <div id="activity-preview" class="fs-preview"></div>
-          </div>
-        </section>
-
-        <section class="panel" id="panel-config" data-panel="config" data-label="Config">
-          <div class="act-bar">
-            <span class="spy-title">config</span>
-            <span id="config-meta" class="wt-count"></span>
-            <span class="spy-spacer"></span>
-            <button id="config-reload" type="button">Reload</button>
-            <button id="config-open" type="button">Open file</button>
-          </div>
-          <div id="config-body" class="cfg-body"></div>
-        </section>
-      </div>
-
-      <!-- Custom resize grips: decorations are off, so macOS gives no native
-           edge handles. Each calls startResizeDragging on pointerdown. -->
       <div class="rz" data-dir="North"></div>
       <div class="rz" data-dir="South"></div>
       <div class="rz" data-dir="West"></div>

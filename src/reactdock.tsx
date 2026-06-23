@@ -1,12 +1,9 @@
-// Dock layout via dockview-react. React owns each panel's mount/unmount through
-// useEffect, so there's no imperative init/dispose timing to get wrong (the
-// class of bug that plagued the vanilla dockview-core version).
+// Dock layout via dockview-react. Panels are React components registered
+// through the plugin registry (plugin.tsx). Terminal panels use a dedicated
+// "terminal" component that adopts an xterm host element.
 //
-// Panel CONTENT is the existing DOM subtree parked in #panel-pool: a HostPanel
-// adopts #panel-<id> on mount and returns it to the pool on unmount, so every
-// render function in main.ts keeps targeting the same live nodes (and the live
-// xterm) wherever the panel is docked. main.ts injects lazy-load + terminal-fit
-// hooks via setDockHooks; layout persists with a version stamp.
+// Layout persists with a version stamp. Terminal panels are recreated fresh
+// on reload from openTabs.
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { createElement } from "react";
@@ -22,14 +19,11 @@ import {
 import "dockview/dist/styles/dockview.css";
 
 import { store } from "./state";
-import type { PanelId } from "./state";
+import { dockComponents, getPanel } from "./plugin";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
-// Custom tab: same look as dockview's default (title + close ✕) plus a
-// right-click menu that splits the panel in a direction. File-drop owns the
-// native drag handler, so tabs can't be dragged; this menu is how panes move.
 function CustomTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const [title, setTitle] = useState(api.title ?? "");
@@ -75,12 +69,8 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
   );
 }
 
-const LAYOUT_VERSION = 6; // bump to discard older saved layouts (6: drop floating groups)
+const LAYOUT_VERSION = 7; // 7: plugin-based panel components
 
-// Each tmux terminal is its own dockview panel, id `term:<sessionId>`. Its
-// content is a live xterm host element registered here by main.ts (it isn't a
-// pooled #panel-* node, it's created on the fly). HostPanel adopts from this
-// map first, the pool second.
 const TERM = "term:";
 const isTerm = (id: string) => id.startsWith(TERM);
 const termSid = (id: string) => id.slice(TERM.length);
@@ -90,13 +80,11 @@ let api: DockviewApi | null = null;
 let saving = false;
 
 type Hooks = {
-  onShow: (id: PanelId) => void; // a tool/sessions panel mounted -> lazy load
-  onTermActivate: (sid: string) => void; // a terminal panel became active
-  onTermClose: (sid: string) => void; // a terminal panel was removed
-  onTermLayout: (sid: string) => void; // a terminal panel resized -> refit
+  onTermActivate: (sid: string) => void;
+  onTermClose: (sid: string) => void;
+  onTermLayout: (sid: string) => void;
 };
 let hooks: Hooks = {
-  onShow: () => {},
   onTermActivate: () => {},
   onTermClose: () => {},
   onTermLayout: () => {},
@@ -105,39 +93,28 @@ export function setDockHooks(h: Partial<Hooks>) {
   hooks = { ...hooks, ...h };
 }
 
-// ---- panel content host: adopt the live node (dynamic terminal, or pooled) ----
-function HostPanel(props: IDockviewPanelProps) {
+function TerminalPanel(props: IDockviewPanelProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const sid = termSid(props.params.panelId as string);
   const id = props.params.panelId as string;
 
   useEffect(() => {
-    // Capture the node now. On unmount React removes this host div (and the
-    // adopted node inside it) from the document BEFORE cleanup runs, so a
-    // getElementById in cleanup returns null and the node would be destroyed
-    // instead of pooled. The captured reference stays valid while detached.
-    const node = dynamicNodes.get(id) ?? document.getElementById(`panel-${id}`);
+    const node = dynamicNodes.get(id);
     if (node && ref.current) ref.current.appendChild(node);
 
-    let sub: { dispose(): void } | undefined;
-    if (isTerm(id)) {
-      // Refit this terminal whenever its group resizes.
-      sub = props.api.onDidDimensionsChange(() => hooks.onTermLayout(termSid(id)));
-      hooks.onTermLayout(termSid(id)); // fit on (re)mount too
-    } else {
-      hooks.onShow(id as PanelId); // lazy-load; the node is in the document now
-    }
+    const sub = props.api.onDidDimensionsChange(() => hooks.onTermLayout(sid));
+    hooks.onTermLayout(sid);
 
     return () => {
-      sub?.dispose();
+      sub.dispose();
       const pool = document.getElementById("panel-pool");
-      if (pool && node) pool.appendChild(node); // park the captured node for re-open
+      if (pool && node) pool.appendChild(node);
     };
   }, [id]);
 
   return <div className="dv-host" ref={ref} />;
 }
 
-// ---- layout persistence (versioned) ----
 function persist() {
   if (api) store.set({ dockJSON: { v: LAYOUT_VERSION, layout: api.toJSON() } });
 }
@@ -151,12 +128,14 @@ function applyLayout(fn: () => void) {
 function buildDefault() {
   if (!api) return;
   api.clear();
-  api.addPanel({ id: "sessions", component: "host", params: { panelId: "sessions" }, title: "Sessions" });
+  api.addPanel({
+    id: "sessions",
+    component: "sessions",
+    params: { panelId: "sessions" },
+    title: getPanel("sessions")?.title ?? "Sessions",
+  });
 }
 
-// Terminal panels can't be restored from JSON: their xterm content is recreated
-// fresh on reload (openTabs replay). Drop any term husks the saved layout left
-// behind so a later addTermPanel with the same id doesn't collide.
 function stripTermHusks() {
   if (!api) return;
   for (const p of [...api.panels]) if (isTerm(p.id)) api.removePanel(p);
@@ -180,7 +159,7 @@ function onReady(e: DockviewReadyEvent) {
     }
 
     api.onDidActivePanelChange((p) => {
-      if (p) lastActivePanelId = p.id; // new panels open into this group
+      if (p) lastActivePanelId = p.id;
       if (p && isTerm(p.id)) hooks.onTermActivate(termSid(p.id));
     });
     api.onDidRemovePanel((p) => {
@@ -194,10 +173,8 @@ function onReady(e: DockviewReadyEvent) {
       if (!saving) persist();
       for (const fn of changeSubs) fn();
     });
-    for (const fn of changeSubs) fn(); // initial highlight sync
+    for (const fn of changeSubs) fn();
   } catch (err) {
-    // onReady runs inside React's render commit; a throw here is swallowed and
-    // leaves an empty dock. Surface it where it can be seen.
     const msg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
     const el = document.getElementById("dock");
     if (el)
@@ -207,14 +184,8 @@ function onReady(e: DockviewReadyEvent) {
   }
 }
 
-// ---- terminal panels (one dockview panel per tmux session) ----
-// main.ts owns the xterm; it hands us the host element + title and we place it
-// as a flat, draggable/splittable dockview tab next to its siblings.
 const firstTermPanel = () => api?.panels.find((p) => isTerm(p.id))?.id;
 
-// Last panel (terminal OR tool) that held focus. New panels open as a tab in
-// this panel's group, so they land where you were working instead of spawning a
-// new column. Falls back to the first terminal, then any panel.
 let lastActivePanelId: string | null = null;
 const anchorPanel = (): string | undefined => {
   if (lastActivePanelId && api?.getPanel(lastActivePanelId)) return lastActivePanelId;
@@ -237,7 +208,7 @@ export function addTermPanel(sid: string, title: string, el: HTMLElement) {
   if (anchor) position = { referencePanel: anchor, direction: "within" };
   api.addPanel({
     id: pid,
-    component: "host",
+    component: "terminal",
     params: { panelId: pid },
     title,
     ...(position ? { position } : {}),
@@ -255,59 +226,45 @@ export function setTermTitle(sid: string, title: string) {
   api?.getPanel(TERM + sid)?.api.setTitle(title);
 }
 
-// ---- public api for main.ts (rail toggles, highlights) ----
-const TITLES: Record<PanelId, string> = {
-  sessions: "Sessions",
-  worktrees: "Worktrees",
-  activity: "Activity",
-  files: "Files",
-  preview: "Preview",
-  config: "Config",
-};
-
-// Open the Preview pane next to Files (its own dockview group, so it's
-// draggable/splittable independently). No-op if already open.
 export function ensurePreview() {
   if (!api || api.getPanel("preview")) return;
   const ref = api.getPanel("files") ? "files" : api.panels[0]?.id;
   api.addPanel({
     id: "preview",
-    component: "host",
+    component: "preview",
     params: { panelId: "preview" },
-    title: "Preview",
+    title: getPanel("preview")?.title ?? "Preview",
     ...(ref ? { position: { referencePanel: ref, direction: "right" as const } } : {}),
   });
 }
 
-// Close the Preview pane (nothing selected -> don't reserve space for it).
 export function closePreview() {
   const p = api?.getPanel("preview");
   if (p) api!.removePanel(p);
 }
 
-export function togglePanel(id: PanelId) {
+export function togglePanel(id: string) {
   if (!api) return;
   const existing = api.getPanel(id);
   if (existing) {
     api.removePanel(existing);
     return;
   }
-  // Insert as a tab in the last-focused group — no new column. The user docks
-  // panels into columns themselves by dragging; toggling one on never splits.
   const ref = anchorPanel();
   const position = ref
     ? { referencePanel: ref, direction: "within" as const }
     : undefined;
+  const def = getPanel(id);
   api.addPanel({
     id,
-    component: "host",
+    component: id,
     params: { panelId: id },
-    title: TITLES[id],
+    title: def?.title ?? id,
     ...(position ? { position } : {}),
   });
 }
 
-export function isOpen(id: PanelId): boolean {
+export function isOpen(id: string): boolean {
   return !!api?.getPanel(id);
 }
 
@@ -316,23 +273,20 @@ export function onDockChange(fn: () => void) {
   changeSubs.push(fn);
 }
 
-// ---- mount (called from main.ts, no JSX there) ----
 function DockApp() {
+  const comps = dockComponents();
   return createElement(DockviewReact, {
-    components: { host: HostPanel },
+    components: { ...comps, terminal: TerminalPanel },
     defaultTabComponent: CustomTab,
     theme: themeLight,
     onReady,
     className: "dv-fill",
-    // Dragging a tab out spawned a detached floating panel that read as broken.
-    // Keep docking/split/reorder drags; just disable the float-out mode.
     disableFloatingGroups: true,
   });
 }
 
 export function mountReactDock(el: HTMLElement) {
   createRoot(el).render(createElement(DockApp));
-  // Diagnostic: if onReady never fires, the dock stays empty silently.
   setTimeout(() => {
     if (!api)
       el.insertAdjacentHTML(

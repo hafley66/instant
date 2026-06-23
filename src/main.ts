@@ -14,11 +14,11 @@ import {
   type DirListing,
   type Event,
   type FsEntry,
-  type PanelId,
   type Skin,
   type Workspace,
   type WorktreeRow,
 } from "./state";
+import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
 import {
   renderTable,
   virtualTable,
@@ -1302,31 +1302,12 @@ function renderFilesPanel() {
   renderPreview(fsSelected, files);
 }
 
-// Lazy first load when a panel becomes the active tab in its zone. Idempotent:
-// each loader guards on its own already-loaded state. Wired into dock via
-// setDockHooks so it fires wherever the panel is docked.
-function onPanelShown(id: PanelId) {
-  // The panel's DOM just mounted into the dock; re-run its renderer so anything
-  // that bailed earlier (DOM not present) now paints.
-  if (id === "sessions") refreshSessions();
-  else if (id === "worktrees" && store.get().worktrees.length === 0) scanWorktrees();
-  else if (id === "activity" && store.get().activity.length === 0) refreshActivity();
-  else if (id === "files" && !store.get().files) browseTo(store.get().fsCwd);
-  else if (id === "preview") renderPreview(store.get().fsSelected, store.get().files ?? { path: "", parent: null, entries: [] });
-  else if (id === "config" && !store.get().config) refreshConfig();
-}
-
-// Reflect which panels are docked on the activity-rail buttons.
+// syncToggles now reads from the plugin registry instead of a hardcoded list.
 function syncToggles() {
-  const m: [string, PanelId][] = [
-    ["#sessions-toggle", "sessions"],
-    ["#wt-toggle", "worktrees"],
-    ["#activity-toggle", "activity"],
-    ["#files-toggle", "files"],
-    ["#config-toggle", "config"],
-  ];
-  for (const [sel, id] of m)
-    ($(sel) as HTMLButtonElement).classList.toggle("active", isOpen(id));
+  for (const p of allPanels()) {
+    const btn = document.getElementById(`${p.id}-toggle`);
+    if (btn) btn.classList.toggle("active", isOpen(p.id));
+  }
 }
 
 // Activity rail compact (icons) vs big (icons + labels).
@@ -1611,11 +1592,13 @@ function wireChrome() {
   $("#shot-btn").onclick = captureToPrompt;
   $("#send-menu-btn").onclick = (e) => openSendPicker(e.currentTarget as HTMLElement);
 
-  $("#sessions-toggle").onclick = () => togglePanel("sessions");
+  for (const p of allPanels()) {
+    const btn = document.getElementById(`${p.id}-toggle`);
+    if (btn) btn.onclick = () => togglePanel(p.id);
+  }
   $("#actbar-toggle").onclick = () =>
     store.set({ sidebar: store.get().sidebar === "big" ? "compact" : "big" });
 
-  $("#wt-toggle").onclick = () => togglePanel("worktrees");
   $("#wt-scan").addEventListener("submit", (e) => {
     e.preventDefault();
     scanWorktrees();
@@ -1632,7 +1615,6 @@ function wireChrome() {
     refreshSessions();
   });
 
-  $("#activity-toggle").onclick = () => togglePanel("activity");
   $("#activity-clear").onclick = () =>
     invoke("activity_clear")
       .then(() => {
@@ -1655,14 +1637,12 @@ function wireChrome() {
       store.set({ activitySource: b.dataset.src as ActivitySource });
   });
 
-  $("#config-toggle").onclick = () => togglePanel("config");
   $("#config-reload").onclick = () =>
     invoke<ConfigView>("config_reload")
       .then((view) => store.set({ config: view }))
       .catch(console.error);
   $("#config-open").onclick = () => invoke("config_open").catch(console.error);
 
-  $("#files-toggle").onclick = () => togglePanel("files");
   $("#fs-up").onclick = () => {
     const f = store.get().files;
     if (f?.parent) browseTo(f.parent);
@@ -1715,16 +1695,143 @@ function wireChrome() {
   });
 }
 
+function registerBuiltin() {
+  registerPlugin({
+    id: "builtin",
+    panels: [
+      {
+        id: "sessions",
+        title: "Sessions",
+        icon: "▦",
+        iconLabel: "Sessions",
+        html: `<div class="sidebar-lists">
+          <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span>
+            <select id="session-sort" class="session-sort" title="sort sessions">
+              <option value="activity:desc">recent</option>
+              <option value="activity:asc">oldest</option>
+              <option value="name:asc">name a–z</option>
+              <option value="name:desc">name z–a</option>
+              <option value="windows:desc">windows</option>
+            </select>
+          </div>
+          <ul id="session-list" class="session-list"></ul>
+          <div class="sidebar-head">SPACES</div>
+          <ul id="workspace-list" class="session-list"></ul>
+        </div>
+        <div class="sidebar-create">
+          <div class="quick-launch">
+            <button id="ql-claude" type="button" class="ql-btn">+ claude</button>
+            <button id="ql-opencode" type="button" class="ql-btn">+ opencode</button>
+          </div>
+          <form id="new-session" class="new-session">
+            <input id="new-name" placeholder="new shell…" autocomplete="off" />
+            <button type="submit">+</button>
+          </form>
+          <details class="space-create">
+            <summary>+ new space (worktree + agent)</summary>
+            <form id="new-workspace" class="new-session new-workspace">
+              <input id="ws-repo" placeholder="repo path…" autocomplete="off" />
+              <input id="ws-branch" placeholder="branch…" autocomplete="off" />
+              <select id="ws-agent">
+                <option value="claude">claude</option>
+                <option value="opencode">opencode</option>
+              </select>
+              <button type="submit">+ space</button>
+            </form>
+          </details>
+        </div>`,
+        onShow: () => { refreshSessions(); refreshWorkspaces(); },
+      },
+      {
+        id: "worktrees",
+        title: "Worktrees",
+        icon: "⊞",
+        iconLabel: "Worktrees",
+        html: `<form id="wt-scan" class="wt-scan">
+          <input id="wt-root" value="~/projects" autocomplete="off" />
+          <button type="submit">Scan</button>
+          <button id="wt-view" type="button">Table</button>
+          <span id="wt-count" class="wt-count"></span>
+        </form>
+        <div id="wt-table" class="wt-table"></div>`,
+        onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
+      },
+      {
+        id: "files",
+        title: "Files",
+        icon: "📁",
+        iconLabel: "Files",
+        html: `<div class="fs-bar">
+          <button id="fs-up" type="button" title="Up one folder">↑</button>
+          <input id="fs-path" autocomplete="off" spellcheck="false" />
+          <button id="fs-go" type="button">Go</button>
+        </div>
+        <div class="fs-body">
+          <div id="fs-list" class="fs-list"></div>
+        </div>`,
+        onShow: () => { if (!store.get().files) browseTo(store.get().fsCwd); },
+      },
+      {
+        id: "preview",
+        title: "Preview",
+        icon: "▤",
+        iconLabel: "Preview",
+        html: `<div id="fs-preview" class="fs-preview"></div>`,
+      },
+      {
+        id: "activity",
+        title: "Activity",
+        icon: "◉",
+        iconLabel: "Activity",
+        html: `<div class="act-bar">
+          <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
+          <span id="activity-count" class="wt-count"></span>
+          <span class="spy-spacer"></span>
+          <button id="activity-record" type="button" class="act-record">○ Record</button>
+          <button id="activity-clear" type="button">Clear</button>
+        </div>
+        <div class="act-chips">
+          <button class="act-chip" data-src="all" type="button">all</button>
+          <button class="act-chip" data-src="os" type="button">screen</button>
+          <button class="act-chip" data-src="browser" type="button">browser</button>
+          <button class="act-chip" data-src="files" type="button">files</button>
+          <button class="act-chip" data-src="session" type="button">sessions</button>
+        </div>
+        <div class="fs-body">
+          <div id="activity-table" class="fs-list"></div>
+          <div id="activity-preview" class="fs-preview"></div>
+        </div>`,
+        onShow: () => { if (store.get().activity.length === 0) refreshActivity(); },
+      },
+      {
+        id: "config",
+        title: "Config",
+        icon: "⚙",
+        iconLabel: "Config",
+        html: `<div class="act-bar">
+          <span class="spy-title">config</span>
+          <span id="config-meta" class="wt-count"></span>
+          <span class="spy-spacer"></span>
+          <button id="config-reload" type="button">Reload</button>
+          <button id="config-open" type="button">Open file</button>
+        </div>
+        <div id="config-body" class="cfg-body"></div>`,
+        onShow: () => { if (!store.get().config) refreshConfig(); },
+      },
+    ],
+  });
+}
+
 async function main() {
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncSidebar, ["sidebar"]);
-  // dockview owns the layout; we only react: lazy-load a panel when it's first
-  // shown, and refit the active terminal whenever dockview re-lays-out a group.
+  // dockview owns the layout; we only react: refit the active terminal
+  // whenever dockview re-lays-out a group. Panel lazy-load is handled per-panel
+  // via PanelDef.onShow in the plugin registry.
   setDockHooks({
-    onShow: onPanelShown,
     onTermActivate: onTermShown,
     onTermClose: onTermClosed,
     onTermLayout: fitTerm,
@@ -1752,6 +1859,9 @@ async function main() {
     console.error,
   );
 
+  registerBuiltin();
+  injectPanelHtml();
+  buildActivityRail();
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
   // A dock failure must not abort the rest of boot (sessions, pty listeners).

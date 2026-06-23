@@ -3,6 +3,7 @@ mod capture;
 mod config;
 mod fs;
 mod pty;
+mod sprefa_plugin;
 mod workspace;
 mod worktrees;
 
