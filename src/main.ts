@@ -15,6 +15,8 @@ import {
   type Event,
   type FsEntry,
   type Skin,
+  type SprefaScopeItem,
+  type SprefaScopeKind,
   type WorktreeRow,
 } from "./state";
 import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
@@ -1246,6 +1248,8 @@ function renderFilesPanel() {
         },
       ],
       rowTitle: (e) => e.path,
+      // Files are draggable into the sprefa scope tray (folders aren't entities).
+      rowEntity: (e) => (e.is_dir ? undefined : { kind: "file", value: e.path }),
       // Folders open on a single click; files select + open the preview pane.
       onRow: (e) => {
         if (e.is_dir) browseTo(e.path);
@@ -1451,8 +1455,18 @@ async function wireDragDrop() {
   await getCurrentWebview().onDragDropEvent((e) => {
     cancelHide();
     if (e.payload.type !== "drop") return;
+    if (!e.payload.paths.length) return;
+    // A drop over the sprefa scope tray adds those files to the selection
+    // instead of pasting them into the terminal. position is physical px.
+    const p = e.payload.position;
+    const dpr = window.devicePixelRatio || 1;
+    const over = document.elementFromPoint(p.x / dpr, p.y / dpr);
+    if (over?.closest("#sprefa-scope")) {
+      for (const path of e.payload.paths) addScope({ kind: "file", value: path });
+      return;
+    }
     const id = activeId();
-    if (!id || !e.payload.paths.length) return;
+    if (!id) return;
     const data = e.payload.paths.map(pathArg).join(" ") + " ";
     invoke("write_pty", { id, data }).catch(console.error);
     tabs.get(id)?.term.focus();
@@ -1482,6 +1496,20 @@ function wireWindowResize() {
 function ctxItemsFor(target: HTMLElement): CtxItem[] {
   const copy = (s: string) => navigator.clipboard.writeText(s).catch(() => {});
 
+  // Any draggable entity (file/repo/rev) — result cells and fs rows carry these.
+  const ent = target.closest("[data-entity-kind]") as HTMLElement | null;
+  const entKind = ent?.dataset.entityKind as SprefaScopeKind | undefined;
+  const entVal = ent?.dataset.entityValue ?? "";
+  const scopeItems = (): CtxItem[] =>
+    ent && entKind
+      ? [
+          {
+            label: inScope(entKind, entVal) ? "Remove from selection" : "Add to selection",
+            action: () => toggleScope(entKind, entVal),
+          },
+        ]
+      : [];
+
   // A file row in the Files explorer.
   const fsRow = target.closest("#fs-list tr.dtable-row") as HTMLElement | null;
   if (fsRow?.title) {
@@ -1491,7 +1519,24 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
       { label: "Copy path", action: () => copy(path) },
       { sep: true },
       { label: "Up one folder", action: () => $("#fs-up").click() },
+      ...(ent ? [{ sep: true } as CtxItem, ...scopeItems()] : []),
     ];
+  }
+
+  // A sprefa result cell tagged as an entity.
+  if (ent && entKind) {
+    const items: CtxItem[] = [...scopeItems(), { label: "Copy", action: () => copy(entVal) }];
+    if (entKind === "file")
+      items.push({ label: "Open (paste path)", action: () => pasteToActive(pathArg(entVal) + " ") });
+    items.push(
+      { sep: true },
+      {
+        label: "Clear selection",
+        action: () => store.set({ sprefaScope: [] }),
+        disabled: store.get().sprefaScope.length === 0,
+      },
+    );
+    return items;
   }
 
   // An activity-timeline row.
@@ -1898,7 +1943,21 @@ async function loadSprefaSchema() {
     const res = await invoke<{ relations: SprefaRel[] }>("sprefa_schema", { root: sprefaRoot });
     renderSprefaSchema(res.relations);
     const builtins = res.relations.filter((r) => r.builtin).length;
-    status.textContent = `${res.relations.length} relations (${builtins} builtin)`;
+    const declared = res.relations.length - builtins;
+    status.textContent = `${res.relations.length} relations (${declared} rules, ${builtins} builtin)`;
+    // The loaded .dl program: ping reports what the daemon parsed. Prepend it
+    // above the relation tree so it's clear which rules are in effect.
+    try {
+      const ping = await invoke<{ program: string; tick_count: number }>("sprefa_ping", {
+        root: sprefaRoot,
+      });
+      const info = node("sprefa-program");
+      info.append(span("sprefa-head", "loaded program"), span("wt-label", ping.program || "(none)"));
+      info.title = ping.program;
+      tree.prepend(info);
+    } catch {
+      /* ping optional; schema already rendered */
+    }
   } catch (e) {
     tree.replaceChildren();
     status.textContent = String(e);
@@ -1925,10 +1984,115 @@ function showSprefaView(view: "schema" | "scratch") {
   if (view === "scratch") document.querySelector<HTMLTextAreaElement>("#sprefa-scratch-src")?.focus();
 }
 
-function cell(text: string, tag: "td" | "th" = "td"): HTMLElement {
+// Classify a result column as a common entity by its header name, falling back
+// to the value shape. Returns null for plain values (names, counts, lines).
+function entityKind(col: string, value: string): SprefaScopeKind | null {
+  if (/^repo$/i.test(col)) return "repo";
+  if (/rev/i.test(col)) return "rev";
+  if (/(^|_)(path|file)$/i.test(col)) return "file";
+  if (!value) return null;
+  if (value === "WORK" || /^[0-9a-f]{7,40}$/i.test(value)) return "rev";
+  if (value.includes("/") && /\.[a-z0-9]{1,8}$/i.test(value)) return "file";
+  return null;
+}
+
+// A result/header cell. When `kind` is set the cell becomes a draggable entity
+// (data-entity-* attrs shared with fs rows) and gets click-to-toggle wiring via
+// the global handlers. `entity-on` marks values already in the scope tray.
+function cell(text: string, tag: "td" | "th" = "td", kind: SprefaScopeKind | null = null): HTMLElement {
   const el = document.createElement(tag);
   el.textContent = text;
+  if (kind && tag === "td") {
+    el.dataset.entityKind = kind;
+    el.dataset.entityValue = text;
+    el.draggable = true;
+    el.className = "entity";
+    if (inScope(kind, text)) el.classList.add("entity-on");
+  }
   return el;
+}
+
+// ---- sprefa scope tray --------------------------------------------------
+
+function inScope(kind: SprefaScopeKind, value: string): boolean {
+  return store.get().sprefaScope.some((s) => s.kind === kind && s.value === value);
+}
+
+function addScope(item: SprefaScopeItem) {
+  if (inScope(item.kind, item.value)) return;
+  store.set({ sprefaScope: [...store.get().sprefaScope, item] });
+}
+
+function removeScope(kind: SprefaScopeKind, value: string) {
+  store.set({
+    sprefaScope: store.get().sprefaScope.filter((s) => !(s.kind === kind && s.value === value)),
+  });
+}
+
+function toggleScope(kind: SprefaScopeKind, value: string) {
+  if (inScope(kind, value)) removeScope(kind, value);
+  else addScope({ kind, value });
+}
+
+// Datalog facts for the active selection, prepended to a scratch query so it can
+// join: e.g. `scan(R, "WORK", g, _), sel_repo(R)`. Empty when scope is off/empty.
+function scopePrelude(): string {
+  const { sprefaScope, sprefaScopeActive } = store.get();
+  if (!sprefaScopeActive || sprefaScope.length === 0) return "";
+  const rels: Record<SprefaScopeKind, { rel: string; col: string }> = {
+    repo: { rel: "sel_repo", col: "repo" },
+    file: { rel: "sel_file", col: "path" },
+    rev: { rel: "sel_rev", col: "rev" },
+  };
+  const lines: string[] = [];
+  for (const kind of ["repo", "file", "rev"] as SprefaScopeKind[]) {
+    const vals = sprefaScope.filter((s) => s.kind === kind).map((s) => s.value);
+    if (!vals.length) continue;
+    const { rel, col } = rels[kind];
+    lines.push(`rel ${rel}(${col}: text).`);
+    for (const v of vals) lines.push(`${rel}(${JSON.stringify(v)}).`);
+  }
+  return lines.length ? lines.join("\n") + "\n\n" : "";
+}
+
+function renderSprefaScope() {
+  const host = document.querySelector<HTMLElement>("#sprefa-scope");
+  if (!host) return;
+  const { sprefaScope, sprefaScopeActive } = store.get();
+  host.replaceChildren();
+  host.classList.toggle("active", sprefaScopeActive);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "sprefa-scope-toggle" + (sprefaScopeActive ? " on" : "");
+  toggle.title = sprefaScopeActive
+    ? "scope ON — sel_repo/sel_file/sel_rev facts prepended to queries"
+    : "scope OFF — selection is a collection only";
+  toggle.textContent = sprefaScopeActive ? "scope ●" : "scope ○";
+  toggle.onclick = () => store.set({ sprefaScopeActive: !store.get().sprefaScopeActive });
+  host.appendChild(toggle);
+
+  if (sprefaScope.length === 0) {
+    host.appendChild(span("wt-meta", "drag or click files/repos/revs here"));
+    return;
+  }
+  for (const it of sprefaScope) {
+    const chip = node(`sprefa-chip kind-${it.kind}`);
+    chip.append(span("sprefa-chip-kind", it.kind), span("sprefa-chip-val", it.value));
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "sprefa-chip-x";
+    x.textContent = "×";
+    x.onclick = () => removeScope(it.kind, it.value);
+    chip.appendChild(x);
+    host.appendChild(chip);
+  }
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "sprefa-scope-clear";
+  clear.textContent = "clear";
+  clear.onclick = () => store.set({ sprefaScope: [] });
+  host.appendChild(clear);
 }
 
 function renderSprefaEval(res: SprefaEval) {
@@ -1958,9 +2122,14 @@ function renderSprefaEval(res: SprefaEval) {
     thead.appendChild(htr);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
+    // Classify columns once from the header + first non-empty value per column.
+    const kinds = q.columns.map((c, i) => {
+      const sample = q.rows.find((row) => row[i] != null);
+      return entityKind(c, sample ? String(sample[i]) : "");
+    });
     for (const r of q.rows.slice(0, 500)) {
       const tr = document.createElement("tr");
-      for (const v of r) tr.appendChild(cell(v == null ? "" : String(v)));
+      r.forEach((v, i) => tr.appendChild(cell(v == null ? "" : String(v), "td", kinds[i])));
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
@@ -1979,7 +2148,10 @@ async function runSprefaScratch() {
   localStorage.setItem(SPREFA_SCRATCH_KEY, text);
   status.textContent = "running…";
   try {
-    const res = await invoke<SprefaEval>("sprefa_eval", { root: sprefaRoot, text });
+    const res = await invoke<SprefaEval>("sprefa_eval", {
+      root: sprefaRoot,
+      text: scopePrelude() + text,
+    });
     renderSprefaEval(res);
     const n = res.results.reduce((a, q) => a + q.rows.length, 0);
     status.textContent = res.ok ? `${n} rows` : "errors";
@@ -1994,14 +2166,72 @@ async function runSprefaScratch() {
   }
 }
 
+const SPREFA_DND_MIME = "application/x-sprefa-entity";
+
+// Re-render the tray and re-mark already-rendered result cells when the scope
+// changes. Cheap class toggle avoids re-running the query.
+function refreshSprefaScopeUI() {
+  renderSprefaScope();
+  document
+    .querySelectorAll<HTMLElement>("#sprefa-scratch-out [data-entity-kind]")
+    .forEach((el) =>
+      el.classList.toggle(
+        "entity-on",
+        inScope(el.dataset.entityKind as SprefaScopeKind, el.dataset.entityValue ?? ""),
+      ),
+    );
+}
+
 let sprefaWired = false;
 function wireSprefa() {
   const input = document.querySelector<HTMLInputElement>("#sprefa-root");
   if (input) input.value = sprefaRoot;
   const scratchSrc = document.querySelector<HTMLTextAreaElement>("#sprefa-scratch-src");
   if (scratchSrc && !scratchSrc.value) scratchSrc.value = localStorage.getItem(SPREFA_SCRATCH_KEY) ?? "";
+  renderSprefaScope();
   if (sprefaWired) return;
   sprefaWired = true;
+
+  // Drag any entity (result cell or fs row) -> carry its typed value.
+  document.addEventListener("dragstart", (e) => {
+    const el = (e.target as HTMLElement)?.closest?.("[data-entity-kind]") as HTMLElement | null;
+    if (!el || !e.dataTransfer) return;
+    const item = { kind: el.dataset.entityKind, value: el.dataset.entityValue ?? "" };
+    e.dataTransfer.setData(SPREFA_DND_MIME, JSON.stringify(item));
+    e.dataTransfer.setData("text/plain", item.value);
+    e.dataTransfer.effectAllowed = "copy";
+  });
+
+  // The tray is a drop zone for in-app entity drags.
+  const tray = document.querySelector<HTMLElement>("#sprefa-scope");
+  tray?.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes(SPREFA_DND_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    tray.classList.add("drop-hover");
+  });
+  tray?.addEventListener("dragleave", () => tray.classList.remove("drop-hover"));
+  tray?.addEventListener("drop", (e) => {
+    tray.classList.remove("drop-hover");
+    const raw = e.dataTransfer?.getData(SPREFA_DND_MIME);
+    if (!raw) return;
+    e.preventDefault();
+    try {
+      const it = JSON.parse(raw) as SprefaScopeItem;
+      if (it.kind && it.value) addScope(it);
+    } catch {
+      /* malformed payload */
+    }
+  });
+
+  // Left-click an entity result cell toggles it into the selection.
+  document.querySelector("#sprefa-scratch-out")?.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement)?.closest?.("[data-entity-kind]") as HTMLElement | null;
+    if (!el) return;
+    toggleScope(el.dataset.entityKind as SprefaScopeKind, el.dataset.entityValue ?? "");
+  });
+
+  store.subscribe(() => refreshSprefaScopeUI(), ["sprefaScope", "sprefaScopeActive"]);
   const form = document.querySelector<HTMLFormElement>("#sprefa-bar");
   form?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -2040,6 +2270,7 @@ function registerSprefa() {
         </form>
         <div id="sprefa-schema" class="wt-tree"></div>
         <div id="sprefa-scratch" hidden>
+          <div id="sprefa-scope" class="sprefa-scope"></div>
           <textarea id="sprefa-scratch-src" class="sprefa-scratch-src" spellcheck="false"
             placeholder="scratch datalog — runtime-only, nothing saved.&#10;&#10;rel hot(name: text, line: int).&#10;hot(name, line) &lt;-&#10;  scan(&quot;WORK&quot;, &quot;**/*.rs&quot;, p, rev),&#10;  match(p, rev, /fn\\s+(?&lt;name&gt;[a-z_]+)/, line).&#10;? hot(name, line)."></textarea>
           <div class="sprefa-scratch-bar">

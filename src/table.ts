@@ -34,6 +34,10 @@ export interface TableOpts<T> {
   rowTitle?: (row: T) => string;
   // Class applied to a row's <tr> (e.g. to mark the selected row).
   rowClass?: (row: T) => string | undefined;
+  // Marks the row as a draggable entity (file/repo/rev) carrying a typed value.
+  // Sets draggable + data-entity-kind/value; the global dragstart/ctx handlers
+  // in main.ts key off those attrs (shared with sprefa result cells).
+  rowEntity?: (row: T) => { kind: string; value: string } | undefined;
   // Active sort + a callback to request a new one (caller persists, re-renders).
   sort?: SortState;
   onSort?: (s: SortState) => void;
@@ -74,11 +78,17 @@ export function sortRows<T>(rows: T[], columns: Column<T>[], sort?: SortState): 
 // Build one <tr> from a row. Shared by the static and virtual tables so their
 // cell/handler/selection behavior is identical.
 function buildRow<T>(row: T, opts: RowOpts<T>): HTMLTableRowElement {
-  const { columns, onRow, onRowDblClick, rowTitle, rowClass } = opts;
+  const { columns, onRow, onRowDblClick, rowTitle, rowClass, rowEntity } = opts;
   const tr = document.createElement("tr");
   tr.className = "dtable-row";
   const extra = rowClass?.(row);
   if (extra) tr.className += ` ${extra}`;
+  const ent = rowEntity?.(row);
+  if (ent) {
+    tr.draggable = true;
+    tr.dataset.entityKind = ent.kind;
+    tr.dataset.entityValue = ent.value;
+  }
   for (const col of columns) {
     const td = document.createElement("td");
     td.textContent = col.cell(row);

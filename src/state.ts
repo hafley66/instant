@@ -23,6 +23,16 @@ export type Sidebar = "compact" | "big"; // activity rail: icons-only vs labelle
 export type PanelId = string;
 
 export type WtView = "tree" | "table";
+
+// Files, repos, and revs are the common sprefa entities. A selection of them is
+// the "scope tray": a collection you build by clicking/dragging entity cells.
+// When sprefaScopeActive, runSprefaScratch prepends sel_repo/sel_file/sel_rev
+// facts so queries can join against the selection.
+export type SprefaScopeKind = "repo" | "file" | "rev";
+export interface SprefaScopeItem {
+  kind: SprefaScopeKind;
+  value: string;
+}
 export type ActivitySource = "all" | "browser" | "os" | "files" | "session";
 export type ActivityType =
   | "all"
@@ -139,6 +149,8 @@ export interface AppState {
   fsCwd: string; // Files explorer current directory (persisted)
   sidebarWidth: number; // px
   wtExpanded: string[]; // expanded tree node keys
+  sprefaScope: SprefaScopeItem[]; // selected files/repos/revs (persisted)
+  sprefaScopeActive: boolean; // when on, scope contributes sel_* facts to queries
 }
 
 // Durable slice, mirrored to localStorage. Runtime fields (active, sessions,
@@ -161,6 +173,8 @@ const PERSIST: (keyof AppState)[] = [
   "fsCwd",
   "sidebarWidth",
   "wtExpanded",
+  "sprefaScope",
+  "sprefaScopeActive",
 ];
 
 // JSON so arrays/numbers round-trip. Falls back to the raw string for values
@@ -202,6 +216,8 @@ function load(): AppState {
     fsCwd: loadKey<string>("fsCwd", "~"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
+    sprefaScope: loadKey<SprefaScopeItem[]>("sprefaScope", []),
+    sprefaScopeActive: loadKey<boolean>("sprefaScopeActive", false),
   };
 }
 
