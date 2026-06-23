@@ -1113,6 +1113,11 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 .dtable th.sorted {
   color: var(--row-active-bg);
 }
+/* Dark xp's --row-active-bg is navy (#094771): dark-on-dark as header text.
+   Use the bright type accent, matching the sprefa-meta override below. */
+body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
+  color: #4ec9b0;
+}
 .dtable-sort-mark {
   font-size: 9px;
   opacity: 0.85;
