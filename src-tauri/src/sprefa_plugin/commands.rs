@@ -26,8 +26,20 @@ fn expand(root: &str) -> PathBuf {
     PathBuf::from(root)
 }
 
-/// `<root>/.dl/daemon.sock`, with `~` expanded against $HOME.
+/// The sprefa daemon socket. The productized daemon is rootless: a singleton
+/// at the XDG home (`$XDG_STATE_HOME/sprefa` or `~/.local/state/sprefa`),
+/// mirroring sprefa's `daemon_home()`. Falls back to the legacy per-root path
+/// `<root>/.dl/daemon.sock` when the XDG socket is absent (a daemon still
+/// launched with `--root`).
 fn socket_path(root: &str) -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/state")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let xdg = base.join("sprefa").join("daemon.sock");
+    if xdg.exists() {
+        return xdg;
+    }
     expand(root).join(".dl").join("daemon.sock")
 }
 
