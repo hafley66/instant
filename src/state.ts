@@ -113,23 +113,12 @@ export interface WorktreeRow {
   dirty: boolean;
 }
 
-// Mirror of the Rust workspace::Workspace registry (backend-owned).
-export interface Workspace {
-  id: string;
-  repo: string;
-  branch: string;
-  path: string;
-  agent: string;
-  created: number;
-}
-
 export interface AppState {
   skin: Skin;
   mode: Mode;
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
-  workspaces: Workspace[]; // backend-owned, not persisted client-side
   dockJSON: unknown; // serialized dockview layout (persisted); null until first save
   sessions: Session[]; // live tmux sessions (runtime)
   sessionWorktrees: Record<string, string[]>; // session name -> worktree paths it has touched (persisted, accumulated)
@@ -152,7 +141,7 @@ export interface AppState {
   wtExpanded: string[]; // expanded tree node keys
 }
 
-// Durable slice, mirrored to localStorage. Runtime fields (active, workspaces,
+// Durable slice, mirrored to localStorage. Runtime fields (active, sessions,
 // worktrees) are excluded.
 const PERSIST: (keyof AppState)[] = [
   "skin",
@@ -193,7 +182,6 @@ function load(): AppState {
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),
-    workspaces: [],
     dockJSON: loadKey<unknown>("dockJSON", null),
     sessions: [],
     sessionWorktrees: loadKey<Record<string, string[]>>("sessionWorktrees", {}),

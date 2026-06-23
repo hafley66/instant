@@ -456,7 +456,7 @@ body[data-skin="xp"][data-mode="dark"] #dock .dv-tab.dv-active-tab {
    light face with no dark variant, so they glare white on the dark surface
    (search box, filter chips, path/scan inputs). Repaint with panel tokens. */
 body[data-skin="xp"][data-mode="dark"] :is(
-    .act-search, .fs-bar input, .wt-scan input, .new-session input, .new-workspace input
+    .act-search, .fs-bar input, .wt-scan input, .new-session input
   ) {
   background: #1b1b1d;
   color: var(--panel-fg);
@@ -552,16 +552,6 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   margin: 0;
   padding: 2px;
 }
-/* Repo/branch/agent stack vertically in the narrow sidebar. */
-.new-workspace {
-  flex-wrap: wrap;
-}
-.new-workspace input,
-.new-workspace select,
-.new-workspace button {
-  flex: 1 1 100%;
-  min-width: 0;
-}
 .session {
   display: flex;
   align-items: center;
@@ -640,24 +630,6 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 .new-session {
   border-top: none;
 }
-.space-create {
-  font-size: 11px;
-  padding: 0 4px 4px;
-}
-.space-create summary {
-  cursor: pointer;
-  opacity: 0.6;
-  padding: 3px 2px;
-  list-style: revert;
-}
-.space-create summary:hover {
-  opacity: 1;
-}
-.space-create .new-workspace {
-  padding: 4px 0 0;
-  border-top: none;
-}
-
 /* ---- terminal pane ---- */
 .term-pane {
   flex: 1;
@@ -1258,6 +1230,13 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 }
 
 /* ---- sprefa schema explorer (reuses .wt-tree / .wt-node) ---- */
+/* The tree is a direct panel child (no .wt-table wrapper), so it owns its own
+   scroll region. */
+#sprefa-schema {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .sprefa-rel > .wt-label {
   font-weight: bold;
 }
@@ -1270,8 +1249,71 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   padding-left: 24px;
   opacity: 0.85;
 }
+/* Source sites under an expanded relation: where the rel is declared / made. */
+.sprefa-src {
+  padding: 2px 0 4px;
+}
+.sprefa-src-empty {
+  padding: 2px 6px 2px 24px;
+}
+.sprefa-site {
+  padding-left: 24px;
+  gap: 6px;
+}
+.sprefa-kind {
+  flex: none;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 4px;
+  border-radius: 2px;
+  opacity: 0.9;
+}
+.sprefa-kind-decl {
+  background: var(--row-active-bg);
+  color: #fff;
+}
+.sprefa-kind-rule {
+  background: #4ec9b0;
+  color: #062;
+}
+.sprefa-kind-rust {
+  background: #b07d2b;
+  color: #fff;
+}
+/* One-shot source snippet in the preview pane. */
+.src-pre {
+  margin: 0;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+}
+.src-line {
+  padding: 0 6px;
+}
+.src-line.on {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg, #fff);
+}
+.src-n {
+  display: inline-block;
+  width: 3.2em;
+  margin-right: 8px;
+  opacity: 0.45;
+  user-select: none;
+}
 .sprefa-col > .wt-meta {
   color: var(--row-active-bg);
+}
+/* Dark xp's --row-active-bg is a navy (#094771) that vanishes as text on the
+   dark panel; use a bright type color instead. */
+body[data-skin="xp"][data-mode="dark"] .sprefa-col > .wt-meta {
+  color: #4ec9b0;
+}
+body[data-skin="xp"][data-mode="dark"] .sprefa-col {
+  opacity: 1;
 }
 
 /* Entrance animation, default (XP): quick scale-up from cursor. */

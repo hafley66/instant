@@ -16,17 +16,19 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+/// Expand a leading `~/` against $HOME.
+fn expand(root: &str) -> PathBuf {
+    if let Some(rest) = root.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return Path::new(&home).join(rest);
+        }
+    }
+    PathBuf::from(root)
+}
+
 /// `<root>/.dl/daemon.sock`, with `~` expanded against $HOME.
 fn socket_path(root: &str) -> PathBuf {
-    let expanded = if let Some(rest) = root.strip_prefix("~/") {
-        match std::env::var_os("HOME") {
-            Some(home) => Path::new(&home).join(rest),
-            None => PathBuf::from(root),
-        }
-    } else {
-        PathBuf::from(root)
-    };
-    expanded.join(".dl").join("daemon.sock")
+    expand(root).join(".dl").join("daemon.sock")
 }
 
 /// Write one Content-Length-framed message.
@@ -120,4 +122,116 @@ pub fn sprefa_ping(root: String) -> Result<Value, String> {
 #[tauri::command]
 pub fn sprefa_query_sql(root: String, sql: String, params: Vec<Value>) -> Result<Value, String> {
     rpc(&root, "query_sql", json!({"sql": sql, "params": params}))
+}
+
+/// One source site for a relation: a `.dl` declaration / rule head, or a Rust
+/// emit site for a builtin relation.
+#[derive(serde::Serialize)]
+pub struct RelSite {
+    file: String,
+    line: usize,
+    text: String,
+    kind: String, // "decl" | "rule" | "rust"
+}
+
+/// Recursively collect files with one of `exts` under `dir`, skipping heavy
+/// dirs. Bounded by `budget` to keep a large repo from stalling the scan.
+fn collect(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>, budget: &mut usize) {
+    if *budget == 0 {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for ent in entries.flatten() {
+        let p = ent.path();
+        let name = ent.file_name();
+        let name = name.to_string_lossy();
+        if p.is_dir() {
+            if matches!(name.as_ref(), "target" | "node_modules" | ".git" | "dist") {
+                continue;
+            }
+            collect(&p, exts, out, budget);
+        } else if exts.iter().any(|e| name.ends_with(e)) {
+            out.push(p);
+            *budget -= 1;
+            if *budget == 0 {
+                return;
+            }
+        }
+    }
+}
+
+/// Where a relation is produced. Scans `.dl` files under `<root>` for the
+/// `rel <name>(` declaration and `<name>(` rule heads, then `<root>/src/*.rs`
+/// for `"<name>"` literals (builtin relations are emitted from Rust). Returns
+/// up to 60 sites, decls and rule heads first.
+#[tauri::command]
+pub fn sprefa_rel_source(root: String, rel: String) -> Result<Vec<RelSite>, String> {
+    let base = expand(&root);
+    let mut sites: Vec<RelSite> = Vec::new();
+
+    let mut dl_files = Vec::new();
+    let mut budget = 4000usize;
+    collect(&base, &[".dl"], &mut dl_files, &mut budget);
+    let decl = format!("rel {rel}(");
+    let head_paren = format!("{rel}(");
+    for f in &dl_files {
+        let txt = match std::fs::read_to_string(f) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        for (i, raw) in txt.lines().enumerate() {
+            let line = raw.trim_start();
+            let kind = if line.starts_with(&decl) || line.starts_with(&format!("rel {rel} ")) {
+                Some("decl")
+            } else if line.starts_with(&head_paren) {
+                // statement head: a fact `rel(..)` or a rule `rel(..) <-`
+                Some("rule")
+            } else {
+                None
+            };
+            if let Some(k) = kind {
+                sites.push(RelSite {
+                    file: f.to_string_lossy().to_string(),
+                    line: i + 1,
+                    text: raw.trim_end().to_string(),
+                    kind: k.to_string(),
+                });
+            }
+        }
+    }
+
+    // Rust emit sites for builtins: "<name>" string literals under src/.
+    let mut rs_files = Vec::new();
+    let mut rs_budget = 2000usize;
+    collect(&base.join("src"), &[".rs"], &mut rs_files, &mut rs_budget);
+    let needle = format!("\"{rel}\"");
+    for f in &rs_files {
+        let txt = match std::fs::read_to_string(f) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        for (i, raw) in txt.lines().enumerate() {
+            if raw.contains(&needle) {
+                sites.push(RelSite {
+                    file: f.to_string_lossy().to_string(),
+                    line: i + 1,
+                    text: raw.trim().to_string(),
+                    kind: "rust".to_string(),
+                });
+            }
+        }
+    }
+
+    // decl, then rule, then rust.
+    let order = |k: &str| match k {
+        "decl" => 0,
+        "rule" => 1,
+        _ => 2,
+    };
+    sites.sort_by_key(|s| order(&s.kind));
+    sites.truncate(60);
+    Ok(sites)
 }

@@ -15,7 +15,6 @@ import {
   type Event,
   type FsEntry,
   type Skin,
-  type Workspace,
   type WorktreeRow,
 } from "./state";
 import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
@@ -73,7 +72,6 @@ function touchTab(id: string) {
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const listEl = $("#session-list") as HTMLUListElement;
-const wsListEl = $("#workspace-list") as HTMLUListElement;
 
 const sessionId = (name: string) => `s:${name}`;
 const activeId = () => store.get().active;
@@ -370,41 +368,6 @@ async function refreshSessions() {
     listEl.appendChild(li);
   }
   renderSessionActive();
-}
-
-// ---- workspaces (Spaces): a git worktree + agent, opened in its own cwd ----
-function renderWorkspaces(list: Workspace[]) {
-  wsListEl.innerHTML = "";
-  for (const ws of list) {
-    const li = document.createElement("li");
-    li.className = "session";
-    li.dataset.id = sessionId(ws.id);
-    li.innerHTML = `<span class="dot on"></span>
-      <span class="s-name">${ws.id}</span>
-      <span class="s-meta">${ws.agent}</span>`;
-    li.onclick = () => openTab(ws.id, { command: ws.agent, cwd: ws.path });
-    const rm = document.createElement("span");
-    rm.className = "tab-close";
-    rm.textContent = "×";
-    rm.title = "remove space (keeps the worktree on disk)";
-    rm.onclick = (e) => {
-      e.stopPropagation();
-      invoke("remove_workspace", { id: ws.id, deleteTree: false }).catch(
-        console.error,
-      ); // workspaces-changed refreshes the list
-    };
-    li.appendChild(rm);
-    wsListEl.appendChild(li);
-  }
-  renderSessionActive();
-}
-
-async function refreshWorkspaces() {
-  try {
-    store.set({ workspaces: await invoke<Workspace[]>("list_workspaces") });
-  } catch (e) {
-    console.error(e);
-  }
 }
 
 // ---- worktrees table: discover existing worktrees across N repo clones ----
@@ -1676,23 +1639,6 @@ function wireChrome() {
     openTab(name); // plain shell (no agent command)
     refreshSessions();
   });
-
-  $("#new-workspace").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const repoEl = $("#ws-repo") as HTMLInputElement;
-    const branchEl = $("#ws-branch") as HTMLInputElement;
-    const repo = repoEl.value.trim();
-    const branch = branchEl.value.trim();
-    const agent = ($("#ws-agent") as HTMLSelectElement).value;
-    if (!repo || !branch) return;
-    invoke<Workspace>("create_workspace", { repo, branch, agent })
-      .then((ws) => {
-        repoEl.value = "";
-        branchEl.value = "";
-        openTab(ws.id, { command: ws.agent, cwd: ws.path });
-      })
-      .catch((err) => console.error("create_workspace:", err));
-  });
 }
 
 function registerBuiltin() {
@@ -1715,8 +1661,6 @@ function registerBuiltin() {
             </select>
           </div>
           <ul id="session-list" class="session-list"></ul>
-          <div class="sidebar-head">SPACES</div>
-          <ul id="workspace-list" class="session-list"></ul>
         </div>
         <div class="sidebar-create">
           <div class="quick-launch">
@@ -1727,20 +1671,8 @@ function registerBuiltin() {
             <input id="new-name" placeholder="new shell…" autocomplete="off" />
             <button type="submit">+</button>
           </form>
-          <details class="space-create">
-            <summary>+ new space (worktree + agent)</summary>
-            <form id="new-workspace" class="new-session new-workspace">
-              <input id="ws-repo" placeholder="repo path…" autocomplete="off" />
-              <input id="ws-branch" placeholder="branch…" autocomplete="off" />
-              <select id="ws-agent">
-                <option value="claude">claude</option>
-                <option value="opencode">opencode</option>
-              </select>
-              <button type="submit">+ space</button>
-            </form>
-          </details>
         </div>`,
-        onShow: () => { refreshSessions(); refreshWorkspaces(); },
+        onShow: () => { refreshSessions(); },
       },
       {
         id: "worktrees",
@@ -1842,6 +1774,67 @@ function span(cls: string, text: string): HTMLSpanElement {
   return s;
 }
 
+type SprefaSite = { file: string; line: number; text: string; kind: string };
+
+// Open a .dl/.rs file in the preview pane, scrolled to `line` with that row
+// marked. Not store-reactive (a one-shot snippet view), so write #fs-preview
+// directly after ensuring the panel exists.
+async function openSprefaSource(file: string, line: number) {
+  ensurePreview();
+  const pane = document.querySelector<HTMLElement>("#fs-preview");
+  if (!pane) return;
+  const name = file.split("/").pop() ?? file;
+  const meta = `<div class="fs-preview-meta">${name}<br><span>${file}:${line}</span></div>`;
+  pane.innerHTML = meta + `<div class="fs-preview-empty">loading…</div>`;
+  try {
+    const text = await invoke<string>("read_text", { path: file });
+    const lines = text.split("\n");
+    const body = lines
+      .map((l, i) => {
+        const n = i + 1;
+        const cls = n === line ? "src-line on" : "src-line";
+        const num = String(n).padStart(4, " ");
+        const esc = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${esc || " "}</div>`;
+      })
+      .join("");
+    pane.innerHTML = meta + `<pre class="src-pre">${body}</pre>`;
+    pane.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
+  } catch (e) {
+    pane.innerHTML = meta + `<div class="fs-preview-empty">${e}</div>`;
+  }
+}
+
+async function loadSprefaSites(rel: string, host: HTMLElement) {
+  host.replaceChildren(node("sprefa-src-empty", span("wt-meta", "finding source…")));
+  let sites: SprefaSite[] = [];
+  try {
+    sites = await invoke<SprefaSite[]>("sprefa_rel_source", { root: sprefaRoot, rel });
+  } catch (e) {
+    host.replaceChildren(node("sprefa-src-empty", span("wt-meta", String(e))));
+    return;
+  }
+  if (sites.length === 0) {
+    host.replaceChildren(node("sprefa-src-empty", span("wt-meta", "no .dl/.rs source found")));
+    return;
+  }
+  host.replaceChildren();
+  for (const s of sites) {
+    const rel = s.file.split("/").slice(-2).join("/");
+    const row = node(
+      "wt-node sprefa-site",
+      span("sprefa-kind sprefa-kind-" + s.kind, s.kind),
+      span("wt-label", `${rel}:${s.line}`),
+    );
+    row.title = s.text;
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openSprefaSource(s.file, s.line);
+    });
+    host.appendChild(row);
+  }
+}
+
 function renderSprefaSchema(rels: SprefaRel[]) {
   const tree = document.querySelector<HTMLElement>("#sprefa-schema");
   if (!tree) return;
@@ -1859,19 +1852,28 @@ function renderSprefaSchema(rels: SprefaRel[]) {
       span("wt-label", r.name),
       span("wt-meta", String(r.columns.length)),
     );
+    const detail = node("sprefa-detail");
+    detail.hidden = true;
     const cols = node("sprefa-cols");
-    cols.hidden = true;
     for (const c of r.columns) {
       cols.appendChild(
         node("wt-node sprefa-col", span("wt-glyph", ""), span("wt-label", c.name), span("wt-meta", c.ty)),
       );
     }
+    const src = node("sprefa-src");
+    detail.appendChild(cols);
+    detail.appendChild(src);
+    let sourced = false;
     row.addEventListener("click", () => {
-      cols.hidden = !cols.hidden;
-      glyph.textContent = cols.hidden ? "▸" : "▾";
+      detail.hidden = !detail.hidden;
+      glyph.textContent = detail.hidden ? "▸" : "▾";
+      if (!detail.hidden && !sourced) {
+        sourced = true;
+        loadSprefaSites(r.name, src);
+      }
     });
     tree.appendChild(row);
-    tree.appendChild(cols);
+    tree.appendChild(detail);
   }
 }
 
@@ -1946,7 +1948,6 @@ async function main() {
     onTermClose: onTermClosed,
     onTermLayout: fitTerm,
   });
-  store.subscribe((s) => renderWorkspaces(s.workspaces), ["workspaces"]);
   store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
   store.subscribe(renderActivityPanel, [
     "activity",
@@ -1987,7 +1988,6 @@ async function main() {
   wireDragDrop();
   wireContextMenu(ctxItemsFor);
   await refreshSessions();
-  await refreshWorkspaces();
   // Scan worktrees in the background so session rows can show which worktrees
   // they've touched; re-relate sessions once the scan lands.
   scanWorktrees().then(refreshSessions).catch(() => {});
@@ -2007,11 +2007,6 @@ async function main() {
   }
   replaying = false;
   if (wantActive && tabs.has(wantActive)) activate(wantActive);
-
-  // Backend pushes the registry whenever a Space is created/removed.
-  await listen<Workspace[]>("workspaces-changed", (e) => {
-    store.set({ workspaces: e.payload });
-  });
 
   // Each new activity row (browser ingest, os capture, file open) arrives here;
   // prepend, newest-first, capped.
