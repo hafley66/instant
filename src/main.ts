@@ -1822,6 +1822,116 @@ function registerBuiltin() {
   });
 }
 
+// ---- sprefa plugin: schema explorer over the daemon socket ----
+type SprefaCol = { name: string; ty: string };
+type SprefaRel = { name: string; columns: SprefaCol[]; builtin?: boolean };
+
+const SPREFA_ROOT_KEY = "sprefa.root";
+let sprefaRoot = localStorage.getItem(SPREFA_ROOT_KEY) ?? "~/projects/sprefa/v5";
+
+function node(cls: string, ...kids: HTMLElement[]): HTMLDivElement {
+  const d = document.createElement("div");
+  d.className = cls;
+  for (const k of kids) d.appendChild(k);
+  return d;
+}
+function span(cls: string, text: string): HTMLSpanElement {
+  const s = document.createElement("span");
+  s.className = cls;
+  s.textContent = text;
+  return s;
+}
+
+function renderSprefaSchema(rels: SprefaRel[]) {
+  const tree = document.querySelector<HTMLElement>("#sprefa-schema");
+  if (!tree) return;
+  tree.replaceChildren();
+  // Declared relations first, built-ins (source/meta tables) after; each block
+  // sorted by name.
+  const sorted = [...rels].sort(
+    (a, b) => Number(!!a.builtin) - Number(!!b.builtin) || a.name.localeCompare(b.name),
+  );
+  for (const r of sorted) {
+    const glyph = span("wt-glyph", "▸");
+    const row = node(
+      "wt-node sprefa-rel" + (r.builtin ? " sprefa-builtin" : ""),
+      glyph,
+      span("wt-label", r.name),
+      span("wt-meta", String(r.columns.length)),
+    );
+    const cols = node("sprefa-cols");
+    cols.hidden = true;
+    for (const c of r.columns) {
+      cols.appendChild(
+        node("wt-node sprefa-col", span("wt-glyph", ""), span("wt-label", c.name), span("wt-meta", c.ty)),
+      );
+    }
+    row.addEventListener("click", () => {
+      cols.hidden = !cols.hidden;
+      glyph.textContent = cols.hidden ? "▸" : "▾";
+    });
+    tree.appendChild(row);
+    tree.appendChild(cols);
+  }
+}
+
+async function loadSprefaSchema() {
+  const status = document.querySelector<HTMLElement>("#sprefa-status");
+  const tree = document.querySelector<HTMLElement>("#sprefa-schema");
+  if (!tree || !status) return;
+  status.textContent = "loading…";
+  try {
+    const res = await invoke<{ relations: SprefaRel[] }>("sprefa_schema", { root: sprefaRoot });
+    renderSprefaSchema(res.relations);
+    const builtins = res.relations.filter((r) => r.builtin).length;
+    status.textContent = `${res.relations.length} relations (${builtins} builtin)`;
+  } catch (e) {
+    tree.replaceChildren();
+    status.textContent = String(e);
+  }
+}
+
+let sprefaWired = false;
+function wireSprefa() {
+  const input = document.querySelector<HTMLInputElement>("#sprefa-root");
+  if (input) input.value = sprefaRoot;
+  if (sprefaWired) return;
+  sprefaWired = true;
+  const form = document.querySelector<HTMLFormElement>("#sprefa-bar");
+  form?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (input) {
+      sprefaRoot = input.value.trim();
+      localStorage.setItem(SPREFA_ROOT_KEY, sprefaRoot);
+    }
+    loadSprefaSchema();
+  });
+}
+
+function registerSprefa() {
+  registerPlugin({
+    id: "sprefa",
+    panels: [
+      {
+        id: "sprefa",
+        title: "Sprefa",
+        icon: "∿",
+        iconLabel: "Sprefa",
+        html: `<form id="sprefa-bar" class="wt-scan">
+          <input id="sprefa-root" autocomplete="off" spellcheck="false" />
+          <button type="submit">Load</button>
+          <span id="sprefa-status" class="wt-count"></span>
+        </form>
+        <div id="sprefa-schema" class="wt-tree"></div>`,
+        onShow: () => {
+          wireSprefa();
+          loadSprefaSchema();
+        },
+      },
+    ],
+  });
+}
+
 async function main() {
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
@@ -1860,6 +1970,7 @@ async function main() {
   );
 
   registerBuiltin();
+  registerSprefa();
   injectPanelHtml();
   buildActivityRail();
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;

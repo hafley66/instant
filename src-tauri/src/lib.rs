@@ -466,6 +466,9 @@ pub fn run() {
             fs::list_dir,
             fs::read_image,
             fs::read_text,
+            sprefa_plugin::commands::sprefa_schema,
+            sprefa_plugin::commands::sprefa_ping,
+            sprefa_plugin::commands::sprefa_query_sql,
             screenshot,
         ])
         .run(tauri::generate_context!())
