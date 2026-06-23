@@ -1789,16 +1789,24 @@ async function openSprefaSource(file: string, line: number) {
   try {
     const text = await invoke<string>("read_text", { path: file });
     const lines = text.split("\n");
+    // Window ±12 lines around the target so a big file doesn't become an
+    // endless scroll; the snippet centers on the rule.
+    const PAD = 12;
+    const lo = Math.max(0, line - 1 - PAD);
+    const hi = Math.min(lines.length, line - 1 + PAD + 1);
     const body = lines
+      .slice(lo, hi)
       .map((l, i) => {
-        const n = i + 1;
+        const n = lo + i + 1;
         const cls = n === line ? "src-line on" : "src-line";
         const num = String(n).padStart(4, " ");
         const esc = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${esc || " "}</div>`;
       })
       .join("");
-    pane.innerHTML = meta + `<pre class="src-pre">${body}</pre>`;
+    const head = lo > 0 ? `<div class="src-elide">… ${lo} lines above</div>` : "";
+    const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} lines below</div>` : "";
+    pane.innerHTML = meta + `<pre class="src-pre">${head}${body}${tail}</pre>`;
     pane.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
   } catch (e) {
     pane.innerHTML = meta + `<div class="fs-preview-empty">${e}</div>`;
@@ -1815,7 +1823,9 @@ async function loadSprefaSites(rel: string, host: HTMLElement) {
     return;
   }
   if (sites.length === 0) {
-    host.replaceChildren(node("sprefa-src-empty", span("wt-meta", "no .dl/.rs source found")));
+    host.replaceChildren(
+      node("sprefa-src-empty", span("wt-meta", "builtin · emitted by the engine (no .dl rule)")),
+    );
     return;
   }
   host.replaceChildren();
@@ -1861,7 +1871,9 @@ function renderSprefaSchema(rels: SprefaRel[]) {
       );
     }
     const src = node("sprefa-src");
+    detail.appendChild(span("sprefa-head", "columns"));
     detail.appendChild(cols);
+    detail.appendChild(span("sprefa-head", "defined in"));
     detail.appendChild(src);
     let sourced = false;
     row.addEventListener("click", () => {
@@ -1893,10 +1905,101 @@ async function loadSprefaSchema() {
   }
 }
 
+type SprefaQueryResult = { rel: string; columns: string[]; rows: unknown[][] };
+type SprefaDiag = { severity: string; code?: string; message: string };
+type SprefaEval = { ok: boolean; results: SprefaQueryResult[]; diagnostics: SprefaDiag[] };
+
+const SPREFA_SCRATCH_KEY = "sprefa.scratch";
+
+function showSprefaView(view: "schema" | "scratch") {
+  const schema = document.querySelector<HTMLElement>("#sprefa-schema");
+  const scratch = document.querySelector<HTMLElement>("#sprefa-scratch");
+  if (schema) schema.hidden = view !== "schema";
+  if (scratch) scratch.hidden = view !== "scratch";
+  document
+    .querySelector("#sprefa-tab-schema")
+    ?.classList.toggle("on", view === "schema");
+  document
+    .querySelector("#sprefa-tab-scratch")
+    ?.classList.toggle("on", view === "scratch");
+  if (view === "scratch") document.querySelector<HTMLTextAreaElement>("#sprefa-scratch-src")?.focus();
+}
+
+function cell(text: string, tag: "td" | "th" = "td"): HTMLElement {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  return el;
+}
+
+function renderSprefaEval(res: SprefaEval) {
+  const out = document.querySelector<HTMLElement>("#sprefa-scratch-out");
+  if (!out) return;
+  out.replaceChildren();
+  const errs = res.diagnostics.filter((d) => d.severity === "error");
+  for (const d of errs) {
+    const row = node("sprefa-diag err");
+    row.textContent = `${d.code ? `[${d.code}] ` : ""}${d.message}`;
+    out.appendChild(row);
+  }
+  if (!res.ok) return;
+  if (res.results.length === 0) {
+    out.appendChild(node("sprefa-src-empty", span("wt-meta", "no ? query — add e.g. ? hot(name, line).")));
+    return;
+  }
+  for (const q of res.results) {
+    const head = node("sprefa-qhead");
+    head.append(span("wt-label", `? ${q.rel}`), span("wt-meta", `${q.rows.length} rows`));
+    out.appendChild(head);
+    const table = document.createElement("table");
+    table.className = "dtable sprefa-qtable";
+    const thead = document.createElement("thead");
+    const htr = document.createElement("tr");
+    for (const c of q.columns) htr.appendChild(cell(c, "th"));
+    thead.appendChild(htr);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const r of q.rows.slice(0, 500)) {
+      const tr = document.createElement("tr");
+      for (const v of r) tr.appendChild(cell(v == null ? "" : String(v)));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    out.appendChild(table);
+    if (q.rows.length > 500) {
+      out.appendChild(node("sprefa-src-empty", span("wt-meta", `… ${q.rows.length - 500} more rows`)));
+    }
+  }
+}
+
+async function runSprefaScratch() {
+  const src = document.querySelector<HTMLTextAreaElement>("#sprefa-scratch-src");
+  const status = document.querySelector<HTMLElement>("#sprefa-scratch-status");
+  if (!src || !status) return;
+  const text = src.value;
+  localStorage.setItem(SPREFA_SCRATCH_KEY, text);
+  status.textContent = "running…";
+  try {
+    const res = await invoke<SprefaEval>("sprefa_eval", { root: sprefaRoot, text });
+    renderSprefaEval(res);
+    const n = res.results.reduce((a, q) => a + q.rows.length, 0);
+    status.textContent = res.ok ? `${n} rows` : "errors";
+  } catch (e) {
+    const out = document.querySelector<HTMLElement>("#sprefa-scratch-out");
+    if (out) {
+      const row = node("sprefa-diag err");
+      row.textContent = String(e);
+      out.replaceChildren(row);
+    }
+    status.textContent = "failed";
+  }
+}
+
 let sprefaWired = false;
 function wireSprefa() {
   const input = document.querySelector<HTMLInputElement>("#sprefa-root");
   if (input) input.value = sprefaRoot;
+  const scratchSrc = document.querySelector<HTMLTextAreaElement>("#sprefa-scratch-src");
+  if (scratchSrc && !scratchSrc.value) scratchSrc.value = localStorage.getItem(SPREFA_SCRATCH_KEY) ?? "";
   if (sprefaWired) return;
   sprefaWired = true;
   const form = document.querySelector<HTMLFormElement>("#sprefa-bar");
@@ -1907,6 +2010,15 @@ function wireSprefa() {
       localStorage.setItem(SPREFA_ROOT_KEY, sprefaRoot);
     }
     loadSprefaSchema();
+  });
+  document.querySelector("#sprefa-tab-schema")?.addEventListener("click", () => showSprefaView("schema"));
+  document.querySelector("#sprefa-tab-scratch")?.addEventListener("click", () => showSprefaView("scratch"));
+  document.querySelector("#sprefa-run")?.addEventListener("click", runSprefaScratch);
+  scratchSrc?.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      runSprefaScratch();
+    }
   });
 }
 
@@ -1922,9 +2034,20 @@ function registerSprefa() {
         html: `<form id="sprefa-bar" class="wt-scan">
           <input id="sprefa-root" autocomplete="off" spellcheck="false" />
           <button type="submit">Load</button>
+          <button id="sprefa-tab-schema" type="button" class="sprefa-tab on">Schema</button>
+          <button id="sprefa-tab-scratch" type="button" class="sprefa-tab">Scratch</button>
           <span id="sprefa-status" class="wt-count"></span>
         </form>
-        <div id="sprefa-schema" class="wt-tree"></div>`,
+        <div id="sprefa-schema" class="wt-tree"></div>
+        <div id="sprefa-scratch" hidden>
+          <textarea id="sprefa-scratch-src" class="sprefa-scratch-src" spellcheck="false"
+            placeholder="scratch datalog — runtime-only, nothing saved.&#10;&#10;rel hot(name: text, line: int).&#10;hot(name, line) &lt;-&#10;  scan(&quot;WORK&quot;, &quot;**/*.rs&quot;, p, rev),&#10;  match(p, rev, /fn\\s+(?&lt;name&gt;[a-z_]+)/, line).&#10;? hot(name, line)."></textarea>
+          <div class="sprefa-scratch-bar">
+            <button id="sprefa-run" type="button">Run ⌘↵</button>
+            <span id="sprefa-scratch-status" class="wt-count"></span>
+          </div>
+          <div id="sprefa-scratch-out" class="sprefa-scratch-out"></div>
+        </div>`,
         onShow: () => {
           wireSprefa();
           loadSprefaSchema();

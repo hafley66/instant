@@ -468,6 +468,7 @@ pub fn run() {
             fs::read_text,
             sprefa_plugin::commands::sprefa_schema,
             sprefa_plugin::commands::sprefa_ping,
+            sprefa_plugin::commands::sprefa_eval,
             sprefa_plugin::commands::sprefa_query_sql,
             sprefa_plugin::commands::sprefa_rel_source,
             screenshot,

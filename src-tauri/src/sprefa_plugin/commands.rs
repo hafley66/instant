@@ -118,6 +118,14 @@ pub fn sprefa_ping(root: String) -> Result<Value, String> {
     rpc(&root, "ping", json!({}))
 }
 
+/// Evaluate a scratch `.dl` snippet against a throwaway engine (runtime-only
+/// relations; nothing persists). Returns `{ok, results: [{rel, columns, rows}],
+/// diagnostics: [...]}`.
+#[tauri::command]
+pub fn sprefa_eval(root: String, text: String) -> Result<Value, String> {
+    rpc(&root, "eval", json!({ "text": text }))
+}
+
 /// Raw parameterized SQL: `{rows: [[Value]]}`.
 #[tauri::command]
 pub fn sprefa_query_sql(root: String, sql: String, params: Vec<Value>) -> Result<Value, String> {
@@ -203,35 +211,15 @@ pub fn sprefa_rel_source(root: String, rel: String) -> Result<Vec<RelSite>, Stri
         }
     }
 
-    // Rust emit sites for builtins: "<name>" string literals under src/.
-    let mut rs_files = Vec::new();
-    let mut rs_budget = 2000usize;
-    collect(&base.join("src"), &[".rs"], &mut rs_files, &mut rs_budget);
-    let needle = format!("\"{rel}\"");
-    for f in &rs_files {
-        let txt = match std::fs::read_to_string(f) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        for (i, raw) in txt.lines().enumerate() {
-            if raw.contains(&needle) {
-                sites.push(RelSite {
-                    file: f.to_string_lossy().to_string(),
-                    line: i + 1,
-                    text: raw.trim().to_string(),
-                    kind: "rust".to_string(),
-                });
-            }
-        }
-    }
-
-    // decl, then rule, then rust.
+    // No Rust fallback: builtin relations (`_file`, `call_site`, …) are emitted
+    // by the engine and have no single definition line; grepping the bare name
+    // returns scattered, meaningless string-literal hits. An empty result means
+    // "engine-emitted builtin, no .dl rule" — the frontend says so.
     let order = |k: &str| match k {
         "decl" => 0,
-        "rule" => 1,
-        _ => 2,
+        _ => 1, // rule
     };
     sites.sort_by_key(|s| order(&s.kind));
-    sites.truncate(60);
+    sites.truncate(20);
     Ok(sites)
 }

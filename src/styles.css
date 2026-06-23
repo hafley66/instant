@@ -506,20 +506,23 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 
 /* ---- window resize grips ---- */
 /* Decorations are off; these overlay the four edges + corners and start a
-   native resize drag. 6px hit zone, corners win via larger size + higher z. */
+   native resize drag. #app is inset 6px (transparent shadow margin), so the
+   grips reach OUT past #app's edge with a negative offset to cover the visible
+   window border that sits in that margin. ~10px edge zone + bigger corners that
+   win via higher z. */
 .rz {
   position: absolute;
   z-index: 50;
   -webkit-app-region: no-drag;
 }
-.rz[data-dir="North"]  { top: 0; left: 6px; right: 6px; height: 6px; cursor: ns-resize; }
-.rz[data-dir="South"]  { bottom: 0; left: 6px; right: 6px; height: 6px; cursor: ns-resize; }
-.rz[data-dir="West"]   { left: 0; top: 6px; bottom: 6px; width: 6px; cursor: ew-resize; }
-.rz[data-dir="East"]   { right: 0; top: 6px; bottom: 6px; width: 6px; cursor: ew-resize; }
-.rz[data-dir="NorthWest"] { top: 0; left: 0; width: 8px; height: 8px; cursor: nwse-resize; z-index: 51; }
-.rz[data-dir="NorthEast"] { top: 0; right: 0; width: 8px; height: 8px; cursor: nesw-resize; z-index: 51; }
-.rz[data-dir="SouthWest"] { bottom: 0; left: 0; width: 8px; height: 8px; cursor: nesw-resize; z-index: 51; }
-.rz[data-dir="SouthEast"] { bottom: 0; right: 0; width: 8px; height: 8px; cursor: nwse-resize; z-index: 51; }
+.rz[data-dir="North"]  { top: -6px; left: 10px; right: 10px; height: 12px; cursor: ns-resize; }
+.rz[data-dir="South"]  { bottom: -6px; left: 10px; right: 10px; height: 12px; cursor: ns-resize; }
+.rz[data-dir="West"]   { left: -6px; top: 10px; bottom: 10px; width: 12px; cursor: ew-resize; }
+.rz[data-dir="East"]   { right: -6px; top: 10px; bottom: 10px; width: 12px; cursor: ew-resize; }
+.rz[data-dir="NorthWest"] { top: -6px; left: -6px; width: 16px; height: 16px; cursor: nwse-resize; z-index: 51; }
+.rz[data-dir="NorthEast"] { top: -6px; right: -6px; width: 16px; height: 16px; cursor: nesw-resize; z-index: 51; }
+.rz[data-dir="SouthWest"] { bottom: -6px; left: -6px; width: 16px; height: 16px; cursor: nesw-resize; z-index: 51; }
+.rz[data-dir="SouthEast"] { bottom: -6px; right: -6px; width: 16px; height: 16px; cursor: nwse-resize; z-index: 51; }
 .sidebar-head {
   font-size: 10px;
   letter-spacing: 1px;
@@ -1249,6 +1252,76 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   padding-left: 24px;
   opacity: 0.85;
 }
+/* Schema/Scratch toggle in the sprefa bar. */
+.sprefa-tab.on {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg, #fff);
+}
+/* Scratch datalog editor + results. */
+#sprefa-scratch {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sprefa-scratch-src {
+  flex: none;
+  height: 140px;
+  resize: vertical;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 6px;
+  border: none;
+  border-bottom: var(--frame-w) solid var(--frame);
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+}
+body[data-skin="xp"][data-mode="dark"] .sprefa-scratch-src {
+  background: #1b1b1d;
+}
+.sprefa-scratch-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-bottom: var(--frame-w) solid var(--frame);
+}
+.sprefa-scratch-out {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+.sprefa-qhead {
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px 2px;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+}
+.sprefa-qhead > .wt-label {
+  font-weight: bold;
+}
+.sprefa-qtable {
+  margin: 0 0 8px;
+}
+.sprefa-diag.err {
+  padding: 4px 6px;
+  font-size: 11px;
+  color: #e06c75;
+  white-space: pre-wrap;
+}
+/* Section labels inside an expanded relation ("columns" / "defined in"). */
+.sprefa-head {
+  display: block;
+  padding: 4px 6px 1px 12px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.45;
+}
 /* Source sites under an expanded relation: where the rel is declared / made. */
 .sprefa-src {
   padding: 2px 0 4px;
@@ -1288,10 +1361,18 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   font-size: 11px;
   line-height: 1.45;
   white-space: pre;
-  overflow: auto;
+  /* The preview pane (.fs-preview) owns vertical scroll; only take horizontal
+     here so long lines don't wrap. Avoids a nested vertical scrollbar. */
+  overflow-x: auto;
+  overflow-y: visible;
 }
 .src-line {
   padding: 0 6px;
+}
+.src-elide {
+  padding: 1px 6px;
+  opacity: 0.4;
+  font-style: italic;
 }
 .src-line.on {
   background: var(--row-active-bg);
