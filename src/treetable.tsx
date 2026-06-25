@@ -26,6 +26,8 @@ export interface TreeColumn<T> {
   sortValue?: (row: T) => string | number | null | undefined;
   // The one column that carries the tree twisty + depth indent (tree tables).
   tree?: boolean;
+  // Action cells (pin, star): clicks here must NOT trigger the row's onClick.
+  noRowClick?: boolean;
 }
 
 export interface TreeTableProps<T> {
@@ -161,7 +163,16 @@ function TableRow<T>(props: {
       draggable={ent ? true : undefined}
       data-entity-kind={ent?.kind}
       data-entity-value={ent?.value}
-      onClick={props.onRowClick ? (e) => props.onRowClick!(data, e) : undefined}
+      onClick={
+        props.onRowClick
+          ? (e) => {
+              // Bail if the click landed in an action cell (pin/star). A belt to
+              // stopPropagation's braces: survives any synthetic-event quirk.
+              if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
+              props.onRowClick!(data, e);
+            }
+          : undefined
+      }
       onDoubleClick={
         props.onRowDoubleClick ? (e) => props.onRowDoubleClick!(data, e) : undefined
       }
@@ -176,7 +187,11 @@ function TableRow<T>(props: {
       }
     >
       {columns.map((c) => (
-        <td key={c.id} className={c.cellClass?.(data)}>
+        <td
+          key={c.id}
+          className={c.cellClass?.(data)}
+          data-no-row-click={c.noRowClick ? "" : undefined}
+        >
           {c.tree ? (
             <span
               className="tt-tree"

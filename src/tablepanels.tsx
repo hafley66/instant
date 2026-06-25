@@ -90,6 +90,7 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
   {
     id: "pin",
     header: "",
+    noRowClick: true,
     cell: (r) => <PinCell row={r} />,
   },
 ];
@@ -111,7 +112,12 @@ function PinCell({ row }: { row: TmuxRow }) {
 
 export function TmuxPanelV2() {
   useApp(); // re-render on store change
-  useEffect(() => tmuxBridge?.onShow?.(), []);
+  // Block body: onShow returns a Promise (refreshSessions); returning it from the
+  // effect would make React treat the Promise as the cleanup fn and call it on
+  // unmount -> "destroy is not a function". Return nothing.
+  useEffect(() => {
+    tmuxBridge?.onShow?.();
+  }, []);
   const rows = tmuxBridge?.rows() ?? [];
   return (
     <div className="panel-scroll">
@@ -162,6 +168,7 @@ const WT_COLUMNS: TreeColumn<WtRow>[] = [
   {
     id: "star",
     header: "",
+    noRowClick: true,
     cellClass: (r) => (r.fav ? "wt-star on" : "wt-star"),
     sortValue: (r) => (r.fav ? 0 : 1),
     cell: (r) => <StarCell row={r} />,
@@ -213,7 +220,9 @@ function StarCell({ row }: { row: WtRow }) {
 
 export function WorktreesPanelV2() {
   useApp();
-  useEffect(() => wtBridge?.onShow?.(), []);
+  useEffect(() => {
+    wtBridge?.onShow?.();
+  }, []);
   const rows = wtBridge?.rows() ?? [];
   return (
     <div className="panel-scroll">

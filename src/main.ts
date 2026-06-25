@@ -262,6 +262,9 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.open", keys: ["$mod+t"], run: openTabAtPwd },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], run: reopenLastTab },
   { id: "tab.pin", keys: ["$mod+Shift+p"], run: togglePinActiveTab },
+  // Reload the webview — recover from a crashed React render without restarting
+  // the app (tmux sessions outlive the reload, so nothing is lost).
+  { id: "app.reload", keys: ["$mod+r"], run: () => location.reload() },
   // cmd/ctrl+1..9 jump to a tab (9 = last).
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.goto${i + 1}`,
