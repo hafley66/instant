@@ -1369,6 +1369,11 @@ body[data-skin="xp"][data-mode="dark"] .s-proc {
 .wt-actions:focus-within {
   opacity: 1;
 }
+/* v2 tree-data rows are .dtable-row (not .wt-node): reveal actions/star on hover. */
+.dtable-row:hover .wt-actions,
+.dtable-row .wt-actions:focus-within {
+  opacity: 1;
+}
 .wt-act {
   font-family: inherit;
   font-size: 10px;
@@ -1392,7 +1397,8 @@ body[data-skin="xp"][data-mode="dark"] .s-proc {
   width: 14px;
   text-align: center;
 }
-.wt-node:hover .wt-star {
+.wt-node:hover .wt-star,
+.dtable-row:hover .wt-star {
   opacity: 0.7;
 }
 .wt-star.on,

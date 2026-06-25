@@ -42,7 +42,7 @@ import {
   setWorktreesPanel,
   setFilesPanel,
   type TmuxRow,
-  type WtRow,
+  type WtTreeRow,
   type FsRow,
 } from "./tablepanels";
 import {
@@ -861,25 +861,45 @@ function tmuxRows(): TmuxRow[] {
   });
 }
 
-function wtRows(): WtRow[] {
-  return focusRows(store.get().worktrees).map((r) => ({
-    worktree: r.worktree,
-    origin: prettyOrigin(r.origin),
-    clone: baseName(r.clone),
-    worktreeLabel: r.is_main ? "(main)" : baseName(r.worktree),
-    branch: r.branch,
-    head: r.head,
-    pathDisplay: tildify(r.worktree),
-    dirty: r.dirty,
-    fav: isFavWorktree(r.worktree),
+// Display-ready tree rows (org → clone → worktree-leaf) for the react-table
+// worktrees panel. Mirrors the v1 renderTree hierarchy via buildTree; the React
+// panel indents the name column + chevron (MUI-X tree-data style) and renders
+// the per-row star / open / resume / +worktree actions from these fields.
+function wtTreeRows(): WtTreeRow[] {
+  const rows = focusRows(store.get().worktrees);
+  const adding = store.get().wtAddingClone;
+  return buildTree(rows).map((org) => ({
+    id: `o:${org.origin}`,
+    kind: "org",
+    label: prettyOrigin(org.origin),
+    meta: `${org.clones.length} clone${org.clones.length > 1 ? "s" : ""}`,
+    children: org.clones.map((cl) => ({
+      id: `o:${org.origin}|c:${cl.clone}`,
+      kind: "clone",
+      label: baseName(cl.clone),
+      meta: cl.branch ? `@${cl.branch}` : "",
+      clonePath: cl.clone,
+      adding: adding === cl.clone,
+      children: cl.worktrees.map((wt) => ({
+        id: wt.worktree,
+        kind: "leaf",
+        label: wt.is_main ? "(main)" : baseName(wt.worktree),
+        clonePath: cl.clone,
+        worktree: wt.worktree,
+        branch: wt.branch,
+        head: wt.head,
+        pathDisplay: tildify(wt.worktree),
+        dirty: wt.dirty,
+        fav: isFavWorktree(wt.worktree),
+        resumeNames: sessionsForWorktree(wt.worktree).map((s) => s.name),
+      })),
+    })),
   }));
 }
 
-// gesture helper bound to a derived WtRow (mirrors renderFlatTable's gFor).
-const wtGestures = (r: WtRow) => {
-  const src = store.get().worktrees.find((w) => w.worktree === r.worktree);
-  return leafGestures(src?.clone ?? "", r.branch, r.worktree, r.dirty);
-};
+// Gestures for a leaf tree row (single/dbl/right-click → agent chooser).
+const wtLeafGestures = (r: WtTreeRow) =>
+  leafGestures(r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty);
 
 function registerV2Bridges() {
   setTmuxPanel({
@@ -899,11 +919,7 @@ function registerV2Bridges() {
     },
   });
   setWorktreesPanel({
-    rows: wtRows,
-    onSingle: (r, x, y) => wtGestures(r).onSingle(x, y),
-    onDouble: (r) => wtGestures(r).onDouble(),
-    onContext: (r, x, y) => wtGestures(r).onContext(x, y),
-    onToggleFav: (r) => toggleFavWorktree(r.worktree),
+    treeRows: wtTreeRows,
     onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
     scanRoot: () => store.get().scanRoot,
     scan: (root) => {
@@ -919,6 +935,18 @@ function registerV2Bridges() {
         total: worktrees.length,
       };
     },
+    // leaf gestures (single/dbl/right-click → chooser) + the open ▾ anchored menu.
+    onLeafSingle: (r, x, y) => wtLeafGestures(r).onSingle(x, y),
+    onLeafDouble: (r) => wtLeafGestures(r).onDouble(),
+    onLeafContext: (r, x, y) => wtLeafGestures(r).onContext(x, y),
+    onLeafMenu: (r, x, y) =>
+      showAgentMenu(x, y, r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty),
+    onResume: (name) => openTab(name),
+    toggleFav: (path) => toggleFavWorktree(path),
+    // inline "+ worktree" branch input on a clone row.
+    revealAdd: (clonePath) => store.set({ wtAddingClone: clonePath }),
+    submitAdd: (clonePath, branch) => submitAddWorktree(clonePath, branch),
+    cancelAdd: () => store.set({ wtAddingClone: null }),
   });
 }
 
@@ -971,18 +999,16 @@ function sessionsForWorktree(wtPath: string): Session[] {
   );
 }
 
-// Which checkout row is mid-add (its branch input is showing), by clone path.
-let wtAddingClone: string | null = null;
-
+// Which checkout row is mid-add (its branch input is showing) lives in the store
+// (store.wtAddingClone) so the React worktrees tree re-renders when it changes.
 function submitAddWorktree(clone: string, branch: string) {
   if (!branch) {
-    wtAddingClone = null;
-    renderWorktreesPanel();
+    store.set({ wtAddingClone: null });
     return;
   }
   invoke<string>("add_worktree", { repo: clone, branch })
     .then(() => {
-      wtAddingClone = null;
+      store.set({ wtAddingClone: null });
       return scanWorktrees(); // rescan picks up the new worktree row
     })
     .catch((e) => showError("worktree", String(e)));
@@ -1148,7 +1174,7 @@ function renderTree(rows: WorktreeRow[]) {
     for (const cl of org.clones) {
       const ckey = `${okey}|c:${cl.clone}`;
       const cOpen = wtExpanded.has(ckey);
-      const adding = wtAddingClone === cl.clone;
+      const adding = store.get().wtAddingClone === cl.clone;
       wrap.appendChild(
         treeNode({
           depth: 1,
@@ -1166,7 +1192,7 @@ function renderTree(rows: WorktreeRow[]) {
                   title: "add a git worktree under this checkout",
                   cls: "wt-add",
                   onClick: () => {
-                    wtAddingClone = cl.clone;
+                    store.set({ wtAddingClone: cl.clone });
                     if (!cOpen) toggle(ckey); // expand so the new row is visible
                     else renderWorktreesPanel();
                   },
@@ -1177,8 +1203,7 @@ function renderTree(rows: WorktreeRow[]) {
                 placeholder: "branch name…",
                 onSubmit: (v) => submitAddWorktree(cl.clone, v),
                 onCancel: () => {
-                  wtAddingClone = null;
-                  renderWorktreesPanel();
+                  store.set({ wtAddingClone: null });
                 },
               }
             : undefined,

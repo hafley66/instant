@@ -173,6 +173,7 @@ export interface AppState {
   wtExpanded: string[]; // expanded tree node keys
   wtFavorites: string[]; // starred worktree paths (persisted)
   wtFocus: boolean; // when on, the worktree view shows only starred rows
+  wtAddingClone: string | null; // clone path whose inline "+ worktree" branch input is open (runtime)
   wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
   autoResume: boolean; // when on, launching an agent resumes its latest session in that cwd (persisted, default true)
   pinnedSessions: string[]; // tmux session names pinned to the top of the list (persisted)
@@ -261,6 +262,7 @@ function load(): AppState {
     wtExpanded: loadKey<string[]>("wtExpanded", []),
     wtFavorites: loadKey<string[]>("wtFavorites", []),
     wtFocus: loadKey<boolean>("wtFocus", false),
+    wtAddingClone: null,
     wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
     autoResume: loadKey<boolean>("autoResume", true),
     pinnedSessions: loadKey<string[]>("pinnedSessions", []),

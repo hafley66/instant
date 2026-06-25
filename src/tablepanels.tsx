@@ -4,7 +4,7 @@
 // already is); main.ts injects them through these bridges, keeping this file
 // purely presentational. useApp() subscribes the panels to the store so they
 // re-render when sessions/worktrees/sort change.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "./useStore";
 import { TreeTable, type TreeColumn } from "./treetable";
 import type { SortingState } from "@tanstack/react-table";
@@ -189,26 +189,31 @@ export function TmuxPanelV2() {
   );
 }
 
-// ---- worktrees v2 (flat) ----
-// Display-ready row: main.ts derives every label so this file stays presentational.
-export interface WtRow {
-  worktree: string; // disk path (stable id + gesture key)
-  origin: string; // prettyOrigin(org/repo)
-  clone: string; // baseName(clone)
-  worktreeLabel: string; // "(main)" or baseName
-  branch: string;
-  head: string;
-  pathDisplay: string; // tildified path
-  dirty: boolean;
-  fav: boolean;
+// ---- worktrees v2 (tree-data) ----
+// One indented table (org → clone → worktree-leaf), MUI-X tree-data style: the
+// name column carries the chevron + indent, other columns + actions fill on
+// leaves. main.ts (wtTreeRows) derives every label so this file is presentational.
+export interface WtTreeRow {
+  id: string;
+  kind: "org" | "clone" | "leaf";
+  label: string;
+  meta?: string; // org: "N clones" · clone: "@branch"
+  // leaf
+  clonePath?: string; // source clone (gestures + add key)
+  worktree?: string; // disk path (gesture key + drag entity)
+  branch?: string;
+  head?: string;
+  pathDisplay?: string;
+  dirty?: boolean;
+  fav?: boolean;
+  resumeNames?: string[]; // live sessions sitting in this worktree
+  // clone
+  adding?: boolean; // its inline "+ worktree" branch input is open
+  children?: WtTreeRow[];
 }
 
 export interface WtBridge {
-  rows: () => WtRow[];
-  onSingle: (r: WtRow, x: number, y: number) => void;
-  onDouble: (r: WtRow) => void;
-  onContext: (r: WtRow, x: number, y: number) => void;
-  onToggleFav: (r: WtRow) => void;
+  treeRows: () => WtTreeRow[];
   onShow?: () => void;
   // toolbar
   scanRoot: () => string;
@@ -216,6 +221,17 @@ export interface WtBridge {
   focus: () => boolean;
   toggleFocus: () => void;
   counts: () => { shown: number; total: number };
+  // leaf gestures + actions
+  onLeafSingle: (r: WtTreeRow, x: number, y: number) => void;
+  onLeafDouble: (r: WtTreeRow) => void;
+  onLeafContext: (r: WtTreeRow, x: number, y: number) => void;
+  onLeafMenu: (r: WtTreeRow, x: number, y: number) => void; // open ▾ anchored chooser
+  onResume: (name: string) => void;
+  toggleFav: (worktree: string) => void;
+  // clone "+ worktree" inline add
+  revealAdd: (clonePath: string) => void;
+  submitAdd: (clonePath: string, branch: string) => void;
+  cancelAdd: () => void;
 }
 
 let wtBridge: WtBridge | null = null;
@@ -223,59 +239,132 @@ export function setWorktreesPanel(b: WtBridge) {
   wtBridge = b;
 }
 
-const WT_COLUMNS: TreeColumn<WtRow>[] = [
-  {
-    id: "star",
-    header: "",
-    noRowClick: true,
-    cellClass: (r) => (r.fav ? "wt-star on" : "wt-star"),
-    sortValue: (r) => (r.fav ? 0 : 1),
-    cell: (r) => <StarCell row={r} />,
-  },
-  { id: "origin", header: "org/repo", sortValue: (r) => r.origin, cell: (r) => r.origin },
-  { id: "clone", header: "clone", sortValue: (r) => r.clone, cell: (r) => r.clone },
-  {
-    id: "worktree",
-    header: "worktree",
-    sortValue: (r) => r.worktreeLabel,
-    cell: (r) => r.worktreeLabel,
-  },
-  { id: "branch", header: "branch", sortValue: (r) => r.branch, cell: (r) => r.branch },
-  { id: "head", header: "head", sortValue: (r) => r.head, cell: (r) => r.head },
+// Tree (name) column: star + label on leaves, label + dim meta on org/clone.
+function WtNameCell({ row }: { row: WtTreeRow }) {
+  if (row.kind === "leaf") {
+    return (
+      <>
+        <span
+          className={"wt-star" + (row.fav ? " on" : "")}
+          title={row.fav ? "unfavorite" : "favorite"}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (row.worktree) wtBridge?.toggleFav(row.worktree);
+          }}
+        >
+          {row.fav ? "★" : "☆"}
+        </span>
+        <span className="wt-label">{row.label}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="wt-label">{row.label}</span>
+      {row.meta ? <span className="wt-meta">{row.meta}</span> : null}
+    </>
+  );
+}
+
+// Inline branch input shown on a clone row mid-add. Enter commits, Esc cancels.
+function WtAddInput({ clonePath }: { clonePath: string }) {
+  const [v, setV] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return (
+    <input
+      ref={ref}
+      className="wt-add-input"
+      placeholder="branch name…"
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") wtBridge?.submitAdd(clonePath, v.trim());
+        else if (e.key === "Escape") wtBridge?.cancelAdd();
+      }}
+    />
+  );
+}
+
+// Trailing actions: open ▾ / resume on leaves, + worktree (or its input) on clones.
+function WtActionsCell({ row }: { row: WtTreeRow }) {
+  if (row.kind === "leaf") {
+    const n = row.resumeNames?.length ?? 0;
+    return (
+      <span className="wt-actions">
+        <button
+          className="wt-act wt-open"
+          title="open a NEW session here (pick an agent)"
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            wtBridge?.onLeafMenu(row, r.left, r.bottom);
+          }}
+        >
+          open ▾
+        </button>
+        {n ? (
+          <button
+            className="wt-act wt-resume"
+            title={`attach existing session: ${row.resumeNames!.join(", ")}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              wtBridge?.onResume(row.resumeNames![0]);
+            }}
+          >
+            {`resume${n > 1 ? ` (${n})` : ""}`}
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+  if (row.kind === "clone") {
+    if (row.adding) return <WtAddInput clonePath={row.clonePath!} />;
+    return (
+      <span className="wt-actions">
+        <button
+          className="wt-act wt-add"
+          title="add a git worktree under this checkout"
+          onClick={(e) => {
+            e.stopPropagation();
+            wtBridge?.revealAdd(row.clonePath!);
+          }}
+        >
+          + worktree
+        </button>
+      </span>
+    );
+  }
+  return null;
+}
+
+const WT_COLUMNS: TreeColumn<WtTreeRow>[] = [
+  { id: "name", header: "worktree", tree: true, cell: (r) => <WtNameCell row={r} /> },
+  { id: "branch", header: "branch", cell: (r) => (r.kind === "leaf" ? r.branch : "") },
+  { id: "head", header: "head", cell: (r) => (r.kind === "leaf" ? r.head : "") },
   {
     id: "path",
     header: "path",
-    sortValue: (r) => r.worktree,
-    cell: (r) => (
-      <span className="wt-path" title={r.worktree}>
-        {r.pathDisplay}
-      </span>
-    ),
+    cell: (r) =>
+      r.kind === "leaf" && r.pathDisplay ? (
+        <span className="wt-path" title={r.worktree}>
+          {r.pathDisplay}
+        </span>
+      ) : (
+        ""
+      ),
   },
   {
     id: "dirty",
     header: "",
-    sortValue: (r) => (r.dirty ? 0 : 1),
-    cellClass: (r) => (r.dirty ? "wt-dirty" : undefined),
-    cell: (r) => (r.dirty ? "●" : ""),
+    cellClass: (r) => (r.kind === "leaf" && r.dirty ? "wt-dirty" : undefined),
+    cell: (r) => (r.kind === "leaf" && r.dirty ? "●" : ""),
   },
+  { id: "actions", header: "", noRowClick: true, cell: (r) => <WtActionsCell row={r} /> },
 ];
-
-const WT_DEFAULT_SORT: SortingState = [{ id: "star", desc: false }];
-
-function StarCell({ row }: { row: WtRow }) {
-  return (
-    <span
-      title={row.fav ? "unfavorite" : "favorite"}
-      onClick={(e) => {
-        e.stopPropagation();
-        wtBridge?.onToggleFav(row);
-      }}
-    >
-      {row.fav ? "★" : "☆"}
-    </span>
-  );
-}
 
 // Scan-root + Scan + Focus toggle, ported from the retired v1 html. Header sort
 // replaces the old Tree/Table button (the v2 panel is flat-only).
@@ -426,7 +515,7 @@ export function WorktreesPanelV2() {
   useEffect(() => {
     wtBridge?.onShow?.();
   }, []);
-  const rows = wtBridge?.rows() ?? [];
+  const rows = wtBridge?.treeRows() ?? [];
   return (
     <div className="v2-panel">
       <WtToolbar />
@@ -434,16 +523,26 @@ export function WorktreesPanelV2() {
         {rows.length === 0 ? (
           <div className="session-empty">no worktrees scanned</div>
         ) : (
-          <TreeTable<WtRow>
+          <TreeTable<WtTreeRow>
             columns={WT_COLUMNS}
             data={rows}
-            getRowId={(r) => r.worktree}
-            defaultSorting={WT_DEFAULT_SORT}
-            rowTitle={(r) => r.worktree}
-            rowEntity={(r) => ({ kind: "repo", value: r.worktree })}
-            onRowClick={(r, e) => wtBridge?.onSingle(r, e.clientX, e.clientY)}
-            onRowDoubleClick={(r) => wtBridge?.onDouble(r)}
-            onRowContextMenu={(r, e) => wtBridge?.onContext(r, e.clientX, e.clientY)}
+            getRowId={(r) => r.id}
+            getSubRows={(r) => r.children}
+            defaultExpandedAll
+            rowClass={(r) => `wt-${r.kind}`}
+            rowTitle={(r) => r.worktree ?? r.label}
+            rowEntity={(r) =>
+              r.kind === "leaf" && r.worktree ? { kind: "repo", value: r.worktree } : undefined
+            }
+            onRowClick={(r, e) => {
+              if (r.kind === "leaf") wtBridge?.onLeafSingle(r, e.clientX, e.clientY);
+            }}
+            onRowDoubleClick={(r) => {
+              if (r.kind === "leaf") wtBridge?.onLeafDouble(r);
+            }}
+            onRowContextMenu={(r, e) => {
+              if (r.kind === "leaf") wtBridge?.onLeafContext(r, e.clientX, e.clientY);
+            }}
           />
         )}
       </div>
