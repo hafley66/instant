@@ -2,6 +2,7 @@ mod activity;
 mod capture;
 mod config;
 mod fs;
+mod harness;
 mod pty;
 mod sprefa_plugin;
 mod workspace;
@@ -466,6 +467,7 @@ pub fn run() {
             fs::list_dir,
             fs::read_image,
             fs::read_text,
+            harness::harness_session,
             sprefa_plugin::commands::sprefa_schema,
             sprefa_plugin::commands::sprefa_ping,
             sprefa_plugin::commands::sprefa_eval,

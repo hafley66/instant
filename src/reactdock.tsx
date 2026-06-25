@@ -252,6 +252,11 @@ export function removeTermPanel(sid: string) {
 export function setTermTitle(sid: string, title: string) {
   api?.getPanel(TERM + sid)?.api.setTitle(title);
 }
+// Reorder a terminal tab within its group (used to float pinned tabs left).
+export function moveTermPanel(sid: string, index: number) {
+  const p = api?.getPanel(TERM + sid);
+  if (p) p.api.moveTo({ group: p.group, index });
+}
 
 // Open (or focus) a per-path preview tab. The caller owns `el` and renders into
 // it; we adopt it into a `preview:<path>` dock panel, mirroring addTermPanel.

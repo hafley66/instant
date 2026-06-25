@@ -25,6 +25,7 @@ import {
   type DirListing,
   type Event,
   type FsEntry,
+  type OpenTab,
   type Skin,
   type SprefaScopeItem,
   type SprefaScopeKind,
@@ -52,6 +53,8 @@ import {
   addTermPanel,
   focusTermPanel,
   removeTermPanel,
+  setTermTitle,
+  moveTermPanel,
 } from "./reactdock";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -165,12 +168,59 @@ function closeActiveTab() {
   if (id) closeTab(id);
 }
 
+// Session name behind the active tab id (strips the "s:" prefix), or "".
+function activeTabName(): string {
+  const id = activeId();
+  return id ? id.slice(sessionId("").length) : "";
+}
+
+// ---- pinned terminal tabs (persisted by session name) ----
+// Visual is a 📌 prefix on the dockview tab title, pushed via reactdock's
+// setTermTitle (a public API) so we don't have to touch reactdock's renderer.
+const isPinnedTab = (name: string) => store.get().pinnedTabs.includes(name);
+const tabTitle = (name: string) => (isPinnedTab(name) ? `📌 ${name}` : name);
+function applyTabTitle(name: string) {
+  setTermTitle(sessionId(name), tabTitle(name));
+}
+function togglePinTab(name: string) {
+  if (!name) return;
+  const cur = store.get().pinnedTabs;
+  store.set({
+    pinnedTabs: cur.includes(name)
+      ? cur.filter((n) => n !== name)
+      : [...cur, name],
+  });
+  applyTabTitle(name);
+  reflowPinnedTabs();
+}
+function togglePinActiveTab() {
+  togglePinTab(activeTabName());
+}
+
+// Stack of recently closed tabs for reopen (⌘⇧T). In-memory only. A tmux session
+// survives a tab close, so reopen reattaches by name and the agent is still
+// alive; the stored command/cwd only matter if the session was actually killed.
+const closedTabs: OpenTab[] = [];
+function reopenLastTab() {
+  const last = closedTabs.pop();
+  if (last) openTab(last.name, { command: last.command, cwd: last.cwd });
+}
+
+// Float pinned tabs to the left of the bar, in pinnedTabs order. Each open
+// pinned tab is moved to its slot (0,1,2,…); processing in order lets earlier
+// pins settle first so the final left-to-right matches the list.
+function reflowPinnedTabs() {
+  let i = 0;
+  for (const name of store.get().pinnedTabs) {
+    if (tabs.has(sessionId(name))) moveTermPanel(sessionId(name), i++);
+  }
+}
+
 // Open a new tmux session at the active tab's cwd (cmd/ctrl+T). The session is
 // named after that directory; falls back to a plain "shell" at HOME when there's
 // no active terminal to read a cwd from.
 function openTabAtPwd() {
-  const cur = activeId();
-  const name = cur ? cur.slice(sessionId("").length) : ""; // strip the "s:" prefix
+  const name = activeTabName();
   const sess = name ? store.get().sessions.find((s) => s.name === name) : undefined;
   const cwd = (sess?.paths ?? [])[0] ?? null;
   const taken = new Set<string>([
@@ -190,6 +240,8 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], run: () => focusTabByOffset(-1) },
   { id: "tab.close", keys: ["$mod+w"], run: closeActiveTab },
   { id: "tab.open", keys: ["$mod+t"], run: openTabAtPwd },
+  { id: "tab.reopen", keys: ["$mod+Shift+t"], run: reopenLastTab },
+  { id: "tab.pin", keys: ["$mod+Shift+p"], run: togglePinActiveTab },
   // cmd/ctrl+1..9 jump to a tab (9 = last).
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.goto${i + 1}`,
@@ -280,8 +332,9 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
 
   // Hand the host element to dockview as a flat, draggable/splittable panel.
   // Adding it makes it active, which fires onTermActivate -> onTermShown.
-  addTermPanel(id, name, el);
+  addTermPanel(id, tabTitle(name), el);
   activate(id);
+  if (store.get().pinnedTabs.length) reflowPinnedTabs();
 }
 
 // Make a terminal the active dockview panel. The store/active-sync + focus is
@@ -321,6 +374,9 @@ function onTermClosed(id: string) {
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
+  // Remember it for reopen (⌘⇧T), carrying the original command/cwd.
+  const meta = store.get().openTabs.find((o) => o.name === t.name);
+  closedTabs.push({ name: t.name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
   forgetTab(id); // don't reattach a tab the user closed
   if (activeId() === id) {
     const next = tabs.keys().next();
@@ -556,7 +612,7 @@ function freshSessionName(clone: string, branch: string): string {
 // Open a tmux session for a worktree, optionally launching an agent the first
 // time it's created. `fresh` forces a brand-new session (suffixed name) even
 // when one already exists here; otherwise reattach/create the base session.
-function openWorktree(
+async function openWorktree(
   clone: string,
   branch: string,
   wtPath: string,
@@ -564,9 +620,34 @@ function openWorktree(
   fresh = false,
 ) {
   const name = fresh ? freshSessionName(clone, branch) : baseSessionName(clone, branch);
-  openTab(name, { cwd: wtPath, command });
+  openTab(name, { cwd: wtPath, command: await resumeCommand(command, wtPath) });
   refreshSessions();
 }
+
+// Turn a bare agent command into a resume-aware one for `cwd`: when autoResume
+// is on and the matching agent declares a resume flag, ask the backend for the
+// latest harness session id in this cwd and append `<flag> <id>` so the agent
+// continues its last conversation. No id (fresh worktree) -> launch blank.
+async function resumeCommand(
+  command: string | undefined,
+  cwd: string,
+): Promise<string | undefined> {
+  if (!command || !store.get().autoResume) return command;
+  const agent = store.get().wtAgents.find((a) => a.command === command);
+  if (!agent?.resume) return command;
+  const tool = command.trim().split(/\s+/)[0];
+  const id = await invoke<string | null>("harness_session", { tool, cwd }).catch(
+    () => null,
+  );
+  return id ? `${command} ${agent.resume} ${id}` : command;
+}
+
+// Resume flag per known harness binary; auto-attached so the simple text editor
+// ("label:command") still gets resume support without extra syntax.
+const KNOWN_RESUME: Record<string, string> = {
+  claude: "--resume",
+  opencode: "--session",
+};
 
 // Parse the inline agent-list editor: "claude:claude, vim:nvim ." -> WtAgent[].
 // Each entry is "label:command"; a bare token is used as both label and command.
@@ -577,8 +658,12 @@ function parseWtAgents(text: string): WtAgent[] {
     .filter(Boolean)
     .map((tok) => {
       const i = tok.indexOf(":");
-      if (i < 0) return { label: tok, command: tok };
-      return { label: tok.slice(0, i).trim(), command: tok.slice(i + 1).trim() };
+      const a =
+        i < 0
+          ? { label: tok, command: tok }
+          : { label: tok.slice(0, i).trim(), command: tok.slice(i + 1).trim() };
+      const bin = a.command.trim().split(/\s+/)[0].split("/").pop() ?? "";
+      return KNOWN_RESUME[bin] ? { ...a, resume: KNOWN_RESUME[bin] } : a;
     })
     .filter((a) => a.label && a.command);
 }
@@ -620,6 +705,10 @@ function showAgentMenu(
   items.push({
     label: isFavWorktree(wtPath) ? "★ unfavorite" : "☆ favorite",
     action: () => toggleFavWorktree(wtPath),
+  });
+  items.push({
+    label: `${store.get().autoResume ? "✓" : "○"} auto-resume latest`,
+    action: () => store.set({ autoResume: !store.get().autoResume }),
   });
   items.push({ label: "edit agents…", action: openWtAgentsEditor });
   showContextMenu(x, y, items);

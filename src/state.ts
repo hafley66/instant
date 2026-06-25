@@ -112,6 +112,11 @@ export interface Session {
 export interface WtAgent {
   label: string;
   command: string;
+  // Flag this harness uses to resume a session by id (claude `--resume`,
+  // opencode `--session`). When set and autoResume is on, the launcher appends
+  // `<resume> <latest-session-id>` so the agent continues the last conversation
+  // in that cwd instead of starting blank. Undefined = no resume support.
+  resume?: string;
 }
 
 // One open terminal tab (its xterm lives in the engine registry, keyed by id).
@@ -160,15 +165,17 @@ export interface AppState {
   wtFavorites: string[]; // starred worktree paths (persisted)
   wtFocus: boolean; // when on, the worktree view shows only starred rows
   wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
+  autoResume: boolean; // when on, launching an agent resumes its latest session in that cwd (persisted, default true)
   pinnedSessions: string[]; // tmux session names pinned to the top of the list (persisted)
+  pinnedTabs: string[]; // terminal tab session names pinned (persisted)
   sprefaScope: SprefaScopeItem[]; // selected files/repos/revs (persisted)
   sprefaScopeActive: boolean; // when on, scope contributes sel_* facts to queries
 }
 
 // Seeded into wtAgents on first run; thereafter the user's edited list wins.
 export const DEFAULT_WT_AGENTS: WtAgent[] = [
-  { label: "claude", command: "claude" },
-  { label: "opencode", command: "opencode" },
+  { label: "claude", command: "claude", resume: "--resume" },
+  { label: "opencode", command: "opencode", resume: "--session" },
 ];
 
 // Durable slice, mirrored to localStorage. Runtime fields (active, sessions,
@@ -194,7 +201,9 @@ const PERSIST: (keyof AppState)[] = [
   "wtFavorites",
   "wtFocus",
   "wtAgents",
+  "autoResume",
   "pinnedSessions",
+  "pinnedTabs",
   "sprefaScope",
   "sprefaScopeActive",
 ];
@@ -241,7 +250,9 @@ function load(): AppState {
     wtFavorites: loadKey<string[]>("wtFavorites", []),
     wtFocus: loadKey<boolean>("wtFocus", false),
     wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
+    autoResume: loadKey<boolean>("autoResume", true),
     pinnedSessions: loadKey<string[]>("pinnedSessions", []),
+    pinnedTabs: loadKey<string[]>("pinnedTabs", []),
     sprefaScope: loadKey<SprefaScopeItem[]>("sprefaScope", []),
     sprefaScopeActive: loadKey<boolean>("sprefaScopeActive", false),
   };
