@@ -73,9 +73,10 @@ fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, ki
 /// (click-state, keycode, flags) directly — NO TIS/TSM keycode translation — so
 /// the old rdev-on-a-background-thread crash does not recur. Needs Accessibility
 /// / Input Monitoring permission, same as the hotkey.
-fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
+fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let g = Mutex::new(Gesture::default());
+        let ta = tap_active.clone();
         let res = CGEventTap::with_enabled(
             CGEventTapLocation::HID,
             CGEventTapPlacement::HeadInsertEventTap,
@@ -182,9 +183,15 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>) {
                 }
                 CallbackResult::Keep // passive: pass every event through unchanged
             },
-            || CFRunLoop::run_current(),
+            move || {
+                // Tap created OK; mark it live for the capture diagnostics, then
+                // run its runloop (blocks this thread for the app's lifetime).
+                ta.store(true, Ordering::Relaxed);
+                CFRunLoop::run_current()
+            },
         );
         if res.is_err() {
+            tap_active.store(false, Ordering::Relaxed);
             eprintln!(
                 "input taps disabled: event tap creation failed \
                  (grant Accessibility / Input Monitoring permission)"
@@ -368,7 +375,9 @@ pub fn run() {
             // re-enables it on boot if the user had recording on.
             let enabled = Arc::new(AtomicBool::new(false));
             app.manage(activity::CaptureEnabled(enabled.clone()));
-            spawn_input_taps(app.handle().clone(), enabled);
+            let tap_active = Arc::new(AtomicBool::new(false));
+            app.manage(capture::TapActive(tap_active.clone()));
+            spawn_input_taps(app.handle().clone(), enabled, tap_active);
 
             // Track focus on our own window so the capture worker can skip
             // gestures made inside instant (clicking rows/chips shouldn't record).
@@ -460,6 +469,8 @@ pub fn run() {
             activity::activity_log,
             activity::capture_set_enabled,
             activity::capture_enabled,
+            capture::capture_permissions,
+            capture::capture_request_screen,
             config::config_get,
             config::config_set,
             config::config_reload,

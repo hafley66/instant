@@ -22,6 +22,8 @@ import {
   store,
   type ActivitySource,
   type AppState,
+  type CapturePerms,
+  type CaptureStatus,
   type ConfigView,
   type DirListing,
   type Event,
@@ -65,7 +67,7 @@ import {
   removeTermPanel,
   setTermTitle,
   moveTermPanel,
-  groupPanelIds,
+  allPanelIds,
   activePanelId,
   focusPanelById,
   closeActivePanel,
@@ -155,12 +157,13 @@ const QUICK_CMD: Record<string, string> = {
 };
 
 // ---- tab commands (driven by the central keymap) ----
-// Visual tab nav walks the active group's FULL panel list (dockview order), not
-// just terminals, so cmd+1..9 / next / prev also reach tool panels sharing the
-// bar (tmux v2, worktrees v2). Falls back to terminal open-order before the dock
-// reports a group. focusPanelById/activePanelId are generic over panel type.
+// Visual tab nav walks EVERY panel across ALL panes (dockview order), not just
+// the active group, so cmd+1..9 / next / prev cross panes and reach tool panels
+// sharing the bar (tmux v2, worktrees v2). Focusing a panel in another group
+// activates that group (setActive). Falls back to terminal open-order before the
+// dock reports groups. focusPanelById/activePanelId are generic over panel type.
 const visualTabIds = () => {
-  const ids = groupPanelIds();
+  const ids = allPanelIds();
   return ids.length ? ids : [...tabs.keys()];
 };
 
@@ -1449,12 +1452,16 @@ function actRows(): ActRow[] {
     id: e.id,
     ts: e.ts,
     time: fmtTime(e.ts),
+    source: e.source,
     src: SRC_LABEL[e.source],
     action: actionVerb(e),
     target: eventSource(e),
     title: e.shot || e.url || e.text || e.title,
     paste: eventText(e),
     kind: e.kind,
+    // The previewable file path for this row, if any: a screenshot PNG (os) or
+    // the logged file path (files). Routed to a split-right preview tab.
+    filePath: e.shot || (e.source === "files" ? e.text : "") || undefined,
     shot: e.shot || undefined,
     url: e.url || undefined,
     text: e.text || undefined,
@@ -1485,11 +1492,31 @@ function registerActivityBridge() {
     onActivate: (r) => {
       if (r.paste) pasteToActive(r.paste + " ");
     },
-    loadShot: (path) => invoke<string>("read_image", { path }),
+    // Any file-backed row (screenshot PNG or logged file) opens the shared
+    // file-preview in a split-right tab.
+    openPreview: (path) => openPreviewPanel(path, undefined, "right"),
+    perms: () => store.get().capturePerms,
+    status: () => store.get().captureStatus,
+    refreshPerms: refreshCapturePerms,
+    requestScreen: () => {
+      invoke("capture_request_screen")
+        // The grant may not register until the OS prompt is dismissed; re-probe
+        // shortly after so the banner clears once it's granted.
+        .then(() => setTimeout(refreshCapturePerms, 500))
+        .catch(console.error);
+    },
     onShow: () => {
       if (store.get().activity.length === 0) refreshActivity();
+      refreshCapturePerms();
     },
   });
+}
+
+// Probe macOS TCC + tap state for the Activity panel's capture banner.
+function refreshCapturePerms() {
+  invoke<CapturePerms>("capture_permissions")
+    .then((p) => store.set({ capturePerms: p }))
+    .catch(console.error);
 }
 
 // Load all sources once; the chip + search filter client-side (visibleActivity).
@@ -1754,7 +1781,11 @@ const previewInsts = new Map<string, PreviewInst>();
 // Open (or focus) the preview tab for `path`. A `line` (>0) selects the
 // line-numbered source view scrolled to that row; otherwise the rendered view
 // (image / markdown / syntax-highlighted code).
-function openPreviewPanel(path: string, line?: number) {
+function openPreviewPanel(
+  path: string,
+  line?: number,
+  direction: "within" | "right" = "within",
+) {
   let inst = previewInsts.get(path);
   if (!inst) {
     const el = document.createElement("div");
@@ -1764,7 +1795,7 @@ function openPreviewPanel(path: string, line?: number) {
   } else {
     inst.line = line;
   }
-  addPreviewPanel(path, path.split("/").pop() ?? path, inst.el);
+  addPreviewPanel(path, path.split("/").pop() ?? path, inst.el, direction);
   renderPathInto(inst.el, path, line);
 }
 
@@ -2974,6 +3005,12 @@ async function main() {
     store.set({
       activity: [e.payload, ...store.get().activity].slice(0, ACTIVITY_CAP),
     });
+  });
+
+  // Per-gesture capture outcome (shot saved, or the reason it was skipped) —
+  // drives the Activity panel's live status line + permission banner.
+  await listen<CaptureStatus>("capture-status", (e) => {
+    store.set({ captureStatus: e.payload });
   });
 
   // Summon: replay entrance animation + refocus active terminal.

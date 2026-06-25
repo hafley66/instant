@@ -858,6 +858,42 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   padding: 4px;
   border-bottom: var(--frame-w) solid var(--frame);
 }
+/* Capture diagnostics: permission banners + the last-gesture outcome. */
+.act-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+  border-bottom: var(--frame-w) solid var(--frame);
+}
+.act-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d23;
+  font-weight: bold;
+}
+body[data-mode="dark"] .act-warn {
+  color: #ff7a7a;
+}
+.act-grant {
+  font-size: 10px;
+  padding: 0 6px;
+  min-height: 18px;
+}
+.act-last {
+  opacity: 0.7;
+  font-family: "Menlo", "Consolas", monospace;
+}
+.act-last.ok {
+  color: #2a7;
+  opacity: 0.9;
+}
+body[data-mode="dark"] .act-last.ok {
+  color: #6ec88f;
+}
 /* Second row (event-type sub-filter) reads as a quieter sub-level. */
 .act-types {
   opacity: 0.92;

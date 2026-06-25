@@ -19,23 +19,92 @@ use core_graphics::window::{
     copy_window_info, kCGNullWindowID, kCGWindowLayer, kCGWindowListExcludeDesktopElements,
     kCGWindowListOptionOnScreenOnly, kCGWindowOwnerName,
 };
-use tauri::{AppHandle, Emitter, Manager};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::activity::{self, ActivityDb};
+
+// macOS TCC probes. CGPreflight* reports whether we already hold the grant;
+// CGRequest* adds instant to the list and prompts, returning the post-prompt
+// state. AXIsProcessTrusted is the Accessibility bit the CGEventTap needs to see
+// input. All three live in CoreGraphics, re-exported by the ApplicationServices
+// umbrella (which we link for AXIsProcessTrusted).
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+    fn AXIsProcessTrusted() -> bool;
+}
 
 /// Whether the instant window is focused, kept current by the window focus
 /// event (lib.rs). The capture worker reads it to avoid screenshotting our own
 /// UI while you click around inside the app.
 pub struct WindowFocused(pub Arc<AtomicBool>);
 
+/// Whether the CGEventTap is live. Set true once the tap's runloop starts
+/// (lib.rs `spawn_input_taps`); stays false if tap creation failed for lack of
+/// Accessibility / Input Monitoring. Surfaced so the Activity panel can explain
+/// why no gestures are being captured.
+pub struct TapActive(pub Arc<AtomicBool>);
+
+/// TCC + tap state for the Activity panel's capture diagnostics.
+#[derive(Serialize)]
+pub struct CapturePerms {
+    pub screen_recording: bool,
+    pub accessibility: bool,
+    pub tap_active: bool,
+}
+
+/// Per-gesture outcome, emitted as `capture-status` so the panel can show the
+/// last result (a saved shot, or exactly why one was skipped). This is what
+/// turns the six silent no-ops below into something observable.
+#[derive(Serialize, Clone)]
+pub struct CaptureStatus {
+    pub kind: String,
+    pub ok: bool,
+    pub reason: String,
+    pub ts: i64,
+}
+
+#[tauri::command]
+pub fn capture_permissions(tap: State<TapActive>) -> CapturePerms {
+    CapturePerms {
+        screen_recording: unsafe { CGPreflightScreenCaptureAccess() },
+        accessibility: unsafe { AXIsProcessTrusted() },
+        tap_active: tap.0.load(Ordering::Relaxed),
+    }
+}
+
+/// Trigger the macOS Screen Recording prompt (adds instant to the list). The
+/// grant only takes effect for screencapture after this returns true; the OS
+/// may still require a relaunch for some flows.
+#[tauri::command]
+pub fn capture_request_screen() -> bool {
+    unsafe { CGRequestScreenCaptureAccess() }
+}
+
 /// Take one shot for `kind`, store it, emit the row. Best-effort: any failure
 /// (no permission, dir error, screencapture nonzero) silently no-ops.
 pub fn take(app: AppHandle, kind: &str) {
     let ts = activity::now_ms();
+    // Emit the outcome of this gesture so the panel can show "shot saved" or the
+    // precise skip reason instead of nothing happening.
+    let status = |ok: bool, reason: &str| {
+        let _ = app.emit(
+            "capture-status",
+            CaptureStatus {
+                kind: kind.to_string(),
+                ok,
+                reason: reason.to_string(),
+                ts,
+            },
+        );
+    };
 
     // Don't record our own clicks: skip while the instant window is focused.
     // Not counted as a filter — interacting with the app just isn't an event.
     if app.state::<WindowFocused>().0.load(Ordering::Relaxed) {
+        status(false, "instant window focused");
         return;
     }
 
@@ -45,26 +114,30 @@ pub fn take(app: AppHandle, kind: &str) {
         let cfg = app.state::<crate::config::ConfigState>();
         if cfg.config.lock().unwrap().app_excluded(&app_name) {
             crate::config::note_excluded(&cfg);
+            status(false, &format!("{app_name} excluded"));
             return;
         }
     }
 
     let Ok(data_dir) = app.path().app_data_dir() else {
+        status(false, "no app data dir");
         return;
     };
     let dir = data_dir.join("captures").join(day_string(ts));
     if std::fs::create_dir_all(&dir).is_err() {
+        status(false, "capture dir create failed");
         return;
     }
     let shot = dir.join(format!("{ts}-{kind}.png"));
 
     // Absolute path: GUI apps don't get /usr/sbin in PATH. -x silent, no shutter
     // sound; full main display.
-    let status = std::process::Command::new("/usr/sbin/screencapture")
+    let st = std::process::Command::new("/usr/sbin/screencapture")
         .args(["-x", "-t", "png"])
         .arg(&shot)
         .status();
-    if status.map(|s| !s.success()).unwrap_or(true) || !shot.exists() {
+    if st.map(|s| !s.success()).unwrap_or(true) || !shot.exists() {
+        status(false, "screen recording denied or capture failed");
         return;
     }
 
@@ -74,8 +147,12 @@ pub fn take(app: AppHandle, kind: &str) {
         let conn = db.0.lock().unwrap();
         activity::insert_row(&conn, ts, "os", kind, &app_name, "", "", "", &shot_str)
     };
-    if let Ok(ev) = row {
-        let _ = app.emit("activity-added", &ev);
+    match row {
+        Ok(ev) => {
+            let _ = app.emit("activity-added", &ev);
+            status(true, &app_name);
+        }
+        Err(e) => status(false, &format!("db error: {e}")),
     }
 }
 

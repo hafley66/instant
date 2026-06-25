@@ -273,6 +273,17 @@ export function groupPanelIds(): string[] {
   const g = api?.activeGroup;
   return g ? g.panels.map((p) => p.id) : [];
 }
+// Every panel id across ALL groups, visual order (group order, then tab order).
+// Drives cross-pane tab nav: next/prev (and cmd+1..9) walk every tab in every
+// pane, and focusing one in another group activates that group too (setActive).
+export function allPanelIds(): string[] {
+  if (!api) return [];
+  const out: string[] = [];
+  for (const group of api.groups) {
+    for (const p of group.panels) out.push(p.id);
+  }
+  return out;
+}
 export function activePanelId(): string | null {
   return api?.activePanel?.id ?? null;
 }
@@ -305,7 +316,12 @@ export function termPanelOrder(): string[] {
 
 // Open (or focus) a per-path preview tab. The caller owns `el` and renders into
 // it; we adopt it into a `preview:<path>` dock panel, mirroring addTermPanel.
-export function addPreviewPanel(path: string, title: string, el: HTMLElement) {
+export function addPreviewPanel(
+  path: string,
+  title: string,
+  el: HTMLElement,
+  direction: "within" | "right" = "within",
+) {
   if (!api) return;
   const pid = PREVIEW + path;
   dynamicNodes.set(pid, el);
@@ -314,10 +330,19 @@ export function addPreviewPanel(path: string, title: string, el: HTMLElement) {
     existing.api.setActive();
     return;
   }
-  const anchor = anchorPanel();
-  const position = anchor
-    ? { referencePanel: anchor, direction: "within" as const }
-    : undefined;
+  // Stack new previews into the existing preview group if one is open (so they
+  // share one tab strip); otherwise place the first preview relative to the
+  // anchor (the terminals) in `direction` — "right" gives the split-right group.
+  const openPreview = api.panels.find((p) => isPreview(p.id));
+  let position:
+    | { referencePanel: string; direction: "within" | "right" }
+    | undefined;
+  if (openPreview) {
+    position = { referencePanel: openPreview.id, direction: "within" };
+  } else {
+    const anchor = anchorPanel();
+    if (anchor) position = { referencePanel: anchor, direction };
+  }
   api.addPanel({
     id: pid,
     component: "preview-instance",

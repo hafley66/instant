@@ -70,6 +70,20 @@ export interface FsNode extends FsEntry {
 // One row of the unified activity store (Rust activity::Event). Sources: a
 // browser DOM/tab event (extension), an os screen capture (gesture), or a file
 // open (Files panel).
+// Mirror of capture::CapturePerms — TCC grants + whether the input tap is live.
+export interface CapturePerms {
+  screen_recording: boolean;
+  accessibility: boolean;
+  tap_active: boolean;
+}
+// Mirror of capture::CaptureStatus — the outcome of the last capture gesture.
+export interface CaptureStatus {
+  kind: string;
+  ok: boolean;
+  reason: string;
+  ts: number;
+}
+
 export interface Event {
   id: number;
   ts: number; // unix ms
@@ -159,6 +173,8 @@ export interface AppState {
   activityType: ActivityType; // event-type sub-filter chip (persisted)
   activityQuery: string; // fuzzy search box (runtime)
   captureEnabled: boolean; // screen-capture recording on/off (persisted, mirrors backend)
+  capturePerms: CapturePerms | null; // TCC + tap state for the activity capture diagnostics (runtime)
+  captureStatus: CaptureStatus | null; // last per-gesture capture outcome, from the capture-status event (runtime)
   config: ConfigView | null; // resolved observation config (runtime)
   files: DirListing | null; // root Files explorer listing for the tree (runtime)
   fsChildren: Record<string, FsEntry[]>; // per-folder listings, loaded on expand (runtime)
@@ -248,6 +264,8 @@ function load(): AppState {
     activityType: loadKey<ActivityType>("activityType", "all"),
     activityQuery: "",
     captureEnabled: loadKey<boolean>("captureEnabled", false),
+    capturePerms: null,
+    captureStatus: null,
     sessionSort: loadKey<SessionSort>("sessionSort", { key: "activity", dir: "desc" }),
     tableSort: loadKey<Record<string, SortState>>("tableSort", {}),
     config: null,

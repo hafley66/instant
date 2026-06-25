@@ -546,15 +546,29 @@ export interface ActRow {
   id: number;
   ts: number;
   time: string;
-  src: string;
+  source: string; // raw event source: os | browser | files | session
+  src: string; // display label
   action: string;
   target: string;
   title: string;
   paste: string;
   kind: string;
+  filePath?: string; // previewable file (screenshot PNG or logged file path)
   shot?: string;
   url?: string;
   text?: string;
+}
+
+export interface ActCapturePerms {
+  screen_recording: boolean;
+  accessibility: boolean;
+  tap_active: boolean;
+}
+export interface ActCaptureStatus {
+  kind: string;
+  ok: boolean;
+  reason: string;
+  ts: number;
 }
 
 export interface ActivityBridge {
@@ -569,7 +583,12 @@ export interface ActivityBridge {
   clear: () => void;
   hasEvents: () => boolean;
   onActivate: (r: ActRow) => void; // dbl-click → paste into active terminal
-  loadShot: (path: string) => Promise<string>; // read_image → data url
+  openPreview: (path: string) => void; // file-backed row → split-right preview tab
+  // capture diagnostics
+  perms: () => ActCapturePerms | null;
+  status: () => ActCaptureStatus | null;
+  refreshPerms: () => void;
+  requestScreen: () => void;
   onShow?: () => void;
 }
 
@@ -631,6 +650,51 @@ function ActToolbar() {
   );
 }
 
+// Capture diagnostics row: permission banners (Screen Recording / input access)
+// + the live outcome of the last gesture. This is the "why isn't it shooting?"
+// readout — it turns the silent backend no-ops into something you can see.
+function ActStatusBar() {
+  const b = activityBridge!;
+  const perms = b.perms();
+  const st = b.status();
+  if (!b.recording() && !perms) return null;
+  const banners: React.ReactNode[] = [];
+  if (perms && !perms.screen_recording) {
+    banners.push(
+      <span key="sr" className="act-warn">
+        ⚠ Screen Recording denied
+        <button type="button" className="act-grant" onClick={() => b.requestScreen()}>
+          Grant
+        </button>
+      </span>,
+    );
+  }
+  if (perms && !perms.tap_active) {
+    banners.push(
+      <span key="tap" className="act-warn" title="Grant Accessibility / Input Monitoring to instant in System Settings → Privacy & Security, then relaunch.">
+        ⚠ Input access off — no gestures captured
+      </span>,
+    );
+  }
+  // Last gesture outcome. ok=shot saved; else the precise skip reason.
+  let last: React.ReactNode = null;
+  if (st) {
+    last = (
+      <span className={"act-last" + (st.ok ? " ok" : "")}>
+        {st.ok ? "✓ shot" : "skipped"}: {st.kind}
+        {st.ok ? "" : ` — ${st.reason}`}
+      </span>
+    );
+  }
+  if (!banners.length && !last) return null;
+  return (
+    <div className="act-status">
+      {banners}
+      {last}
+    </div>
+  );
+}
+
 function ActChips() {
   const b = activityBridge!;
   const cur = b.source();
@@ -646,68 +710,6 @@ function ActChips() {
           {label}
         </button>
       ))}
-    </div>
-  );
-}
-
-// Right-hand preview: screenshot thumbnail for os rows (async read_image),
-// url/text otherwise. Collapses out of the flex row when nothing is selected.
-function ActPreview({
-  row,
-  loadShot,
-}: {
-  row: ActRow | null;
-  loadShot: (p: string) => Promise<string>;
-}) {
-  const [img, setImg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const shot = row?.shot;
-  useEffect(() => {
-    setImg(null);
-    setErr(null);
-    if (!shot) return;
-    let live = true;
-    loadShot(shot).then(
-      (u) => live && setImg(u),
-      (e) => live && setErr(String(e)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [shot]);
-  if (!row) return <div id="activity-preview" className="fs-preview preview-collapsed" />;
-  const head = (
-    <div className="fs-preview-meta">
-      {row.kind} · {row.target}
-      <br />
-      <span>{row.time}</span>
-    </div>
-  );
-  let body: React.ReactNode;
-  if (shot) {
-    body = img ? (
-      <img className="fs-preview-img" src={img} alt="" />
-    ) : (
-      <div className="fs-preview-empty">{err ?? "loading…"}</div>
-    );
-  } else if (row.url || row.text) {
-    body = (
-      <>
-        {row.url ? (
-          <div className="fs-preview-meta">
-            <span>{row.url}</span>
-          </div>
-        ) : null}
-        {row.text ? <div className="fs-preview-meta">{row.text}</div> : null}
-      </>
-    );
-  } else {
-    body = <div className="fs-preview-empty">no preview</div>;
-  }
-  return (
-    <div id="activity-preview" className="fs-preview">
-      {head}
-      {body}
     </div>
   );
 }
@@ -764,32 +766,34 @@ export function ActivityPanelV2() {
   }, []);
   const [sel, setSel] = useState<number | null>(null);
   const rows = b?.rows() ?? [];
-  const selRow = sel == null ? null : rows.find((r) => r.id === sel) ?? null;
   const hasEvents = b?.hasEvents() ?? false;
   return (
     <div className="v2-panel">
       <ActToolbar />
       <ActChips />
-      <div className="fs-body">
-        {/* id keeps the legacy #activity-table context-menu hook working. */}
-        <div id="activity-table" className="fs-list">
-          {hasEvents ? (
-            <TreeTable<ActRow>
-              columns={ACT_COLUMNS}
-              data={rows}
-              getRowId={(r) => String(r.id)}
-              virtual
-              defaultSorting={ACT_DEFAULT_SORT}
-              rowTitle={(r) => r.title}
-              rowClass={(r) => (r.id === sel ? "fs-selected" : undefined)}
-              onRowClick={(r) => setSel(r.id)}
-              onRowDoubleClick={(r) => b?.onActivate(r)}
-            />
-          ) : (
-            <ActivitySetup />
-          )}
-        </div>
-        <ActPreview row={selRow} loadShot={(p) => b!.loadShot(p)} />
+      <ActStatusBar />
+      {/* id keeps the legacy #activity-table context-menu hook working. */}
+      <div id="activity-table" className="fs-list">
+        {hasEvents ? (
+          <TreeTable<ActRow>
+            columns={ACT_COLUMNS}
+            data={rows}
+            getRowId={(r) => String(r.id)}
+            virtual
+            defaultSorting={ACT_DEFAULT_SORT}
+            rowTitle={(r) => r.title}
+            rowClass={(r) => (r.id === sel ? "fs-selected" : undefined)}
+            onRowClick={(r) => {
+              setSel(r.id);
+              // Any file-backed row (screenshot or logged file) opens the shared
+              // file preview in a split-right tab.
+              if (r.filePath) b?.openPreview(r.filePath);
+            }}
+            onRowDoubleClick={(r) => b?.onActivate(r)}
+          />
+        ) : (
+          <ActivitySetup />
+        )}
       </div>
     </div>
   );
