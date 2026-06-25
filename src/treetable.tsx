@@ -115,20 +115,89 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
   });
 
   const modelRows = table.getRowModel().rows;
-  const parentRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   // Virtualizer is created unconditionally (hooks rule); only consulted when
   // `virtual` is set. Spacer <tr>s pad the height so column widths still align.
   const virtualizer = useVirtualizer({
     count: modelRows.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => wrapRef.current,
     estimateSize: () => 22,
     overscan: 12,
   });
 
-  const renderRow = (row: Row<T>) => (
+  // Keyboard cursor: the focused row index in the flattened (visible) model.
+  // Arrows move it, ←/→ collapse/expand (or step out/in), Enter activates the
+  // row (reuses onRowClick at the row's rect so menus anchor sensibly).
+  const [active, setActive] = useState(-1);
+  const cur = active >= modelRows.length ? modelRows.length - 1 : active;
+  const rowAt = (i: number) =>
+    wrapRef.current?.querySelector<HTMLElement>(`[data-row-index="${i}"]`) ?? null;
+  const moveTo = (i: number) => {
+    if (!modelRows.length) return;
+    const idx = Math.max(0, Math.min(modelRows.length - 1, i));
+    setActive(idx);
+    // Virtual lists need the virtualizer to bring the row into range first.
+    if (virtual) virtualizer.scrollToIndex(idx, { align: "auto" });
+    requestAnimationFrame(() => rowAt(idx)?.scrollIntoView({ block: "nearest" }));
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!modelRows.length) return;
+    const i = cur < 0 ? 0 : cur;
+    const row = modelRows[i];
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        moveTo(cur < 0 ? 0 : i + 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        moveTo(cur < 0 ? 0 : i - 1);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (row.getCanExpand() && !row.getIsExpanded()) {
+          onToggleExpand?.(row.original, true);
+          row.toggleExpanded();
+        } else if (i + 1 < modelRows.length) moveTo(i + 1);
+        break;
+      case "ArrowLeft": {
+        e.preventDefault();
+        if (row.getCanExpand() && row.getIsExpanded()) row.toggleExpanded();
+        else {
+          const p = row.getParentRow();
+          if (p) {
+            const pi = modelRows.findIndex((r) => r.id === p.id);
+            if (pi >= 0) moveTo(pi);
+          }
+        }
+        break;
+      }
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        if (onRowClick) {
+          const r = rowAt(i)?.getBoundingClientRect();
+          onRowClick(row.original, { clientX: (r?.left ?? 0) + 8, clientY: r?.bottom ?? 0 } as MouseEvent);
+        }
+        break;
+      case "Home":
+        e.preventDefault();
+        moveTo(0);
+        break;
+      case "End":
+        e.preventDefault();
+        moveTo(modelRows.length - 1);
+        break;
+    }
+  };
+
+  const renderRow = (row: Row<T>, index: number) => (
     <TableRow
       key={row.id}
       row={row}
+      index={index}
+      active={index === cur}
+      onFocusRow={setActive}
       columns={columns}
       onRowClick={onRowClick}
       onRowDoubleClick={onRowDoubleClick}
@@ -153,7 +222,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
             <td colSpan={columns.length} style={{ height: before, padding: 0, border: 0 }} />
           </tr>
         )}
-        {items.map((it) => renderRow(modelRows[it.index]))}
+        {items.map((it) => renderRow(modelRows[it.index], it.index))}
         {after > 0 && (
           <tr className="dtable-spacer">
             <td colSpan={columns.length} style={{ height: after, padding: 0, border: 0 }} />
@@ -193,17 +262,25 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     </table>
   );
 
-  return virtual ? (
-    <div className="tt-scroll" ref={parentRef}>
+  // Focusable wrapper owns keyboard nav. `virtual` adds the scroll container
+  // (.tt-scroll); flat tables scroll in their panel parent but still focus here.
+  return (
+    <div
+      className={"tt-wrap" + (virtual ? " tt-scroll" : "")}
+      tabIndex={0}
+      ref={wrapRef}
+      onKeyDown={onKeyDown}
+    >
       {tableEl}
     </div>
-  ) : (
-    tableEl
   );
 }
 
 function TableRow<T>(props: {
   row: Row<T>;
+  index: number;
+  active: boolean;
+  onFocusRow: (index: number) => void;
   columns: TreeColumn<T>[];
   onRowClick?: (row: T, e: MouseEvent) => void;
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
@@ -216,14 +293,18 @@ function TableRow<T>(props: {
   const { row, columns } = props;
   const data = row.original;
   const ent = props.rowEntity?.(data);
-  const cls = ["dtable-row", props.rowClass?.(data)].filter(Boolean).join(" ");
+  const cls = ["dtable-row", props.active ? "kbd-active" : "", props.rowClass?.(data)]
+    .filter(Boolean)
+    .join(" ");
   return (
     <tr
       className={cls}
+      data-row-index={props.index}
       title={props.rowTitle?.(data)}
       draggable={ent ? true : undefined}
       data-entity-kind={ent?.kind}
       data-entity-value={ent?.value}
+      onMouseDown={() => props.onFocusRow(props.index)}
       onClick={
         props.onRowClick
           ? (e) => {

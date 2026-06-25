@@ -1246,6 +1246,19 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   height: 100%;
   overflow: auto;
 }
+/* Focusable TreeTable wrapper for keyboard nav (no focus ring; the active-row
+   highlight is the cursor). Dim when the table isn't focused, full when it is. */
+.tt-wrap {
+  outline: none;
+  height: 100%;
+}
+.dtable-row.kbd-active > td {
+  background: color-mix(in srgb, var(--row-active-bg) 22%, transparent);
+}
+.tt-wrap:focus-within .dtable-row.kbd-active > td {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+}
 .panel-scroll {
   height: 100%;
   overflow: auto;
