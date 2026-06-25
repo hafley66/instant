@@ -2265,7 +2265,7 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
   return [
     {
       label: "New session",
-      action: () => ($("#new-name") as HTMLInputElement).focus(),
+      action: openTabAtPwd,
     },
     { sep: true },
     { label: "Cycle skin", action: () => store.set({ skin: nextSkin(store.get().skin) }) },
@@ -2293,23 +2293,6 @@ function wireChrome() {
   }
   $("#actbar-toggle").onclick = () =>
     store.set({ sidebar: store.get().sidebar === "big" ? "compact" : "big" });
-
-  $("#wt-scan").addEventListener("submit", (e) => {
-    e.preventDefault();
-    scanWorktrees();
-  });
-  $("#wt-view").onclick = () =>
-    store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
-  $("#wt-focus").onclick = () => store.set({ wtFocus: !store.get().wtFocus });
-
-  $("#session-sort").addEventListener("change", (e) => {
-    const [key, dir] = (e.target as HTMLSelectElement).value.split(":") as [
-      "name" | "activity" | "windows",
-      "asc" | "desc",
-    ];
-    store.set({ sessionSort: { key, dir } });
-    refreshSessions();
-  });
 
   $("#activity-clear").onclick = () =>
     invoke("activity_clear")
@@ -2366,25 +2349,6 @@ function wireChrome() {
     else getCurrentWindow().startDragging();
   });
 
-  // Quick-launch an agent session (creates the tmux session running the agent).
-  $("#ql-claude").onclick = () => {
-    openTab("claude", { command: "claude" });
-    refreshSessions();
-  };
-  $("#ql-opencode").onclick = () => {
-    openTab("opencode", { command: "opencode" });
-    refreshSessions();
-  };
-
-  $("#new-session").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const input = $("#new-name") as HTMLInputElement;
-    const name = input.value.trim();
-    if (!name) return;
-    input.value = "";
-    openTab(name); // plain shell (no agent command)
-    refreshSessions();
-  });
 }
 
 function registerBuiltin() {
@@ -2397,28 +2361,8 @@ function registerBuiltin() {
         icon: "▦",
         iconUrl: "/icons/BatExec_16x16_4.png",
         iconLabel: "tmux",
-        html: `<div class="sidebar-lists">
-          <div class="sidebar-head">TMUX <span id="session-count" class="head-count"></span>
-            <select id="session-sort" class="session-sort" title="sort sessions">
-              <option value="activity:desc">recent</option>
-              <option value="activity:asc">oldest</option>
-              <option value="name:asc">name a–z</option>
-              <option value="name:desc">name z–a</option>
-              <option value="windows:desc">windows</option>
-            </select>
-          </div>
-          <ul id="session-list" class="session-list"></ul>
-        </div>
-        <div class="sidebar-create">
-          <div class="quick-launch">
-            <button id="ql-claude" type="button" class="ql-btn">+ claude</button>
-            <button id="ql-opencode" type="button" class="ql-btn">+ opencode</button>
-          </div>
-          <form id="new-session" class="new-session">
-            <input id="new-name" placeholder="new shell…" autocomplete="off" />
-            <button type="submit">+</button>
-          </form>
-        </div>`,
+        html: "",
+        component: TmuxPanelV2,
         onShow: () => { refreshSessions(); },
       },
       {
@@ -2427,33 +2371,6 @@ function registerBuiltin() {
         icon: "⊞",
         iconUrl: "/icons/Explorer100_16x16_4.png",
         iconLabel: "Worktrees",
-        html: `<form id="wt-scan" class="wt-scan">
-          <input id="wt-root" value="~/projects" autocomplete="off" />
-          <button type="submit">Scan</button>
-          <button id="wt-view" type="button">Table</button>
-          <button id="wt-focus" type="button" title="show only favorited worktrees">☆ Focus</button>
-          <span id="wt-count" class="wt-count"></span>
-        </form>
-        <div id="wt-agents" class="wt-agents-row"></div>
-        <div id="wt-table" class="wt-table"></div>`,
-        onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
-      },
-      {
-        id: "tmux2",
-        title: "tmux v2",
-        icon: "▦",
-        iconUrl: "/icons/BatExec2_16x16_4.png",
-        iconLabel: "tmux2",
-        html: "",
-        component: TmuxPanelV2,
-        onShow: () => { refreshSessions(); },
-      },
-      {
-        id: "worktrees2",
-        title: "Worktrees v2",
-        icon: "⊞",
-        iconUrl: "/icons/FolderExe_16x16_4.png",
-        iconLabel: "wt2",
         html: "",
         component: WorktreesPanelV2,
         onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
@@ -3047,7 +2964,6 @@ async function main() {
   registerV2Bridges();
   injectPanelHtml();
   buildActivityRail();
-  ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
   wireChrome();
   // A dock failure must not abort the rest of boot (sessions, pty listeners).
   try {
