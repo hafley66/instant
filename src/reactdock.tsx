@@ -255,7 +255,52 @@ export function setTermTitle(sid: string, title: string) {
 // Reorder a terminal tab within its group (used to float pinned tabs left).
 export function moveTermPanel(sid: string, index: number) {
   const p = api?.getPanel(TERM + sid);
-  if (p) p.api.moveTo({ group: p.group, index });
+  if (!p) return;
+  // Clamp to the panel's own group size — the caller's pinned counter is global,
+  // but moveTo targets one group, so an out-of-range index throws gridview's
+  // "invalid location" (which surfaced as new-tab opens failing). Never throw.
+  const idx = Math.max(0, Math.min(index, p.group.panels.length - 1));
+  try {
+    p.api.moveTo({ group: p.group, index: idx });
+  } catch (e) {
+    console.error("moveTermPanel", e);
+  }
+}
+// All panels in the active group, visual left-to-right order, as full panel ids.
+// Tab nav (cmd+1..9 / next / prev) walks THIS so it reaches non-terminal panels
+// sharing the bar (tmux v2, worktrees v2), not just terminals.
+export function groupPanelIds(): string[] {
+  const g = api?.activeGroup;
+  return g ? g.panels.map((p) => p.id) : [];
+}
+export function activePanelId(): string | null {
+  return api?.activePanel?.id ?? null;
+}
+export function focusPanelById(pid: string) {
+  api?.getPanel(pid)?.api.setActive();
+}
+// Close whatever panel is actually focused (dockview's active panel), not a
+// store-tracked guess — cmd+W must close the tab you're looking at. For terminal
+// panels this fires onDidRemovePanel -> onTermClosed (full teardown + closed-tab
+// capture); tool panels (tmux v2, …) just close.
+export function closeActivePanel() {
+  const p = api?.activePanel;
+  if (p) api!.removePanel(p);
+}
+
+// Terminal tab ids (the sid, i.e. the "s:name") in visual left-to-right order,
+// flattened across groups. Drives cmd+1..9 / next/prev so they follow what the
+// user sees (incl. pinned tabs floated left), not panel insertion order. Empty
+// until the dock is ready -> caller falls back to its own open-order map.
+export function termPanelOrder(): string[] {
+  if (!api) return [];
+  const out: string[] = [];
+  for (const group of api.groups) {
+    for (const p of group.panels) {
+      if (isTerm(p.id)) out.push(p.id.slice(TERM.length));
+    }
+  }
+  return out;
 }
 
 // Open (or focus) a per-path preview tab. The caller owns `el` and renders into

@@ -34,6 +34,14 @@ import {
 } from "./state";
 import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
 import {
+  TmuxPanelV2,
+  WorktreesPanelV2,
+  setTmuxPanel,
+  setWorktreesPanel,
+  type TmuxRow,
+  type WtRow,
+} from "./tablepanels";
+import {
   renderTable,
   virtualTable,
   type VirtualTable,
@@ -55,6 +63,10 @@ import {
   removeTermPanel,
   setTermTitle,
   moveTermPanel,
+  groupPanelIds,
+  activePanelId,
+  focusPanelById,
+  closeActivePanel,
 } from "./reactdock";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -141,31 +153,39 @@ const QUICK_CMD: Record<string, string> = {
 };
 
 // ---- tab commands (driven by the central keymap) ----
-// Terminal tabs in open order; the active one is store.active (a term id).
-const termTabIds = () => [...tabs.keys()];
+// Visual tab nav walks the active group's FULL panel list (dockview order), not
+// just terminals, so cmd+1..9 / next / prev also reach tool panels sharing the
+// bar (tmux v2, worktrees v2). Falls back to terminal open-order before the dock
+// reports a group. focusPanelById/activePanelId are generic over panel type.
+const visualTabIds = () => {
+  const ids = groupPanelIds();
+  return ids.length ? ids : [...tabs.keys()];
+};
 
-// Move focus by ±1 through the open terminal tabs, wrapping around.
+// Move focus by ±1 through the visible tabs, wrapping around.
 function focusTabByOffset(delta: number) {
-  const ids = termTabIds();
+  const ids = visualTabIds();
   if (ids.length < 2) return;
-  const cur = activeId();
+  const cur = activePanelId() ?? activeId();
   const i = cur ? ids.indexOf(cur) : -1;
   const next = ids[((i < 0 ? 0 : i) + delta + ids.length) % ids.length];
-  focusTermPanel(next);
+  focusPanelById(next);
 }
 
 // Go to the Nth tab (1-based). 9 always jumps to the last, browser-style.
 function focusTabN(n: number) {
-  const ids = termTabIds();
+  const ids = visualTabIds();
   if (!ids.length) return;
   const idx = n >= 9 ? ids.length - 1 : n - 1;
-  if (ids[idx]) focusTermPanel(ids[idx]);
+  if (ids[idx]) focusPanelById(ids[idx]);
 }
 
-// Close the active tab (cmd/ctrl+W).
+// Close the focused tab (cmd/ctrl+W). Closes dockview's ACTIVE panel, not the
+// store.active terminal — those diverge once focus lands on a non-terminal panel
+// (tmux v2, …), which made cmd+W close a stale sibling. Terminal teardown +
+// closed-tab capture still run via onTermClosed.
 function closeActiveTab() {
-  const id = activeId();
-  if (id) closeTab(id);
+  closeActivePanel();
 }
 
 // Session name behind the active tab id (strips the "s:" prefix), or "".
@@ -312,6 +332,14 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
       if (e.key === "Backspace") return send("\x1b\x7f"); // delete word back
     }
     if (only(e.metaKey, e.altKey, e.ctrlKey)) {
+      // Cmd+C: xterm paints its selection in its own layer (not a DOM selection)
+      // so copy only when there IS a selection, else fall through. Paste is left
+      // to xterm's native handler (its textarea paste event) — handling it here
+      // too double-pastes.
+      if (e.key === "c" && term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection()).catch(console.error);
+        return false;
+      }
       if (e.key === "ArrowLeft") return send("\x01"); // line start (Ctrl-A)
       if (e.key === "ArrowRight") return send("\x05"); // line end (Ctrl-E)
       if (e.key === "Backspace") return send("\x15"); // kill to line start (Ctrl-U)
@@ -775,6 +803,71 @@ function leafGestures(clone: string, branch: string, wtPath: string, dirty: bool
       showAgentMenu(x, y, clone, branch, wtPath, dirty);
     },
   };
+}
+
+// ---- v2 react-table panel bridges ----
+// Derivation + handlers live here (next to the existing session/worktree logic);
+// the React panels (tablepanels.tsx) are presentational and pull rows() lazily.
+// Registering these bridges once is enough: rows() reads the store on each call,
+// and useApp() in the panels triggers the re-render that re-invokes rows().
+function tmuxRows(): TmuxRow[] {
+  const rows = store.get().worktrees;
+  const sw = store.get().sessionWorktrees;
+  return sortSessions(store.get().sessions).map((s) => {
+    const current = new Set(worktreesForPaths(s.paths ?? [], rows));
+    const chips = (sw[s.name] ?? []).map((p) => {
+      const w = rows.find((r) => r.worktree === p);
+      return { label: w ? w.branch : baseName(p), current: current.has(p), path: p };
+    });
+    const pwd = (s.paths ?? [])[0];
+    return {
+      name: s.name,
+      attached: s.attached,
+      proc: foregroundProc(s.commands ?? []),
+      windows: s.windows,
+      open: tabs.has(sessionId(s.name)),
+      pwd: pwd ? tildify(pwd) : "",
+      chips,
+      pinned: isPinnedSession(s.name),
+    };
+  });
+}
+
+function wtRows(): WtRow[] {
+  return focusRows(store.get().worktrees).map((r) => ({
+    worktree: r.worktree,
+    origin: prettyOrigin(r.origin),
+    clone: baseName(r.clone),
+    worktreeLabel: r.is_main ? "(main)" : baseName(r.worktree),
+    branch: r.branch,
+    head: r.head,
+    pathDisplay: tildify(r.worktree),
+    dirty: r.dirty,
+    fav: isFavWorktree(r.worktree),
+  }));
+}
+
+// gesture helper bound to a derived WtRow (mirrors renderFlatTable's gFor).
+const wtGestures = (r: WtRow) => {
+  const src = store.get().worktrees.find((w) => w.worktree === r.worktree);
+  return leafGestures(src?.clone ?? "", r.branch, r.worktree, r.dirty);
+};
+
+function registerV2Bridges() {
+  setTmuxPanel({
+    rows: tmuxRows,
+    onOpen: (name) => openTab(name),
+    onPin: (name) => togglePinSession(name),
+    onShow: () => refreshSessions(),
+  });
+  setWorktreesPanel({
+    rows: wtRows,
+    onSingle: (r, x, y) => wtGestures(r).onSingle(x, y),
+    onDouble: (r) => wtGestures(r).onDouble(),
+    onContext: (r, x, y) => wtGestures(r).onContext(x, y),
+    onToggleFav: (r) => toggleFavWorktree(r.worktree),
+    onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
+  });
 }
 
 // Reveal the inline agent-list editor in the worktree panel header, seeded with
@@ -1750,6 +1843,40 @@ function syncToggles() {
 // Activity rail compact (icons) vs big (icons + labels).
 function syncSidebar(s: AppState) {
   $("#actbar").dataset.mode = s.sidebar;
+  applyRailWidth();
+}
+
+// Big mode honors the persisted drag width; compact falls back to the fixed
+// 44px CSS rule (clear the inline width so it isn't pinned wide).
+function applyRailWidth() {
+  const bar = $("#actbar");
+  if (store.get().sidebar === "big") bar.style.width = `${store.get().sidebarWidth}px`;
+  else bar.style.removeProperty("width");
+}
+
+// Drag the divider on the rail's right edge to resize it (big mode only); the
+// width persists in the store. Pointer capture so the drag survives fast moves.
+function wireRailResize() {
+  const grip = $("#actbar-resize");
+  grip.addEventListener("pointerdown", (e) => {
+    if (store.get().sidebar !== "big") return;
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = store.get().sidebarWidth;
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.max(96, Math.min(360, startW + (ev.clientX - startX)));
+      store.set({ sidebarWidth: w });
+      applyRailWidth();
+    };
+    const onUp = (ev: PointerEvent) => {
+      grip.releasePointerCapture(ev.pointerId);
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+  });
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
@@ -2265,6 +2392,7 @@ function registerBuiltin() {
         id: "sessions",
         title: "tmux",
         icon: "▦",
+        iconUrl: "/icons/BatExec_16x16_4.png",
         iconLabel: "tmux",
         html: `<div class="sidebar-lists">
           <div class="sidebar-head">TMUX <span id="session-count" class="head-count"></span>
@@ -2294,6 +2422,7 @@ function registerBuiltin() {
         id: "worktrees",
         title: "Worktrees",
         icon: "⊞",
+        iconUrl: "/icons/Explorer100_16x16_4.png",
         iconLabel: "Worktrees",
         html: `<form id="wt-scan" class="wt-scan">
           <input id="wt-root" value="~/projects" autocomplete="off" />
@@ -2307,9 +2436,30 @@ function registerBuiltin() {
         onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
       },
       {
+        id: "tmux2",
+        title: "tmux v2",
+        icon: "▦",
+        iconUrl: "/icons/BatExec2_16x16_4.png",
+        iconLabel: "tmux2",
+        html: "",
+        component: TmuxPanelV2,
+        onShow: () => { refreshSessions(); },
+      },
+      {
+        id: "worktrees2",
+        title: "Worktrees v2",
+        icon: "⊞",
+        iconUrl: "/icons/FolderExe_16x16_4.png",
+        iconLabel: "wt2",
+        html: "",
+        component: WorktreesPanelV2,
+        onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
+      },
+      {
         id: "files",
         title: "Files",
         icon: "📁",
+        iconUrl: "/icons/Folder_16x16_4.png",
         iconLabel: "Files",
         html: `<div class="fs-bar">
           <button id="fs-up" type="button" title="Up one folder">↑</button>
@@ -2325,6 +2475,7 @@ function registerBuiltin() {
         id: "activity",
         title: "Activity",
         icon: "◉",
+        iconUrl: "/icons/WindowGraph_16x16_4.png",
         iconLabel: "Activity",
         html: `<div class="act-bar">
           <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
@@ -2350,6 +2501,7 @@ function registerBuiltin() {
         id: "config",
         title: "Config",
         icon: "⚙",
+        iconUrl: "/icons/Controls3000_16x16_4.png",
         iconLabel: "Config",
         html: `<div class="act-bar">
           <span class="spy-title">config</span>
@@ -2889,6 +3041,7 @@ async function main() {
 
   registerBuiltin();
   registerSprefa();
+  registerV2Bridges();
   injectPanelHtml();
   buildActivityRail();
   ($("#wt-root") as HTMLInputElement).value = store.get().scanRoot;
@@ -2902,6 +3055,7 @@ async function main() {
     showError("wireDock", e);
   }
   wireWindowResize();
+  wireRailResize();
   wireOsDrop().catch((e) => showError("wireOsDrop", e));
   wireContextMenu(ctxItemsFor);
   await refreshSessions();

@@ -4,7 +4,8 @@ import type { IDockviewPanelProps } from "dockview";
 export interface PanelDef {
   id: string;
   title: string;
-  icon: string;
+  icon: string; // fallback glyph when iconUrl is absent
+  iconUrl?: string; // XP-style raster icon (public/icons/*.png); wins over `icon`
   iconLabel: string;
   html: string;
   component?: ComponentType<IDockviewPanelProps>;
@@ -93,7 +94,10 @@ export function buildActivityRail() {
     btn.id = `${p.id}-toggle`;
     btn.dataset.panel = p.id;
     btn.title = p.title;
-    btn.innerHTML = `<span class="ai">${p.icon}</span><span class="al">${p.iconLabel}</span>`;
+    const icon = p.iconUrl
+      ? `<img class="ai-img" src="${p.iconUrl}" alt="" />`
+      : p.icon;
+    btn.innerHTML = `<span class="ai">${icon}</span><span class="al">${p.iconLabel}</span>`;
     container.appendChild(btn);
   }
   const spacer = actbar.querySelector(".actbar-spacer");

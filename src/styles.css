@@ -270,7 +270,22 @@ body[data-skin="ac3"] .mode-toggle {
   border-right: none;
 }
 .actbar[data-mode="big"] {
-  width: 148px;
+  width: 148px; /* default; overridden by the persisted drag width (applyRailWidth) */
+}
+/* Draggable divider on the rail's right edge (big mode). Thin hit zone that
+   lights up on hover, like the window resize grips. */
+.actbar-resize {
+  flex: none;
+  width: 4px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 5;
+}
+.actbar-resize:hover {
+  background: var(--row-active-bg);
+}
+.actbar[data-mode="compact"] + .actbar-resize {
+  display: none; /* compact width is fixed; nothing to drag */
 }
 .actbar[data-mode="compact"] {
   width: 44px;
@@ -300,6 +315,13 @@ body[data-skin="ac3"] .mode-toggle {
   width: 18px;
   text-align: center;
   font-size: 14px;
+}
+/* XP raster rail icons (react95 png set): keep the 16px pixels crisp, no smoothing. */
+.actbar-item .ai-img {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+  image-rendering: pixelated;
 }
 .actbar[data-mode="compact"] .actbar-item .al {
   display: none;
@@ -1203,6 +1225,75 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
 }
 .dtable-row:hover td {
   background: var(--row-hover);
+}
+/* v2 react-table panels: scroll host + tree column twisty/indent. The dtable
+   classes carry all the skin theming; these are layout-only. The explicit color
+   is load-bearing: a dockview panel host doesn't inherit --panel-fg, so without
+   it the row <td> text went near-black on the dark surface. */
+.panel-scroll {
+  height: 100%;
+  overflow: auto;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+}
+.panel-scroll .dtable {
+  color: var(--panel-fg);
+}
+.dtable-row.pinned td {
+  background: color-mix(in srgb, var(--row-active-bg) 8%, transparent);
+}
+.tt-tree {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tt-twisty {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 9px;
+}
+.tt-twisty.tt-leaf {
+  cursor: default;
+  opacity: 0;
+}
+
+/* ---- XP "details view" listview chrome ----
+   Raised gradient column headers with separators + the signature blue row
+   selection, so the v2 tables read as a real XP Explorer list. Skin-scoped so
+   p5/ac3 keep their flat looks; the base .dtable tokens still drive those. */
+body[data-skin="xp"] .dtable th {
+  background: linear-gradient(#fbfbfb, #ece9d8 55%, #d6d2c6);
+  border-right: 1px solid #aca899;
+  text-shadow: 0 1px 0 #fff;
+}
+body[data-skin="xp"] .dtable th:last-child {
+  border-right: none;
+}
+body[data-skin="xp"] .dtable th.dtable-th-sort:hover {
+  background: linear-gradient(#eaf3ff, #cfe3ff 55%, #b8d6ff);
+  color: var(--head-fg);
+}
+body[data-skin="xp"] .dtable-row:hover td {
+  background: linear-gradient(#eef6ff, #d4e8ff);
+}
+/* dark xp: dark raised header, teal-ish proc/sort accents (navy is invisible). */
+body[data-skin="xp"][data-mode="dark"] .dtable th {
+  background: linear-gradient(#3c3c3e, #2d2d30);
+  border-right: 1px solid #1c1c1c;
+  text-shadow: none;
+}
+body[data-skin="xp"][data-mode="dark"] .dtable th.dtable-th-sort:hover {
+  background: linear-gradient(#0c4a78, #073353);
+  color: #fff;
+}
+body[data-skin="xp"][data-mode="dark"] .dtable-row:hover td {
+  background: linear-gradient(#0a3a5c, #07304d);
+}
+body[data-skin="xp"][data-mode="dark"] .s-proc {
+  color: #4ec9b0;
 }
 .wt-dirty {
   /* amber: uncommitted changes (green read as "clean", which is backwards) */
