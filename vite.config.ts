@@ -8,6 +8,18 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Two HTML entries: the app (index.html) and the headless drop-catcher window
+  // (dropcatcher.html). The catcher is the only surface with the native Tauri
+  // drag handler; the main window keeps it off so dockview tab-drag works.
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        dropcatcher: "dropcatcher.html",
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

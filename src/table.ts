@@ -29,8 +29,11 @@ export interface SortState {
 export interface TableOpts<T> {
   columns: Column<T>[];
   rows: T[];
-  onRow?: (row: T) => void;
+  onRow?: (row: T, e: MouseEvent) => void;
   onRowDblClick?: (row: T) => void;
+  // Right-click on a row; receives the row plus the mouse event for anchoring a
+  // context menu. The caller is responsible for preventDefault.
+  onRowContextMenu?: (row: T, e: MouseEvent) => void;
   rowTitle?: (row: T) => string;
   // Class applied to a row's <tr> (e.g. to mark the selected row).
   rowClass?: (row: T) => string | undefined;
@@ -78,7 +81,8 @@ export function sortRows<T>(rows: T[], columns: Column<T>[], sort?: SortState): 
 // Build one <tr> from a row. Shared by the static and virtual tables so their
 // cell/handler/selection behavior is identical.
 function buildRow<T>(row: T, opts: RowOpts<T>): HTMLTableRowElement {
-  const { columns, onRow, onRowDblClick, rowTitle, rowClass, rowEntity } = opts;
+  const { columns, onRow, onRowDblClick, onRowContextMenu, rowTitle, rowClass, rowEntity } =
+    opts;
   const tr = document.createElement("tr");
   tr.className = "dtable-row";
   const extra = rowClass?.(row);
@@ -97,8 +101,14 @@ function buildRow<T>(row: T, opts: RowOpts<T>): HTMLTableRowElement {
     tr.appendChild(td);
   }
   if (rowTitle) tr.title = rowTitle(row);
-  if (onRow) tr.onclick = () => onRow(row);
+  if (onRow) tr.onclick = (e) => onRow(row, e);
   if (onRowDblClick) tr.ondblclick = () => onRowDblClick(row);
+  if (onRowContextMenu)
+    tr.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onRowContextMenu(row, e);
+    };
   return tr;
 }
 

@@ -69,11 +69,15 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
   );
 }
 
-const LAYOUT_VERSION = 7; // 7: plugin-based panel components
+const LAYOUT_VERSION = 8; // 8: per-path preview tabs; singleton preview panel removed
 
 const TERM = "term:";
 const isTerm = (id: string) => id.startsWith(TERM);
 const termSid = (id: string) => id.slice(TERM.length);
+const PREVIEW = "preview:";
+const isPreview = (id: string) => id.startsWith(PREVIEW);
+// Both terminals and previews adopt a content node owned by JS (not in the dock
+// JSON), keyed by full panel id.
 const dynamicNodes = new Map<string, HTMLElement>();
 
 let api: DockviewApi | null = null;
@@ -115,6 +119,25 @@ function TerminalPanel(props: IDockviewPanelProps) {
   return <div className="dv-host" ref={ref} />;
 }
 
+// Per-path preview instance. Like terminals, the content node lives in JS
+// (dynamicNodes) and is adopted on mount, returned to the pool on unmount.
+// main.ts owns the node and renders into it; this just hosts it in the dock.
+function PreviewPanel(props: IDockviewPanelProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const id = props.params.panelId as string;
+
+  useEffect(() => {
+    const node = dynamicNodes.get(id);
+    if (node && ref.current) ref.current.appendChild(node);
+    return () => {
+      const pool = document.getElementById("panel-pool");
+      if (pool && node) pool.appendChild(node);
+    };
+  }, [id]);
+
+  return <div className="dv-host dv-host-scroll" ref={ref} />;
+}
+
 function persist() {
   if (api) store.set({ dockJSON: { v: LAYOUT_VERSION, layout: api.toJSON() } });
 }
@@ -136,9 +159,11 @@ function buildDefault() {
   });
 }
 
-function stripTermHusks() {
+// Terminals and previews don't survive a reload (their content nodes live in
+// JS, not the dock JSON), so drop any husks restored from the saved layout.
+function stripDynamicHusks() {
   if (!api) return;
-  for (const p of [...api.panels]) if (isTerm(p.id)) api.removePanel(p);
+  for (const p of [...api.panels]) if (isTerm(p.id) || isPreview(p.id)) api.removePanel(p);
 }
 
 function onReady(e: DockviewReadyEvent) {
@@ -149,7 +174,7 @@ function onReady(e: DockviewReadyEvent) {
       try {
         applyLayout(() => {
           api!.fromJSON(saved.layout as never);
-          stripTermHusks();
+          stripDynamicHusks();
         });
       } catch {
         applyLayout(buildDefault);
@@ -167,6 +192,8 @@ function onReady(e: DockviewReadyEvent) {
       if (isTerm(p.id)) {
         dynamicNodes.delete(p.id);
         hooks.onTermClose(termSid(p.id));
+      } else if (isPreview(p.id)) {
+        dynamicNodes.delete(p.id);
       }
     });
     api.onDidLayoutChange(() => {
@@ -226,20 +253,35 @@ export function setTermTitle(sid: string, title: string) {
   api?.getPanel(TERM + sid)?.api.setTitle(title);
 }
 
-export function ensurePreview() {
-  if (!api || api.getPanel("preview")) return;
-  const ref = api.getPanel("files") ? "files" : api.panels[0]?.id;
+// Open (or focus) a per-path preview tab. The caller owns `el` and renders into
+// it; we adopt it into a `preview:<path>` dock panel, mirroring addTermPanel.
+export function addPreviewPanel(path: string, title: string, el: HTMLElement) {
+  if (!api) return;
+  const pid = PREVIEW + path;
+  dynamicNodes.set(pid, el);
+  const existing = api.getPanel(pid);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  const anchor = anchorPanel();
+  const position = anchor
+    ? { referencePanel: anchor, direction: "within" as const }
+    : undefined;
   api.addPanel({
-    id: "preview",
-    component: "preview",
-    params: { panelId: "preview" },
-    title: getPanel("preview")?.title ?? "Preview",
-    ...(ref ? { position: { referencePanel: ref, direction: "right" as const } } : {}),
+    id: pid,
+    component: "preview-instance",
+    params: { panelId: pid },
+    title,
+    ...(position ? { position } : {}),
   });
 }
 
-export function closePreview() {
-  const p = api?.getPanel("preview");
+export function isPreviewOpen(path: string): boolean {
+  return !!api?.getPanel(PREVIEW + path);
+}
+export function closePreviewPanel(path: string) {
+  const p = api?.getPanel(PREVIEW + path);
   if (p) api!.removePanel(p);
 }
 
@@ -276,7 +318,7 @@ export function onDockChange(fn: () => void) {
 function DockApp() {
   const comps = dockComponents();
   return createElement(DockviewReact, {
-    components: { ...comps, terminal: TerminalPanel },
+    components: { ...comps, terminal: TerminalPanel, "preview-instance": PreviewPanel },
     defaultTabComponent: CustomTab,
     theme: themeLight,
     onReady,

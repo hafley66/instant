@@ -45,6 +45,10 @@ pub struct Session {
     /// frontend maps these to worktrees (longest-prefix match) to relate a
     /// session to the worktrees it has touched.
     paths: Vec<String>,
+    /// Distinct foreground process names across this session's panes
+    /// (#{pane_current_command}): claude, opencode, nvim, zsh… The frontend
+    /// shows these so you can see what bot/tool a session is actually running.
+    commands: Vec<String>,
 }
 
 /// Emitted to the webview as `pty-data`.
@@ -65,7 +69,7 @@ pub fn list_sessions() -> Vec<Session> {
         .env("PATH", path_env())
         .output();
 
-    let mut paths = session_pane_paths();
+    let (mut paths, mut commands) = session_pane_info();
     let Ok(out) = out else { return Vec::new() };
     String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -79,32 +83,48 @@ pub fn list_sessions() -> Vec<Session> {
             let activity = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let created = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let paths = paths.remove(&name).unwrap_or_default();
-            Some(Session { name, windows, attached, activity, created, paths })
+            let commands = commands.remove(&name).unwrap_or_default();
+            Some(Session { name, windows, attached, activity, created, paths, commands })
         })
         .collect()
 }
 
-/// session_name -> distinct pane cwds, from one `tmux list-panes -a` call. Empty
-/// on any failure (the session list still renders, just without worktree links).
-fn session_pane_paths() -> HashMap<String, Vec<String>> {
+/// session_name -> (distinct pane cwds, distinct foreground commands), from one
+/// `tmux list-panes -a` call. Empty on any failure (the session list still
+/// renders, just without worktree links or process labels).
+fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
     let out = std::process::Command::new("tmux")
-        .args(["list-panes", "-a", "-F", "#{session_name}\t#{pane_current_path}"])
+        .args([
+            "list-panes",
+            "-a",
+            "-F",
+            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}",
+        ])
         .env("PATH", path_env())
         .output();
-    let Ok(out) = out else { return HashMap::new() };
-    let mut map: HashMap<String, Vec<String>> = HashMap::new();
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let mut it = line.split('\t');
-        let (Some(name), Some(path)) = (it.next(), it.next()) else { continue };
-        if path.is_empty() {
-            continue;
+    let mut paths: HashMap<String, Vec<String>> = HashMap::new();
+    let mut commands: HashMap<String, Vec<String>> = HashMap::new();
+    let Ok(out) = out else { return (paths, commands) };
+    let push = |map: &mut HashMap<String, Vec<String>>, name: &str, val: &str| {
+        if val.is_empty() {
+            return;
         }
         let v = map.entry(name.to_string()).or_default();
-        if !v.iter().any(|p| p == path) {
-            v.push(path.to_string());
+        if !v.iter().any(|p| p == val) {
+            v.push(val.to_string());
+        }
+    };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.split('\t');
+        let Some(name) = it.next() else { continue };
+        if let Some(path) = it.next() {
+            push(&mut paths, name, path);
+        }
+        if let Some(cmd) = it.next() {
+            push(&mut commands, name, cmd);
         }
     }
-    map
+    (paths, commands)
 }
 
 /// Turn on mouse mode for a session so the wheel scrolls the pane / forwards to

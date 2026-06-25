@@ -25,6 +25,20 @@
         "skipTaskbar": true,
         "resizable": true,
         "dragDropEnabled": false
+      },
+      {
+        "label": "dropcatcher",
+        "url": "dropcatcher.html",
+        "width": 820,
+        "height": 540,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": false,
+        "dragDropEnabled": true
       }
     ],
     "security": {

@@ -10,6 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@oddbird/css-anchor-positioning": "^0.9.0",
     "@tanstack/virtual-core": "^3.17.1",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
@@ -22,6 +23,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "shiki": "^4.2.0",
+    "tinykeys": "^4.0.0",
     "xp.css": "^0.2.6"
   },
   "devDependencies": {

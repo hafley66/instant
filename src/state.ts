@@ -104,6 +104,14 @@ export interface Session {
   activity: number; // unix seconds of last activity (tmux #{session_activity})
   created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees it has touched
+  commands: string[]; // distinct foreground process per pane (#{pane_current_command}): claude, nvim, zsh…
+}
+
+// A label + the shell command it launches, offered when opening a worktree
+// session. User-editable (persisted as wtAgents) so the picker isn't hardcoded.
+export interface WtAgent {
+  label: string;
+  command: string;
 }
 
 // One open terminal tab (its xterm lives in the engine registry, keyed by id).
@@ -149,9 +157,19 @@ export interface AppState {
   fsCwd: string; // Files explorer current directory (persisted)
   sidebarWidth: number; // px
   wtExpanded: string[]; // expanded tree node keys
+  wtFavorites: string[]; // starred worktree paths (persisted)
+  wtFocus: boolean; // when on, the worktree view shows only starred rows
+  wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
+  pinnedSessions: string[]; // tmux session names pinned to the top of the list (persisted)
   sprefaScope: SprefaScopeItem[]; // selected files/repos/revs (persisted)
   sprefaScopeActive: boolean; // when on, scope contributes sel_* facts to queries
 }
+
+// Seeded into wtAgents on first run; thereafter the user's edited list wins.
+export const DEFAULT_WT_AGENTS: WtAgent[] = [
+  { label: "claude", command: "claude" },
+  { label: "opencode", command: "opencode" },
+];
 
 // Durable slice, mirrored to localStorage. Runtime fields (active, sessions,
 // worktrees) are excluded.
@@ -173,6 +191,10 @@ const PERSIST: (keyof AppState)[] = [
   "fsCwd",
   "sidebarWidth",
   "wtExpanded",
+  "wtFavorites",
+  "wtFocus",
+  "wtAgents",
+  "pinnedSessions",
   "sprefaScope",
   "sprefaScopeActive",
 ];
@@ -216,6 +238,10 @@ function load(): AppState {
     fsCwd: loadKey<string>("fsCwd", "~"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
+    wtFavorites: loadKey<string[]>("wtFavorites", []),
+    wtFocus: loadKey<boolean>("wtFocus", false),
+    wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
+    pinnedSessions: loadKey<string[]>("pinnedSessions", []),
     sprefaScope: loadKey<SprefaScopeItem[]>("sprefaScope", []),
     sprefaScopeActive: loadKey<boolean>("sprefaScopeActive", false),
   };

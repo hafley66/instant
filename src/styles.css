@@ -113,11 +113,10 @@ body[data-skin="ac3"] {
   background: var(--surface);
 }
 
-.title-bar {
-  -webkit-app-region: drag;
-}
-/* Kill text selection on the whole bar (incl. the text node xp.css styles), so
-   a drag from the title moves the window instead of highlighting the caption. */
+/* Drag + double-click-maximize are wired in JS (getCurrentWindow().startDragging
+   / toggleMaximize on the bar's mousedown); -webkit-app-region is Electron-only
+   and a no-op in WKWebView. Kill text selection on the whole bar (incl. the text
+   node xp.css styles) so a drag moves the window instead of highlighting it. */
 .title-bar,
 .title-bar * {
   user-select: none;
@@ -244,8 +243,10 @@ body[data-skin="ac3"] .mode-toggle {
   display: flex;
   min-height: 0;
   /* No top margin: the workbench sits flush under the toolbar so the rail and
-     toolbar read as one connected block, not two floating boxes. */
-  margin: 0 3px 3px;
+     toolbar read as one connected block, not two floating boxes. The right/
+     bottom gutter is wide enough that the dock's scrollbars sit inboard of the
+     window-resize bands (.rz) and the two stop fighting for the same pixels. */
+  margin: 0 7px 7px;
   gap: 0;
   background: var(--surface);
 }
@@ -510,19 +511,25 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
    grips reach OUT past #app's edge with a negative offset to cover the visible
    window border that sits in that margin. ~10px edge zone + bigger corners that
    win via higher z. */
+/* z above the dockview surface (and its scrollbars) so an edge drag always
+   starts a window resize, never grabs the scrollbar underneath. The edge bands
+   are wide enough to hit without precision; the corner squares are larger still
+   and win via higher z where they overlap an edge. The content is held a few px
+   off the right/bottom edges (see .body.window-body margin) so the panel
+   scrollbar sits inboard of these bands instead of fighting them. */
 .rz {
   position: absolute;
-  z-index: 50;
+  z-index: 200;
   -webkit-app-region: no-drag;
 }
-.rz[data-dir="North"]  { top: -6px; left: 10px; right: 10px; height: 12px; cursor: ns-resize; }
-.rz[data-dir="South"]  { bottom: -6px; left: 10px; right: 10px; height: 12px; cursor: ns-resize; }
-.rz[data-dir="West"]   { left: -6px; top: 10px; bottom: 10px; width: 12px; cursor: ew-resize; }
-.rz[data-dir="East"]   { right: -6px; top: 10px; bottom: 10px; width: 12px; cursor: ew-resize; }
-.rz[data-dir="NorthWest"] { top: -6px; left: -6px; width: 16px; height: 16px; cursor: nwse-resize; z-index: 51; }
-.rz[data-dir="NorthEast"] { top: -6px; right: -6px; width: 16px; height: 16px; cursor: nesw-resize; z-index: 51; }
-.rz[data-dir="SouthWest"] { bottom: -6px; left: -6px; width: 16px; height: 16px; cursor: nesw-resize; z-index: 51; }
-.rz[data-dir="SouthEast"] { bottom: -6px; right: -6px; width: 16px; height: 16px; cursor: nwse-resize; z-index: 51; }
+.rz[data-dir="North"]  { top: -6px; left: 12px; right: 12px; height: 14px; cursor: ns-resize; }
+.rz[data-dir="South"]  { bottom: -6px; left: 12px; right: 12px; height: 14px; cursor: ns-resize; }
+.rz[data-dir="West"]   { left: -6px; top: 12px; bottom: 12px; width: 14px; cursor: ew-resize; }
+.rz[data-dir="East"]   { right: -6px; top: 12px; bottom: 12px; width: 14px; cursor: ew-resize; }
+.rz[data-dir="NorthWest"] { top: -6px; left: -6px; width: 22px; height: 22px; cursor: nwse-resize; z-index: 201; }
+.rz[data-dir="NorthEast"] { top: -6px; right: -6px; width: 22px; height: 22px; cursor: nesw-resize; z-index: 201; }
+.rz[data-dir="SouthWest"] { bottom: -6px; left: -6px; width: 22px; height: 22px; cursor: nesw-resize; z-index: 201; }
+.rz[data-dir="SouthEast"] { bottom: -6px; right: -6px; width: 22px; height: 22px; cursor: nwse-resize; z-index: 201; }
 .sidebar-head {
   font-size: 10px;
   letter-spacing: 1px;
@@ -921,33 +928,56 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   border: var(--frame-w) solid var(--frame);
 }
 
-/* The preview is its own dockview panel now; fill it instead of the fixed
-   180px column it used while embedded beside the Files list. The activity
-   panel still embeds .fs-preview in a split, so scope this to the panel. */
-#panel-preview .fs-preview {
+/* Each preview is its own per-path dockview tab now (preview:<path>); its
+   content node (.fs-preview) is hosted in a .dv-host-scroll and fills the tab
+   instead of the fixed 180px column it used while embedded beside the Files
+   list. The activity panel still embeds a bare .fs-preview in a split, so scope
+   these overrides to the tab host. */
+.dv-host-scroll .fs-preview {
   width: auto;
   flex: 1;
   border-left: none;
   /* The inner snippet/code block owns the single scroll; the pane itself must
-     not also scroll, or you get nested double scrollbars. meta stays pinned. */
+     not also scroll, or you get nested double scrollbars. The meta is a fixed
+     header strip with its own padding; the body fills below. */
   overflow: hidden;
   min-height: 0;
+  padding: 0;
+  gap: 0;
 }
-#panel-preview .fs-preview-meta {
+.dv-host-scroll .fs-preview-meta {
   flex: none;
+  padding: 6px 8px;
+  border-bottom: var(--frame-w) solid var(--frame);
 }
-/* The one scroll container, in both axes. */
-#panel-preview .src-pre,
-#panel-preview .code-body,
-#panel-preview .code-plain {
+/* The single scroll container — vertical only. Long lines wrap (below) so there
+   is never a horizontal scrollbar; resizing the tab narrower just reflows. */
+.dv-host-scroll .src-pre,
+.dv-host-scroll .code-body,
+.dv-host-scroll .code-plain {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 0;
 }
-/* Shiki sets overflow:auto on its <pre>; let the .code-body wrapper scroll
-   instead so there's a single scroller. */
-#panel-preview .code-body pre.shiki {
+/* Center an image preview in the tab instead of pinning it to the top-left. */
+.dv-host-scroll .fs-preview-img {
+  margin: auto;
+}
+/* Shiki sets overflow:auto + white-space:pre on its <pre>; let the .code-body
+   wrapper own the (vertical) scroll and wrap long lines so they never scroll
+   sideways. overflow-wrap:anywhere breaks mid-token when a line has no spaces. */
+.dv-host-scroll .code-body pre.shiki {
   overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* code-plain has no per-line padding of its own (unlike .src-line / shiki). */
+.dv-host-scroll .code-plain {
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Rendered markdown (marked + DOMPurify). */
@@ -1245,6 +1275,88 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   color: var(--row-active-bg);
   font-weight: bold;
 }
+/* Favorite star on a worktree leaf (and the flat-table star column). Dim until
+   starred or hovered, so unstarred rows stay quiet. */
+.wt-star {
+  flex: none;
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.35;
+  width: 14px;
+  text-align: center;
+}
+.wt-node:hover .wt-star {
+  opacity: 0.7;
+}
+.wt-star.on,
+.wt-star:hover {
+  opacity: 1;
+  color: var(--row-active-bg);
+}
+td.wt-star {
+  width: 18px;
+}
+/* Worktree path on disk, shown dim after the meta; truncates before actions. */
+.wt-path {
+  font-size: 10px;
+  opacity: 0.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* Focus toggle in the worktree header reads as active when on. */
+#wt-focus.on {
+  color: var(--row-active-bg);
+  font-weight: bold;
+}
+/* Inline agent-list editor row under the scan header. */
+.wt-agents-row {
+  display: flex;
+  padding: 0 4px;
+}
+.wt-agents-row:empty {
+  display: none;
+}
+.wt-agents-row .wt-add-input {
+  margin-left: 0;
+  width: 100%;
+}
+
+/* tmux row: foreground process tag + cwd. */
+.s-proc {
+  font-size: 10px;
+  font-weight: bold;
+  color: var(--row-active-bg);
+  flex: none;
+}
+.s-pwd {
+  font-size: 10px;
+  opacity: 0.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-basis: 100%; /* drop the cwd onto its own line under the name */
+}
+.s-pin {
+  flex: none;
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+.session:hover .s-pin {
+  opacity: 0.7;
+}
+.s-pin.on {
+  opacity: 1;
+  filter: none;
+}
+.session.pinned {
+  background: color-mix(in srgb, var(--row-active-bg) 8%, transparent);
+}
+
 /* Inline branch input for "+ worktree". */
 .wt-add-input {
   margin-left: auto;
@@ -1290,6 +1402,13 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   font-family: "Menlo", "Consolas", monospace;
   word-break: break-all;
   opacity: 0.8;
+}
+.sprefa-program-file {
+  cursor: pointer;
+}
+.sprefa-program-file:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 /* Schema/Scratch toggle in the sprefa bar. */
 .sprefa-tab.on {
@@ -1469,14 +1588,18 @@ body[data-skin="xp"][data-mode="dark"] .sprefa-scratch-src {
   font-family: "Menlo", "Consolas", monospace;
   font-size: 11px;
   line-height: 1.45;
-  white-space: pre;
-  /* The preview pane (.fs-preview) owns vertical scroll; only take horizontal
-     here so long lines don't wrap. Avoids a nested vertical scrollbar. */
-  overflow-x: auto;
-  overflow-y: visible;
+  /* Wrap long lines so there's no horizontal scrollbar; the pane owns the
+     single vertical scroll. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .src-line {
-  padding: 0 6px;
+  /* Hanging indent: the line number sits at the left; wrapped continuation
+     lines align past it (under the code), not under the number. */
+  padding: 0 6px 0 calc(6px + 3.2em + 8px);
+  text-indent: calc(-3.2em - 8px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .src-elide {
   padding: 1px 6px;

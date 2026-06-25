@@ -5,7 +5,18 @@ import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  PhysicalPosition,
+  PhysicalSize,
+  LogicalPosition,
+  LogicalSize,
+} from "@tauri-apps/api/dpi";
+import { homeDir } from "@tauri-apps/api/path";
+// CSS Anchor Positioning isn't in WebKit yet (Tauri = WKWebView); this shims
+// `anchor-name`/`position-anchor`/`anchor()`/`position-area` so tooltips and
+// menus can be authored in native CSS. No-ops where the browser supports it.
+import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import {
   store,
   type ActivitySource,
@@ -18,6 +29,7 @@ import {
   type SprefaScopeItem,
   type SprefaScopeKind,
   type WorktreeRow,
+  type WtAgent,
 } from "./state";
 import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
 import {
@@ -28,14 +40,15 @@ import {
 } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
+import { installKeymap, runMatchingCommand, type Command } from "./keymap";
 import {
   mountReactDock,
   togglePanel,
   isOpen,
   setDockHooks,
   onDockChange,
-  ensurePreview,
-  closePreview,
+  addPreviewPanel,
+  isPreviewOpen,
   addTermPanel,
   focusTermPanel,
   removeTermPanel,
@@ -51,6 +64,7 @@ type Session = {
   activity: number; // unix seconds of last activity (tmux #{session_activity})
   created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees in refreshSessions
+  commands: string[]; // distinct foreground process per pane (claude, nvim, zsh…)
 };
 
 type Tab = {
@@ -73,7 +87,6 @@ function touchTab(id: string) {
 }
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
-const listEl = $("#session-list") as HTMLUListElement;
 
 const sessionId = (name: string) => `s:${name}`;
 const activeId = () => store.get().active;
@@ -124,6 +137,67 @@ const QUICK_CMD: Record<string, string> = {
   opencode: "opencode",
 };
 
+// ---- tab commands (driven by the central keymap) ----
+// Terminal tabs in open order; the active one is store.active (a term id).
+const termTabIds = () => [...tabs.keys()];
+
+// Move focus by ±1 through the open terminal tabs, wrapping around.
+function focusTabByOffset(delta: number) {
+  const ids = termTabIds();
+  if (ids.length < 2) return;
+  const cur = activeId();
+  const i = cur ? ids.indexOf(cur) : -1;
+  const next = ids[((i < 0 ? 0 : i) + delta + ids.length) % ids.length];
+  focusTermPanel(next);
+}
+
+// Go to the Nth tab (1-based). 9 always jumps to the last, browser-style.
+function focusTabN(n: number) {
+  const ids = termTabIds();
+  if (!ids.length) return;
+  const idx = n >= 9 ? ids.length - 1 : n - 1;
+  if (ids[idx]) focusTermPanel(ids[idx]);
+}
+
+// Close the active tab (cmd/ctrl+W).
+function closeActiveTab() {
+  const id = activeId();
+  if (id) closeTab(id);
+}
+
+// Open a new tmux session at the active tab's cwd (cmd/ctrl+T). The session is
+// named after that directory; falls back to a plain "shell" at HOME when there's
+// no active terminal to read a cwd from.
+function openTabAtPwd() {
+  const cur = activeId();
+  const name = cur ? cur.slice(sessionId("").length) : ""; // strip the "s:" prefix
+  const sess = name ? store.get().sessions.find((s) => s.name === name) : undefined;
+  const cwd = (sess?.paths ?? [])[0] ?? null;
+  const taken = new Set<string>([
+    ...store.get().sessions.map((s) => s.name),
+    ...[...tabs.values()].map((t) => t.name),
+  ]);
+  const base = cwd ? tmuxName(baseName(cwd)) : "shell";
+  let fresh = base;
+  let n = 2;
+  while (taken.has(fresh)) fresh = `${base}-${n++}`;
+  openTab(fresh, { cwd });
+  refreshSessions();
+}
+
+const TAB_COMMANDS: Command[] = [
+  { id: "tab.next", keys: ["$mod+Shift+BracketRight", "Control+Tab"], run: () => focusTabByOffset(1) },
+  { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], run: () => focusTabByOffset(-1) },
+  { id: "tab.close", keys: ["$mod+w"], run: closeActiveTab },
+  { id: "tab.open", keys: ["$mod+t"], run: openTabAtPwd },
+  // cmd/ctrl+1..9 jump to a tab (9 = last).
+  ...Array.from({ length: 9 }, (_, i) => ({
+    id: `tab.goto${i + 1}`,
+    keys: [`$mod+${i + 1}`],
+    run: () => focusTabN(i + 1),
+  })),
+];
+
 // opts let a Space override the agent command and launch cwd; plain sessions
 // fall back to QUICK_CMD and the backend default (HOME).
 function openTab(name: string, opts: { command?: string | null; cwd?: string | null } = {}) {
@@ -169,6 +243,12 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   // (e.g. Alt+b inserting "∫").
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
+    // App command? Run it, swallow the key (no pty write), and stop it bubbling
+    // to the window keymap listener so it doesn't fire twice.
+    if (runMatchingCommand(e)) {
+      e.stopPropagation();
+      return false;
+    }
     const send = (data: string) => {
       invoke("write_pty", { id, data }).catch(console.error);
       return false;
@@ -289,14 +369,34 @@ function worktreesForPaths(paths: string[], rows: WorktreeRow[]): string[] {
 // Order the launcher rows per store.sessionSort. Name is the stable tiebreak.
 function sortSessions(live: Session[]): Session[] {
   const { key, dir } = store.get().sessionSort;
+  const pinned = new Set(store.get().pinnedSessions);
   const sign = dir === "asc" ? 1 : -1;
   return [...live].sort((a, b) => {
+    // Pinned sessions always float to the top, regardless of the sort key.
+    const pa = pinned.has(a.name) ? 0 : 1;
+    const pb = pinned.has(b.name) ? 0 : 1;
+    if (pa !== pb) return pa - pb;
     let c = 0;
     if (key === "name") c = a.name.localeCompare(b.name, undefined, { numeric: true });
     else if (key === "windows") c = a.windows - b.windows;
     else c = a.activity - b.activity;
     return c !== 0 ? c * sign : a.name.localeCompare(b.name, undefined, { numeric: true });
   });
+}
+
+// Shells aren't interesting as a "what's running here" label; surface the agent
+// or tool instead. Returns the first non-shell foreground command, else "".
+const SHELLS = new Set(["zsh", "bash", "fish", "sh", "tmux", "-zsh", "-bash"]);
+function foregroundProc(commands: string[]): string {
+  return commands.find((c) => !SHELLS.has(c)) ?? "";
+}
+const isPinnedSession = (name: string) => store.get().pinnedSessions.includes(name);
+function togglePinSession(name: string) {
+  const cur = store.get().pinnedSessions;
+  store.set({
+    pinnedSessions: cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name],
+  });
+  refreshSessions();
 }
 
 async function refreshSessions() {
@@ -319,6 +419,10 @@ async function refreshSessions() {
   store.set({ sessions: live, sessionWorktrees: sw });
 
   const countEl = document.querySelector("#session-count");
+  // Query the list element fresh each call: it's created by injectPanelHtml
+  // AFTER this module loads, so a module-level ref would be null forever (this
+  // was the "no session list" bug — the render bailed every time).
+  const listEl = document.querySelector<HTMLUListElement>("#session-list");
   if (!countEl || !listEl) return; // panel DOM not mounted yet; a later show re-runs
   countEl.textContent = live.length ? String(live.length) : "";
 
@@ -346,14 +450,28 @@ async function refreshSessions() {
         return `<span class="wt-chip${current.has(p) ? " current" : ""}" title="${p}">${label}</span>`;
       })
       .join("");
+    const proc = foregroundProc(s.commands ?? []);
+    const pwd = (s.paths ?? [])[0]; // a representative cwd for this session
+    const pinned = isPinnedSession(s.name);
     const li = document.createElement("li");
     li.dataset.id = sessionId(s.name);
-    li.className = "session";
+    li.className = "session" + (pinned ? " pinned" : "");
     li.innerHTML = `<span class="dot ${s.attached ? "on" : ""}"></span>
       <span class="s-name">${s.name}</span>
+      ${proc ? `<span class="s-proc" title="foreground process">${proc}</span>` : ""}
       <span class="s-meta">${s.windows}w${open ? " · open" : ""}</span>
+      ${pwd ? `<span class="s-pwd" title="${pwd}">${tildify(pwd)}</span>` : ""}
       ${chips ? `<span class="s-worktrees">${chips}</span>` : ""}`;
     li.onclick = () => openTab(s.name); // attaches (tmux new-session -A) / focuses
+    const pin = document.createElement("span");
+    pin.className = "s-pin" + (pinned ? " on" : "");
+    pin.textContent = pinned ? "📌" : "📍";
+    pin.title = pinned ? "unpin" : "pin to top";
+    pin.onclick = (e) => {
+      e.stopPropagation();
+      togglePinSession(s.name);
+    };
+    li.appendChild(pin);
     const kill = document.createElement("span");
     kill.className = "tab-close";
     kill.textContent = "×";
@@ -412,24 +530,64 @@ function buildTree(rows: WorktreeRow[]): OrgNode[] {
     }));
 }
 
-// Open (or attach) a tmux session for a worktree, optionally launching an agent
-// the first time the session is created. The session name is derived from the
-// checkout + branch so the same worktree always maps to the same session.
-function openWorktree(clone: string, branch: string, wtPath: string, command?: string) {
-  openTab(tmuxName(`${baseName(clone)}-${branch}`), { cwd: wtPath, command });
+// The base tmux session name for a worktree (deterministic: same checkout +
+// branch always resolves here, so "resume" reattaches the same session).
+const baseSessionName = (clone: string, branch: string) =>
+  tmuxName(`${baseName(clone)}-${branch}`);
+
+// A session name not already taken, so "new session" on a worktree spawns a
+// second/third session instead of reattaching the first. Considers BOTH live
+// tmux sessions AND currently-open tabs — store.sessions can be stale between
+// refreshes, and a just-opened tab won't be in it yet, so without the tabs
+// union a "new" name collides with the base and openTab just re-focuses it.
+// Returns the base name when it's free, else base-2, base-3, …
+function freshSessionName(clone: string, branch: string): string {
+  const base = baseSessionName(clone, branch);
+  const taken = new Set<string>([
+    ...store.get().sessions.map((s) => s.name),
+    ...[...tabs.values()].map((t) => t.name),
+  ]);
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
 }
 
-// AI agents offered by the worktree "open ▾" menu. A plain shell is always
-// appended (see showAgentMenu) so you can drop into a new tmux session there.
-const WT_AGENTS: { label: string; command: string }[] = [
-  { label: "claude", command: "claude" },
-  { label: "opencode", command: "opencode" },
-];
+// Open a tmux session for a worktree, optionally launching an agent the first
+// time it's created. `fresh` forces a brand-new session (suffixed name) even
+// when one already exists here; otherwise reattach/create the base session.
+function openWorktree(
+  clone: string,
+  branch: string,
+  wtPath: string,
+  command?: string,
+  fresh = false,
+) {
+  const name = fresh ? freshSessionName(clone, branch) : baseSessionName(clone, branch);
+  openTab(name, { cwd: wtPath, command });
+  refreshSessions();
+}
 
-// The agent picker for a worktree: launch a session here running the chosen
-// agent, or a plain new tmux shell. Anchored at (x,y) — a button corner or the
-// cursor. When the worktree is dirty the shell option calls that out, since
-// "drop into a shell to inspect/commit" is the common move there.
+// Parse the inline agent-list editor: "claude:claude, vim:nvim ." -> WtAgent[].
+// Each entry is "label:command"; a bare token is used as both label and command.
+function parseWtAgents(text: string): WtAgent[] {
+  return text
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((tok) => {
+      const i = tok.indexOf(":");
+      if (i < 0) return { label: tok, command: tok };
+      return { label: tok.slice(0, i).trim(), command: tok.slice(i + 1).trim() };
+    })
+    .filter((a) => a.label && a.command);
+}
+
+// The full chooser for a worktree, anchored at (x,y). Lists every existing
+// session here so you can resume a SPECIFIC one (not just the latest), then the
+// "new session" options per configured agent + a plain shell. This is the one
+// menu used by single click, right click, and the "open ▾" button so the
+// reuse-vs-new decision is always explicit.
 function showAgentMenu(
   x: number,
   y: number,
@@ -438,16 +596,137 @@ function showAgentMenu(
   wtPath: string,
   dirty: boolean,
 ) {
-  const items: CtxItem[] = WT_AGENTS.map((a) => ({
-    label: a.label,
-    action: () => openWorktree(clone, branch, wtPath, a.command),
-  }));
-  items.push({ sep: true });
+  const live = sessionsForWorktree(wtPath);
+  const items: CtxItem[] = [];
+  for (const s of live) {
+    const proc = foregroundProc(s.commands ?? []);
+    items.push({
+      label: `resume · ${s.name}${proc ? ` (${proc})` : ""}`,
+      action: () => openTab(s.name),
+    });
+  }
+  if (live.length) items.push({ sep: true });
+  for (const a of store.get().wtAgents) {
+    items.push({
+      label: `new · ${a.label}`,
+      action: () => openWorktree(clone, branch, wtPath, a.command, true),
+    });
+  }
   items.push({
     label: dirty ? "new shell · uncommitted changes" : "new shell",
-    action: () => openWorktree(clone, branch, wtPath, undefined),
+    action: () => openWorktree(clone, branch, wtPath, undefined, true),
   });
+  items.push({ sep: true });
+  items.push({
+    label: isFavWorktree(wtPath) ? "★ unfavorite" : "☆ favorite",
+    action: () => toggleFavWorktree(wtPath),
+  });
+  items.push({ label: "edit agents…", action: openWtAgentsEditor });
   showContextMenu(x, y, items);
+}
+
+// Default-agent launch (first configured agent) for the double-click gesture.
+function openWorktreeDefault(clone: string, branch: string, wtPath: string) {
+  const agent = store.get().wtAgents[0];
+  openWorktree(clone, branch, wtPath, agent?.command, true);
+}
+
+// ---- worktree favorites (stars) + focus filter ----
+const isFavWorktree = (wtPath: string) => store.get().wtFavorites.includes(wtPath);
+function toggleFavWorktree(wtPath: string) {
+  const cur = store.get().wtFavorites;
+  store.set({
+    wtFavorites: cur.includes(wtPath)
+      ? cur.filter((p) => p !== wtPath)
+      : [...cur, wtPath],
+  });
+  renderWorktreesPanel();
+}
+// When focus is on, keep only starred worktrees (and any whose row is needed to
+// reach them). buildTree/renderFlatTable both consume the filtered rows.
+function focusRows(rows: WorktreeRow[]): WorktreeRow[] {
+  if (!store.get().wtFocus) return rows;
+  const favs = new Set(store.get().wtFavorites);
+  return rows.filter((r) => favs.has(r.worktree));
+}
+
+// Buffered click vs double-click on a worktree leaf. Single click waits ~220ms
+// so a double-click can preempt it; double-click and right-click open a NEW
+// session, single click resumes an existing one (or opens the picker if none).
+const CLICK_BUFFER_MS = 220;
+let leafClickTimer: number | null = null;
+function clearLeafClick() {
+  if (leafClickTimer !== null) {
+    clearTimeout(leafClickTimer);
+    leafClickTimer = null;
+  }
+}
+
+// The three gestures shared by tree leaves and flat-table rows:
+//   single click (buffered): open the chooser (resume a specific session / new)
+//   double click: skip the menu, open a brand-new session with the default agent
+//   right click: same chooser as single click
+// Single and right both go through showAgentMenu so the reuse-vs-new choice is
+// always explicit — never silently attach the latest session.
+function leafGestures(clone: string, branch: string, wtPath: string, dirty: boolean) {
+  return {
+    onSingle: (x: number, y: number) => {
+      clearLeafClick();
+      leafClickTimer = window.setTimeout(() => {
+        leafClickTimer = null;
+        showAgentMenu(x, y, clone, branch, wtPath, dirty);
+      }, CLICK_BUFFER_MS);
+    },
+    onDouble: () => {
+      clearLeafClick();
+      openWorktreeDefault(clone, branch, wtPath);
+    },
+    onContext: (x: number, y: number) => {
+      clearLeafClick();
+      showAgentMenu(x, y, clone, branch, wtPath, dirty);
+    },
+  };
+}
+
+// Reveal the inline agent-list editor in the worktree panel header, seeded with
+// the current list as "label:command" tokens. Enter commits, Esc cancels.
+let wtAgentsEditing = false;
+function openWtAgentsEditor() {
+  wtAgentsEditing = true;
+  renderWorktreesPanel();
+}
+function wtAgentsToText(agents: WtAgent[]): string {
+  return agents.map((a) => (a.label === a.command ? a.label : `${a.label}:${a.command}`)).join(", ");
+}
+// Render (or tear down) the inline agent-list editor in the panel header.
+function renderWtAgentsEditor() {
+  const host = document.querySelector<HTMLElement>("#wt-agents");
+  if (!host) return;
+  if (!wtAgentsEditing) {
+    host.innerHTML = "";
+    return;
+  }
+  host.innerHTML = "";
+  const inp = document.createElement("input");
+  inp.className = "wt-add-input";
+  inp.placeholder = "label:command, … (e.g. claude, sonnet:claude --model sonnet)";
+  inp.value = wtAgentsToText(store.get().wtAgents);
+  const commit = () => {
+    const parsed = parseWtAgents(inp.value);
+    if (parsed.length) store.set({ wtAgents: parsed });
+    wtAgentsEditing = false;
+    renderWorktreesPanel();
+  };
+  inp.onkeydown = (e) => {
+    if (e.key === "Enter") commit();
+    else if (e.key === "Escape") {
+      wtAgentsEditing = false;
+      renderWorktreesPanel();
+    }
+  };
+  inp.onblur = commit;
+  host.appendChild(inp);
+  queueMicrotask(() => inp.focus());
 }
 
 // Live tmux sessions whose panes currently sit inside `wtPath` — the candidates
@@ -491,8 +770,14 @@ function treeNode(opts: {
   meta?: string;
   multi?: boolean;
   dirty?: boolean;
+  // A leading ☆/★ toggle (worktree leaves only). `on` drives the filled glyph.
+  star?: { on: boolean; onToggle: () => void };
+  // Full filepath shown dim after the meta (worktree leaves), title on hover.
+  path?: string;
   onGlyph?: () => void;
   onLabel?: (e: MouseEvent) => void;
+  onDblClick?: (e: MouseEvent) => void;
+  onContextMenu?: (e: MouseEvent) => void;
   actions?: RowAction[];
   // Inline editor shown in place of the meta (e.g. the new-worktree branch
   // input). When present the row renders an <input> and forwards submit/cancel.
@@ -512,6 +797,18 @@ function treeNode(opts: {
     };
   row.appendChild(g);
 
+  if (opts.star) {
+    const star = document.createElement("span");
+    star.className = "wt-star" + (opts.star.on ? " on" : "");
+    star.textContent = opts.star.on ? "★" : "☆";
+    star.title = opts.star.on ? "unfavorite" : "favorite";
+    star.onclick = (e) => {
+      e.stopPropagation();
+      opts.star!.onToggle();
+    };
+    row.appendChild(star);
+  }
+
   const label = document.createElement("span");
   label.className = "wt-label";
   label.textContent = opts.label;
@@ -528,6 +825,13 @@ function treeNode(opts: {
     d.className = "wt-dirty";
     d.textContent = "●";
     row.appendChild(d);
+  }
+  if (opts.path) {
+    const p = document.createElement("span");
+    p.className = "wt-path";
+    p.textContent = tildify(opts.path);
+    p.title = opts.path;
+    row.appendChild(p);
   }
 
   if (opts.editor) {
@@ -561,7 +865,22 @@ function treeNode(opts: {
   }
 
   if (opts.onLabel) row.onclick = (e) => opts.onLabel!(e);
+  if (opts.onDblClick) row.ondblclick = (e) => opts.onDblClick!(e);
+  if (opts.onContextMenu)
+    row.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      opts.onContextMenu!(e);
+    };
   return row;
+}
+
+// "/Users/me/projects/x" -> "~/projects/x" for compact display. Home is filled
+// once at boot (see init) so this stays synchronous for render.
+let homeDirCached = "";
+function tildify(p: string): string {
+  const h = homeDirCached.replace(/\/$/, "");
+  return h && p.startsWith(h + "/") ? "~" + p.slice(h.length) : p;
 }
 
 function renderTree(rows: WorktreeRow[]) {
@@ -576,7 +895,7 @@ function renderTree(rows: WorktreeRow[]) {
 
   const wrap = document.createElement("div");
   wrap.className = "wt-tree";
-  for (const org of buildTree(rows)) {
+  for (const org of buildTree(focusRows(rows))) {
     const okey = `o:${org.origin}`;
     const oOpen = wtExpanded.has(okey);
     wrap.appendChild(
@@ -635,10 +954,11 @@ function renderTree(rows: WorktreeRow[]) {
 
       for (const wt of cl.worktrees) {
         const live = sessionsForWorktree(wt.worktree);
+        const g = leafGestures(cl.clone, wt.branch, wt.worktree, wt.dirty);
         const actions: RowAction[] = [
           {
             label: "open ▾",
-            title: "open a session here (pick an agent)",
+            title: "open a NEW session here (pick an agent)",
             cls: "wt-open",
             onClick: (anchor) => {
               const r = anchor.getBoundingClientRect();
@@ -648,7 +968,7 @@ function renderTree(rows: WorktreeRow[]) {
         ];
         if (live.length)
           actions.push({
-            label: "resume",
+            label: `resume${live.length > 1 ? ` (${live.length})` : ""}`,
             title: `attach existing session: ${live.map((s) => s.name).join(", ")}`,
             cls: "wt-resume",
             onClick: () => openTab(live[0].name),
@@ -660,10 +980,13 @@ function renderTree(rows: WorktreeRow[]) {
             label: wt.is_main ? "(main)" : baseName(wt.worktree),
             meta: `${wt.branch}  ${wt.head}`,
             dirty: wt.dirty,
+            path: wt.worktree,
+            star: { on: isFavWorktree(wt.worktree), onToggle: () => toggleFavWorktree(wt.worktree) },
             actions,
-            // Click (or double-click) the leaf to open the same agent menu.
-            onLabel: (e) =>
-              showAgentMenu(e.clientX, e.clientY, cl.clone, wt.branch, wt.worktree, wt.dirty),
+            // single = resume/pick · double = new session · right = picker
+            onDblClick: () => g.onDouble(),
+            onContextMenu: (e) => g.onContext(e.clientX, e.clientY),
+            onLabel: (e) => g.onSingle(e.clientX, e.clientY),
           }),
         );
       }
@@ -686,12 +1009,20 @@ function renderFlatTable(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
   const sort = tableSortFor("worktrees", { col: 0, dir: "asc" });
+  const gFor = (r: WorktreeRow) => leafGestures(r.clone, r.branch, r.worktree, r.dirty);
   host.appendChild(
     renderTable<WorktreeRow>({
-      rows,
+      rows: focusRows(rows),
       sort,
       onSort: (s) => onTableSort("worktrees", s, () => renderFlatTable(store.get().worktrees)),
       columns: [
+        {
+          // Star indicator; toggle via right-click (favorite/unfavorite).
+          header: "",
+          cell: (r) => (isFavWorktree(r.worktree) ? "★" : "☆"),
+          cellClass: (r) => (isFavWorktree(r.worktree) ? "wt-star on" : "wt-star"),
+          sortKey: (r) => (isFavWorktree(r.worktree) ? 0 : 1),
+        },
         { header: "org/repo", cell: (r) => prettyOrigin(r.origin), sortKey: (r) => r.origin },
         { header: "clone", cell: (r) => baseName(r.clone), sortKey: (r) => baseName(r.clone) },
         {
@@ -701,6 +1032,7 @@ function renderFlatTable(rows: WorktreeRow[]) {
         },
         { header: "branch", cell: (r) => r.branch, sortKey: (r) => r.branch },
         { header: "head", cell: (r) => r.head, sortKey: (r) => r.head },
+        { header: "path", cell: (r) => tildify(r.worktree), sortKey: (r) => r.worktree },
         {
           header: "",
           cell: (r) => (r.dirty ? "●" : ""),
@@ -709,7 +1041,10 @@ function renderFlatTable(rows: WorktreeRow[]) {
         },
       ],
       rowTitle: (r) => r.worktree,
-      onRow: (r) => openWorktree(r.clone, r.branch, r.worktree),
+      // Same gesture model as the tree: single=resume/pick, dbl=new, right=menu.
+      onRow: (r, e) => gFor(r).onSingle(e.clientX, e.clientY),
+      onRowDblClick: (r) => gFor(r).onDouble(),
+      onRowContextMenu: (r, e) => gFor(r).onContext(e.clientX, e.clientY),
     }),
   );
 }
@@ -718,10 +1053,21 @@ function renderWorktreesPanel() {
   // Panel may be closed / mid-remount when a store change fires this; bail.
   const count = document.querySelector<HTMLElement>("#wt-count");
   if (!count) return;
-  const { worktrees, wtView } = store.get();
-  count.textContent = worktrees.length ? `${worktrees.length} worktrees` : "";
+  const { worktrees, wtView, wtFocus, wtFavorites } = store.get();
+  const shown = wtFocus ? worktrees.filter((r) => wtFavorites.includes(r.worktree)).length : worktrees.length;
+  count.textContent = worktrees.length
+    ? wtFocus
+      ? `${shown}/${worktrees.length} ★`
+      : `${worktrees.length} worktrees`
+    : "";
   ($("#wt-view") as HTMLButtonElement).textContent =
     wtView === "tree" ? "Table" : "Tree";
+  const focusBtn = document.querySelector<HTMLButtonElement>("#wt-focus");
+  if (focusBtn) {
+    focusBtn.textContent = wtFocus ? "★ Focus" : "☆ Focus";
+    focusBtn.classList.toggle("on", wtFocus);
+  }
+  renderWtAgentsEditor();
   if (wtView === "tree") renderTree(worktrees);
   else renderFlatTable(worktrees);
 }
@@ -1127,7 +1473,6 @@ async function browseTo(path: string) {
   try {
     const listing = await invoke<DirListing>("list_dir", { path });
     store.set({ files: listing, fsCwd: listing.path, fsSelected: null });
-    closePreview(); // selection cleared -> hide the preview pane
   } catch (e) {
     console.error("list_dir:", e);
     const host = document.querySelector<HTMLElement>("#fs-list");
@@ -1154,64 +1499,101 @@ const SHIKI_LANG: Record<string, string> = {
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// Render the selected entry into the preview pane: images via read_image,
-// markdown via marked, everything else via shiki syntax highlighting. Each path
-// re-checks fsSelected after its async hop so a newer selection wins.
-async function renderPreview(sel: string | null, files: DirListing) {
-  const pane = document.querySelector<HTMLElement>("#fs-preview");
-  if (!pane) return; // preview pane closed; reopens + re-renders on next select
-  const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
-  const entry = sel ? files.entries.find((e) => e.path === sel) : null;
-  if (!entry) {
-    pane.innerHTML = empty("select a file");
-    return;
-  }
-  const meta = `<div class="fs-preview-meta">${entry.name}<br><span>${typeLabel(entry)} · ${fmtSize(entry.size)}</span></div>`;
-  if (entry.is_dir) {
-    pane.innerHTML = meta + empty("folder");
-    return;
-  }
+// ---- per-path preview tabs ----
+// Previews are dynamic dock panels keyed by path (preview:<path>), like xterm
+// sessions. main.ts owns each instance's content node and renders into it;
+// reactdock hosts the node. No untitled buffers: every preview names a path.
+type PreviewInst = { el: HTMLElement; line?: number };
+const previewInsts = new Map<string, PreviewInst>();
 
-  if (IMAGE_EXTS.has(entry.ext)) {
-    pane.innerHTML = meta + empty("loading…");
+// Open (or focus) the preview tab for `path`. A `line` (>0) selects the
+// line-numbered source view scrolled to that row; otherwise the rendered view
+// (image / markdown / syntax-highlighted code).
+function openPreviewPanel(path: string, line?: number) {
+  let inst = previewInsts.get(path);
+  if (!inst) {
+    const el = document.createElement("div");
+    el.className = "fs-preview";
+    inst = { el, line };
+    previewInsts.set(path, inst);
+  } else {
+    inst.line = line;
+  }
+  addPreviewPanel(path, path.split("/").pop() ?? path, inst.el);
+  renderPathInto(inst.el, path, line);
+}
+
+// Render `path` into `node`: images via read_image, markdown via marked, a
+// `line` request via the line-numbered source view, everything else via shiki.
+async function renderPathInto(node: HTMLElement, path: string, line?: number) {
+  const name = path.split("/").pop() ?? path;
+  const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
+  const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
+  const meta = `<div class="fs-preview-meta">${name}<br><span>${line ? `${path}:${line}` : path}</span></div>`;
+  node.innerHTML = meta + empty("loading…");
+
+  if (!line && IMAGE_EXTS.has(ext)) {
     try {
-      const url = await invoke<string>("read_image", { path: entry.path });
-      if (store.get().fsSelected !== entry.path) return;
-      pane.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
+      const url = await invoke<string>("read_image", { path });
+      node.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
     } catch (e) {
-      pane.innerHTML = meta + empty(String(e));
+      node.innerHTML = meta + empty(String(e));
     }
     return;
   }
 
-  pane.innerHTML = meta + empty("loading…");
   let text: string;
   try {
-    text = await invoke<string>("read_text", { path: entry.path });
+    text = await invoke<string>("read_text", { path });
   } catch (e) {
-    pane.innerHTML = meta + empty(String(e));
+    node.innerHTML = meta + empty(String(e));
     return;
   }
-  if (store.get().fsSelected !== entry.path) return;
 
-  if (MD_EXTS.has(entry.ext)) {
+  if (line) {
+    // Whole file with line numbers; the target row is highlighted and scrolled
+    // to center. Capped so a giant source file stays responsive.
+    const lines = text.split("\n");
+    const CAP = 2000;
+    const hi = Math.min(lines.length, CAP);
+    const body = lines
+      .slice(0, hi)
+      .map((l, i) => {
+        const n = i + 1;
+        const cls = n === line ? "src-line on" : "src-line";
+        const num = String(n).padStart(4, " ");
+        return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${escapeHtml(l) || " "}</div>`;
+      })
+      .join("");
+    const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} more lines</div>` : "";
+    node.innerHTML = meta + `<pre class="src-pre">${body}${tail}</pre>`;
+    node.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
+    return;
+  }
+
+  if (MD_EXTS.has(ext)) {
     const html = DOMPurify.sanitize(await marked.parse(text));
-    if (store.get().fsSelected !== entry.path) return;
-    pane.innerHTML = meta + `<div class="md-body">${html}</div>`;
+    node.innerHTML = meta + `<div class="md-body">${html}</div>`;
     return;
   }
 
   const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
-  const lang = SHIKI_LANG[entry.ext] || SHIKI_LANG[entry.name.toLowerCase()] || "text";
+  const lang = SHIKI_LANG[ext] || SHIKI_LANG[name.toLowerCase()] || "text";
   try {
     const html = await codeToHtml(text, { lang, theme });
-    if (store.get().fsSelected !== entry.path) return;
-    pane.innerHTML = meta + `<div class="code-body">${html}</div>`;
+    node.innerHTML = meta + `<div class="code-body">${html}</div>`;
   } catch {
-    if (store.get().fsSelected !== entry.path) return;
-    pane.innerHTML = meta + `<pre class="code-plain">${escapeHtml(text)}</pre>`;
+    node.innerHTML = meta + `<pre class="code-plain">${escapeHtml(text)}</pre>`;
   }
 }
+
+// On theme flip, re-render the open (non-source) previews so syntax colors track
+// light/dark. Closed instances keep their cached node; reopening re-renders.
+store.subscribe(() => {
+  for (const [path, inst] of previewInsts) {
+    if (!inst.line && isPreviewOpen(path)) renderPathInto(inst.el, path, inst.line);
+  }
+}, ["mode"]);
 
 function renderFilesPanel() {
   const host = document.querySelector<HTMLElement>("#fs-list");
@@ -1250,12 +1632,12 @@ function renderFilesPanel() {
       rowTitle: (e) => e.path,
       // Files are draggable into the sprefa scope tray (folders aren't entities).
       rowEntity: (e) => (e.is_dir ? undefined : { kind: "file", value: e.path }),
-      // Folders open on a single click; files select + open the preview pane.
+      // Folders open on a single click; files select + open a preview tab.
       onRow: (e) => {
         if (e.is_dir) browseTo(e.path);
         else {
           store.set({ fsSelected: e.path });
-          ensurePreview();
+          openPreviewPanel(e.path);
         }
       },
       onRowDblClick: (e) => {
@@ -1266,7 +1648,6 @@ function renderFilesPanel() {
     }),
   );
   host.scrollTop = scroll;
-  renderPreview(fsSelected, files);
 }
 
 // syncToggles now reads from the plugin registry instead of a hardcoded list.
@@ -1446,46 +1827,133 @@ function openSendPicker(anchor: HTMLElement) {
 function pathArg(p: string): string {
   return /\s/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p;
 }
-// Finder-drag-a-file-into-the-terminal is OFF: it needs Tauri's native drag
-// handler (dragDropEnabled), which on macOS swallows the in-page HTML5 drag
-// events dockview uses to drag/split tabs. Tab dragging won out. Paths still
-// reach the terminal via the Shot button and the right-click "paste path" menu.
-// This listener is inert while dragDropEnabled is false; kept for an easy flip.
-async function wireDragDrop() {
-  await getCurrentWebview().onDragDropEvent((e) => {
-    cancelHide();
-    if (e.payload.type !== "drop") return;
-    if (!e.payload.paths.length) return;
-    // A drop over the sprefa scope tray adds those files to the selection
-    // instead of pasting them into the terminal. position is physical px.
-    const p = e.payload.position;
-    const dpr = window.devicePixelRatio || 1;
-    const over = document.elementFromPoint(p.x / dpr, p.y / dpr);
-    if (over?.closest("#sprefa-scope")) {
-      for (const path of e.payload.paths) addScope({ kind: "file", value: path });
-      return;
+
+// True from the moment a Finder drag enters until the catcher reports a drop or
+// cancel. Suppresses blur-to-hide (showing the catcher blurs us) and debounces
+// repeat dragenter events.
+let draggingIn = false;
+let dropWatchdog: number | undefined;
+
+// Native OS file-drop without losing dockview tab-drag. The main window has the
+// Tauri drag handler OFF (so HTML5 tab-drag works), which means a Finder drag
+// fires a DOM dragenter here but exposes no file paths. On that dragenter we
+// raise the `dropcatcher` window — the one surface WITH the native handler —
+// over our exact bounds. Being always-on-top it becomes the OS drop target,
+// reads the absolute paths, and emits them back via `os-file-drop`. It hides
+// itself on drop/leave; a watchdog covers a cancelled drag that sends neither.
+async function wireOsDrop() {
+  const main = getCurrentWindow();
+  const catcher = await WebviewWindow.getByLabel("dropcatcher");
+  if (!catcher) return;
+
+  const standDown = () => {
+    draggingIn = false;
+    if (dropWatchdog !== undefined) {
+      clearTimeout(dropWatchdog);
+      dropWatchdog = undefined;
     }
-    const id = activeId();
-    if (!id) return;
-    const data = e.payload.paths.map(pathArg).join(" ") + " ";
-    invoke("write_pty", { id, data }).catch(console.error);
-    tabs.get(id)?.term.focus();
+  };
+
+  window.addEventListener("dragenter", async (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    if (draggingIn) return;
+    draggingIn = true;
+    cancelHide(); // the catcher taking the drag must not auto-hide us
+    const pos = await main.outerPosition();
+    const size = await main.outerSize();
+    await catcher.setPosition(new PhysicalPosition(pos.x, pos.y));
+    await catcher.setSize(new PhysicalSize(size.width, size.height));
+    await catcher.show();
+    // Safety net: a drag cancelled outside the app may send no drop/leave.
+    dropWatchdog = window.setTimeout(() => {
+      standDown();
+      catcher.hide().catch(() => {});
+    }, 8000);
   });
+
+  // Catcher covers us exactly, so its drop position (physical px, window-origin)
+  // maps 1:1 onto ours. Over the sprefa scope tray → add file scope; otherwise
+  // paste the paths into the active terminal.
+  await listen<{ paths: string[]; position: { x: number; y: number } }>(
+    "os-file-drop",
+    (e) => {
+      standDown();
+      cancelHide();
+      const { paths, position } = e.payload;
+      if (!paths.length) return;
+      const dpr = window.devicePixelRatio || 1;
+      const over = document.elementFromPoint(position.x / dpr, position.y / dpr);
+      if (over?.closest("#sprefa-scope")) {
+        for (const path of paths) addScope({ kind: "file", value: path });
+        return;
+      }
+      const id = activeId();
+      if (!id) return;
+      pasteToActive(paths.map(pathArg).join(" ") + " ");
+      tabs.get(id)?.term.focus();
+    },
+  );
+
+  await listen("os-file-drop-cancel", standDown);
 }
 
-// Drag the divider to resize the sidebar; width persists in the store.
 // Window edge/corner grips. decorations:false means macOS gives no native
-// resize handles, so each grip hands the drag to Tauri's startResizeDragging.
-// The data-dir strings match Tauri's ResizeDirection enum values exactly.
+// resize handles, and Tauri's startResizeDragging is a no-op on macOS (tao's
+// drag_resize_window returns NotSupported for every direction), so we drive the
+// resize ourselves: capture the pointer, track the screen-space delta, and push
+// new size/position to the window. screenX/screenY are logical (CSS) px, which
+// is what LogicalSize/LogicalPosition expect — no scale-factor juggling needed.
+const MIN_W = 420;
+const MIN_H = 320;
 function wireWindowResize() {
   const win = getCurrentWindow();
   document.querySelectorAll<HTMLElement>(".rz").forEach((grip) => {
-    grip.addEventListener("pointerdown", (e) => {
+    const dir = grip.dataset.dir ?? "";
+    grip.addEventListener("pointerdown", async (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      // ResizeDirection is an internal union; dataset.dir already holds a valid
-      // member ('North' | 'SouthEast' | …) so cast through the param type.
-      win.startResizeDragging(grip.dataset.dir as never).catch(console.error);
+      e.stopPropagation();
+      const scale = await win.scaleFactor();
+      const p = await win.outerPosition();
+      const s = await win.outerSize();
+      const ox = p.x / scale;
+      const oy = p.y / scale;
+      const ow = s.width / scale;
+      const oh = s.height / scale;
+      const startX = e.screenX;
+      const startY = e.screenY;
+      grip.setPointerCapture(e.pointerId);
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.screenX - startX;
+        const dy = ev.screenY - startY;
+        let w = ow;
+        let h = oh;
+        if (dir.includes("East")) w = ow + dx;
+        if (dir.includes("West")) w = ow - dx;
+        if (dir.includes("South")) h = oh + dy;
+        if (dir.includes("North")) h = oh - dy;
+        w = Math.max(w, MIN_W);
+        h = Math.max(h, MIN_H);
+        win.setSize(new LogicalSize(w, h));
+        // West/North move the anchored (far) edge; keep it fixed by shifting the
+        // origin so only the dragged edge tracks the cursor. Clamp-aware: derive
+        // the shift from the clamped size, not the raw delta.
+        if (dir.includes("West") || dir.includes("North")) {
+          const nx = dir.includes("West") ? ox + (ow - w) : ox;
+          const ny = dir.includes("North") ? oy + (oh - h) : oy;
+          win.setPosition(new LogicalPosition(nx, ny));
+        }
+      };
+      const onUp = (ev: PointerEvent) => {
+        grip.releasePointerCapture(ev.pointerId);
+        grip.removeEventListener("pointermove", onMove);
+        grip.removeEventListener("pointerup", onUp);
+        grip.removeEventListener("pointercancel", onUp);
+      };
+      grip.addEventListener("pointermove", onMove);
+      grip.addEventListener("pointerup", onUp);
+      grip.addEventListener("pointercancel", onUp);
     });
   });
 }
@@ -1613,6 +2081,7 @@ function wireChrome() {
   });
   $("#wt-view").onclick = () =>
     store.set({ wtView: store.get().wtView === "tree" ? "table" : "tree" });
+  $("#wt-focus").onclick = () => store.set({ wtFocus: !store.get().wtFocus });
 
   $("#session-sort").addEventListener("change", (e) => {
     const [key, dir] = (e.target as HTMLSelectElement).value.split(":") as [
@@ -1665,6 +2134,19 @@ function wireChrome() {
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
   $("#hide-btn").onclick = () => getCurrentWindow().hide();
 
+  // Own the drag region in JS instead of `data-tauri-drag-region`: that attribute
+  // only matches the exact event target, so grabbing the caption text (a child)
+  // started a text-selection instead of a window drag. Listening on the bar and
+  // routing by target covers every child. `e.detail === 2` is the double-click
+  // (same trick Tauri's built-in uses) → maximize toggle.
+  $(".title-bar").addEventListener("mousedown", (e) => {
+    const me = e as MouseEvent;
+    if (me.button !== 0) return;
+    if ((me.target as HTMLElement).closest(".title-bar-controls")) return;
+    if (me.detail === 2) getCurrentWindow().toggleMaximize();
+    else getCurrentWindow().startDragging();
+  });
+
   // Quick-launch an agent session (creates the tmux session running the agent).
   $("#ql-claude").onclick = () => {
     openTab("claude", { command: "claude" });
@@ -1692,11 +2174,11 @@ function registerBuiltin() {
     panels: [
       {
         id: "sessions",
-        title: "Sessions",
+        title: "tmux",
         icon: "▦",
-        iconLabel: "Sessions",
+        iconLabel: "tmux",
         html: `<div class="sidebar-lists">
-          <div class="sidebar-head">SESSIONS <span id="session-count" class="head-count"></span>
+          <div class="sidebar-head">TMUX <span id="session-count" class="head-count"></span>
             <select id="session-sort" class="session-sort" title="sort sessions">
               <option value="activity:desc">recent</option>
               <option value="activity:asc">oldest</option>
@@ -1728,8 +2210,10 @@ function registerBuiltin() {
           <input id="wt-root" value="~/projects" autocomplete="off" />
           <button type="submit">Scan</button>
           <button id="wt-view" type="button">Table</button>
+          <button id="wt-focus" type="button" title="show only favorited worktrees">☆ Focus</button>
           <span id="wt-count" class="wt-count"></span>
         </form>
+        <div id="wt-agents" class="wt-agents-row"></div>
         <div id="wt-table" class="wt-table"></div>`,
         onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
       },
@@ -1747,13 +2231,6 @@ function registerBuiltin() {
           <div id="fs-list" class="fs-list"></div>
         </div>`,
         onShow: () => { if (!store.get().files) browseTo(store.get().fsCwd); },
-      },
-      {
-        id: "preview",
-        title: "Preview",
-        icon: "▤",
-        iconLabel: "Preview",
-        html: `<div id="fs-preview" class="fs-preview"></div>`,
       },
       {
         id: "activity",
@@ -1821,41 +2298,11 @@ function span(cls: string, text: string): HTMLSpanElement {
 
 type SprefaSite = { file: string; line: number; text: string; kind: string };
 
-// Open a .dl/.rs file in the preview pane, scrolled to `line` with that row
-// marked. Not store-reactive (a one-shot snippet view), so write #fs-preview
-// directly after ensuring the panel exists.
-async function openSprefaSource(file: string, line: number) {
-  ensurePreview();
-  const pane = document.querySelector<HTMLElement>("#fs-preview");
-  if (!pane) return;
-  const name = file.split("/").pop() ?? file;
-  const meta = `<div class="fs-preview-meta">${name}<br><span>${file}:${line}</span></div>`;
-  pane.innerHTML = meta + `<div class="fs-preview-empty">loading…</div>`;
-  try {
-    const text = await invoke<string>("read_text", { path: file });
-    const lines = text.split("\n");
-    // Window ±12 lines around the target so a big file doesn't become an
-    // endless scroll; the snippet centers on the rule.
-    const PAD = 12;
-    const lo = Math.max(0, line - 1 - PAD);
-    const hi = Math.min(lines.length, line - 1 + PAD + 1);
-    const body = lines
-      .slice(lo, hi)
-      .map((l, i) => {
-        const n = lo + i + 1;
-        const cls = n === line ? "src-line on" : "src-line";
-        const num = String(n).padStart(4, " ");
-        const esc = l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${esc || " "}</div>`;
-      })
-      .join("");
-    const head = lo > 0 ? `<div class="src-elide">… ${lo} lines above</div>` : "";
-    const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} lines below</div>` : "";
-    pane.innerHTML = meta + `<pre class="src-pre">${head}${body}${tail}</pre>`;
-    pane.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
-  } catch (e) {
-    pane.innerHTML = meta + `<div class="fs-preview-empty">${e}</div>`;
-  }
+// Open a .dl/.rs file in a preview tab. `line` (>0) marks + scrolls to that row
+// in the line-numbered source view; 0 opens the rendered (syntax-highlighted)
+// view. Routes through the per-path tab machinery like every other preview.
+function openSprefaSource(file: string, line: number) {
+  openPreviewPanel(file, line > 0 ? line : undefined);
 }
 
 async function loadSprefaSites(rel: string, host: HTMLElement) {
@@ -1945,15 +2392,28 @@ async function loadSprefaSchema() {
     const builtins = res.relations.filter((r) => r.builtin).length;
     const declared = res.relations.length - builtins;
     status.textContent = `${res.relations.length} relations (${declared} rules, ${builtins} builtin)`;
-    // The loaded .dl program: ping reports what the daemon parsed. Prepend it
-    // above the relation tree so it's clear which rules are in effect.
+    // The loaded .dl program: ping reports the actual file set the daemon
+    // parsed. Prepend it above the relation tree so it's clear which rules are
+    // in effect (multiple files merge into one program).
     try {
-      const ping = await invoke<{ program: string; tick_count: number }>("sprefa_ping", {
+      const ping = await invoke<{ program: string; program_files?: string[] }>("sprefa_ping", {
         root: sprefaRoot,
       });
+      const files = ping.program_files?.length ? ping.program_files : [ping.program].filter(Boolean);
       const info = node("sprefa-program");
-      info.append(span("sprefa-head", "loaded program"), span("wt-label", ping.program || "(none)"));
-      info.title = ping.program;
+      info.append(span("sprefa-head", `loaded program${files.length === 1 ? "" : `s (${files.length})`}`));
+      if (files.length === 0) info.append(span("wt-label", "(none)"));
+      for (const f of files) {
+        const row = span("wt-label sprefa-program-file", f.split("/").pop() ?? f);
+        row.title = f;
+        // Click opens the file in the Preview pane; also a draggable file entity
+        // (scope tray + right-click), like result cells and fs rows.
+        row.dataset.entityKind = "file";
+        row.dataset.entityValue = f;
+        row.draggable = true;
+        row.addEventListener("click", () => openSprefaSource(f, 0));
+        info.append(row);
+      }
       tree.prepend(info);
     } catch {
       /* ping optional; schema already rendered */
@@ -2289,6 +2749,13 @@ function registerSprefa() {
 }
 
 async function main() {
+  // Resolve the home dir once so tildify() can stay synchronous during render.
+  homeDirCached = await homeDir().catch(() => "");
+  // Activate anchor-positioning where it's not native (WebKit). useAnimationFrame
+  // keeps anchored elements positioned as the layout/scroll changes.
+  if (!CSS.supports("anchor-name: --x")) {
+    anchorPolyfill({ useAnimationFrame: true }).catch(console.error);
+  }
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
@@ -2302,7 +2769,14 @@ async function main() {
     onTermClose: onTermClosed,
     onTermLayout: fitTerm,
   });
-  store.subscribe(renderWorktreesPanel, ["worktrees", "wtView", "wtExpanded"]);
+  store.subscribe(renderWorktreesPanel, [
+    "worktrees",
+    "wtView",
+    "wtExpanded",
+    "wtFocus",
+    "wtFavorites",
+    "wtAgents",
+  ]);
   store.subscribe(renderActivityPanel, [
     "activity",
     "activitySource",
@@ -2339,7 +2813,7 @@ async function main() {
     showError("wireDock", e);
   }
   wireWindowResize();
-  wireDragDrop();
+  wireOsDrop().catch((e) => showError("wireOsDrop", e));
   wireContextMenu(ctxItemsFor);
   await refreshSessions();
   // Scan worktrees in the background so session rows can show which worktrees
@@ -2397,6 +2871,11 @@ async function main() {
     if (e.key === "Escape") getCurrentWindow().hide();
   });
 
+  // Central keymap: binds the command table on the window. The focused-terminal
+  // path is intercepted inside attachCustomKeyEventHandler (runMatchingCommand)
+  // so combos aren't typed into the pty.
+  installKeymap(TAB_COMMANDS);
+
   // Right-⌘ + Right-⇧ + V: the native tap (lib.rs) swallows the combo, copies
   // the focused app's selection, and emits the text here. Write it straight into
   // the active terminal (no picker).
@@ -2420,7 +2899,7 @@ async function main() {
       cancelHide();
       return;
     }
-    if (everFocused && !capturing) {
+    if (everFocused && !capturing && !draggingIn) {
       // Defer so a drag-in (which blurs us) can land; a drag-enter cancels it.
       cancelHide();
       hideTimer = window.setTimeout(() => win.hide(), 500);

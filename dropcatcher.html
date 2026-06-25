@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>instant — drop</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font: 13px/1.4 -apple-system, system-ui, sans-serif;
+        /* The window is only ever on-screen during a drag, so the cursor is
+           already a drag cursor; no pointer interactions to style. */
+        user-select: none;
+      }
+      #zone {
+        box-sizing: border-box;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 3px dashed rgba(120, 170, 255, 0.9);
+        background: rgba(30, 60, 120, 0.18);
+      }
+      #zone span {
+        padding: 8px 16px;
+        border-radius: 8px;
+        background: rgba(20, 40, 90, 0.78);
+        color: #eaf2ff;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+      }
+    </style>
+    <script type="module" src="/src/dropcatcher.ts" defer></script>
+  </head>
+  <body>
+    <div id="zone"><span>Drop to attach</span></div>
+  </body>
+</html>
