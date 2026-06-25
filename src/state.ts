@@ -60,6 +60,13 @@ export interface DirListing {
   entries: FsEntry[];
 }
 
+// A node in the lazy Files tree: an FsEntry plus its loaded children (undefined
+// until the folder is first expanded). Built on the fly from `files` (the root
+// listing) + `fsChildren` (per-path listings loaded on expand).
+export interface FsNode extends FsEntry {
+  children?: FsNode[];
+}
+
 // One row of the unified activity store (Rust activity::Event). Sources: a
 // browser DOM/tab event (extension), an os screen capture (gesture), or a file
 // open (Files panel).
@@ -153,7 +160,8 @@ export interface AppState {
   activityQuery: string; // fuzzy search box (runtime)
   captureEnabled: boolean; // screen-capture recording on/off (persisted, mirrors backend)
   config: ConfigView | null; // resolved observation config (runtime)
-  files: DirListing | null; // current Files explorer listing (runtime)
+  files: DirListing | null; // root Files explorer listing for the tree (runtime)
+  fsChildren: Record<string, FsEntry[]>; // per-folder listings, loaded on expand (runtime)
   fsSelected: string | null; // selected file path in the explorer (runtime)
   sessionSort: SessionSort; // sessions launcher ordering (persisted)
   tableSort: Record<string, SortState>; // per-dtable sort, keyed by table id (persisted)
@@ -161,6 +169,7 @@ export interface AppState {
   scanRoot: string; // worktrees scan path
   fsCwd: string; // Files explorer current directory (persisted)
   sidebarWidth: number; // px
+  zoom: number; // webview zoom factor (persisted; applied via getCurrentWebview().setZoom)
   wtExpanded: string[]; // expanded tree node keys
   wtFavorites: string[]; // starred worktree paths (persisted)
   wtFocus: boolean; // when on, the worktree view shows only starred rows
@@ -197,6 +206,7 @@ const PERSIST: (keyof AppState)[] = [
   "scanRoot",
   "fsCwd",
   "sidebarWidth",
+  "zoom",
   "wtExpanded",
   "wtFavorites",
   "wtFocus",
@@ -241,11 +251,13 @@ function load(): AppState {
     tableSort: loadKey<Record<string, SortState>>("tableSort", {}),
     config: null,
     files: null,
+    fsChildren: {},
     fsSelected: null,
     wtView: loadKey<WtView>("wtView", "tree"),
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
     fsCwd: loadKey<string>("fsCwd", "~"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
+    zoom: loadKey<number>("zoom", 1),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
     wtFavorites: loadKey<string[]>("wtFavorites", []),
     wtFocus: loadKey<boolean>("wtFocus", false),

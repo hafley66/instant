@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   PhysicalPosition,
@@ -36,10 +37,13 @@ import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from ".
 import {
   TmuxPanelV2,
   WorktreesPanelV2,
+  FilesPanelV2,
   setTmuxPanel,
   setWorktreesPanel,
+  setFilesPanel,
   type TmuxRow,
   type WtRow,
+  type FsRow,
 } from "./tablepanels";
 import {
   renderTable,
@@ -255,6 +259,23 @@ function openTabAtPwd() {
   refreshSessions();
 }
 
+// ---- webview zoom ----
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.0;
+const ZOOM_STEP = 0.1;
+function applyZoom() {
+  getCurrentWebview().setZoom(store.get().zoom).catch(console.error);
+}
+function nudgeZoom(delta: number) {
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(store.get().zoom + delta).toFixed(2)));
+  store.set({ zoom: z });
+  applyZoom();
+}
+function resetZoom() {
+  store.set({ zoom: 1 });
+  applyZoom();
+}
+
 const TAB_COMMANDS: Command[] = [
   { id: "tab.next", keys: ["$mod+Shift+BracketRight", "Control+Tab"], run: () => focusTabByOffset(1) },
   { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], run: () => focusTabByOffset(-1) },
@@ -265,6 +286,10 @@ const TAB_COMMANDS: Command[] = [
   // Reload the webview — recover from a crashed React render without restarting
   // the app (tmux sessions outlive the reload, so nothing is lost).
   { id: "app.reload", keys: ["$mod+r"], run: () => location.reload() },
+  // UI zoom: cmd +/-/0 scale the whole webview (persisted, clamped 0.5–2.0).
+  { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], run: () => nudgeZoom(ZOOM_STEP) },
+  { id: "app.zoomOut", keys: ["$mod+Minus"], run: () => nudgeZoom(-ZOOM_STEP) },
+  { id: "app.zoomReset", keys: ["$mod+Digit0"], run: resetZoom },
   // cmd/ctrl+1..9 jump to a tab (9 = last).
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.goto${i + 1}`,
@@ -862,6 +887,16 @@ function registerV2Bridges() {
     onOpen: (name) => openTab(name),
     onPin: (name) => togglePinSession(name),
     onShow: () => refreshSessions(),
+    sort: () => store.get().sessionSort,
+    setSort: (s) => store.set({ sessionSort: s }),
+    launch: (command) => {
+      openTab(command, { command });
+      refreshSessions();
+    },
+    newShell: (name) => {
+      openTab(name);
+      refreshSessions();
+    },
   });
   setWorktreesPanel({
     rows: wtRows,
@@ -870,6 +905,20 @@ function registerV2Bridges() {
     onContext: (r, x, y) => wtGestures(r).onContext(x, y),
     onToggleFav: (r) => toggleFavWorktree(r.worktree),
     onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
+    scanRoot: () => store.get().scanRoot,
+    scan: (root) => {
+      store.set({ scanRoot: root });
+      scanWorktrees();
+    },
+    focus: () => store.get().wtFocus,
+    toggleFocus: () => store.set({ wtFocus: !store.get().wtFocus }),
+    counts: () => {
+      const { worktrees, wtFavorites } = store.get();
+      return {
+        shown: worktrees.filter((r) => wtFavorites.includes(r.worktree)).length,
+        total: worktrees.length,
+      };
+    },
   });
 }
 
@@ -1654,16 +1703,56 @@ function logFileOpen(e: FsEntry) {
   }).catch(console.error);
 }
 
-async function browseTo(path: string) {
+// Load a new tree root. Resets the expanded-children cache — those listings
+// belong to the previous root. Reused by Up / Go / folder double-click / onShow.
+async function loadFsRoot(path: string) {
   try {
     const listing = await invoke<DirListing>("list_dir", { path });
-    store.set({ files: listing, fsCwd: listing.path, fsSelected: null });
+    store.set({ files: listing, fsCwd: listing.path, fsChildren: {}, fsSelected: null });
   } catch (e) {
     console.error("list_dir:", e);
-    const host = document.querySelector<HTMLElement>("#fs-list");
-    if (host)
-      host.innerHTML = `<div class="empty-help">Can't open<br><code>${path}</code><br>${e}</div>`;
   }
+}
+
+// Lazily load one folder's children the first time it's expanded; no-op if the
+// listing is already cached. The new listing is merged into fsChildren (a fresh
+// ref) so the FilesPanelV2 re-renders with the subrows present.
+async function loadFsChildren(path: string) {
+  if (store.get().fsChildren[path]) return;
+  try {
+    const listing = await invoke<DirListing>("list_dir", { path });
+    store.set({ fsChildren: { ...store.get().fsChildren, [path]: listing.entries } });
+  } catch (e) {
+    console.error("list_dir:", e);
+  }
+}
+
+function filesGoUp() {
+  const f = store.get().files;
+  if (f?.parent) loadFsRoot(f.parent);
+}
+
+// Build the display-ready tree rows from the root listing + the per-folder
+// children loaded so far. Recursive: a folder's children are present once
+// loadFsChildren has cached them, undefined otherwise (twisty still shows).
+function toFsRow(e: FsEntry): FsRow {
+  const kids = e.is_dir ? store.get().fsChildren[e.path] : undefined;
+  return {
+    path: e.path,
+    name: e.name,
+    isDir: e.is_dir,
+    glyph: fileGlyph(e),
+    date: fmtDate(e.modified),
+    type: typeLabel(e),
+    size: e.is_dir ? "" : fmtSize(e.size),
+    sortName: `${e.is_dir ? 0 : 1}\t${e.name.toLowerCase()}`,
+    sortSize: e.is_dir ? -1 : e.size,
+    modified: e.modified,
+    children: kids ? kids.map(toFsRow) : undefined,
+  };
+}
+function fsRows(): FsRow[] {
+  return (store.get().files?.entries ?? []).map(toFsRow);
 }
 
 // File extension -> shiki language id. Anything not listed falls back to plain
@@ -1780,59 +1869,35 @@ store.subscribe(() => {
   }
 }, ["mode"]);
 
-function renderFilesPanel() {
-  const host = document.querySelector<HTMLElement>("#fs-list");
-  const pathEl = document.querySelector<HTMLInputElement>("#fs-path");
-  if (!host || !pathEl) return; // panel detached; a later show re-renders
-  const { files, fsSelected } = store.get();
-  pathEl.value = files?.path ?? store.get().fsCwd;
-  if (!files) {
-    host.innerHTML = "";
-    return;
-  }
-  const scroll = host.scrollTop; // selection re-renders the table; keep the view
-  host.innerHTML = "";
-  host.appendChild(
-    renderTable<FsEntry>({
-      rows: files.entries,
-      rowClass: (e) => (e.path === fsSelected ? "fs-selected" : undefined),
-      sort: tableSortFor("files", { col: 0, dir: "asc" }),
-      onSort: (s) => onTableSort("files", s, () => renderFilesPanel()),
-      columns: [
-        {
-          header: "Name",
-          cell: (e) => `${fileGlyph(e)}  ${e.name}`,
-          // Folders sort before files, then by name (Explorer-style).
-          sortKey: (e) => `${e.is_dir ? 0 : 1}\t${e.name.toLowerCase()}`,
-        },
-        { header: "Date modified", cell: (e) => fmtDate(e.modified), sortKey: (e) => e.modified },
-        { header: "Type", cell: (e) => typeLabel(e), sortKey: (e) => typeLabel(e) },
-        {
-          header: "Size",
-          cell: (e) => (e.is_dir ? "" : fmtSize(e.size)),
-          cellClass: () => "fs-size",
-          sortKey: (e) => (e.is_dir ? -1 : e.size),
-        },
-      ],
-      rowTitle: (e) => e.path,
-      // Files are draggable into the sprefa scope tray (folders aren't entities).
-      rowEntity: (e) => (e.is_dir ? undefined : { kind: "file", value: e.path }),
-      // Folders open on a single click; files select + open a preview tab.
-      onRow: (e) => {
-        if (e.is_dir) browseTo(e.path);
-        else {
-          store.set({ fsSelected: e.path });
-          openPreviewPanel(e.path);
-        }
-      },
-      onRowDblClick: (e) => {
-        if (e.is_dir) return;
-        pasteToActive(pathArg(e.path) + " ");
-        logFileOpen(e); // joins the unified activity history
-      },
-    }),
-  );
-  host.scrollTop = scroll;
+// Wire the FilesPanelV2 bridge: derivation + handlers live here, next to the
+// list_dir loaders; the React panel (tablepanels.tsx) stays presentational.
+function registerFilesBridge() {
+  setFilesPanel({
+    rows: fsRows,
+    path: () => store.get().files?.path ?? store.get().fsCwd,
+    hasParent: () => !!store.get().files?.parent,
+    goUp: filesGoUp,
+    goTo: (path) => loadFsRoot(path),
+    selected: () => store.get().fsSelected,
+    onShow: () => { if (!store.get().files) loadFsRoot(store.get().fsCwd); },
+    onToggle: (r, willExpand) => { if (willExpand) loadFsChildren(r.path); },
+    // Single click: folders are expanded via the twisty, so a folder row-click is
+    // a no-op; a file selects + opens its preview tab.
+    onOpen: (r) => {
+      if (r.isDir) return;
+      store.set({ fsSelected: r.path });
+      openPreviewPanel(r.path);
+    },
+    // Double click: descend into a folder (new tree root); paste a file's path.
+    onActivate: (r) => {
+      if (r.isDir) {
+        loadFsRoot(r.path);
+        return;
+      }
+      pasteToActive(pathArg(r.path) + " ");
+      logFileOpen({ name: r.name, path: r.path } as FsEntry);
+    },
+  });
 }
 
 // syncToggles now reads from the plugin registry instead of a hardcoded list.
@@ -2205,7 +2270,7 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
       { label: "Open (paste path)", action: () => pasteToActive(pathArg(path) + " ") },
       { label: "Copy path", action: () => copy(path) },
       { sep: true },
-      { label: "Up one folder", action: () => $("#fs-up").click() },
+      { label: "Up one folder", action: filesGoUp },
       ...(ent ? [{ sep: true } as CtxItem, ...scopeItems()] : []),
     ];
   }
@@ -2322,16 +2387,6 @@ function wireChrome() {
       .catch(console.error);
   $("#config-open").onclick = () => invoke("config_open").catch(console.error);
 
-  $("#fs-up").onclick = () => {
-    const f = store.get().files;
-    if (f?.parent) browseTo(f.parent);
-  };
-  const goPath = () => browseTo(($("#fs-path") as HTMLInputElement).value);
-  $("#fs-go").onclick = goPath;
-  $("#fs-path").addEventListener("keydown", (e) => {
-    if ((e as KeyboardEvent).key === "Enter") goPath();
-  });
-
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
   $("#hide-btn").onclick = () => getCurrentWindow().hide();
@@ -2381,15 +2436,9 @@ function registerBuiltin() {
         icon: "📁",
         iconUrl: "/icons/Folder_16x16_4.png",
         iconLabel: "Files",
-        html: `<div class="fs-bar">
-          <button id="fs-up" type="button" title="Up one folder">↑</button>
-          <input id="fs-path" autocomplete="off" spellcheck="false" />
-          <button id="fs-go" type="button">Go</button>
-        </div>
-        <div class="fs-body">
-          <div id="fs-list" class="fs-list"></div>
-        </div>`,
-        onShow: () => { if (!store.get().files) browseTo(store.get().fsCwd); },
+        html: "",
+        component: FilesPanelV2,
+        onShow: () => { if (!store.get().files) loadFsRoot(store.get().fsCwd); },
       },
       {
         id: "activity",
@@ -2946,22 +2995,22 @@ async function main() {
   ]);
   store.subscribe(syncRecord, ["captureEnabled"]);
   store.subscribe(renderConfigPanel, ["config"]);
-  store.subscribe(renderFilesPanel, ["files", "fsSelected"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncSidebar(store.get());
   renderWorktreesPanel();
   renderActivityPanel();
-  renderFilesPanel();
   syncRecord(store.get());
   // Re-apply the persisted recording flag to the backend (default off there).
   invoke("capture_set_enabled", { on: store.get().captureEnabled }).catch(
     console.error,
   );
 
+  applyZoom(); // restore persisted webview zoom
   registerBuiltin();
   registerSprefa();
   registerV2Bridges();
+  registerFilesBridge();
   injectPanelHtml();
   buildActivityRail();
   wireChrome();

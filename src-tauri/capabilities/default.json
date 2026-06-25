@@ -15,6 +15,7 @@
     "core:window:allow-set-size",
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
+    "core:webview:allow-set-webview-zoom",
     "opener:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

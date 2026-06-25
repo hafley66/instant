@@ -1230,6 +1230,22 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
    classes carry all the skin theming; these are layout-only. The explicit color
    is load-bearing: a dockview panel host doesn't inherit --panel-fg, so without
    it the row <td> text went near-black on the dark surface. */
+/* v2 component panel: fixed toolbar (.wt-scan) above a flex-filling scroll area. */
+.v2-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.v2-panel .panel-scroll {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+/* Virtualized TreeTable owns its own scroll container. */
+.tt-scroll {
+  height: 100%;
+  overflow: auto;
+}
 .panel-scroll {
   height: 100%;
   overflow: auto;
@@ -1397,7 +1413,8 @@ td.wt-star {
   min-width: 0;
 }
 /* Focus toggle in the worktree header reads as active when on. */
-#wt-focus.on {
+#wt-focus.on,
+.wt-focus-btn.on {
   color: var(--row-active-bg);
   font-weight: bold;
 }

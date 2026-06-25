@@ -14,7 +14,8 @@ import {
   type ExpandedState,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { useState, type ReactNode, type MouseEvent } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useRef, useState, type ReactNode, type MouseEvent } from "react";
 
 export interface TreeColumn<T> {
   id: string;
@@ -48,6 +49,15 @@ export interface TreeTableProps<T> {
   // draggable entity payload (mirrors table.ts rowEntity; main.ts dragstart reads
   // data-entity-kind/value).
   rowEntity?: (row: T) => { kind: string; value: string } | undefined;
+  // Force a row to show the twisty even before its children are loaded (lazy
+  // trees): return true for expandable rows whose getSubRows is still empty.
+  getRowCanExpand?: (row: T) => boolean;
+  // Fired when a twisty toggles, before the table state flips. Lazy trees load
+  // children here (willExpand=true) so the next render has subRows to show.
+  onToggleExpand?: (row: T, willExpand: boolean) => void;
+  // Virtualize the body (spacer <tr>s above/below the visible window). For long
+  // flat lists (activity); the table scrolls inside its own container.
+  virtual?: boolean;
 }
 
 export function TreeTable<T>(props: TreeTableProps<T>) {
@@ -60,9 +70,11 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     onRowClick,
     onRowDoubleClick,
     onRowContextMenu,
+    onToggleExpand,
     rowClass,
     rowTitle,
     rowEntity,
+    virtual,
   } = props;
 
   const [ownSorting, setOwnSorting] = useState<SortingState>(props.defaultSorting ?? []);
@@ -92,6 +104,9 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     onExpandedChange: setExpanded,
     getSubRows,
     getRowId,
+    getRowCanExpand: props.getRowCanExpand
+      ? (row) => props.getRowCanExpand!(row.original)
+      : undefined,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -99,7 +114,58 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     enableSortingRemoval: true,
   });
 
-  return (
+  const modelRows = table.getRowModel().rows;
+  const parentRef = useRef<HTMLDivElement>(null);
+  // Virtualizer is created unconditionally (hooks rule); only consulted when
+  // `virtual` is set. Spacer <tr>s pad the height so column widths still align.
+  const virtualizer = useVirtualizer({
+    count: modelRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 22,
+    overscan: 12,
+  });
+
+  const renderRow = (row: Row<T>) => (
+    <TableRow
+      key={row.id}
+      row={row}
+      columns={columns}
+      onRowClick={onRowClick}
+      onRowDoubleClick={onRowDoubleClick}
+      onRowContextMenu={onRowContextMenu}
+      onToggleExpand={onToggleExpand}
+      rowClass={rowClass}
+      rowTitle={rowTitle}
+      rowEntity={rowEntity}
+    />
+  );
+
+  let body: ReactNode;
+  if (virtual) {
+    const items = virtualizer.getVirtualItems();
+    const total = virtualizer.getTotalSize();
+    const before = items.length ? items[0].start : 0;
+    const after = items.length ? total - items[items.length - 1].end : 0;
+    body = (
+      <>
+        {before > 0 && (
+          <tr className="dtable-spacer">
+            <td colSpan={columns.length} style={{ height: before, padding: 0, border: 0 }} />
+          </tr>
+        )}
+        {items.map((it) => renderRow(modelRows[it.index]))}
+        {after > 0 && (
+          <tr className="dtable-spacer">
+            <td colSpan={columns.length} style={{ height: after, padding: 0, border: 0 }} />
+          </tr>
+        )}
+      </>
+    );
+  } else {
+    body = modelRows.map(renderRow);
+  }
+
+  const tableEl = (
     <table className="dtable">
       <thead>
         <tr>
@@ -123,22 +189,16 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
           })}
         </tr>
       </thead>
-      <tbody>
-        {table.getRowModel().rows.map((row) => (
-          <TableRow
-            key={row.id}
-            row={row}
-            columns={columns}
-            onRowClick={onRowClick}
-            onRowDoubleClick={onRowDoubleClick}
-            onRowContextMenu={onRowContextMenu}
-            rowClass={rowClass}
-            rowTitle={rowTitle}
-            rowEntity={rowEntity}
-          />
-        ))}
-      </tbody>
+      <tbody>{body}</tbody>
     </table>
+  );
+
+  return virtual ? (
+    <div className="tt-scroll" ref={parentRef}>
+      {tableEl}
+    </div>
+  ) : (
+    tableEl
   );
 }
 
@@ -148,6 +208,7 @@ function TableRow<T>(props: {
   onRowClick?: (row: T, e: MouseEvent) => void;
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
+  onToggleExpand?: (row: T, willExpand: boolean) => void;
   rowClass?: (row: T) => string | undefined;
   rowTitle?: (row: T) => string;
   rowEntity?: (row: T) => { kind: string; value: string } | undefined;
@@ -202,6 +263,7 @@ function TableRow<T>(props: {
                   className="tt-twisty"
                   onClick={(e) => {
                     e.stopPropagation();
+                    props.onToggleExpand?.(data, !row.getIsExpanded());
                     row.toggleExpanded();
                   }}
                 >
