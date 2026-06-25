@@ -195,7 +195,7 @@ export function TmuxPanelV2() {
 // leaves. main.ts (wtTreeRows) derives every label so this file is presentational.
 export interface WtTreeRow {
   id: string;
-  kind: "org" | "clone" | "leaf";
+  kind: "org" | "clone" | "leaf" | "session";
   label: string;
   meta?: string; // org: "N clones" · clone: "@branch"
   // leaf
@@ -206,7 +206,12 @@ export interface WtTreeRow {
   pathDisplay?: string;
   dirty?: boolean;
   fav?: boolean;
-  resumeNames?: string[]; // live sessions sitting in this worktree
+  // session (leaf child): a live tmux session in this worktree
+  sessionName?: string;
+  attached?: boolean;
+  proc?: string;
+  windows?: number;
+  open?: boolean;
   // clone
   adding?: boolean; // its inline "+ worktree" branch input is open
   children?: WtTreeRow[];
@@ -226,7 +231,8 @@ export interface WtBridge {
   onLeafDouble: (r: WtTreeRow) => void;
   onLeafContext: (r: WtTreeRow, x: number, y: number) => void;
   onLeafMenu: (r: WtTreeRow, x: number, y: number) => void; // open ▾ anchored chooser
-  onResume: (name: string) => void;
+  onResume: (name: string) => void; // resume/focus a session row
+  onKill: (name: string) => void; // kill a session row
   toggleFav: (worktree: string) => void;
   // clone "+ worktree" inline add
   revealAdd: (clonePath: string) => void;
@@ -239,8 +245,25 @@ export function setWorktreesPanel(b: WtBridge) {
   wtBridge = b;
 }
 
-// Tree (name) column: star + label on leaves, label + dim meta on org/clone.
+// Tree (name) column: star + label on leaves, label + dim meta on org/clone,
+// a live-session line (dot + name + proc + windows) on session children.
 function WtNameCell({ row }: { row: WtTreeRow }) {
+  if (row.kind === "session") {
+    return (
+      <>
+        <span className={"dot" + (row.attached ? " on" : "")} />
+        <span className="s-name">{row.label}</span>
+        {row.proc ? (
+          <span className="s-proc" title="foreground process">
+            {row.proc}
+          </span>
+        ) : null}
+        <span className="s-meta">
+          {row.windows}w{row.open ? " · open" : ""}
+        </span>
+      </>
+    );
+  }
   if (row.kind === "leaf") {
     return (
       <>
@@ -289,10 +312,11 @@ function WtAddInput({ clonePath }: { clonePath: string }) {
   );
 }
 
-// Trailing actions: open ▾ / resume on leaves, + worktree (or its input) on clones.
+// Trailing actions: open ▾ on leaves, kill × on session rows, + worktree (or its
+// input) on clones. Sessions are now visible as child rows, so the leaf-level
+// "resume" button is gone — click a session row to resume/focus it.
 function WtActionsCell({ row }: { row: WtTreeRow }) {
   if (row.kind === "leaf") {
-    const n = row.resumeNames?.length ?? 0;
     return (
       <span className="wt-actions">
         <button
@@ -306,18 +330,22 @@ function WtActionsCell({ row }: { row: WtTreeRow }) {
         >
           open ▾
         </button>
-        {n ? (
-          <button
-            className="wt-act wt-resume"
-            title={`attach existing session: ${row.resumeNames!.join(", ")}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              wtBridge?.onResume(row.resumeNames![0]);
-            }}
-          >
-            {`resume${n > 1 ? ` (${n})` : ""}`}
-          </button>
-        ) : null}
+      </span>
+    );
+  }
+  if (row.kind === "session") {
+    return (
+      <span className="wt-actions">
+        <button
+          className="wt-act"
+          title="kill this tmux session"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (row.sessionName) wtBridge?.onKill(row.sessionName);
+          }}
+        >
+          ×
+        </button>
       </span>
     );
   }
@@ -536,9 +564,11 @@ export function WorktreesPanelV2() {
             }
             onRowClick={(r, e) => {
               if (r.kind === "leaf") wtBridge?.onLeafSingle(r, e.clientX, e.clientY);
+              else if (r.kind === "session" && r.sessionName) wtBridge?.onResume(r.sessionName);
             }}
             onRowDoubleClick={(r) => {
               if (r.kind === "leaf") wtBridge?.onLeafDouble(r);
+              else if (r.kind === "session" && r.sessionName) wtBridge?.onResume(r.sessionName);
             }}
             onRowContextMenu={(r, e) => {
               if (r.kind === "leaf") wtBridge?.onLeafContext(r, e.clientX, e.clientY);

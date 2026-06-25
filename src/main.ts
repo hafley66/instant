@@ -891,7 +891,18 @@ function wtTreeRows(): WtTreeRow[] {
         pathDisplay: tildify(wt.worktree),
         dirty: wt.dirty,
         fav: isFavWorktree(wt.worktree),
-        resumeNames: sessionsForWorktree(wt.worktree).map((s) => s.name),
+        // Live tmux sessions sitting in this worktree show as child rows, so the
+        // tree doubles as "what's running where". Empty → leaf has no twisty.
+        children: sessionsForWorktree(wt.worktree).map((s) => ({
+          id: `${wt.worktree}::sess:${s.name}`,
+          kind: "session" as const,
+          label: s.name,
+          sessionName: s.name,
+          attached: s.attached,
+          proc: foregroundProc(s.commands ?? []),
+          windows: s.windows,
+          open: tabs.has(sessionId(s.name)),
+        })),
       })),
     })),
   }));
@@ -942,6 +953,12 @@ function registerV2Bridges() {
     onLeafMenu: (r, x, y) =>
       showAgentMenu(x, y, r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty),
     onResume: (name) => openTab(name),
+    onKill: (name) => {
+      closeTab(sessionId(name)); // drop the panel + dispose xterm, then kill tmux
+      invoke("kill_session", { name })
+        .then(() => refreshSessions())
+        .catch(console.error);
+    },
     toggleFav: (path) => toggleFavWorktree(path),
     // inline "+ worktree" branch input on a clone row.
     revealAdd: (clonePath) => store.set({ wtAddingClone: clonePath }),
