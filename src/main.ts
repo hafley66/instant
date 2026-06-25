@@ -38,19 +38,17 @@ import {
   TmuxPanelV2,
   WorktreesPanelV2,
   FilesPanelV2,
+  ActivityPanelV2,
   setTmuxPanel,
   setWorktreesPanel,
   setFilesPanel,
+  setActivityPanel,
   type TmuxRow,
   type WtTreeRow,
   type FsRow,
+  type ActRow,
 } from "./tablepanels";
-import {
-  renderTable,
-  virtualTable,
-  type VirtualTable,
-  type SortState,
-} from "./table";
+import { renderTable, type SortState } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import { installKeymap, runMatchingCommand, type Command } from "./keymap";
@@ -1404,35 +1402,6 @@ function activityKey(e: Event): string {
   return `${e.kind} ${e.source} ${eventSource(e)} ${eventText(e)}`;
 }
 
-// Shown in the Activity panel before any event arrives: how to turn on capture
-// and wire the extension (the ingest server is already running while up).
-function activitySetupCard(): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "empty-help";
-  el.innerHTML = `
-    <h3>activity — setup</h3>
-    <p>A searchable history of what you touch: screen captures on mouse/key
-       gestures, plus browser navigation/clicks and the files you open.</p>
-    <p><b>Screen capture (OS):</b> flip <b>Recording</b> on (top-right of this
-       panel). The first shot prompts for <b>Screen Recording</b> permission —
-       grant it, then double-clicks, drags, and ⌘C/⌘V each save a screenshot
-       tagged with the frontmost app. Default off; only ⌘C/⌘V keys are read.</p>
-    <p><b>Browser:</b> the ingest server runs at <code>127.0.0.1:8787</code>
-       while instant is open. Install the extension:</p>
-    <ol>
-      <li>Open <code>chrome://extensions</code></li>
-      <li>Enable <b>Developer mode</b> (top-right)</li>
-      <li><b>Load unpacked</b> → pick the <code>extension/</code> folder in the instant repo</li>
-    </ol>
-    <p>Click any row to paste its text/url into the active terminal; click a
-       screenshot row to preview it. Search filters fzf-style.</p>
-    <p class="muted">Test the browser ingest without Chrome:</p>
-    <pre>curl -XPOST 127.0.0.1:8787/ingest \\
-  -H 'content-type: application/json' \\
-  -d '{"kind":"nav","url":"https://example.com","title":"Example"}'</pre>`;
-  return el;
-}
-
 // Short source label for the row (the panel's one filter axis is source).
 const SRC_LABEL: Record<Event["source"], string> = {
   os: "screen",
@@ -1461,106 +1430,55 @@ function visibleActivity(): Event[] {
   return fuzzyFilter(activityQuery, filtered, activityKey);
 }
 
-let activitySelected: number | null = null; // selected row id (for the preview pane)
-// One virtualized table bound to #activity-table, created on first render and
-// reused (the pooled host node survives panel open/close). Only visible rows
-// are in the DOM, so 2000-row updates stay cheap.
-let activityTable: VirtualTable<Event> | null = null;
-
-function renderActivityPanel() {
-  // The panel DOM may be detached (panel closed, or mid-remount) when an
-  // activity-added event fires this. Bail; a later show re-runs the render.
-  const host = document.querySelector<HTMLElement>("#activity-table");
-  if (!host) return;
-  syncRecord(store.get()); // record button may be stale if toggled from the tray while closed
-  const { activity, activitySource } = store.get();
-  // Chips reflect the active source filter. Use `.on` (not `.active`) — xp.css
-  // owns button.active and would force the pressed-silver look over our color.
-  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-src]").forEach((b) => {
-    b.classList.toggle("on", b.dataset.src === activitySource);
-  });
-  const rows = visibleActivity();
-  const count = document.querySelector<HTMLElement>("#activity-count");
-  if (count) count.textContent = activity.length ? `${rows.length}/${activity.length}` : "";
-
-  // (Re)create the virtual table if it isn't mounted in the current host (first
-  // render, or the host node was swapped out for the setup card).
-  if (!activityTable || host.firstElementChild?.tagName !== "TABLE") {
-    activityTable?.destroy();
-    activityTable = virtualTable<Event>(host, {
-      rowClass: (e) => (e.id === activitySelected ? "fs-selected" : undefined),
-      defaultSort: tableSortFor("activity", { col: 0, dir: "desc" }),
-      onSort: (s) => store.set({ tableSort: { ...store.get().tableSort, activity: s } }),
-      columns: [
-        { header: "time", cell: (e) => fmtTime(e.ts), sortKey: (e) => e.ts },
-        {
-          header: "src",
-          cell: (e) => SRC_LABEL[e.source],
-          cellClass: () => "act-src",
-          sortKey: (e) => SRC_LABEL[e.source],
-        },
-        { header: "action", cell: (e) => actionVerb(e), sortKey: (e) => actionVerb(e) },
-        { header: "target", cell: (e) => eventSource(e), sortKey: (e) => eventSource(e) },
-      ],
-      rowTitle: (e) => e.shot || e.url || e.text || e.title,
-      onRow: (e) => {
-        activitySelected = e.id;
-        renderActivityPanel();
-      },
-      onRowDblClick: (e) => {
-        const data = eventText(e);
-        if (data) pasteToActive(data + " ");
-      },
-    });
-  }
-  activityTable.setRows(rows);
-
-  // Setup card sits after the (empty) table until the first event arrives.
-  let card = host.querySelector("#activity-setup");
-  if (activity.length === 0) {
-    if (!card) {
-      card = activitySetupCard();
-      card.id = "activity-setup";
-      host.appendChild(card);
-    }
-  } else if (card) {
-    card.remove();
-  }
-  renderActivityPreview();
+// Display-ready timeline rows for ActivityPanelV2. `title` mirrors v1's <tr
+// title> (shot path wins, used by the global ctx-menu); `paste` is the
+// dbl-click payload (text/url/title, never the shot path).
+function actRows(): ActRow[] {
+  return visibleActivity().map((e) => ({
+    id: e.id,
+    ts: e.ts,
+    time: fmtTime(e.ts),
+    src: SRC_LABEL[e.source],
+    action: actionVerb(e),
+    target: eventSource(e),
+    title: e.shot || e.url || e.text || e.title,
+    paste: eventText(e),
+    kind: e.kind,
+    shot: e.shot || undefined,
+    url: e.url || undefined,
+    text: e.text || undefined,
+  }));
 }
 
-// Preview pane: a screenshot thumbnail for os rows, the url/title for browser,
-// the path for files. Guards a newer selection landing mid-load.
-async function renderActivityPreview() {
-  const pane = document.querySelector<HTMLElement>("#activity-preview");
-  if (!pane) return; // panel detached; a later show re-renders
-  const sel = store.get().activity.find((e) => e.id === activitySelected);
-  // No selection -> collapse the preview so the list isn't cramped.
-  pane.classList.toggle("preview-collapsed", !sel);
-  if (!sel) {
-    pane.innerHTML = "";
-    return;
-  }
-  const head = `<div class="fs-preview-meta">${sel.kind} · ${eventSource(sel)}<br>
-    <span>${fmtTime(sel.ts)}</span></div>`;
-  if (sel.shot) {
-    pane.innerHTML = head + `<div class="fs-preview-empty">loading…</div>`;
-    try {
-      const url = await invoke<string>("read_image", { path: sel.shot });
-      if (activitySelected !== sel.id) return; // selection moved on
-      pane.innerHTML = head + `<img class="fs-preview-img" src="${url}" alt="" />`;
-    } catch (e) {
-      pane.innerHTML = head + `<div class="fs-preview-empty">${e}</div>`;
-    }
-    return;
-  }
-  const body = sel.url
-    ? `<div class="fs-preview-meta"><span>${sel.url}</span></div>`
-    : "";
-  const text = sel.text
-    ? `<div class="fs-preview-meta">${sel.text}</div>`
-    : "";
-  pane.innerHTML = head + body + text || head + `<div class="fs-preview-empty">no preview</div>`;
+// Wire the ActivityPanelV2 bridge: derivation + handlers here, presentation in
+// tablepanels.tsx. The panel re-renders on store change (useApp), so the
+// record/chips/search state stays in the store, no DOM sync needed.
+function registerActivityBridge() {
+  setActivityPanel({
+    rows: actRows,
+    count: () => ({
+      shown: visibleActivity().length,
+      total: store.get().activity.length,
+    }),
+    source: () => store.get().activitySource,
+    setSource: (s) => store.set({ activitySource: s as ActivitySource }),
+    query: () => store.get().activityQuery,
+    setQuery: (q) => store.set({ activityQuery: q }),
+    recording: () => store.get().captureEnabled,
+    toggleRecord: () => toggleRecording(),
+    clear: () =>
+      invoke("activity_clear")
+        .then(() => store.set({ activity: [] }))
+        .catch(console.error),
+    hasEvents: () => store.get().activity.length > 0,
+    onActivate: (r) => {
+      if (r.paste) pasteToActive(r.paste + " ");
+    },
+    loadShot: (path) => invoke<string>("read_image", { path }),
+    onShow: () => {
+      if (store.get().activity.length === 0) refreshActivity();
+    },
+  });
 }
 
 // Load all sources once; the chip + search filter client-side (visibleActivity).
@@ -2004,14 +1922,6 @@ function syncMode(s: AppState) {
   ($("#mode-toggle") as HTMLButtonElement).textContent =
     s.mode === "dark" ? "☀" : "☾";
 }
-function syncRecord(s: AppState) {
-  // Panel may be closed (e.g. toggled from the tray); bail and repaint on show.
-  const b = document.querySelector<HTMLButtonElement>("#activity-record");
-  if (!b) return;
-  b.classList.toggle("recording", s.captureEnabled);
-  b.textContent = s.captureEnabled ? "● Recording" : "○ Record";
-}
-
 // While true, the blur-to-hide handler stands down (the screenshot crosshair
 // steals focus, which would otherwise hide us mid-capture).
 let capturing = false;
@@ -2401,28 +2311,6 @@ function wireChrome() {
   $("#actbar-toggle").onclick = () =>
     store.set({ sidebar: store.get().sidebar === "big" ? "compact" : "big" });
 
-  $("#activity-clear").onclick = () =>
-    invoke("activity_clear")
-      .then(() => {
-        activitySelected = null;
-        store.set({ activity: [] });
-      })
-      .catch(console.error);
-
-  // Recording toggle mirrors backend CaptureEnabled (flag persisted on front).
-  $("#activity-record").onclick = toggleRecording;
-
-  // fzf search box filters live (runtime-only state).
-  $("#activity-search").addEventListener("input", (e) => {
-    store.set({ activityQuery: (e.target as HTMLInputElement).value });
-  });
-
-  // Source filter chips (the panel's single filter axis).
-  document.querySelectorAll<HTMLButtonElement>(".act-chip[data-src]").forEach((b) => {
-    b.onclick = () =>
-      store.set({ activitySource: b.dataset.src as ActivitySource });
-  });
-
   $("#config-reload").onclick = () =>
     invoke<ConfigView>("config_reload")
       .then((view) => store.set({ config: view }))
@@ -2456,7 +2344,7 @@ function registerBuiltin() {
         id: "sessions",
         title: "tmux",
         icon: "▦",
-        iconUrl: "/icons/BatExec_16x16_4.png",
+        iconUrl: "/icons/BatExec_32x32_4.png",
         iconLabel: "tmux",
         html: "",
         component: TmuxPanelV2,
@@ -2466,7 +2354,7 @@ function registerBuiltin() {
         id: "worktrees",
         title: "Worktrees",
         icon: "⊞",
-        iconUrl: "/icons/Explorer100_16x16_4.png",
+        iconUrl: "/icons/Explorer100_32x32_4.png",
         iconLabel: "Worktrees",
         html: "",
         component: WorktreesPanelV2,
@@ -2476,7 +2364,7 @@ function registerBuiltin() {
         id: "files",
         title: "Files",
         icon: "📁",
-        iconUrl: "/icons/Folder_16x16_4.png",
+        iconUrl: "/icons/Folder_32x32_4.png",
         iconLabel: "Files",
         html: "",
         component: FilesPanelV2,
@@ -2486,33 +2374,16 @@ function registerBuiltin() {
         id: "activity",
         title: "Activity",
         icon: "◉",
-        iconUrl: "/icons/WindowGraph_16x16_4.png",
+        iconUrl: "/icons/Sysmon1000_32x32_4.png",
         iconLabel: "Activity",
-        html: `<div class="act-bar">
-          <input id="activity-search" class="act-search" placeholder="search…" autocomplete="off" spellcheck="false" />
-          <span id="activity-count" class="wt-count"></span>
-          <span class="spy-spacer"></span>
-          <button id="activity-record" type="button" class="act-record">○ Record</button>
-          <button id="activity-clear" type="button">Clear</button>
-        </div>
-        <div class="act-chips">
-          <button class="act-chip" data-src="all" type="button">all</button>
-          <button class="act-chip" data-src="os" type="button">screen</button>
-          <button class="act-chip" data-src="browser" type="button">browser</button>
-          <button class="act-chip" data-src="files" type="button">files</button>
-          <button class="act-chip" data-src="session" type="button">sessions</button>
-        </div>
-        <div class="fs-body">
-          <div id="activity-table" class="fs-list"></div>
-          <div id="activity-preview" class="fs-preview"></div>
-        </div>`,
-        onShow: () => { if (store.get().activity.length === 0) refreshActivity(); },
+        html: "",
+        component: ActivityPanelV2,
       },
       {
         id: "config",
         title: "Config",
         icon: "⚙",
-        iconUrl: "/icons/Controls3000_16x16_4.png",
+        iconUrl: "/icons/Controls3000_32x32_4.png",
         iconLabel: "Config",
         html: `<div class="act-bar">
           <span class="spy-title">config</span>
@@ -2972,6 +2843,7 @@ function registerSprefa() {
         id: "sprefa",
         title: "Sprefa",
         icon: "∿",
+        iconUrl: "/icons/ComputerFind_32x32_4.png",
         iconLabel: "Sprefa",
         html: `<form id="sprefa-bar" class="wt-scan">
           <input id="sprefa-root" autocomplete="off" spellcheck="false" />
@@ -3003,11 +2875,6 @@ function registerSprefa() {
 async function main() {
   // Resolve the home dir once so tildify() can stay synchronous during render.
   homeDirCached = await homeDir().catch(() => "");
-  // Activate anchor-positioning where it's not native (WebKit). useAnimationFrame
-  // keeps anchored elements positioned as the layout/scroll changes.
-  if (!CSS.supports("anchor-name: --x")) {
-    anchorPolyfill({ useAnimationFrame: true }).catch(console.error);
-  }
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
@@ -3029,20 +2896,11 @@ async function main() {
     "wtFavorites",
     "wtAgents",
   ]);
-  store.subscribe(renderActivityPanel, [
-    "activity",
-    "activitySource",
-    "activityType",
-    "activityQuery",
-  ]);
-  store.subscribe(syncRecord, ["captureEnabled"]);
   store.subscribe(renderConfigPanel, ["config"]);
   syncSkin(store.get());
   syncMode(store.get());
   syncSidebar(store.get());
   renderWorktreesPanel();
-  renderActivityPanel();
-  syncRecord(store.get());
   // Re-apply the persisted recording flag to the backend (default off there).
   invoke("capture_set_enabled", { on: store.get().captureEnabled }).catch(
     console.error,
@@ -3053,8 +2911,18 @@ async function main() {
   registerSprefa();
   registerV2Bridges();
   registerFilesBridge();
+  registerActivityBridge();
   injectPanelHtml();
   buildActivityRail();
+  // Activate anchor-positioning where it's not native (WebKit) AFTER the rail
+  // exists, so the polyfill discovers the .rail-tip anchors. useAnimationFrame
+  // keeps anchored elements positioned as layout/scroll changes. Gate on the
+  // anchor() FUNCTION, not just the anchor-name property: WebKit may parse the
+  // property while lacking positioning, which would skip the polyfill and leave
+  // the tooltip stuck at the top.
+  if (!CSS.supports("left: anchor(--x right)")) {
+    anchorPolyfill({ useAnimationFrame: true }).catch(console.error);
+  }
   wireChrome();
   // A dock failure must not abort the rest of boot (sessions, pty listeners).
   try {

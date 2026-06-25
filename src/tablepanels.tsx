@@ -538,6 +538,263 @@ export function FilesPanelV2() {
   );
 }
 
+// ---- activity v2 (virtualized flat table + preview) ----
+// Display-ready timeline row: main.ts formats every column. `paste` is the
+// dbl-click payload (text/url/title, never the shot path); `title` is what the
+// <tr title> / ctx-menu paste uses (shot path wins there, mirroring v1).
+export interface ActRow {
+  id: number;
+  ts: number;
+  time: string;
+  src: string;
+  action: string;
+  target: string;
+  title: string;
+  paste: string;
+  kind: string;
+  shot?: string;
+  url?: string;
+  text?: string;
+}
+
+export interface ActivityBridge {
+  rows: () => ActRow[];
+  count: () => { shown: number; total: number };
+  source: () => string;
+  setSource: (s: string) => void;
+  query: () => string;
+  setQuery: (q: string) => void;
+  recording: () => boolean;
+  toggleRecord: () => void;
+  clear: () => void;
+  hasEvents: () => boolean;
+  onActivate: (r: ActRow) => void; // dbl-click → paste into active terminal
+  loadShot: (path: string) => Promise<string>; // read_image → data url
+  onShow?: () => void;
+}
+
+let activityBridge: ActivityBridge | null = null;
+export function setActivityPanel(b: ActivityBridge) {
+  activityBridge = b;
+}
+
+const ACT_COLUMNS: TreeColumn<ActRow>[] = [
+  { id: "time", header: "time", sortValue: (r) => r.ts, cell: (r) => r.time },
+  {
+    id: "src",
+    header: "src",
+    cellClass: () => "act-src",
+    sortValue: (r) => r.src,
+    cell: (r) => r.src,
+  },
+  { id: "action", header: "action", sortValue: (r) => r.action, cell: (r) => r.action },
+  { id: "target", header: "target", sortValue: (r) => r.target, cell: (r) => r.target },
+];
+
+const ACT_DEFAULT_SORT: SortingState = [{ id: "time", desc: true }];
+
+// (value, label): value is the store's ActivitySource; label is the chip text.
+const ACT_CHIPS: [string, string][] = [
+  ["all", "all"],
+  ["os", "screen"],
+  ["browser", "browser"],
+  ["files", "files"],
+  ["session", "sessions"],
+];
+
+function ActToolbar() {
+  const b = activityBridge!;
+  const { shown, total } = b.count();
+  return (
+    <div className="act-bar">
+      <input
+        className="act-search"
+        placeholder="search…"
+        autoComplete="off"
+        spellCheck={false}
+        value={b.query()}
+        onChange={(e) => b.setQuery(e.target.value)}
+      />
+      <span className="wt-count">{total ? `${shown}/${total}` : ""}</span>
+      <span className="spy-spacer" />
+      <button
+        type="button"
+        className={"act-record" + (b.recording() ? " recording" : "")}
+        onClick={() => b.toggleRecord()}
+      >
+        {b.recording() ? "● Recording" : "○ Record"}
+      </button>
+      <button type="button" onClick={() => b.clear()}>
+        Clear
+      </button>
+    </div>
+  );
+}
+
+function ActChips() {
+  const b = activityBridge!;
+  const cur = b.source();
+  return (
+    <div className="act-chips">
+      {ACT_CHIPS.map(([val, label]) => (
+        <button
+          key={val}
+          type="button"
+          className={"act-chip" + (cur === val ? " on" : "")}
+          onClick={() => b.setSource(val)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Right-hand preview: screenshot thumbnail for os rows (async read_image),
+// url/text otherwise. Collapses out of the flex row when nothing is selected.
+function ActPreview({
+  row,
+  loadShot,
+}: {
+  row: ActRow | null;
+  loadShot: (p: string) => Promise<string>;
+}) {
+  const [img, setImg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const shot = row?.shot;
+  useEffect(() => {
+    setImg(null);
+    setErr(null);
+    if (!shot) return;
+    let live = true;
+    loadShot(shot).then(
+      (u) => live && setImg(u),
+      (e) => live && setErr(String(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [shot]);
+  if (!row) return <div id="activity-preview" className="fs-preview preview-collapsed" />;
+  const head = (
+    <div className="fs-preview-meta">
+      {row.kind} · {row.target}
+      <br />
+      <span>{row.time}</span>
+    </div>
+  );
+  let body: React.ReactNode;
+  if (shot) {
+    body = img ? (
+      <img className="fs-preview-img" src={img} alt="" />
+    ) : (
+      <div className="fs-preview-empty">{err ?? "loading…"}</div>
+    );
+  } else if (row.url || row.text) {
+    body = (
+      <>
+        {row.url ? (
+          <div className="fs-preview-meta">
+            <span>{row.url}</span>
+          </div>
+        ) : null}
+        {row.text ? <div className="fs-preview-meta">{row.text}</div> : null}
+      </>
+    );
+  } else {
+    body = <div className="fs-preview-empty">no preview</div>;
+  }
+  return (
+    <div id="activity-preview" className="fs-preview">
+      {head}
+      {body}
+    </div>
+  );
+}
+
+// Shown before the first event arrives (capture off, no extension yet).
+function ActivitySetup() {
+  return (
+    <div className="empty-help">
+      <h3>activity — setup</h3>
+      <p>
+        A searchable history of what you touch: screen captures on mouse/key
+        gestures, plus browser navigation/clicks and the files you open.
+      </p>
+      <p>
+        <b>Screen capture (OS):</b> flip <b>Recording</b> on (top-right of this
+        panel). The first shot prompts for <b>Screen Recording</b> permission —
+        grant it, then double-clicks, drags, and ⌘C/⌘V each save a screenshot
+        tagged with the frontmost app. Default off; only ⌘C/⌘V keys are read.
+      </p>
+      <p>
+        <b>Browser:</b> the ingest server runs at <code>127.0.0.1:8787</code>{" "}
+        while instant is open. Install the extension:
+      </p>
+      <ol>
+        <li>
+          Open <code>chrome://extensions</code>
+        </li>
+        <li>
+          Enable <b>Developer mode</b> (top-right)
+        </li>
+        <li>
+          <b>Load unpacked</b> → pick the <code>extension/</code> folder in the
+          instant repo
+        </li>
+      </ol>
+      <p>
+        Click any row to preview it; double-click to paste its text/url into the
+        active terminal. Search filters fzf-style.
+      </p>
+      <p className="muted">Test the browser ingest without Chrome:</p>
+      <pre>{`curl -XPOST 127.0.0.1:8787/ingest \\
+  -H 'content-type: application/json' \\
+  -d '{"kind":"nav","url":"https://example.com","title":"Example"}'`}</pre>
+    </div>
+  );
+}
+
+export function ActivityPanelV2() {
+  useApp();
+  const b = activityBridge;
+  useEffect(() => {
+    b?.onShow?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [sel, setSel] = useState<number | null>(null);
+  const rows = b?.rows() ?? [];
+  const selRow = sel == null ? null : rows.find((r) => r.id === sel) ?? null;
+  const hasEvents = b?.hasEvents() ?? false;
+  return (
+    <div className="v2-panel">
+      <ActToolbar />
+      <ActChips />
+      <div className="fs-body">
+        {/* id keeps the legacy #activity-table context-menu hook working. */}
+        <div id="activity-table" className="fs-list">
+          {hasEvents ? (
+            <TreeTable<ActRow>
+              columns={ACT_COLUMNS}
+              data={rows}
+              getRowId={(r) => String(r.id)}
+              virtual
+              defaultSorting={ACT_DEFAULT_SORT}
+              rowTitle={(r) => r.title}
+              rowClass={(r) => (r.id === sel ? "fs-selected" : undefined)}
+              onRowClick={(r) => setSel(r.id)}
+              onRowDoubleClick={(r) => b?.onActivate(r)}
+            />
+          ) : (
+            <ActivitySetup />
+          )}
+        </div>
+        <ActPreview row={selRow} loadShot={(p) => b!.loadShot(p)} />
+      </div>
+    </div>
+  );
+}
+
 export function WorktreesPanelV2() {
   useApp();
   useEffect(() => {

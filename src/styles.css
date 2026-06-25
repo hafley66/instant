@@ -152,11 +152,20 @@ body[data-skin="xp"] .title-bar-text {
   min-height: 22px;
   font-weight: bold;
 }
-/* Split companion to Shot: a narrow ▾ that opens the send-to picker. */
+/* Shot + ▾ form one split button: Shot squares its right edge, the ▾ pulls left
+   to cancel the toolbar's 4px gap and squares its left edge so they read joined. */
+.shot-btn {
+  margin-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
 .send-menu-btn {
-  min-width: 18px;
-  padding: 0 4px;
-  margin-left: -2px;
+  min-width: 26px;
+  padding: 0 6px;
+  margin-left: -4px;
+  font-size: 14px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 /* "Send to" picker popover: a compact terminal table near the ▾ button. */
@@ -316,12 +325,12 @@ body[data-skin="ac3"] .mode-toggle {
   text-align: center;
   font-size: 14px;
 }
-/* XP raster rail icons (react95 png set): keep the 16px pixels crisp, no smoothing. */
+/* XP raster rail icons (react95 32px png set, downscaled smooth so they stay
+   crisp at the larger rail size). */
 .actbar-item .ai-img {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   vertical-align: middle;
-  image-rendering: pixelated;
 }
 .actbar[data-mode="compact"] .actbar-item .al {
   display: none;
@@ -338,6 +347,27 @@ body[data-skin] .actbar-item.active {
 }
 .toolbar-spacer {
   flex: 1;
+}
+
+/* Compact-rail hover tooltip: a popover (top layer, escapes the rail/dock clip)
+   pinned to its item's right edge via CSS anchor positioning (polyfilled on
+   WebKit; see anchorPolyfill in main.ts). Shown via showPopover() on hover. */
+.rail-tip {
+  position: fixed;
+  inset: auto; /* clear the UA popover inset:0 so the per-item anchor left/top win */
+  margin: 0;
+  /* left/top are set per item by #rail-tip-<id> rules (buildActivityRail) using
+     explicit anchor(--rail-<id> …); only the offset/centering lives here. */
+  translate: 8px -50%;
+  z-index: 200;
+  padding: 2px 8px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  border: var(--frame-w) solid var(--frame);
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* dockview fills the rest; each panel host is absolutely-filled. */
