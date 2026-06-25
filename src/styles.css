@@ -1265,6 +1265,12 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* The dockview host doesn't inherit --panel-fg; the tmux/worktrees/files
+     panels get it from their .panel-scroll wrapper, but the activity table sits
+     in .fs-body/.fs-list, so set it here for every v2 panel (else dark-on-dark
+     rows in dark mode). */
+  background: var(--panel-bg);
+  color: var(--panel-fg);
 }
 .v2-panel .panel-scroll {
   flex: 1;

@@ -100,7 +100,10 @@ pub fn create_workspace(
     git(repo_path, &["rev-parse", "--is-inside-work-tree"])
         .map_err(|_| format!("{repo} is not a git repository"))?;
 
-    let id = format!("{}-{}", basename(&repo), branch);
+    // Sanitize the branch for the dir-name component: a branch like
+    // "../../etc" would otherwise let the join escape .worktrees. The real git
+    // branch arg below keeps the original name (slashes are valid there).
+    let id = format!("{}-{}", basename(&repo), branch.replace(['/', '\\'], "-"));
     // Worktrees live in a sibling .worktrees dir so they don't clutter the repo.
     let parent = repo_path.parent().ok_or("repo has no parent dir")?;
     let path = parent.join(".worktrees").join(&id);
