@@ -788,6 +788,10 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     fontSize: termFontSize(id), // persisted per-tab zoom (default 13)
     cursorBlink: true,
     allowProposedApi: true,
+    // tmux mouse mode is on (wheel-scroll + forwarding to claude/opencode), which
+    // makes a plain drag go to tmux copy-mode and fight native selection. Hold
+    // Option to force xterm's own selection instead, iTerm-style.
+    macOptionClickForcesSelection: true,
     theme: THEMES[store.get().skin],
   });
   const fit = new FitAddon();
