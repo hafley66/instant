@@ -47,5 +47,11 @@ cargo-check:
 cargo-test:
     cargo test --manifest-path src-tauri/Cargo.toml
 
+# security audit of the Rust deps against the RustSec advisory DB. The ignore
+# list (src-tauri/.cargo/audit.toml) covers only the Linux-webview + build-time
+# advisories that don't reach the macOS binary; a real finding still fails this.
+audit:
+    cd src-tauri && cargo audit
+
 # full preflight before a commit: tsc + vite build + cargo check
 verify: check build cargo-check
