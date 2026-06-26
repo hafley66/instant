@@ -76,34 +76,91 @@ fn claude_dir(cwd: &str) -> Option<PathBuf> {
     )
 }
 
-// Flatten a claude `message.content` (string OR array of {type,text,...} blocks)
-// into plain text. tool_use/tool_result/thinking blocks collapse to a tag so a
-// preview still says something useful.
-fn claude_text(content: &Value) -> String {
+// Cap a string to `max` chars with an ellipsis. Tool inputs/outputs and thinking
+// traces can be huge; the searchable text only needs enough to match the screen.
+fn cap(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        s.chars().take(max).collect::<String>() + "…"
+    } else {
+        s.to_string()
+    }
+}
+
+// Extracted turn text: `full` is everything the harness rendered (prose +
+// thinking + tool calls/results) so a search matches whatever's on screen;
+// `display` is just the assistant's prose, used for a clean preview/label.
+struct Extracted {
+    full: String,
+    display: String,
+}
+
+fn tool_result_text(content: Option<&Value>) -> String {
     match content {
-        Value::String(s) => s.clone(),
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+// Flatten a claude `message.content` (string OR array of typed blocks). thinking
+// carries its real text; tool_use serializes its input; tool_result its output —
+// all into `full`. Only text blocks feed `display`.
+fn claude_text(content: &Value) -> Extracted {
+    match content {
+        Value::String(s) => Extracted {
+            full: s.clone(),
+            display: s.clone(),
+        },
         Value::Array(blocks) => {
-            let mut out = String::new();
+            let mut full = String::new();
+            let mut display = String::new();
             for b in blocks {
                 match b.get("type").and_then(|t| t.as_str()) {
                     Some("text") => {
                         if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
-                            out.push_str(t);
-                            out.push('\n');
+                            full.push_str(t);
+                            full.push('\n');
+                            display.push_str(t);
+                            display.push('\n');
                         }
                     }
-                    Some("thinking") => out.push_str("[thinking]\n"),
+                    Some("thinking") => {
+                        if let Some(t) = b.get("thinking").and_then(|t| t.as_str()) {
+                            full.push_str(&cap(t, 600));
+                            full.push('\n');
+                        }
+                    }
                     Some("tool_use") => {
                         let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
-                        out.push_str(&format!("[tool_use: {name}]\n"));
+                        full.push_str(&format!("[{name}] "));
+                        if let Some(input) = b.get("input") {
+                            full.push_str(&cap(&input.to_string(), 400));
+                        }
+                        full.push('\n');
                     }
-                    Some("tool_result") => out.push_str("[tool_result]\n"),
+                    Some("tool_result") => {
+                        let t = tool_result_text(b.get("content"));
+                        if !t.is_empty() {
+                            full.push_str(&cap(&t, 400));
+                            full.push('\n');
+                        }
+                    }
                     _ => {}
                 }
             }
-            out.trim_end().to_string()
+            Extracted {
+                full: full.trim_end().to_string(),
+                display: display.trim_end().to_string(),
+            }
         }
-        _ => String::new(),
+        _ => Extracted {
+            full: String::new(),
+            display: String::new(),
+        },
     }
 }
 
@@ -182,10 +239,13 @@ fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<
             .and_then(|m| m.get("content"))
             .cloned()
             .unwrap_or(Value::Null);
-        let text = claude_text(&content);
-        if text.is_empty() {
+        let ex = claude_text(&content);
+        if ex.full.is_empty() {
             continue;
         }
+        // Preview from the prose; fall back to full for tool-only turns.
+        let preview = preview_of(if ex.display.is_empty() { &ex.full } else { &ex.display });
+        let text = ex.full;
         let id = v
             .get("uuid")
             .and_then(|u| u.as_str())
@@ -203,7 +263,7 @@ fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<
             seq,
             role: role.to_string(),
             ts,
-            preview: preview_of(&text),
+            preview,
             text,
             locator: format!("claude:{path_str}#L{}", seq + 1),
         });
@@ -229,10 +289,13 @@ fn open_opencode() -> Option<rusqlite::Connection> {
     .ok()
 }
 
-// Pull the plain text of an opencode message from its `part` rows (each part's
-// `data` is a json block; text parts carry a `text` field).
-fn opencode_message_text(conn: &rusqlite::Connection, message_id: &str) -> String {
-    let mut text = String::new();
+// Pull an opencode message's text from its `part` rows. Each part's `data` is a
+// json block: text/reasoning carry a `text` field; a tool part carries its name
+// + `state.input` (the command/args) + `state.output`. reasoning + tool feed the
+// searchable `full`; only text parts feed `display`.
+fn opencode_message_text(conn: &rusqlite::Connection, message_id: &str) -> Extracted {
+    let mut full = String::new();
+    let mut display = String::new();
     if let Ok(mut stmt) =
         conn.prepare("SELECT data FROM part WHERE message_id = ?1 ORDER BY time_created, id")
     {
@@ -243,14 +306,31 @@ fn opencode_message_text(conn: &rusqlite::Connection, message_id: &str) -> Strin
                     match v.get("type").and_then(|t| t.as_str()) {
                         Some("text") => {
                             if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
-                                text.push_str(t);
-                                text.push('\n');
+                                full.push_str(t);
+                                full.push('\n');
+                                display.push_str(t);
+                                display.push('\n');
                             }
                         }
-                        Some("reasoning") => text.push_str("[reasoning]\n"),
+                        Some("reasoning") => {
+                            if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
+                                if !t.is_empty() {
+                                    full.push_str(&cap(t, 600));
+                                    full.push('\n');
+                                }
+                            }
+                        }
                         Some("tool") => {
                             let name = v.get("tool").and_then(|n| n.as_str()).unwrap_or("tool");
-                            text.push_str(&format!("[tool: {name}]\n"));
+                            full.push_str(&format!("[{name}] "));
+                            if let Some(input) = v.pointer("/state/input") {
+                                full.push_str(&cap(&input.to_string(), 400));
+                            }
+                            if let Some(out) = v.pointer("/state/output").and_then(|o| o.as_str()) {
+                                full.push(' ');
+                                full.push_str(&cap(out, 400));
+                            }
+                            full.push('\n');
                         }
                         _ => {}
                     }
@@ -258,7 +338,10 @@ fn opencode_message_text(conn: &rusqlite::Connection, message_id: &str) -> Strin
             }
         }
     }
-    text.trim_end().to_string()
+    Extracted {
+        full: full.trim_end().to_string(),
+        display: display.trim_end().to_string(),
+    }
 }
 
 fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
@@ -287,10 +370,11 @@ fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
             .ok()
             .and_then(|v| v.get("role").and_then(|r| r.as_str()).map(String::from))
             .unwrap_or_else(|| "assistant".to_string());
-        let text = opencode_message_text(&conn, &id);
-        if text.is_empty() {
+        let ex = opencode_message_text(&conn, &id);
+        if ex.full.is_empty() {
             continue;
         }
+        let preview = preview_of(if ex.display.is_empty() { &ex.full } else { &ex.display });
         out.push(AiMessage {
             editor: Editor::Opencode,
             session_id: session_id.to_string(),
@@ -298,8 +382,8 @@ fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
             seq: time_created as u64,
             role,
             ts: time_created as u64,
-            preview: preview_of(&text),
-            text,
+            preview,
+            text: ex.full,
             locator: format!("opencode:#msg={id}"),
         });
     }
