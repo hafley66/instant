@@ -282,13 +282,24 @@ export function addTermPanel(sid: string, title: string, el: HTMLElement) {
     | { referencePanel: string; direction: "within" | "right" }
     | undefined;
   if (anchor) position = { referencePanel: anchor, direction: "within" };
-  api.addPanel({
-    id: pid,
-    component: "terminal",
-    params: { panelId: pid },
-    title,
-    ...(position ? { position } : {}),
-  });
+  const base = { id: pid, component: "terminal", params: { panelId: pid }, title };
+  // A restored-but-corrupt layout can leave the anchor's group disposed, so
+  // addPanel throws "resource already disposed" and the new tab never opens
+  // (cmd+T appears dead). Retry unanchored; if the whole gridview is wedged,
+  // rebuild the default layout and try once more. Never let cmd+T throw.
+  const tryAdd = (opts: Parameters<NonNullable<typeof api>["addPanel"]>[0]) => {
+    try {
+      api!.addPanel(opts);
+      return true;
+    } catch (e) {
+      console.error("addTermPanel", e);
+      return false;
+    }
+  };
+  if (position && tryAdd({ ...base, position })) return;
+  if (tryAdd(base)) return;
+  applyLayout(buildDefault);
+  tryAdd(base);
 }
 
 export function focusTermPanel(sid: string) {

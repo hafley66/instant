@@ -17,15 +17,23 @@ fn home() -> Option<PathBuf> {
 // claude encodes the project dir by replacing every non-alphanumeric char with
 // '-' (so '/', '.', '_', space all collapse to '-'; a '.worktrees' segment turns
 // into '-worktrees'), then stores one <session-uuid>.jsonl per conversation.
-fn latest_claude_session(cwd: &str) -> Option<String> {
+// Returns every session id in the cwd, NEWEST FIRST (mtime desc) — the caller
+// disambiguates when several tabs share a cwd.
+fn claude_sessions(cwd: &str) -> Vec<String> {
     let enc: String = cwd
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let dir = home()?.join(".claude").join("projects").join(enc);
-    let mut newest: Option<(SystemTime, String)> = None;
-    for entry in fs::read_dir(&dir).ok()? {
-        let entry = entry.ok()?;
+    let dir = match home() {
+        Some(h) => h.join(".claude").join("projects").join(enc),
+        None => return vec![],
+    };
+    let rd = match fs::read_dir(&dir) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    let mut items: Vec<(SystemTime, String)> = vec![];
+    for entry in rd.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
@@ -34,49 +42,64 @@ fn latest_claude_session(cwd: &str) -> Option<String> {
             Some(s) => s.to_string(),
             None => continue,
         };
-        let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
-        let mtime = match mtime {
+        let mtime = match entry.metadata().ok().and_then(|m| m.modified().ok()) {
             Some(t) => t,
             None => continue,
         };
-        if newest.as_ref().map_or(true, |(t, _)| mtime > *t) {
-            newest = Some((mtime, stem));
-        }
+        items.push((mtime, stem));
     }
-    newest.map(|(_, id)| id)
+    items.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    items.into_iter().map(|(_, id)| id).collect()
 }
 
 // opencode stores sessions in a SQLite db; `session.directory` is the plain cwd.
-// time_archived IS NULL filters out deleted/archived sessions.
-fn latest_opencode_session(cwd: &str) -> Option<String> {
-    let db = home()?
-        .join(".local")
-        .join("share")
-        .join("opencode")
-        .join("opencode.db");
-    let conn = rusqlite::Connection::open_with_flags(
+// time_archived IS NULL filters out deleted/archived sessions. Newest first.
+fn opencode_sessions(cwd: &str) -> Vec<String> {
+    let db = match home() {
+        Some(h) => h
+            .join(".local")
+            .join("share")
+            .join("opencode")
+            .join("opencode.db"),
+        None => return vec![],
+    };
+    let conn = match rusqlite::Connection::open_with_flags(
         &db,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .ok()?;
-    conn.query_row(
+    ) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let mut stmt = match conn.prepare(
         "SELECT id FROM session \
          WHERE directory = ?1 AND time_archived IS NULL \
-         ORDER BY time_updated DESC LIMIT 1",
-        [cwd],
-        |row| row.get::<_, String>(0),
-    )
-    .ok()
+         ORDER BY time_updated DESC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let ids: Vec<String> = match stmt.query_map([cwd], |row| row.get::<_, String>(0)) {
+        Ok(rows) => rows.flatten().collect(),
+        Err(_) => vec![],
+    };
+    ids
 }
 
+// Newest-first list of resumable session ids for a cwd. Callers that just want the
+// single latest take the first element (harness_session below).
 #[tauri::command]
-pub fn harness_session(tool: String, cwd: String) -> Option<String> {
+pub fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
     // `tool` is the launch command's first token (claude/opencode); strip a path
     // so "/usr/local/bin/claude" still matches.
     let bin = tool.rsplit('/').next().unwrap_or(&tool);
     match bin {
-        "claude" => latest_claude_session(&cwd),
-        "opencode" => latest_opencode_session(&cwd),
-        _ => None,
+        "claude" => claude_sessions(&cwd),
+        "opencode" => opencode_sessions(&cwd),
+        _ => vec![],
     }
+}
+
+#[tauri::command]
+pub fn harness_session(tool: String, cwd: String) -> Option<String> {
+    harness_sessions(tool, cwd).into_iter().next()
 }

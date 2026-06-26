@@ -274,12 +274,34 @@ fn grab_and_send_selection(app: &AppHandle) {
     }
 }
 
+/// While the overlay is up, let it join the OS app/window switcher; on hide,
+/// drop back to a background accessory. macOS: Cmd-Tab + Dock tile follow the
+/// activation policy (Regular vs Accessory). Win/Linux: Alt-Tab + taskbar follow
+/// skip_taskbar. Called from every show/hide path so the entry never lingers.
+fn set_switcher_visible(app: &AppHandle, on: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        // Demoting works cleanly here because we only call this with on=false from
+        // the focus-lost handler, i.e. once we've already resigned active. (Flipping
+        // to Accessory while still frontmost would leave the entry up.)
+        let policy = if on {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        let _ = app.set_activation_policy(policy);
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_skip_taskbar(!on);
+    }
+}
+
 /// Toggle the summon window. When showing, anchor it to the mouse cursor.
 fn toggle_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else { return };
 
     if win.is_visible().unwrap_or(false) {
-        let _ = win.hide();
+        let _ = win.hide(); // focus-lost handler demotes us out of the switcher
         reactivate_prev_app();
         return;
     }
@@ -297,6 +319,7 @@ fn toggle_window(app: &AppHandle) {
         position_at_cursor(&win, x as f64, y as f64);
     }
 
+    set_switcher_visible(app, true);
     let _ = win.show();
     let _ = win.set_focus();
     // Tell the front to play its entrance animation + refocus the active term.
@@ -401,7 +424,7 @@ fn open_target(app: AppHandle, target: String, cwd: String) -> Result<String, St
     });
     let hide_window = || {
         if let Some(w) = app.get_webview_window("main") {
-            let _ = w.hide();
+            let _ = w.hide(); // focus-lost handler demotes us out of the switcher
         }
     };
     if t.starts_with("www.") || scheme_ok {
@@ -427,6 +450,78 @@ fn open_target(app: AppHandle, target: String, cwd: String) -> Result<String, St
         .map_err(|e| e.to_string())?;
     hide_window();
     Ok("path".into())
+}
+
+/// Run a ⌘-click action: a shell command (from the front's clickRules table, with
+/// the clicked token already shell-quoted into it) via `sh -c` in the pane cwd,
+/// using the login PATH so rg/code/open resolve under the GUI's stripped env.
+/// Returns stdout (capped); the caller opens a panel only when it's non-empty, so
+/// launchers (open/code) just launch and producers (rg) show results.
+#[tauri::command]
+fn run_click(command: String, cwd: String) -> Result<String, String> {
+    let dir = match cwd.trim() {
+        "" => std::env::var("HOME").unwrap_or_else(|_| ".".into()),
+        c => c.to_string(),
+    };
+    let out = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(&command)
+        .current_dir(&dir)
+        .env("PATH", pty::path_env())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+    const CAP: usize = 200_000;
+    if s.len() > CAP {
+        s.truncate(CAP);
+        s.push_str("\n… (truncated)");
+    }
+    Ok(s)
+}
+
+fn log_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let _ = std::fs::create_dir_all(&dir);
+    Ok(dir.join("instant.log"))
+}
+
+/// Append one line to app_data_dir/instant.log. The webview has no console a user
+/// can reach, so errors/events are mirrored here. Best-effort: logging never
+/// throws back into the app. Caps the file so it can't grow unbounded.
+#[tauri::command]
+fn log_append(app: AppHandle, line: String) {
+    let Ok(path) = log_file_path(&app) else { return };
+    // Trim from the front if it crosses the cap (cheap: rewrite tail on overflow).
+    const CAP: u64 = 2_000_000;
+    if std::fs::metadata(&path).map(|m| m.len() > CAP).unwrap_or(false) {
+        if let Ok(data) = std::fs::read(&path) {
+            let keep = data.len().saturating_sub(CAP as usize / 2);
+            let _ = std::fs::write(&path, &data[keep..]);
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+        let _ = f.write_all(b"\n");
+    }
+}
+
+/// Absolute path of the log file, for display / tailing.
+#[tauri::command]
+fn log_path(app: AppHandle) -> Result<String, String> {
+    Ok(log_file_path(&app)?.to_string_lossy().into_owned())
+}
+
+/// Reveal the log file in Finder. Best-effort.
+#[tauri::command]
+fn log_reveal(app: AppHandle) -> Result<(), String> {
+    let p = log_file_path(&app)?;
+    std::process::Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(&p)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Interactive screen-region capture to a temp PNG; returns the file path.
@@ -490,9 +585,19 @@ pub fn run() {
             let focused = Arc::new(AtomicBool::new(false));
             app.manage(capture::WindowFocused(focused.clone()));
             if let Some(win) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
                 win.on_window_event(move |e| {
                     if let tauri::WindowEvent::Focused(f) = e {
                         focused.store(*f, Ordering::Relaxed);
+                        // Participate in the OS switcher (Cmd-Tab / Alt-Tab / taskbar)
+                        // only while focused; drop out the instant we lose focus
+                        // (tab-away or dismiss). Demote-on-blur lands cleanly since
+                        // we've resigned active by then. Hop to the main thread:
+                        // AppKit activation-policy calls must run there.
+                        let on = *f;
+                        let app2 = app_handle.clone();
+                        let _ = app_handle
+                            .run_on_main_thread(move || set_switcher_visible(&app2, on));
                     }
                 });
             }
@@ -528,8 +633,14 @@ pub fn run() {
             let toggle_i = MenuItem::with_id(app, "toggle", "Summon / Hide", true, None::<&str>)?;
             let record_i =
                 MenuItem::with_id(app, "record", "Toggle Recording", true, None::<&str>)?;
+            // Recovery: reload skipping persisted layout/state (safe), or wipe it.
+            let safe_i =
+                MenuItem::with_id(app, "safe", "Safe Reopen (skip restore)", true, None::<&str>)?;
+            let reset_i =
+                MenuItem::with_id(app, "reset", "Reset All State…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toggle_i, &record_i, &quit_i])?;
+            let menu =
+                Menu::with_items(app, &[&toggle_i, &record_i, &safe_i, &reset_i, &quit_i])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -541,6 +652,27 @@ pub fn run() {
                     "record" => {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.emit("toggle-record", ());
+                        }
+                    }
+                    // Set the one-shot flag in sessionStorage (survives reload, not
+                    // restart) then reload. eval'd directly so it works even when the
+                    // app JS is wedged by bad persisted state. state.ts reads it
+                    // before touching localStorage.
+                    "safe" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                            let _ = win
+                                .eval("sessionStorage.setItem('SAFE_BOOT','1');location.reload()");
+                        }
+                    }
+                    "reset" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                            let _ = win.eval(
+                                "if(confirm('Reset all instant state (layout, tabs, settings)? tmux sessions are unaffected.')){localStorage.clear();sessionStorage.clear();location.reload()}",
+                            );
                         }
                     }
                     "quit" => app.exit(0),
@@ -589,6 +721,7 @@ pub fn run() {
             fs::read_image,
             fs::read_text,
             harness::harness_session,
+            harness::harness_sessions,
             ledger::list_ai_sessions,
             ledger::read_ai_messages,
             ledger::latest_ai_message,
@@ -602,6 +735,10 @@ pub fn run() {
             sprefa_plugin::commands::sprefa_rel_source,
             screenshot,
             open_target,
+            run_click,
+            log_append,
+            log_path,
+            log_reveal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

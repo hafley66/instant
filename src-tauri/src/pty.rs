@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, State};
 // found without this. Prepend the usual homebrew + system locations.
 const EXTRA_PATH: &str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
-fn path_env() -> String {
+pub(crate) fn path_env() -> String {
     match std::env::var("PATH") {
         Ok(p) => format!("{EXTRA_PATH}:{p}"),
         Err(_) => EXTRA_PATH.to_string(),
@@ -146,6 +146,17 @@ fn enable_mouse(name: &str) {
             }
             std::thread::sleep(std::time::Duration::from_millis(60));
         }
+        // With mouse on, a drag selects in tmux copy-mode and copies into tmux's
+        // OWN buffer — never the macOS clipboard — so ⌘C finds nothing ("can't
+        // copy after leaving opencode"). `set-clipboard on` makes tmux emit an
+        // OSC 52 with the selection to the outer terminal (our xterm), which
+        // bridges it to navigator.clipboard. `external` (the common default) only
+        // forwards apps' own OSC 52, not tmux's mouse copy, so bump to `on`.
+        // Server-wide (one tmux clipboard policy); harmless for other sessions.
+        let _ = std::process::Command::new("tmux")
+            .args(["set-option", "-g", "set-clipboard", "on"])
+            .env("PATH", path_env())
+            .status();
     });
 }
 

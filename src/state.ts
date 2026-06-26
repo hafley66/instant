@@ -221,6 +221,7 @@ export interface AppState {
   wtFocus: boolean; // when on, the worktree view shows only starred rows
   wtAddingClone: string | null; // clone path whose inline "+ worktree" branch input is open (runtime)
   wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
+  clickRules: ClickRule[]; // ⌘-click token -> shell command table (persisted)
   autoResume: boolean; // when on, launching an agent resumes its latest session in that cwd (persisted, default true)
   pinnedSessions: string[]; // tmux session names pinned to the top of the list (persisted)
   pinnedTabs: string[]; // terminal tab session names pinned (persisted)
@@ -232,6 +233,26 @@ export interface AppState {
 export const DEFAULT_WT_AGENTS: WtAgent[] = [
   { label: "claude", command: "claude", resume: "--resume" },
   { label: "opencode", command: "opencode", resume: "--session" },
+];
+
+// What a ⌘-click on a terminal token does: the first rule whose `pattern` (a JS
+// regex) matches the clicked token wins, and its `command` runs in the pane cwd
+// with `$1` substituted by the shell-quoted token. Commands that print to stdout
+// (rg) open a results panel on the right; launchers (open/code) print nothing.
+export interface ClickRule {
+  pattern: string;
+  command: string;
+}
+export const DEFAULT_CLICK_RULES: ClickRule[] = [
+  { pattern: "^(https?://|www\\.)", command: "open $1" }, // url -> browser
+  // Catch-all: open in the editor only if the token (sans :line) is a real path,
+  // else ripgrep it from cwd. The existence test is why this can't be pure regex
+  // — `obj.method` looks file-ish but isn't a file, so it greps. `-n` makes rg
+  // emit path:line:text so the panel can link each hit.
+  // -F: match the token literally so punctuation (foo(), arr[0], a.b) isn't read
+  // as a regex (which errors on unbalanced parens etc.). -e: so a token starting
+  // with `-` (e.g. --flag) isn't taken as an rg flag.
+  { pattern: ".", command: 'f=$1; if [ -e "${f%%:*}" ]; then code -g $1; else rg -nF -e $1; fi' },
 ];
 
 // Durable slice, mirrored to localStorage. Runtime fields (active, sessions,
@@ -262,6 +283,7 @@ const PERSIST: (keyof AppState)[] = [
   "spaces",
   "wtFocus",
   "wtAgents",
+  "clickRules",
   "autoResume",
   "pinnedSessions",
   "pinnedTabs",
@@ -271,7 +293,25 @@ const PERSIST: (keyof AppState)[] = [
 
 // JSON so arrays/numbers round-trip. Falls back to the raw string for values
 // written by the old plain-string persistence (migrates skin/mode in place).
+// Safe boot: skip reading persisted state so a corrupt value (e.g. a dock layout
+// that throws "resource already disposed") can't jam startup. One-shot via a
+// sessionStorage flag (survives reload, cleared on app restart) set by ⌘⇧R or the
+// tray "Safe Reopen"; also honors a ?safe / ?reset URL param. The next normal
+// layout change overwrites the bad persisted copy, so it self-heals.
+export const SAFE_BOOT: boolean = (() => {
+  try {
+    if (sessionStorage.getItem("SAFE_BOOT") === "1") {
+      sessionStorage.removeItem("SAFE_BOOT");
+      return true;
+    }
+  } catch {
+    /* sessionStorage can throw in locked-down contexts */
+  }
+  return /[?#&](safe|reset)\b/.test(location.search + location.hash);
+})();
+
 function loadKey<T>(k: string, fallback: T): T {
+  if (SAFE_BOOT) return fallback;
   const raw = localStorage.getItem(k);
   if (raw === null) return fallback;
   try {
@@ -288,6 +328,14 @@ function load(): AppState {
   if (localStorage.getItem("resumeTabsV2") !== "1") {
     localStorage.removeItem("resumeTabs");
     localStorage.setItem("resumeTabsV2", "1");
+  }
+  // clickRules defaults changed twice during bring-up (existence-checked file
+  // rule, then -F literal grep so punctuation doesn't break the regex). Drop the
+  // old persisted copy once per bump so the new default takes over. Bump the
+  // suffix when the default changes; a user's edits between bumps survive.
+  if (localStorage.getItem("clickRulesV3") !== "1") {
+    localStorage.removeItem("clickRules");
+    localStorage.setItem("clickRulesV3", "1");
   }
   return {
     skin: loadKey<Skin>("skin", "xp"),
@@ -328,6 +376,7 @@ function load(): AppState {
     wtFocus: loadKey<boolean>("wtFocus", false),
     wtAddingClone: null,
     wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
+    clickRules: loadKey<ClickRule[]>("clickRules", DEFAULT_CLICK_RULES),
     autoResume: loadKey<boolean>("autoResume", true),
     pinnedSessions: loadKey<string[]>("pinnedSessions", []),
     pinnedTabs: loadKey<string[]>("pinnedTabs", []),

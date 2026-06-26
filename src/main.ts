@@ -20,6 +20,8 @@ import { homeDir } from "@tauri-apps/api/path";
 import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import {
   store,
+  DEFAULT_CLICK_RULES,
+  type ClickRule,
   type ActivitySource,
   type AppState,
   type CapturePerms,
@@ -255,6 +257,27 @@ async function tabSessions(
     if (sid) out.push({ editor, sessionId: sid });
   }
   return out;
+}
+
+// Newest agent session in a cwd whose id is NOT already claimed by another tab's
+// resume record. Several agents can share a cwd, so "latest in cwd" alone hands
+// every same-cwd tab the same id; skipping claimed ids gives each closed tab a
+// distinct session to resume. Probes both editors (declared agent first), each
+// newest-first, and returns the first unclaimed hit.
+async function unclaimedSession(
+  meta: { cwd: string; command: string | null },
+  claimed: Set<string>,
+): Promise<{ editor: "claude" | "opencode"; sessionId: string } | null> {
+  const bin = (meta.command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
+  const order: ("claude" | "opencode")[] =
+    bin === "opencode" ? ["opencode", "claude"] : ["claude", "opencode"];
+  for (const editor of order) {
+    const ids = await invoke<string[]>("harness_sessions", { tool: editor, cwd: meta.cwd }).catch(
+      () => [] as string[],
+    );
+    for (const sid of ids) if (!claimed.has(sid)) return { editor, sessionId: sid };
+  }
+  return null;
 }
 
 // Per-(editor,session) ledger cache + the per-tab merged turn list the terminal
@@ -586,6 +609,8 @@ function togglePinActiveTab() {
 // survives a tab close, so reopen reattaches by name and the agent is still
 // alive; the stored command/cwd only matter if the session was actually killed.
 const closedTabs: OpenTab[] = [];
+// Runs close-time agent teardown one-at-a-time; see onTermClosed for why.
+let closeChain: Promise<unknown> = Promise.resolve();
 function reopenLastTab() {
   const last = closedTabs.pop();
   if (!last) return;
@@ -696,6 +721,21 @@ const TAB_COMMANDS: Command[] = [
   // Reload the webview — recover from a crashed React render without restarting
   // the app (tmux sessions outlive the reload, so nothing is lost).
   { id: "app.reload", keys: ["$mod+r"], run: () => location.reload() },
+  // Safe reload: reload but skip reading persisted state (dock layout, tabs, …)
+  // so a corrupt value can't re-jam startup. One-shot; the next layout change
+  // rewrites the bad copy. See SAFE_BOOT in state.ts.
+  {
+    id: "app.safeReload",
+    keys: ["$mod+Shift+r"],
+    run: () => {
+      try {
+        sessionStorage.setItem("SAFE_BOOT", "1");
+      } catch {
+        /* ignore */
+      }
+      location.reload();
+    },
+  },
   // Zoom: cmd +/-/0. A focused terminal zooms its own font (persisted per tab);
   // otherwise the webview chrome (rail + toolbars) zooms (persisted, 0.5–2.0).
   { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], run: () => zoomGesture(ZOOM_STEP) },
@@ -755,10 +795,29 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
 
   tabs.set(id, { id, name, term, fit, el });
 
-  // ⌘-click a path or URL to open it (iTerm2 semantic-history). xterm's link
-  // provider does the hit-testing (correct cell mapping, works under a TUI's
-  // mouse mode) and gives the hover underline + pointer cursor for free. It
-  // activates on plain click, so we gate on ⌘ to leave plain clicks to the app.
+  // OSC 52 -> macOS clipboard. tmux (set-clipboard on) emits this when a mouse
+  // drag selects text in copy-mode, and TUIs (opencode) emit it on their own
+  // copy. xterm doesn't touch the system clipboard on its own (security), so
+  // without this bridge a selection lands only in tmux's buffer and ⌘V pastes
+  // nothing — the "can't copy after leaving opencode" case.
+  term.parser.registerOscHandler(52, (data) => {
+    // data = "<targets>;<base64|?>" (targets e.g. "c"/"p"; "?" is a read query).
+    const b64 = data.slice(data.indexOf(";") + 1);
+    if (!b64 || b64 === "?") return true;
+    try {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      void navigator.clipboard.writeText(new TextDecoder().decode(bytes));
+    } catch {
+      /* malformed payload: ignore */
+    }
+    return true; // handled; don't pass through
+  });
+
+  // ⌘-click a token to run its clickRules action (url->open, path->editor,
+  // else->rg). xterm's link provider gives the hover underline + pointer and
+  // correct hit-testing for the openable subset; its activate routes through the
+  // same dispatchClick as the miss handler below. ⌘ gates it so plain clicks
+  // (cursor placement etc.) still reach the TUI.
   term.registerLinkProvider({
     provideLinks(y, cb) {
       const line = term.buffer.active.getLine(y - 1); // y is 1-based absolute row
@@ -778,23 +837,33 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
           range: { start: { x: start + 1, y }, end: { x: start + tok.length, y } },
           activate(e, t) {
             if (!e.metaKey) return; // ⌘ required; plain click stays with the app
-            const cwd = tabMetaById(id)?.cwd ?? "";
-            invoke<string>("open_target", { target: t, cwd })
-              .then((kind) =>
-                invoke("activity_log", {
-                  source: "session",
-                  kind: "open",
-                  title: t,
-                  text: `${kind}: ${t}`,
-                }).catch(() => {}),
-              )
-              .catch(() => {}); // unresolved path/url: ignore silently
+            dispatchClick(t, tabMetaById(id)?.cwd ?? "");
           },
         });
       }
       cb(links);
     },
   });
+
+  // ⌘-click that ISN'T on an openable link (no hover underline): take the
+  // selection, else the word under the cursor, and run its clickRules action
+  // (the catch-all rule greps from cwd). Capture phase so we can swallow it
+  // before the TUI sees the click; openable hits fall through to the link
+  // provider above (which the linkifier activates on mouseup).
+  el.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!e.metaKey || e.button !== 0) return;
+      const sel = term.getSelection().trim();
+      const word = sel || wordAt(id, e.clientX, e.clientY);
+      if (!word) return;
+      if (!sel && looksOpenable(word)) return; // link provider handles this hit
+      e.preventDefault();
+      e.stopPropagation();
+      dispatchClick(word, tabMetaById(id)?.cwd ?? "");
+    },
+    { capture: true },
+  );
 
   // Click anywhere in the host (incl. padding around the xterm) focuses the
   // terminal, so keyboard + scroll work without hunting for the text area.
@@ -962,7 +1031,11 @@ function onTermClosed(id: string) {
   // (recording its id for --resume first, keyed by session name). Anything else →
   // detach the pty; the tmux session survives (so a reload reattaches it). Decided
   // async because the on-disk session probe is async; see exitOrDetachTab.
-  void exitOrDetachTab(id, name, tabMeta, proc);
+  // Serialize teardown: two near-simultaneous closes must NOT interleave their
+  // resumeTabs read-modify-write, or both probe-record the same newest-in-cwd id
+  // and the 2nd reopen resumes the 1st's session ("rando old session"). Chaining
+  // lets each close fully claim its id before the next one probes.
+  closeChain = closeChain.then(() => exitOrDetachTab(id, name, tabMeta, proc)).catch(() => {});
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -1006,7 +1079,11 @@ async function exitOrDetachTab(
   // when several sessions share the cwd. The probe is a fallback for agents we
   // didn't launch with a chosen id (e.g. opencode, or a reattached external one).
   if (!store.get().resumeTabs[name]) {
-    const s = sessions[0]; // declared-agent-first, latest in this cwd
+    // Skip ids already claimed by another tab's record so same-cwd siblings each
+    // resume a DISTINCT session (the "rando old session" fix). Serialized teardown
+    // (closeChain) guarantees prior closes have recorded before we read here.
+    const claimed = new Set(Object.values(store.get().resumeTabs).map((r) => r.sessionId));
+    const s = meta ? await unclaimedSession(meta, claimed) : null;
     if (s) {
       store.set({
         resumeTabs: { ...store.get().resumeTabs, [name]: { editor: s.editor, sessionId: s.sessionId } },
@@ -2482,6 +2559,219 @@ const SHIKI_LANG: Record<string, string> = {
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+// ---- ⌘-click action table ----
+// A ⌘-click on a terminal token runs the first clickRules rule whose regex
+// matches it (see DEFAULT_CLICK_RULES). The token is shell-quoted into `$1`, the
+// command runs in the pane cwd via run_click, and any stdout opens a panel on
+// the right (rg results); launchers (open/code) print nothing, so they just run.
+
+// Single-quote a token for /bin/sh so the clicked text can't inject shell.
+const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
+
+async function dispatchClick(rawToken: string, cwd: string) {
+  const token = rawToken.trim();
+  if (!token) return;
+  const rule = clickRules().find((r) => {
+    try {
+      return new RegExp(r.pattern).test(token);
+    } catch {
+      return false; // a bad regex in the table just doesn't match
+    }
+  });
+  if (!rule) return;
+  const command = rule.command.replace(/\$1/g, () => shQuote(token));
+  let out = "";
+  try {
+    out = await invoke<string>("run_click", { command, cwd });
+  } catch (e) {
+    out = String(e);
+  }
+  if (out.trim()) openClickPanel(token, out, cwd, rule);
+}
+
+const clickPanelEls = new Map<string, HTMLElement>();
+
+// Adopt a per-query results node into a right-side panel (same plumbing as file
+// previews). Re-running the same query refreshes the existing panel.
+function openClickPanel(query: string, output: string, cwd: string, rule: ClickRule) {
+  const key = `rg:${query}`;
+  let el = clickPanelEls.get(key);
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "rg-panel";
+    clickPanelEls.set(key, el);
+  }
+  renderClickOutput(el, query, output, cwd, rule);
+  addPreviewPanel(key, query, el, "right");
+}
+
+// Render command stdout grouped like ripgrep's heading view: one file header per
+// path, then its `line  text` hits. Lines shaped `path:line:text` (rg -n piped)
+// parse into hits that open the file preview at that line; anything else falls
+// back to a plain row.
+type RgHit = { line: number; text: string };
+type RgGroup = { path: string; hits: RgHit[] };
+
+function renderClickOutput(el: HTMLElement, query: string, output: string, cwd: string, rule: ClickRule) {
+  const base = cwd.replace(/\/$/, "");
+  const resolve = (p: string) => (p.startsWith("/") || p.startsWith("~") ? p : base ? `${base}/${p}` : p);
+  const lines = output.replace(/\n+$/, "").split("\n");
+
+  const groups: RgGroup[] = [];
+  const plain: string[] = [];
+  for (const l of lines) {
+    const m = l.match(/^(.+?):(\d+):(.*)$/);
+    if (!m) {
+      if (l) plain.push(l);
+      continue;
+    }
+    const [, p, ln, rest] = m;
+    const g = groups[groups.length - 1];
+    if (g && g.path === p) g.hits.push({ line: +ln, text: rest });
+    else groups.push({ path: p, hits: [{ line: +ln, text: rest }] });
+  }
+
+  const hitCount = groups.reduce((n, g) => n + g.hits.length, 0);
+  const fileRow = (p: string) =>
+    `<div class="rg-file" data-path="${escapeHtml(p)}">${escapeHtml(p)}</div>`;
+  const hitRow = (p: string, h: RgHit) =>
+    `<div class="rg-hit" data-path="${escapeHtml(p)}" data-line="${h.line}">` +
+    `<span class="rg-ln">${h.line}</span><span class="rg-tx">${escapeHtml(h.text) || " "}</span></div>`;
+
+  const body =
+    groups
+      .map((g) => `<div class="rg-group">${fileRow(g.path)}${g.hits.map((h) => hitRow(g.path, h)).join("")}</div>`)
+      .join("") + plain.map((l) => `<div class="rg-plain">${escapeHtml(l)}</div>`).join("");
+
+  el.innerHTML =
+    `<div class="rg-head">${escapeHtml(query)}` +
+    (hitCount ? ` <span class="rg-count">${hitCount} in ${groups.length}</span>` : "") +
+    `</div>` +
+    `<div class="rg-sub">ran <code>${escapeHtml(rule.command)}</code> · ` +
+    `<a class="rg-cfg" href="#">config</a></div>` +
+    `<div class="rg-body">${body || '<div class="rg-plain">no matches</div>'}</div>`;
+
+  el.querySelector<HTMLElement>(".rg-cfg")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openClickConfigPanel();
+  });
+  el.querySelectorAll<HTMLElement>(".rg-body [data-path]").forEach((node) =>
+    node.addEventListener("click", () => {
+      const p = node.getAttribute("data-path") ?? "";
+      const ln = Number(node.getAttribute("data-line") ?? "0");
+      if (p) openPreviewPanel(resolve(p), ln > 0 ? ln : undefined);
+    }),
+  );
+
+  // Syntax-highlight the match text after the plain rows are up (so the panel
+  // shows instantly). One shiki pass per file group — join its hits, highlight by
+  // the file's language, then swap each line's HTML back into its .rg-tx.
+  void highlightClickHits(el, groups);
+}
+
+async function highlightClickHits(el: HTMLElement, groups: RgGroup[]) {
+  const total = groups.reduce((n, g) => n + g.hits.length, 0);
+  if (total === 0 || total > 600) return; // keep large result sets snappy
+  const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
+  const groupEls = Array.from(el.querySelectorAll<HTMLElement>(".rg-group"));
+  await Promise.all(
+    groupEls.map(async (gEl, gi) => {
+      const g = groups[gi];
+      if (!g) return;
+      const name = g.path.split("/").pop() ?? g.path;
+      const ext = (name.includes(".") ? name.split(".").pop()! : name).toLowerCase();
+      const lang = SHIKI_LANG[ext];
+      if (!lang) return; // unknown language: leave the plain rows
+      let html: string;
+      try {
+        html = await codeToHtml(g.hits.map((h) => h.text).join("\n"), { lang, theme });
+      } catch {
+        return;
+      }
+      const spans = new DOMParser().parseFromString(html, "text/html").querySelectorAll(".line");
+      gEl.querySelectorAll<HTMLElement>(".rg-tx").forEach((tx, i) => {
+        if (spans[i]) tx.innerHTML = spans[i].innerHTML;
+      });
+    }),
+  );
+}
+
+// The ⌘-click action table, editable in-app. This is our "internal routing": the
+// `config` link in a results panel calls straight into this — no URL scheme, just
+// open the editor panel. Edits persist to the store (and thus localStorage).
+function openClickConfigPanel() {
+  const key = "config:clickRules";
+  let el = clickPanelEls.get(key);
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "rg-panel";
+    clickPanelEls.set(key, el);
+  }
+  renderClickConfig(el);
+  addPreviewPanel(key, "click rules", el, "right");
+}
+
+function renderClickConfig(el: HTMLElement) {
+  const rules = store.get().clickRules ?? DEFAULT_CLICK_RULES;
+  el.innerHTML =
+    `<div class="rg-head">click rules <span class="rg-count">⌘-click actions</span></div>` +
+    `<div class="rg-body rg-cfg-body">` +
+    `<div class="rg-cfg-help">First rule whose <b>pattern</b> (JS regex) matches the clicked token wins; ` +
+    `<code>$1</code> is the token (shell-quoted) substituted into <b>command</b>. Any stdout opens a results panel.</div>` +
+    `<textarea class="rg-cfg-ta" spellcheck="false"></textarea>` +
+    `<div class="rg-cfg-row"><button class="rg-cfg-save">save</button>` +
+    `<button class="rg-cfg-reset">reset</button><span class="rg-cfg-msg"></span></div>` +
+    `</div>`;
+  const ta = el.querySelector<HTMLTextAreaElement>(".rg-cfg-ta")!;
+  const msg = el.querySelector<HTMLElement>(".rg-cfg-msg")!;
+  ta.value = JSON.stringify(rules, null, 2);
+  el.querySelector<HTMLElement>(".rg-cfg-save")?.addEventListener("click", () => {
+    try {
+      const parsed = JSON.parse(ta.value) as ClickRule[];
+      if (!Array.isArray(parsed) || !parsed.every((r) => typeof r?.pattern === "string" && typeof r?.command === "string"))
+        throw new Error("expected [{pattern, command}, …]");
+      store.set({ clickRules: parsed });
+      msg.textContent = "saved";
+    } catch (e) {
+      msg.textContent = String(e);
+    }
+  });
+  el.querySelector<HTMLElement>(".rg-cfg-reset")?.addEventListener("click", () => {
+    store.set({ clickRules: DEFAULT_CLICK_RULES });
+    ta.value = JSON.stringify(DEFAULT_CLICK_RULES, null, 2);
+    msg.textContent = "reset";
+  });
+}
+
+// The word/path token under the pointer, for a ⌘-click miss (no link hit). Uses
+// the screen-cell geometry to map clientX/Y to a buffer cell, then expands to the
+// surrounding non-whitespace run and strips wrapping punctuation.
+function wordAt(id: string, clientX: number, clientY: number): string {
+  const t = tabs.get(id);
+  if (!t) return "";
+  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
+  const rect = screen.getBoundingClientRect();
+  const cellH = rect.height / t.term.rows || 1;
+  const cellW = rect.width / t.term.cols || 1;
+  const row = Math.max(0, Math.min(t.term.rows - 1, Math.floor((clientY - rect.top) / cellH)));
+  const col = Math.max(0, Math.min(t.term.cols - 1, Math.floor((clientX - rect.left) / cellW)));
+  const buf = t.term.buffer.active;
+  const line = buf.getLine(buf.viewportY + row);
+  if (!line) return "";
+  const text = line.translateToString(true);
+  if (col >= text.length || /\s/.test(text[col] ?? "")) return "";
+  let lo = col;
+  let hi = col;
+  while (lo > 0 && !/\s/.test(text[lo - 1])) lo--;
+  while (hi < text.length - 1 && !/\s/.test(text[hi + 1])) hi++;
+  return text
+    .slice(lo, hi + 1)
+    .replace(/^[('"<[{]+/, "")
+    .replace(/[.,;:)\]}>'"]+$/, "");
+}
+
 // ---- per-path preview tabs ----
 // Previews are dynamic dock panels keyed by path (preview:<path>), like xterm
 // sessions. main.ts owns each instance's content node and renders into it;
@@ -3837,16 +4127,31 @@ async function main() {
     }
     if (everFocused && !capturing && !draggingIn) {
       // Defer so a drag-in (which blurs us) can land; a drag-enter cancels it.
+      // Kept short so tab-away/click-out dismiss feels instant.
       cancelHide();
-      hideTimer = window.setTimeout(() => win.hide(), 500);
+      hideTimer = window.setTimeout(() => win.hide(), 120);
     }
   });
+}
+
+// Append a line to the on-disk log (app_data_dir/instant.log). The webview
+// console isn't reachable once the app is bundled, so this is the durable record.
+// Best-effort and fire-and-forget; never throws back into a caller.
+export function logLine(line: string): void {
+  let stamp = "";
+  try {
+    stamp = new Date().toISOString();
+  } catch {
+    /* ignore */
+  }
+  invoke("log_append", { line: `${stamp} ${line}` }).catch(() => {});
 }
 
 // Surface any boot/runtime error as a visible banner — the webview console
 // isn't reachable from the terminal, so this is how errors get seen.
 function showError(label: string, err: unknown) {
   const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+  logLine(`[${label}] ${msg}`);
   let el = document.getElementById("boot-error");
   if (!el) {
     el = document.createElement("pre");
@@ -3858,6 +4163,31 @@ function showError(label: string, err: unknown) {
   el.textContent = `[${label}] ${msg}`;
   console.error(label, err);
 }
+// Mirror console.error to the on-disk log. Most invoke failures use
+// `.catch(console.error)` (open_session, list_sessions, addPanel, …) and never
+// reach showError, so without this they're invisible in a bundled build — which
+// is exactly how a recoverable tmux/dock error reads as "jammed, no diagnostics".
+{
+  const orig = console.error.bind(console);
+  const fmt = (a: unknown): string => {
+    if (a instanceof Error) return `${a.message}\n${a.stack ?? ""}`;
+    if (typeof a === "string") return a;
+    try {
+      return JSON.stringify(a);
+    } catch {
+      return String(a);
+    }
+  };
+  console.error = (...args: unknown[]) => {
+    orig(...args);
+    try {
+      logLine("[console.error] " + args.map(fmt).join(" "));
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 window.addEventListener("error", (e) => showError("error", e.error ?? e.message));
 window.addEventListener("unhandledrejection", (e) => showError("promise", e.reason));
 

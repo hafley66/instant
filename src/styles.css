@@ -1082,6 +1082,141 @@ body[data-mode="dark"] .act-last.ok {
   overflow-wrap: anywhere;
 }
 
+/* ⌘-click search-results panel (rg). Same shape as a file preview: a fixed head
+   strip + one inner vertical scroll, hosted in a dockview tab. */
+.rg-panel {
+  /* The dockview host (.dv-host) is a flex row; without flex:1 the panel sizes to
+     its content instead of filling the tab. min-width:0 lets long lines wrap. */
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  /* Bind to the skin tokens so contrast is correct on every skin/mode (the host
+     doesn't reliably hand a foreground down — dark xp left text near-black). */
+  color: var(--panel-fg);
+  background: var(--panel-bg);
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.rg-head {
+  flex: none;
+  padding: 6px 8px;
+  font-weight: bold;
+  border-bottom: var(--frame-w) solid var(--frame);
+  word-break: break-all;
+}
+.rg-count {
+  font-weight: normal;
+  opacity: 0.55;
+}
+.rg-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+.rg-group {
+  margin-bottom: 6px;
+}
+/* File header reads as a section divider: full-strength bold + a faint stripe so
+   it separates groups against the dark panel (opacity-dimming made it vanish). */
+.rg-file {
+  padding: 3px 8px;
+  font-weight: bold;
+  background: rgba(127, 127, 127, 0.14);
+  cursor: pointer;
+  word-break: break-all;
+}
+.rg-file:hover {
+  background: rgba(127, 127, 127, 0.28);
+}
+.rg-hit {
+  /* Hanging indent: line number at the left, wrapped text aligns under the code. */
+  padding: 0 8px 0 calc(8px + 3em + 8px);
+  text-indent: calc(-3em - 8px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.rg-hit:hover {
+  background: var(--row-hover-bg, rgba(127, 127, 127, 0.15));
+}
+.rg-ln {
+  display: inline-block;
+  width: 3em;
+  margin-right: 8px;
+  text-align: right;
+  opacity: 0.45;
+  user-select: none;
+}
+.rg-plain {
+  padding: 1px 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  opacity: 0.7;
+}
+/* Subtitle: what command ran + a link back to the config that routed it here. */
+/* No opacity on the row itself — opacity creates a stacking context that dims the
+   link too. Mute the command text via its own color instead. */
+.rg-sub {
+  flex: none;
+  padding: 3px 8px;
+  font-size: 10px;
+  color: var(--panel-fg);
+  border-bottom: var(--frame-w) solid var(--frame);
+  word-break: break-all;
+}
+.rg-sub code {
+  opacity: 0.7;
+}
+.rg-cfg {
+  cursor: pointer;
+  text-decoration: underline;
+  color: #4493f8;
+}
+.rg-cfg:hover {
+  color: #6fb0ff;
+}
+/* clickRules editor */
+.rg-cfg-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rg-cfg-help {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.rg-cfg-ta {
+  width: 100%;
+  min-height: 160px;
+  flex: 1;
+  resize: vertical;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  background: var(--field-bg, rgba(127, 127, 127, 0.1));
+  color: inherit;
+  border: var(--frame-w) solid var(--frame);
+  padding: 6px;
+  box-sizing: border-box;
+}
+.rg-cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rg-cfg-msg {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 /* Rendered markdown (marked + DOMPurify). */
 .md-body {
   font-size: 12px;
