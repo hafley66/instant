@@ -262,6 +262,26 @@ pub fn close_pty(store: State<PtyStore>, id: String) {
     store.0.lock().unwrap().remove(&id);
 }
 
+/// Scroll a session's tmux history, independent of whatever app is running. A
+/// plain wheel only scrolls when the foreground app hasn't grabbed the mouse
+/// (claude/opencode do), so this forces tmux copy-mode and scrolls there. `-e`
+/// makes copy-mode auto-exit when scrolled back to the bottom (live view).
+#[tauri::command]
+pub fn scroll_session(name: String, up: bool, lines: u32) {
+    let n = lines.max(1).to_string();
+    let dir = if up { "scroll-up" } else { "scroll-down" };
+    let path = path_env();
+    // Enter copy-mode (no-op if already in it), then scroll N lines.
+    let _ = std::process::Command::new("tmux")
+        .args(["copy-mode", "-e", "-t", &name])
+        .env("PATH", &path)
+        .status();
+    let _ = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &name, "-X", "-N", &n, dir])
+        .env("PATH", &path)
+        .status();
+}
+
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
 #[tauri::command]
 pub fn kill_session(store: State<PtyStore>, name: String) -> Result<(), String> {

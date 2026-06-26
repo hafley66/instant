@@ -697,17 +697,26 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     return;
   }
 
-  // Reopen of an agent tab we exited on close: relaunch with --resume <id> when
-  // the caller didn't specify its own command (a worktree open resolves resume
-  // itself via resumeCommand). Either way the record is consumed.
-  const resume = store.get().resumeTabs[name];
-  if (resume) {
-    if (opts.command == null) {
-      opts = { command: resumeLaunch(resume.editor, resume.sessionId), cwd: opts.cwd ?? resume.cwd };
+  // Reopen of an agent we exited on close: when the caller gave no command but a
+  // cwd, relaunch with --resume <id> from the cwd-keyed record (the worktree
+  // open path resolves resume itself via resumeCommand). Consumed on use.
+  const resumeCwd = opts.cwd;
+  if (opts.command == null && resumeCwd) {
+    const resume = store.get().resumeTabs[resumeCwd];
+    if (resume) {
+      opts = { ...opts, command: resumeLaunch(resume.editor, resume.sessionId) };
+      const rest = { ...store.get().resumeTabs };
+      delete rest[resumeCwd];
+      store.set({ resumeTabs: rest });
     }
-    const rest = { ...store.get().resumeTabs };
-    delete rest[name];
-    store.set({ resumeTabs: rest });
+  }
+
+  // Visible confirmation that a reopen actually resumed (vs started fresh) —
+  // matches either reopen path since both bake the --resume/--session flag in.
+  const rm = opts.command?.match(/\s--(?:resume|session)\s+(\S+)/);
+  if (rm) {
+    console.log("[resume]", name, opts.command);
+    flashStatus(`↻ resuming ${rm[1].slice(0, 8)}`);
   }
 
   const el = document.createElement("div");
@@ -734,6 +743,27 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   term.open(el);
 
   tabs.set(id, { id, name, term, fit, el });
+
+  // Click anywhere in the host (incl. padding around the xterm) focuses the
+  // terminal, so keyboard + scroll work without hunting for the text area.
+  el.addEventListener("mousedown", () => term.focus());
+
+  // Shift+wheel scrolls the tmux history even when a full-screen TUI
+  // (opencode/claude) has grabbed the mouse so a plain wheel goes to the app
+  // (the "scroll randomly doesn't work" case). xterm has no real scrollback here
+  // — tmux owns the history — so this drives tmux copy-mode in the backend.
+  // Capture phase + stop so the app never sees it; plain wheel is untouched.
+  el.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 24));
+      invoke("scroll_session", { name, up: e.deltaY < 0, lines }).catch(console.error);
+    },
+    { capture: true, passive: false },
+  );
 
   // Track which terminal owns keyboard focus so ⌘+/-/0 zoom the right one.
   term.textarea?.addEventListener("focus", () => {
@@ -810,6 +840,16 @@ function activate(id: string) {
   if (tabs.has(id)) focusTermPanel(id);
 }
 
+// Focus a terminal reliably across a tab switch. A single rAF races dockview:
+// the panel may still be hidden that frame (focus on a display:none element is a
+// no-op) and dockview can move focus right after. Retry on rAF + a short timeout
+// so the keyboard (and keyboard scroll) land in the panel body without a click.
+function focusTermSoon(id: string) {
+  const go = () => tabs.get(id)?.term.focus();
+  requestAnimationFrame(go);
+  setTimeout(go, 60);
+}
+
 // dockview reports a terminal panel became active (tab click, open, or a
 // neighbour closing). Sync the store, log the visit, refit, focus.
 function onTermShown(id: string) {
@@ -822,8 +862,8 @@ function onTermShown(id: string) {
   requestAnimationFrame(() => {
     t.fit.fit();
     invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
-    t.term.focus();
   });
+  focusTermSoon(id);
   renderSessionActive();
 }
 
@@ -851,14 +891,11 @@ function onTermClosed(id: string) {
   const meta = store.get().openTabs.find((o) => o.name === name);
   closedTabs.push({ name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
   forgetTab(id); // don't reattach a tab the user closed
-  // Agent tab → resolve its session id, remember it for --resume, kill the tmux
-  // session so claude/opencode isn't left burning RAM. Anything else → detach
-  // the pty; the tmux session survives (so a reload reattaches it).
-  if (tabMeta && AGENT_PROCS.has(proc)) {
-    void exitAgentTab(id, name, tabMeta);
-  } else {
-    invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
-  }
+  // Agent tab → kill the tmux session so claude/opencode isn't left burning RAM
+  // (recording its id for --resume first). Anything else → detach the pty; the
+  // tmux session survives (so a reload reattaches it). Decided async because the
+  // on-disk session probe is async; see exitOrDetachTab.
+  void exitOrDetachTab(id, name, tabMeta, proc);
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -869,27 +906,40 @@ function onTermClosed(id: string) {
   refreshSessions();
 }
 
-// Exit a closed agent tab's tmux session (frees the RAM claude/opencode hold)
-// after recording its session id so reopen relaunches with --resume <id>. The
-// agent writes its jsonl incrementally, so killing mid-run stays resumable. If
-// no on-disk session is found we detach instead of stranding a live session.
-async function exitAgentTab(
+// Decide a closed tab's fate: an agent tab is KILLED (frees the RAM claude/
+// opencode hold) after best-effort recording its session id for --resume;
+// anything else just detaches (tmux survives a reload). The kill fires whenever
+// we believe an agent is running — it is NOT gated on resolving the session id,
+// so a stale id lookup can't leave claude alive. The agent writes its jsonl
+// incrementally, so killing mid-run stays resumable.
+async function exitOrDetachTab(
   id: string,
   name: string,
-  meta: { cwd: string; command: string | null },
+  meta: { cwd: string; command: string | null } | null,
+  proc: string,
 ) {
-  const s = (await tabSessions(meta.cwd, meta.command))[0]; // declared-agent-first, latest
-  if (s) {
-    store.set({
-      resumeTabs: {
-        ...store.get().resumeTabs,
-        [name]: { editor: s.editor, sessionId: s.sessionId, cwd: meta.cwd },
-      },
-    });
-    await invoke("kill_session", { name }).catch(console.error);
-  } else {
-    await invoke("close_pty", { id }).catch(() => {});
+  const sessions = meta ? await tabSessions(meta.cwd, meta.command) : [];
+  const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
+  // Agent when: the live foreground proc is an agent; the launch command names
+  // one; or the proc was unknown (stale session list) but the cwd has an on-disk
+  // agent session. A known non-agent proc (vim, …) is never killed.
+  const isAgent =
+    AGENT_PROCS.has(proc) || KNOWN_RESUME[bin] != null || (proc === "" && sessions.length > 0);
+  if (!isAgent) {
+    invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
+    return;
   }
+  const s = sessions[0]; // declared-agent-first, latest
+  if (s && meta) {
+    // Key by cwd (reopen mints a fresh tmux name, so name keys never recur). The
+    // live pane cwd is where claude ran, but a worktree reopen passes the scan's
+    // worktree-root path — record under BOTH so either reopen path matches.
+    const val = { editor: s.editor, sessionId: s.sessionId };
+    const next = { ...store.get().resumeTabs, [meta.cwd]: val };
+    for (const wt of worktreesForPaths([meta.cwd], store.get().worktrees)) next[wt] = val;
+    store.set({ resumeTabs: next });
+  }
+  await invoke("kill_session", { name }).catch(console.error); // kill regardless of id resolution
   refreshSessions();
 }
 
@@ -1141,13 +1191,22 @@ async function resumeCommand(
   command: string | undefined,
   cwd: string,
 ): Promise<string | undefined> {
-  if (!command || !store.get().autoResume) return command;
+  if (!command) return command;
   const agent = store.get().wtAgents.find((a) => a.command === command);
   if (!agent?.resume) return command;
   const tool = command.trim().split(/\s+/)[0];
-  const id = await invoke<string | null>("harness_session", { tool, cwd }).catch(
-    () => null,
-  );
+  // A session we killed on close for this cwd → always bring it back, even if
+  // auto-resume-latest is off (closing then reopening is an explicit continue).
+  // Consume the record so a later fresh open isn't pinned to the old id.
+  const killed = store.get().resumeTabs[cwd]?.sessionId;
+  if (killed) {
+    const rest = { ...store.get().resumeTabs };
+    delete rest[cwd];
+    store.set({ resumeTabs: rest });
+    return `${command} ${agent.resume} ${killed}`;
+  }
+  if (!store.get().autoResume) return command;
+  const id = await invoke<string | null>("harness_session", { tool, cwd }).catch(() => null);
   return id ? `${command} ${agent.resume} ${id}` : command;
 }
 

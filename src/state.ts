@@ -211,9 +211,10 @@ export interface AppState {
   sidebarWidth: number; // px
   zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
   tabZoom: Record<string, number>; // per-terminal font size (px), keyed by tab/session id (persisted)
-  // Agent tabs whose tmux session was killed on close (to free RAM); reopen
-  // relaunches with --resume <id>. Keyed by tab/session name (persisted).
-  resumeTabs: Record<string, { editor: "claude" | "opencode"; sessionId: string; cwd: string }>;
+  // Agent sessions killed on tab close (to free RAM); reopen relaunches with
+  // --resume <id>. Keyed by CWD — the stable identity for "the agent in this
+  // worktree" (a reopen mints a fresh tmux name, so name keys don't recur).
+  resumeTabs: Record<string, { editor: "claude" | "opencode"; sessionId: string }>;
   wtExpanded: string[]; // expanded tree node keys
   wtFavorites: string[]; // starred worktree paths (persisted)
   spaces: string[]; // user-designated non-git folders to run AI sessions in (persisted); shown atop the Worktrees panel

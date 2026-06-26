@@ -493,6 +493,7 @@ pub fn run() {
             pty::resize_pty,
             pty::close_pty,
             pty::kill_session,
+            pty::scroll_session,
             workspace::list_workspaces,
             workspace::create_workspace,
             workspace::remove_workspace,
