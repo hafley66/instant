@@ -60,13 +60,6 @@ export interface DirListing {
   entries: FsEntry[];
 }
 
-// A node in the lazy Files tree: an FsEntry plus its loaded children (undefined
-// until the folder is first expanded). Built on the fly from `files` (the root
-// listing) + `fsChildren` (per-path listings loaded on expand).
-export interface FsNode extends FsEntry {
-  children?: FsNode[];
-}
-
 // One row of the unified activity store (Rust activity::Event). Sources: a
 // browser DOM/tab event (extension), an os screen capture (gesture), or a file
 // open (Files panel).
@@ -200,14 +193,11 @@ export interface AppState {
   capturePerms: CapturePerms | null; // TCC + tap state for the activity capture diagnostics (runtime)
   captureStatus: CaptureStatus | null; // last per-gesture capture outcome, from the capture-status event (runtime)
   config: ConfigView | null; // resolved observation config (runtime)
-  files: DirListing | null; // root Files explorer listing for the tree (runtime)
-  fsChildren: Record<string, FsEntry[]>; // per-folder listings, loaded on expand (runtime)
-  fsSelected: string | null; // selected file path in the explorer (runtime)
+  fsChildren: Record<string, FsEntry[]>; // per-folder listings for the unified tree, loaded on expand (runtime)
   sessionSort: SessionSort; // sessions launcher ordering (persisted)
   tableSort: Record<string, SortState>; // per-dtable sort, keyed by table id (persisted)
   wtView: WtView; // tree vs flat table
   scanRoot: string; // worktrees scan path
-  fsCwd: string; // Files explorer current directory (persisted)
   sidebarWidth: number; // px
   zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
   tabZoom: Record<string, number>; // per-terminal font size (px), keyed by tab/session id (persisted)
@@ -274,7 +264,6 @@ const PERSIST: (keyof AppState)[] = [
   "tableSort",
   "wtView",
   "scanRoot",
-  "fsCwd",
   "sidebarWidth",
   "zoom",
   "tabZoom",
@@ -362,12 +351,9 @@ function load(): AppState {
     sessionSort: loadKey<SessionSort>("sessionSort", { key: "activity", dir: "desc" }),
     tableSort: loadKey<Record<string, SortState>>("tableSort", {}),
     config: null,
-    files: null,
     fsChildren: {},
-    fsSelected: null,
     wtView: loadKey<WtView>("wtView", "tree"),
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
-    fsCwd: loadKey<string>("fsCwd", "~"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     zoom: loadKey<number>("zoom", 1),
     tabZoom: loadKey<Record<string, number>>("tabZoom", {}),

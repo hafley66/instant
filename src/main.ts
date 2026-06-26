@@ -43,17 +43,14 @@ import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from ".
 import {
   TmuxPanelV2,
   WorktreesPanelV2,
-  FilesPanelV2,
   ActivityPanelV2,
   FavoritesPanelV2,
   setTmuxPanel,
   setWorktreesPanel,
-  setFilesPanel,
   setActivityPanel,
   setFavoritesPanel,
   type TmuxRow,
   type WtTreeRow,
-  type FsRow,
   type ActRow,
 } from "./tablepanels";
 import { renderTable, type SortState } from "./table";
@@ -612,7 +609,11 @@ function togglePinActiveTab() {
 const closedTabs: OpenTab[] = [];
 // Runs close-time agent teardown one-at-a-time; see onTermClosed for why.
 let closeChain: Promise<unknown> = Promise.resolve();
-function reopenLastTab() {
+// Await all in-flight close teardown (kill_session / close_pty). Reopen paths
+// call this BEFORE recreating a session name so a recreated session can't be
+// reattached to a dying corpse or torn down by a kill still queued from its close.
+const settleClosures = () => closeChain;
+async function reopenLastTab() {
   const last = closedTabs.pop();
   if (!last) return;
   // ⌘⇧T is the "bring back what I just closed" gesture — so if we exited an agent
@@ -625,6 +626,12 @@ function reopenLastTab() {
     command = resumeLaunch(killed.editor, killed.sessionId);
     console.log("[resume] ⌘⇧T", last.name, "->", command);
   }
+  // Wait for the close's teardown to finish before recreating this name. The
+  // close runs exitOrDetachTab on closeChain (async kill_session / close_pty); if
+  // we recreate first, either tmux -A reattaches the dying corpse (dropping the
+  // --resume command) or the still-queued kill lands AFTER our new session and
+  // tears IT down — the "double reopen" failure. Awaiting frees the name first.
+  await settleClosures();
   openTab(last.name, { command, cwd: last.cwd });
 }
 
@@ -1360,10 +1367,15 @@ function freshSessionName(clone: string, branch: string): string {
 // session here"). A still-live base session is reattached by tmux -A regardless
 // (open_session ignores the command on reattach), so the resume command only
 // matters when the base session was killed.
-function openWorktree(clone: string, branch: string, wtPath: string, command?: string, fresh = false) {
+async function openWorktree(clone: string, branch: string, wtPath: string, command?: string, fresh = false) {
   const name = fresh ? freshSessionName(clone, branch) : baseSessionName(clone, branch);
   const known = store.get().resumeTabs[name];
-  const cmd = !fresh && known ? resumeLaunch(known.editor, known.sessionId) : newAgentLaunch(name, command);
+  const resuming = !fresh && !!known;
+  const cmd = resuming ? resumeLaunch(known!.editor, known!.sessionId) : newAgentLaunch(name, command);
+  // Resuming a killed session recreates its tmux name — wait for any in-flight
+  // close teardown first (see settleClosures), else the just-closed kill races
+  // the recreate. Not needed for a fresh name (no prior session by that name).
+  if (resuming) await settleClosures();
   openTab(name, { cwd: wtPath, command: cmd });
   refreshSessions();
 }
@@ -1502,10 +1514,16 @@ function favRows(): WtTreeRow[] {
   const spaces = new Set(store.get().spaces);
   return store.get().wtFavorites.map((path) => {
     const wt = wts.find((w) => w.worktree === path || w.clone === path);
+    const known = !!wt || spaces.has(path);
+    // A starred plain file (not a known worktree/space) renders as a file row so
+    // it opens a preview on click instead of the agent chooser; everything else
+    // is a browsable leaf. `\.[^/]+$` = a basename with an extension.
+    const isFile = !known && /\.[^/]+$/.test(path);
     return {
       id: path,
-      kind: "leaf" as const,
+      kind: isFile ? ("file" as const) : ("leaf" as const),
       label: tildify(path), // full path, not just the basename
+      glyph: isFile ? "📄" : undefined,
       space: spaces.has(path),
       clonePath: wt?.clone ?? path,
       worktree: path,
@@ -1515,7 +1533,7 @@ function favRows(): WtTreeRow[] {
       dirty: wt?.dirty ?? false,
       fav: true,
       favPath: path,
-      children: sessionChildRows(path),
+      children: isFile ? undefined : leafChildRows(path),
     };
   });
 }
@@ -1605,6 +1623,73 @@ function sessionChildRows(wtPath: string): WtTreeRow[] {
   }));
 }
 
+// Filesystem children of a directory path, from the lazy fsChildren cache. Empty
+// until loadFsChildren(path) has run (the twisty still shows via wtCanExpand);
+// after it caches the listing the panel re-renders with these rows. Folders sort
+// before files, then alphabetical — the Explorer convention. Each fs row is
+// favoritable by its absolute path (the same wtFavorites store every other
+// path-bearing row uses), so "star anything" covers files and folders too.
+function fsChildRows(dirPath: string): WtTreeRow[] {
+  const kids = store.get().fsChildren[dirPath];
+  if (!kids) return [];
+  return [...kids]
+    .sort((a, b) =>
+      a.is_dir === b.is_dir ? a.name.localeCompare(b.name) : a.is_dir ? -1 : 1,
+    )
+    .map((e) => ({
+      id: `fs:${e.path}`,
+      kind: e.is_dir ? ("dir" as const) : ("file" as const),
+      label: e.name,
+      glyph: fileGlyph(e),
+      worktree: e.path, // path: gesture key + fav + drag entity
+      pathDisplay: tildify(e.path),
+      isDir: e.is_dir,
+      fav: isFavWorktree(e.path),
+      favPath: e.path,
+      children: e.is_dir ? fsChildRows(e.path) : undefined,
+    }));
+}
+
+// Children shown under a worktree/space leaf in the unified tree: live tmux
+// sessions first, then the directory's filesystem entries (lazy).
+const leafChildRows = (path: string): WtTreeRow[] => [
+  ...sessionChildRows(path),
+  ...fsChildRows(path),
+];
+
+// Twisty visibility for the unified tree. Files never expand; org/clone expand
+// only when they actually have children; leaf/space/dir always show a twisty so
+// the filesystem can be opened on demand even before its listing is cached.
+function wtCanExpand(r: WtTreeRow): boolean {
+  if (r.kind === "file" || r.kind === "session") return false;
+  if (r.kind === "dir" || r.kind === "leaf") return true;
+  return (r.children?.length ?? 0) > 0; // org / clone
+}
+
+// Lazy-load a path's directory listing the first time its row is expanded.
+function wtOnToggle(r: WtTreeRow, willExpand: boolean) {
+  if (!willExpand) return;
+  const p = r.worktree;
+  if (p && (r.kind === "leaf" || r.kind === "dir")) loadFsChildren(p);
+}
+
+// Context menu for a filesystem (file/dir) row: star/unstar + open preview.
+function showPathMenu(r: WtTreeRow, x: number, y: number) {
+  const path = r.worktree ?? "";
+  if (!path) return;
+  const items: CtxItem[] = [];
+  if (r.kind === "file") {
+    items.push({ label: "open preview", action: () => openPreviewPanel(path) });
+    items.push({ label: "paste path", action: () => pasteToActive(pathArg(path) + " ") });
+    items.push({ sep: true });
+  }
+  items.push({
+    label: isFavWorktree(path) ? "★ unfavorite" : "☆ favorite",
+    action: () => toggleFavWorktree(path),
+  });
+  showContextMenu(x, y, items);
+}
+
 // Synthetic top-level "Spaces" org: user-added non-git folders, each a leaf that
 // opens an AI session in that folder (clone/branch empty → name = folder base).
 function spaceTreeRows(): WtTreeRow[] {
@@ -1628,7 +1713,7 @@ function spaceTreeRows(): WtTreeRow[] {
         dirty: false,
         fav: isFavWorktree(p),
         favPath: p,
-        children: sessionChildRows(p),
+        children: leafChildRows(p),
       })),
     },
   ];
@@ -1665,9 +1750,10 @@ function wtTreeRows(): WtTreeRow[] {
         dirty: wt.dirty,
         fav: isFavWorktree(wt.worktree),
         favPath: wt.worktree,
-        // Live tmux sessions sitting in this worktree show as child rows, so the
-        // tree doubles as "what's running where". Empty → leaf has no twisty.
-        children: sessionChildRows(wt.worktree),
+        // Live tmux sessions sitting in this worktree show as child rows, then
+        // the worktree's filesystem (lazy) — the tree is "what's running where"
+        // AND a file browser rooted at the checkout.
+        children: leafChildRows(wt.worktree),
       })),
     })),
   })));
@@ -1706,10 +1792,9 @@ function registerV2Bridges() {
     toggleFocus: () => store.set({ wtFocus: !store.get().wtFocus }),
     counts: () => {
       const { worktrees, wtFavorites } = store.get();
-      return {
-        shown: worktrees.filter((r) => wtFavorites.includes(r.worktree)).length,
-        total: worktrees.length,
-      };
+      // shown = every starred path (worktrees, clones, spaces, files, dirs), not
+      // just scanned worktree leaves, so the focus count matches what focus shows.
+      return { shown: wtFavorites.length, total: worktrees.length };
     },
     // Persisted expand state: store.wtExpanded is a flat list of expanded node
     // ids; convert to/from react-table's ExpandedState record on the boundary.
@@ -1733,6 +1818,19 @@ function registerV2Bridges() {
         .catch(console.error);
     },
     toggleFav: (path) => toggleFavWorktree(path),
+    // filesystem layer: lazy expand + file open/preview/paste + fs context menu.
+    canExpand: wtCanExpand,
+    onToggle: wtOnToggle,
+    onFile: (r) => {
+      if (r.worktree) openPreviewPanel(r.worktree);
+    },
+    onFileActivate: (r) => {
+      const p = r.worktree;
+      if (!p) return;
+      pasteToActive(pathArg(p) + " ");
+      logFileOpen({ name: r.label, path: p } as FsEntry);
+    },
+    onPathContext: (r, x, y) => showPathMenu(r, x, y),
     // inline "+ worktree" branch input on a clone row.
     revealAdd: (clonePath) => store.set({ wtAddingClone: clonePath }),
     submitAdd: (clonePath, branch) => submitAddWorktree(clonePath, branch),
@@ -2489,31 +2587,11 @@ const IMAGE_EXTS = new Set([
   "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif",
 ]);
 
-function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const u = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < u.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v < 10 ? 1 : 0)} ${u[i]}`;
-}
-function fmtDate(ts: number): string {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
+// Glyph for a filesystem row in the unified tree (folder / image / file).
 function fileGlyph(e: FsEntry): string {
   if (e.is_dir) return "📁";
   if (IMAGE_EXTS.has(e.ext)) return "🖼";
   return "📄";
-}
-function typeLabel(e: FsEntry): string {
-  if (e.is_dir) return "Folder";
-  return e.ext ? `${e.ext.toUpperCase()} file` : "File";
 }
 
 // Record a file reference in the unified activity store (source='files').
@@ -2526,20 +2604,9 @@ function logFileOpen(e: FsEntry) {
   }).catch(console.error);
 }
 
-// Load a new tree root. Resets the expanded-children cache — those listings
-// belong to the previous root. Reused by Up / Go / folder double-click / onShow.
-async function loadFsRoot(path: string) {
-  try {
-    const listing = await invoke<DirListing>("list_dir", { path });
-    store.set({ files: listing, fsCwd: listing.path, fsChildren: {}, fsSelected: null });
-  } catch (e) {
-    console.error("list_dir:", e);
-  }
-}
-
 // Lazily load one folder's children the first time it's expanded; no-op if the
 // listing is already cached. The new listing is merged into fsChildren (a fresh
-// ref) so the FilesPanelV2 re-renders with the subrows present.
+// ref) so the unified tree re-renders with the subrows present.
 async function loadFsChildren(path: string) {
   if (store.get().fsChildren[path]) return;
   try {
@@ -2548,34 +2615,6 @@ async function loadFsChildren(path: string) {
   } catch (e) {
     console.error("list_dir:", e);
   }
-}
-
-function filesGoUp() {
-  const f = store.get().files;
-  if (f?.parent) loadFsRoot(f.parent);
-}
-
-// Build the display-ready tree rows from the root listing + the per-folder
-// children loaded so far. Recursive: a folder's children are present once
-// loadFsChildren has cached them, undefined otherwise (twisty still shows).
-function toFsRow(e: FsEntry): FsRow {
-  const kids = e.is_dir ? store.get().fsChildren[e.path] : undefined;
-  return {
-    path: e.path,
-    name: e.name,
-    isDir: e.is_dir,
-    glyph: fileGlyph(e),
-    date: fmtDate(e.modified),
-    type: typeLabel(e),
-    size: e.is_dir ? "" : fmtSize(e.size),
-    sortName: `${e.is_dir ? 0 : 1}\t${e.name.toLowerCase()}`,
-    sortSize: e.is_dir ? -1 : e.size,
-    modified: e.modified,
-    children: kids ? kids.map(toFsRow) : undefined,
-  };
-}
-function fsRows(): FsRow[] {
-  return (store.get().files?.entries ?? []).map(toFsRow);
 }
 
 // File extension -> shiki language id. Anything not listed falls back to plain
@@ -3047,37 +3086,6 @@ store.subscribe(() => {
   }
 }, ["mode"]);
 
-// Wire the FilesPanelV2 bridge: derivation + handlers live here, next to the
-// list_dir loaders; the React panel (tablepanels.tsx) stays presentational.
-function registerFilesBridge() {
-  setFilesPanel({
-    rows: fsRows,
-    path: () => store.get().files?.path ?? store.get().fsCwd,
-    hasParent: () => !!store.get().files?.parent,
-    goUp: filesGoUp,
-    goTo: (path) => loadFsRoot(path),
-    selected: () => store.get().fsSelected,
-    onShow: () => { if (!store.get().files) loadFsRoot(store.get().fsCwd); },
-    onToggle: (r, willExpand) => { if (willExpand) loadFsChildren(r.path); },
-    // Single click: folders are expanded via the twisty, so a folder row-click is
-    // a no-op; a file selects + opens its preview tab.
-    onOpen: (r) => {
-      if (r.isDir) return;
-      store.set({ fsSelected: r.path });
-      openPreviewPanel(r.path);
-    },
-    // Double click: descend into a folder (new tree root); paste a file's path.
-    onActivate: (r) => {
-      if (r.isDir) {
-        loadFsRoot(r.path);
-        return;
-      }
-      pasteToActive(pathArg(r.path) + " ");
-      logFileOpen({ name: r.name, path: r.path } as FsEntry);
-    },
-  });
-}
-
 // syncToggles now reads from the plugin registry instead of a hardcoded list.
 function syncToggles() {
   for (const p of allPanels()) {
@@ -3432,19 +3440,6 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
         ]
       : [];
 
-  // A file row in the Files explorer.
-  const fsRow = target.closest("#fs-list tr.dtable-row") as HTMLElement | null;
-  if (fsRow?.title) {
-    const path = fsRow.title;
-    return [
-      { label: "Open (paste path)", action: () => pasteToActive(pathArg(path) + " ") },
-      { label: "Copy path", action: () => copy(path) },
-      { sep: true },
-      { label: "Up one folder", action: filesGoUp },
-      ...(ent ? [{ sep: true } as CtxItem, ...scopeItems()] : []),
-    ];
-  }
-
   // A sprefa result cell tagged as an entity.
   if (ent && entKind) {
     const items: CtxItem[] = [...scopeItems(), { label: "Copy", action: () => copy(entVal) }];
@@ -3609,16 +3604,6 @@ function registerBuiltin() {
         html: "",
         component: WorktreesPanelV2,
         onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
-      },
-      {
-        id: "files",
-        title: "Files",
-        icon: "📁",
-        iconUrl: "/icons/Folder_32x32_4.png",
-        iconLabel: "Files",
-        html: "",
-        component: FilesPanelV2,
-        onShow: () => { if (!store.get().files) loadFsRoot(store.get().fsCwd); },
       },
       {
         id: "activity",
@@ -4170,7 +4155,6 @@ async function main() {
   registerBuiltin();
   registerSprefa();
   registerV2Bridges();
-  registerFilesBridge();
   registerActivityBridge();
   registerFavoritesBridge();
   refreshFavorites();

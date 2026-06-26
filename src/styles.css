@@ -1799,6 +1799,12 @@ body[data-skin="xp"][data-mode="dark"] .s-proc {
   font-size: 10px;
   opacity: 0.6;
 }
+/* File/dir glyph prefix for the folded-in filesystem rows. */
+.wt-glyph {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.85;
+}
 
 /* Row actions sit at the right edge, revealed on row hover to keep the tree
    quiet. The +worktree / open / resume buttons share a compact pill look. */

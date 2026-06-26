@@ -195,8 +195,12 @@ export function TmuxPanelV2() {
 // leaves. main.ts (wtTreeRows) derives every label so this file is presentational.
 export interface WtTreeRow {
   id: string;
-  kind: "org" | "clone" | "leaf" | "session";
+  // org/clone/leaf(worktree)/session are the git+tmux layer; dir/file are the
+  // filesystem layer folded in — a leaf (or space, or dir) expands into its
+  // directory contents (lazy), so one tree spans worktrees + files + sessions.
+  kind: "org" | "clone" | "leaf" | "session" | "dir" | "file";
   label: string;
+  glyph?: string; // file/dir emoji prefix (📁/📄/🖼)
   meta?: string; // org: "N clones" · clone: "@branch"
   // leaf
   clonePath?: string; // source clone (gestures + add key)
@@ -218,6 +222,7 @@ export interface WtTreeRow {
   // space: a user-added non-git folder (anonymous AI-session workspace). Rendered
   // as a leaf, but its context menu offers "remove space" instead of git actions.
   space?: boolean;
+  isDir?: boolean; // fs row: directory vs file (file/dir kinds)
   children?: WtTreeRow[];
 }
 
@@ -241,6 +246,13 @@ export interface WtBridge {
   onResume: (name: string) => void; // resume/focus a session row
   onKill: (name: string) => void; // kill a session row
   toggleFav: (worktree: string) => void;
+  // filesystem layer (folded in): a leaf/space/dir can lazily expand into its
+  // directory contents; files open a preview / paste their path.
+  canExpand: (r: WtTreeRow) => boolean;
+  onToggle: (r: WtTreeRow, willExpand: boolean) => void;
+  onFile: (r: WtTreeRow) => void; // single-click a file row → preview
+  onFileActivate: (r: WtTreeRow) => void; // double-click a file row → paste path
+  onPathContext: (r: WtTreeRow, x: number, y: number) => void; // file/dir ctx menu
   // clone "+ worktree" inline add
   revealAdd: (clonePath: string) => void;
   submitAdd: (clonePath: string, branch: string) => void;
@@ -295,6 +307,7 @@ function WtNameCell({ row }: { row: WtTreeRow }) {
   return (
     <>
       <FavStar row={row} />
+      {row.glyph ? <span className="wt-glyph">{row.glyph}</span> : null}
       <span className="wt-label">{row.label}</span>
       {row.meta ? <span className="wt-meta">{row.meta}</span> : null}
     </>
@@ -389,7 +402,7 @@ const WT_COLUMNS: TreeColumn<WtTreeRow>[] = [
     id: "path",
     header: "path",
     cell: (r) =>
-      r.kind === "leaf" && r.pathDisplay ? (
+      (r.kind === "leaf" || r.kind === "file" || r.kind === "dir") && r.pathDisplay ? (
         <span className="wt-path" title={r.worktree}>
           {r.pathDisplay}
         </span>
@@ -468,124 +481,6 @@ function WtToolbar() {
         {total ? (focus ? `${shown}/${total} ★` : `${total} worktrees`) : ""}
       </span>
     </form>
-  );
-}
-
-// ---- files v2 (lazy tree) ----
-// Display-ready node: main.ts formats every column so this file stays
-// presentational. `children` is undefined until the folder is expanded.
-export interface FsRow {
-  path: string;
-  name: string;
-  isDir: boolean;
-  glyph: string;
-  date: string;
-  type: string;
-  size: string;
-  sortName: string; // folders-first key
-  sortSize: number; // dirs sink to -1
-  modified: number;
-  children?: FsRow[];
-}
-
-export interface FilesBridge {
-  rows: () => FsRow[];
-  path: () => string;
-  hasParent: () => boolean;
-  goUp: () => void;
-  goTo: (path: string) => void;
-  selected: () => string | null;
-  onToggle: (r: FsRow, willExpand: boolean) => void;
-  onOpen: (r: FsRow) => void;
-  onActivate: (r: FsRow) => void;
-  onShow?: () => void;
-}
-
-let filesBridge: FilesBridge | null = null;
-export function setFilesPanel(b: FilesBridge) {
-  filesBridge = b;
-}
-
-const FS_COLUMNS: TreeColumn<FsRow>[] = [
-  {
-    id: "name",
-    header: "Name",
-    tree: true,
-    sortValue: (r) => r.sortName,
-    cell: (r) => (
-      <span className="fs-name">
-        {r.glyph} {r.name}
-      </span>
-    ),
-  },
-  { id: "date", header: "Date modified", sortValue: (r) => r.modified, cell: (r) => r.date },
-  { id: "type", header: "Type", sortValue: (r) => r.type, cell: (r) => r.type },
-  {
-    id: "size",
-    header: "Size",
-    sortValue: (r) => r.sortSize,
-    cellClass: () => "fs-size",
-    cell: (r) => r.size,
-  },
-];
-
-const FS_DEFAULT_SORT: SortingState = [{ id: "name", desc: false }];
-
-function FsToolbar() {
-  const [path, setPath] = useState(filesBridge?.path() ?? "");
-  // Track the root path when Up/Go/double-click changes it externally.
-  const current = filesBridge?.path() ?? "";
-  const [lastCurrent, setLastCurrent] = useState(current);
-  if (current !== lastCurrent) {
-    setLastCurrent(current);
-    setPath(current);
-  }
-  const go = (e: React.FormEvent) => {
-    e.preventDefault();
-    filesBridge?.goTo(path.trim());
-  };
-  return (
-    <form className="fs-bar" onSubmit={go}>
-      <button type="button" title="Up one folder" onClick={() => filesBridge?.goUp()}>
-        ↑
-      </button>
-      <input value={path} onChange={(e) => setPath(e.target.value)} autoComplete="off" spellCheck={false} />
-      <button type="submit">Go</button>
-    </form>
-  );
-}
-
-export function FilesPanelV2() {
-  useApp();
-  useEffect(() => {
-    filesBridge?.onShow?.();
-  }, []);
-  const rows = filesBridge?.rows() ?? [];
-  const selected = filesBridge?.selected() ?? null;
-  return (
-    <div className="v2-panel">
-      <FsToolbar />
-      {/* id keeps the legacy #fs-list context-menu hook working. */}
-      <div id="fs-list" className="panel-scroll">
-        <TreeTable<FsRow>
-          columns={FS_COLUMNS}
-          data={rows}
-          getRowId={(r) => r.path}
-          getSubRows={(r) => r.children}
-          getRowCanExpand={(r) => r.isDir}
-          onToggleExpand={(r, willExpand) => filesBridge?.onToggle(r, willExpand)}
-          controls
-          filter={(r, q) => r.name.toLowerCase().includes(q.toLowerCase())}
-          searchPlaceholder="filter this folder…"
-          defaultSorting={FS_DEFAULT_SORT}
-          rowTitle={(r) => r.path}
-          rowClass={(r) => (r.path === selected ? "fs-selected" : undefined)}
-          rowEntity={(r) => (r.isDir ? undefined : { kind: "file", value: r.path })}
-          onRowClick={(r) => filesBridge?.onOpen(r)}
-          onRowDoubleClick={(r) => filesBridge?.onActivate(r)}
-        />
-      </div>
-    </div>
   );
 }
 
@@ -924,14 +819,18 @@ export function FavoritesPanelV2() {
   );
 }
 
-// Search predicate: label/branch/path/session-name substring (case-insensitive).
-// A match on any field keeps the row; the table keeps its ancestors too.
+// Search predicate: match label/branch/path/session/meta substring (case-
+// insensitive). A match on any field keeps the row; filterFromLeafRows keeps its
+// ancestors too. Matches the full absolute path (not just the tildified display)
+// so a query like an org or parent-dir segment filters the whole subtree.
 function wtFilter(r: WtTreeRow, q: string): boolean {
   const s = q.toLowerCase();
   return (
     r.label.toLowerCase().includes(s) ||
     (r.branch?.toLowerCase().includes(s) ?? false) ||
     (r.pathDisplay?.toLowerCase().includes(s) ?? false) ||
+    (r.worktree?.toLowerCase().includes(s) ?? false) ||
+    (r.meta?.toLowerCase().includes(s) ?? false) ||
     (r.sessionName?.toLowerCase().includes(s) ?? false)
   );
 }
@@ -955,26 +854,37 @@ export function WorktreesPanelV2() {
             getRowId={(r) => r.id}
             getSubRows={(r) => r.children}
             controls
+            virtual
             filter={wtFilter}
-            searchPlaceholder="filter worktrees…"
+            searchPlaceholder="filter worktrees + files…"
             expanded={wtBridge?.expanded() ?? {}}
             onExpandedChange={(e) => wtBridge?.setExpanded(e)}
-            toggleOnDoubleClick={(r) => r.kind === "org" || r.kind === "clone"}
+            // Leaf/space/dir show a twisty before their fs children load; the
+            // toggle handler lazily lists the directory on first expand.
+            getRowCanExpand={(r) => wtBridge?.canExpand(r) ?? false}
+            onToggleExpand={(r, willExpand) => wtBridge?.onToggle(r, willExpand)}
+            toggleOnDoubleClick={(r) => r.kind === "org" || r.kind === "clone" || r.kind === "dir"}
             rowClass={(r) => `wt-${r.kind}`}
             rowTitle={(r) => r.worktree ?? r.label}
             rowEntity={(r) =>
-              r.kind === "leaf" && r.worktree ? { kind: "repo", value: r.worktree } : undefined
+              (r.kind === "leaf" || r.kind === "file" || r.kind === "dir") && r.worktree
+                ? { kind: r.kind === "file" ? "file" : "repo", value: r.worktree }
+                : undefined
             }
             onRowClick={(r, e) => {
               if (r.kind === "leaf") wtBridge?.onLeafSingle(r, e.clientX, e.clientY);
+              else if (r.kind === "file") wtBridge?.onFile(r);
               else if (r.kind === "session" && r.sessionName) wtBridge?.onResume(r.sessionName);
             }}
             onRowDoubleClick={(r) => {
               if (r.kind === "leaf") wtBridge?.onLeafDouble(r);
+              else if (r.kind === "file") wtBridge?.onFileActivate(r);
               else if (r.kind === "session" && r.sessionName) wtBridge?.onResume(r.sessionName);
             }}
             onRowContextMenu={(r, e) => {
               if (r.kind === "leaf") wtBridge?.onLeafContext(r, e.clientX, e.clientY);
+              else if (r.kind === "file" || r.kind === "dir")
+                wtBridge?.onPathContext(r, e.clientX, e.clientY);
             }}
           />
         )}
