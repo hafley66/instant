@@ -74,6 +74,7 @@ import {
   moveTermPanel,
   allPanelIds,
   activePanelId,
+  activeGroupEl,
   focusPanelById,
   closeActivePanel,
 } from "./reactdock";
@@ -204,17 +205,23 @@ function activeTabName(): string {
   return id ? id.slice(sessionId("").length) : "";
 }
 
-// Transient corner toast for one-shot feedback (favorite saved, nothing to
-// favorite, …). Self-removing; reuses one node so rapid calls don't stack.
+// Transient in-pane toast for one-shot feedback (favorite saved, nothing to
+// favorite, …). Mounts top-center INSIDE the active tab's group (not a global
+// fixed corner) and slides in; reuses one node, re-parented to whichever pane is
+// active so it always shows over the tab the gesture came from.
 let toastEl: HTMLElement | null = null;
 let toastTimer: number | null = null;
 function flashStatus(msg: string) {
   if (!toastEl) {
     toastEl = document.createElement("div");
     toastEl.className = "app-toast";
-    document.body.appendChild(toastEl);
   }
+  const host = activeGroupEl() ?? document.getElementById("dock") ?? document.body;
+  if (toastEl.parentElement !== host) host.appendChild(toastEl);
   toastEl.textContent = msg;
+  // restart the enter animation even if the node is reused mid-show
+  toastEl.classList.remove("on");
+  void toastEl.offsetWidth;
   toastEl.classList.add("on");
   if (toastTimer !== null) clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => toastEl?.classList.remove("on"), 1800);

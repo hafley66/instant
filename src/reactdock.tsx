@@ -373,6 +373,12 @@ export function allPanelIds(): string[] {
 export function activePanelId(): string | null {
   return api?.activePanel?.id ?? null;
 }
+// The DOM element of the active group (one tab pane). Dockview groups are
+// absolutely positioned, so this is a valid positioning context for an overlay
+// scoped to "the active tab's own space" (e.g. the in-pane toast).
+export function activeGroupEl(): HTMLElement | null {
+  return (api?.activeGroup?.element as HTMLElement | undefined) ?? null;
+}
 export function focusPanelById(pid: string) {
   api?.getPanel(pid)?.api.setActive();
 }
