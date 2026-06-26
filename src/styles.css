@@ -1456,21 +1456,73 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   background: color-mix(in srgb, var(--row-active-bg) 8%, transparent);
 }
 .tt-tree {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  /* Fill the row so the twisty's hit-zone spans the full row height. */
+  min-height: 100%;
+}
+/* Fat twisty: full row-height clickable zone, ~22px wide, negative margins eat
+   the td's 4px/8px padding so the hit-box runs edge to edge with zero dead
+   margin. The glyph is centered + larger; the whole rectangle toggles. */
+.tt-twisty {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-.tt-twisty {
-  display: inline-block;
-  width: 12px;
-  text-align: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 22px;
+  margin: -4px 4px -4px -8px;
   cursor: pointer;
   opacity: 0.7;
-  font-size: 9px;
+  font-size: 11px;
+}
+.tt-twisty:hover {
+  opacity: 1;
+  background: var(--row-hover);
 }
 .tt-twisty.tt-leaf {
   cursor: default;
   opacity: 0;
+}
+.tt-twisty.tt-leaf:hover {
+  background: none;
+}
+
+/* Reusable controls bar above a TreeTable: search + expand/collapse-all. The
+   host is a flex column so the bar pins and the table scrolls beneath it. */
+.tt-host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.tt-host > .tt-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.tt-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--frame);
+  background: var(--panel-bg);
+}
+.tt-search {
+  flex: 1;
+  min-width: 0;
+}
+.tt-ctl {
+  flex: none;
+  cursor: pointer;
+}
+.tt-match {
+  flex: none;
+  font-size: 10px;
+  opacity: 0.7;
+  padding: 0 4px;
 }
 
 /* ---- XP "details view" listview chrome ----
@@ -1589,19 +1641,25 @@ body[data-skin="xp"][data-mode="dark"] .s-proc {
 .wt-star {
   flex: none;
   cursor: pointer;
-  font-size: 11px;
-  opacity: 0.35;
-  width: 14px;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.45;
+  width: 20px;
   text-align: center;
 }
 .wt-node:hover .wt-star,
 .dtable-row:hover .wt-star {
-  opacity: 0.7;
+  opacity: 0.8;
 }
+/* A set favorite is always loud (no hover needed) so starred rows are obvious. */
 .wt-star.on,
 .wt-star:hover {
   opacity: 1;
   color: var(--row-active-bg);
+}
+.wt-star.on {
+  font-size: 18px;
+  text-shadow: 0 0 5px color-mix(in srgb, var(--row-active-bg) 50%, transparent);
 }
 td.wt-star {
   width: 18px;

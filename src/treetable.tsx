@@ -8,6 +8,7 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   getExpandedRowModel,
+  getFilteredRowModel,
   useReactTable,
   type Row,
   type SortingState,
@@ -41,6 +42,9 @@ export interface TreeTableProps<T> {
   onSortingChange?: (s: SortingState) => void;
   defaultSorting?: SortingState;
   defaultExpandedAll?: boolean;
+  // Controlled expansion (persist in the store). Omit to let the table own it.
+  expanded?: ExpandedState;
+  onExpandedChange?: (e: ExpandedState) => void;
   onRowClick?: (row: T, e: MouseEvent) => void;
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
@@ -58,6 +62,16 @@ export interface TreeTableProps<T> {
   // Virtualize the body (spacer <tr>s above/below the visible window). For long
   // flat lists (activity); the table scrolls inside its own container.
   virtual?: boolean;
+  // Render a controls bar above the table: a search box (when `filter` is given)
+  // plus collapse-all / expand-all buttons. Self-contained + reusable.
+  controls?: boolean;
+  // Predicate for the search box: return true to keep a row. A row is shown when
+  // it matches OR any descendant matches (filterFromLeafRows keeps ancestors).
+  filter?: (row: T, q: string) => boolean;
+  searchPlaceholder?: string;
+  // When set and a row can expand, a double-click on the row toggles it instead
+  // of firing onRowDoubleClick — for rows with no primary action (org/dir nodes).
+  toggleOnDoubleClick?: (row: T) => boolean;
 }
 
 export function TreeTable<T>(props: TreeTableProps<T>) {
@@ -83,7 +97,11 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     props.onSortingChange?.(s);
     if (!props.sorting) setOwnSorting(s);
   };
-  const [expanded, setExpanded] = useState<ExpandedState>(defaultExpandedAll ? true : {});
+  const [ownExpanded, setOwnExpanded] = useState<ExpandedState>(defaultExpandedAll ? true : {});
+  const expanded = props.expanded ?? ownExpanded;
+  // Search query for the controls bar. A non-empty query forces every branch
+  // open so matches buried under collapsed ancestors are visible.
+  const [query, setQuery] = useState("");
 
   const colDefs: ColumnDef<T>[] = columns.map((c) => ({
     id: c.id,
@@ -95,13 +113,28 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     meta: c,
   }));
 
+  const q = query.trim();
+  // Route expansion through the controlled prop when present, else local state.
+  // An active search displays everything expanded but never persists that.
+  const setExpanded = (updater: ExpandedState | ((p: ExpandedState) => ExpandedState)) => {
+    const base = q ? true : expanded;
+    const next = typeof updater === "function" ? updater(base) : updater;
+    props.onExpandedChange?.(next);
+    if (props.expanded === undefined) setOwnExpanded(next);
+  };
   const table = useReactTable<T>({
     data,
     columns: colDefs,
-    state: { sorting, expanded },
+    // Active search forces all branches open so deep matches surface.
+    state: { sorting, expanded: q ? true : expanded, globalFilter: q },
     onSortingChange: (updater) =>
       setSorting(typeof updater === "function" ? updater(sorting) : updater),
     onExpandedChange: setExpanded,
+    onGlobalFilterChange: (v) => setQuery(typeof v === "function" ? v(query) : (v ?? "")),
+    globalFilterFn: (row, _col, value) =>
+      props.filter ? props.filter(row.original, String(value)) : true,
+    // A parent stays visible when any leaf descendant matches.
+    filterFromLeafRows: true,
     getSubRows,
     getRowId,
     getRowCanExpand: props.getRowCanExpand
@@ -109,6 +142,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       : undefined,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
     // We pre-sort children too; keep manual paging off, everything client-side.
     enableSortingRemoval: true,
@@ -203,6 +237,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       onRowDoubleClick={onRowDoubleClick}
       onRowContextMenu={onRowContextMenu}
       onToggleExpand={onToggleExpand}
+      toggleOnDoubleClick={props.toggleOnDoubleClick}
       rowClass={rowClass}
       rowTitle={rowTitle}
       rowEntity={rowEntity}
@@ -264,7 +299,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
 
   // Focusable wrapper owns keyboard nav. `virtual` adds the scroll container
   // (.tt-scroll); flat tables scroll in their panel parent but still focus here.
-  return (
+  const host = (
     <div
       className={"tt-wrap" + (virtual ? " tt-scroll" : "")}
       tabIndex={0}
@@ -272,6 +307,57 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       onKeyDown={onKeyDown}
     >
       {tableEl}
+    </div>
+  );
+
+  if (!props.controls) return host;
+
+  // Controls bar: search (optional) + collapse-all / expand-all. expandAll on a
+  // lazy tree only opens already-loaded children; collapseAll also clears search.
+  const matches = q ? table.getRowModel().rows.length : 0;
+  return (
+    <div className="tt-host">
+      <div className="tt-controls">
+        {props.filter ? (
+          <input
+            className="tt-search"
+            placeholder={props.searchPlaceholder ?? "filter…"}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        ) : null}
+        <button
+          type="button"
+          className="tt-ctl"
+          title="collapse all"
+          onClick={() => {
+            setQuery("");
+            setExpanded({});
+          }}
+        >
+          ⊟
+        </button>
+        <button
+          type="button"
+          className="tt-ctl"
+          title="expand all"
+          onClick={() => {
+            // Expand every currently-known expandable row by id (persist-friendly
+            // vs the `true` sentinel; lazy trees only open already-loaded nodes).
+            const all: Record<string, boolean> = {};
+            for (const r of table.getCoreRowModel().flatRows) {
+              if (r.getCanExpand()) all[r.id] = true;
+            }
+            setExpanded(all);
+          }}
+        >
+          ⊞
+        </button>
+        {q ? <span className="tt-match">{matches}</span> : null}
+      </div>
+      {host}
     </div>
   );
 }
@@ -286,6 +372,7 @@ function TableRow<T>(props: {
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
   onToggleExpand?: (row: T, willExpand: boolean) => void;
+  toggleOnDoubleClick?: (row: T) => boolean;
   rowClass?: (row: T) => string | undefined;
   rowTitle?: (row: T) => string;
   rowEntity?: (row: T) => { kind: string; value: string } | undefined;
@@ -316,7 +403,15 @@ function TableRow<T>(props: {
           : undefined
       }
       onDoubleClick={
-        props.onRowDoubleClick ? (e) => props.onRowDoubleClick!(data, e) : undefined
+        props.toggleOnDoubleClick?.(data) && row.getCanExpand()
+          ? (e) => {
+              if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
+              props.onToggleExpand?.(data, !row.getIsExpanded());
+              row.toggleExpanded();
+            }
+          : props.onRowDoubleClick
+            ? (e) => props.onRowDoubleClick!(data, e)
+            : undefined
       }
       onContextMenu={
         props.onRowContextMenu

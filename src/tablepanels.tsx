@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "./useStore";
 import { TreeTable, type TreeColumn } from "./treetable";
-import type { SortingState } from "@tanstack/react-table";
+import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import type { SessionSort, SessionSortKey, Fav } from "./state";
 
 // ---- tmux v2 ----
@@ -206,6 +206,7 @@ export interface WtTreeRow {
   pathDisplay?: string;
   dirty?: boolean;
   fav?: boolean;
+  favPath?: string; // any path-bearing row is favoritable (leaf/clone/space)
   // session (leaf child): a live tmux session in this worktree
   sessionName?: string;
   attached?: boolean;
@@ -229,6 +230,9 @@ export interface WtBridge {
   focus: () => boolean;
   toggleFocus: () => void;
   counts: () => { shown: number; total: number };
+  // persisted expand state (store.wtExpanded)
+  expanded: () => ExpandedState;
+  setExpanded: (e: ExpandedState) => void;
   // leaf gestures + actions
   onLeafSingle: (r: WtTreeRow, x: number, y: number) => void;
   onLeafDouble: (r: WtTreeRow) => void;
@@ -251,7 +255,25 @@ export function setWorktreesPanel(b: WtBridge) {
   wtBridge = b;
 }
 
-// Tree (name) column: star + label on leaves, label + dim meta on org/clone,
+// Favorite toggle. Rendered on any path-bearing row (leaf/clone/space). Filled +
+// accented when on; dim otherwise. Click stops row-click so it never opens a menu.
+function FavStar({ row }: { row: WtTreeRow }) {
+  if (!row.favPath) return null;
+  return (
+    <span
+      className={"wt-star" + (row.fav ? " on" : "")}
+      title={row.fav ? "unfavorite" : "favorite"}
+      onClick={(e) => {
+        e.stopPropagation();
+        wtBridge?.toggleFav(row.favPath!);
+      }}
+    >
+      {row.fav ? "★" : "☆"}
+    </span>
+  );
+}
+
+// Tree (name) column: star + label on path rows (leaf/clone/space + org meta),
 // a live-session line (dot + name + proc + windows) on session children.
 function WtNameCell({ row }: { row: WtTreeRow }) {
   if (row.kind === "session") {
@@ -270,25 +292,9 @@ function WtNameCell({ row }: { row: WtTreeRow }) {
       </>
     );
   }
-  if (row.kind === "leaf") {
-    return (
-      <>
-        <span
-          className={"wt-star" + (row.fav ? " on" : "")}
-          title={row.fav ? "unfavorite" : "favorite"}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (row.worktree) wtBridge?.toggleFav(row.worktree);
-          }}
-        >
-          {row.fav ? "★" : "☆"}
-        </span>
-        <span className="wt-label">{row.label}</span>
-      </>
-    );
-  }
   return (
     <>
+      <FavStar row={row} />
       <span className="wt-label">{row.label}</span>
       {row.meta ? <span className="wt-meta">{row.meta}</span> : null}
     </>
@@ -568,6 +574,9 @@ export function FilesPanelV2() {
           getSubRows={(r) => r.children}
           getRowCanExpand={(r) => r.isDir}
           onToggleExpand={(r, willExpand) => filesBridge?.onToggle(r, willExpand)}
+          controls
+          filter={(r, q) => r.name.toLowerCase().includes(q.toLowerCase())}
+          searchPlaceholder="filter this folder…"
           defaultSorting={FS_DEFAULT_SORT}
           rowTitle={(r) => r.path}
           rowClass={(r) => (r.path === selected ? "fs-selected" : undefined)}
@@ -915,6 +924,18 @@ export function FavoritesPanelV2() {
   );
 }
 
+// Search predicate: label/branch/path/session-name substring (case-insensitive).
+// A match on any field keeps the row; the table keeps its ancestors too.
+function wtFilter(r: WtTreeRow, q: string): boolean {
+  const s = q.toLowerCase();
+  return (
+    r.label.toLowerCase().includes(s) ||
+    (r.branch?.toLowerCase().includes(s) ?? false) ||
+    (r.pathDisplay?.toLowerCase().includes(s) ?? false) ||
+    (r.sessionName?.toLowerCase().includes(s) ?? false)
+  );
+}
+
 export function WorktreesPanelV2() {
   useApp();
   useEffect(() => {
@@ -933,7 +954,12 @@ export function WorktreesPanelV2() {
             data={rows}
             getRowId={(r) => r.id}
             getSubRows={(r) => r.children}
-            defaultExpandedAll
+            controls
+            filter={wtFilter}
+            searchPlaceholder="filter worktrees…"
+            expanded={wtBridge?.expanded() ?? {}}
+            onExpandedChange={(e) => wtBridge?.setExpanded(e)}
+            toggleOnDoubleClick={(r) => r.kind === "org" || r.kind === "clone"}
             rowClass={(r) => `wt-${r.kind}`}
             rowTitle={(r) => r.worktree ?? r.label}
             rowEntity={(r) =>

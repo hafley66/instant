@@ -1130,14 +1130,18 @@ function openWorktreeDefault(clone: string, branch: string, wtPath: string) {
   openWorktree(clone, branch, wtPath, agent?.command, true);
 }
 
-// ---- worktree favorites (stars) + focus filter ----
-const isFavWorktree = (wtPath: string) => store.get().wtFavorites.includes(wtPath);
-function toggleFavWorktree(wtPath: string) {
+// ---- favorites (stars) + focus filter ----
+// Favorites are keyed by an absolute fs path, so ANY path-bearing row is
+// favoritable: a git worktree leaf, a clone (main checkout), or a non-git space.
+// (wtFavorites is the persisted path list; the name is historical.)
+const isFavWorktree = (path: string) => store.get().wtFavorites.includes(path);
+function toggleFavWorktree(path: string) {
+  if (!path) return;
   const cur = store.get().wtFavorites;
   store.set({
-    wtFavorites: cur.includes(wtPath)
-      ? cur.filter((p) => p !== wtPath)
-      : [...cur, wtPath],
+    wtFavorites: cur.includes(path)
+      ? cur.filter((p) => p !== path)
+      : [...cur, path],
   });
   renderWorktreesPanel();
 }
@@ -1147,6 +1151,34 @@ function focusRows(rows: WorktreeRow[]): WorktreeRow[] {
   if (!store.get().wtFocus) return rows;
   const favs = new Set(store.get().wtFavorites);
   return rows.filter((r) => favs.has(r.worktree));
+}
+
+// Focus mode is a FLAT list: one row per favorited path, labeled with its full
+// (tildified) path so the whole lineage is legible regardless of tree depth.
+// Git metadata (branch/head/dirty/clone) is filled from the scan when the path
+// is a known worktree; otherwise the path renders as a bare leaf. Live sessions
+// nest underneath, same as the tree.
+function favRows(): WtTreeRow[] {
+  const wts = store.get().worktrees;
+  const spaces = new Set(store.get().spaces);
+  return store.get().wtFavorites.map((path) => {
+    const wt = wts.find((w) => w.worktree === path || w.clone === path);
+    return {
+      id: path,
+      kind: "leaf" as const,
+      label: tildify(path), // full path, not just the basename
+      space: spaces.has(path),
+      clonePath: wt?.clone ?? path,
+      worktree: path,
+      branch: wt?.branch ?? "",
+      head: wt?.head ?? "",
+      pathDisplay: tildify(path),
+      dirty: wt?.dirty ?? false,
+      fav: true,
+      favPath: path,
+      children: sessionChildRows(path),
+    };
+  });
 }
 
 // Buffered click vs double-click on a worktree leaf. Single click waits ~220ms
@@ -1256,6 +1288,7 @@ function spaceTreeRows(): WtTreeRow[] {
         pathDisplay: tildify(p),
         dirty: false,
         fav: isFavWorktree(p),
+        favPath: p,
         children: sessionChildRows(p),
       })),
     },
@@ -1263,7 +1296,9 @@ function spaceTreeRows(): WtTreeRow[] {
 }
 
 function wtTreeRows(): WtTreeRow[] {
-  const rows = focusRows(store.get().worktrees);
+  // Focus mode flattens to the favorites list (full paths), bypassing the tree.
+  if (store.get().wtFocus) return favRows();
+  const rows = store.get().worktrees;
   const adding = store.get().wtAddingClone;
   return spaceTreeRows().concat(buildTree(rows).map((org) => ({
     id: `o:${org.origin}`,
@@ -1276,6 +1311,8 @@ function wtTreeRows(): WtTreeRow[] {
       label: baseName(cl.clone),
       meta: cl.branch ? `@${cl.branch}` : "",
       clonePath: cl.clone,
+      fav: isFavWorktree(cl.clone),
+      favPath: cl.clone,
       adding: adding === cl.clone,
       children: cl.worktrees.map((wt) => ({
         id: wt.worktree,
@@ -1288,6 +1325,7 @@ function wtTreeRows(): WtTreeRow[] {
         pathDisplay: tildify(wt.worktree),
         dirty: wt.dirty,
         fav: isFavWorktree(wt.worktree),
+        favPath: wt.worktree,
         // Live tmux sessions sitting in this worktree show as child rows, so the
         // tree doubles as "what's running where". Empty → leaf has no twisty.
         children: sessionChildRows(wt.worktree),
@@ -1333,6 +1371,13 @@ function registerV2Bridges() {
         shown: worktrees.filter((r) => wtFavorites.includes(r.worktree)).length,
         total: worktrees.length,
       };
+    },
+    // Persisted expand state: store.wtExpanded is a flat list of expanded node
+    // ids; convert to/from react-table's ExpandedState record on the boundary.
+    expanded: () => Object.fromEntries(store.get().wtExpanded.map((k) => [k, true])),
+    setExpanded: (e) => {
+      const keys = e === true ? [] : Object.keys(e).filter((k) => (e as Record<string, boolean>)[k]);
+      store.set({ wtExpanded: keys });
     },
     // leaf gestures (single/dbl/right-click → chooser) + the open ▾ anchored menu.
     onLeafSingle: (r, x, y) => wtLeafGestures(r).onSingle(x, y),
