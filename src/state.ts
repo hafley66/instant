@@ -209,7 +209,11 @@ export interface AppState {
   scanRoot: string; // worktrees scan path
   fsCwd: string; // Files explorer current directory (persisted)
   sidebarWidth: number; // px
-  zoom: number; // webview zoom factor (persisted; applied via getCurrentWebview().setZoom)
+  zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
+  tabZoom: Record<string, number>; // per-terminal font size (px), keyed by tab/session id (persisted)
+  // Agent tabs whose tmux session was killed on close (to free RAM); reopen
+  // relaunches with --resume <id>. Keyed by tab/session name (persisted).
+  resumeTabs: Record<string, { editor: "claude" | "opencode"; sessionId: string; cwd: string }>;
   wtExpanded: string[]; // expanded tree node keys
   wtFavorites: string[]; // starred worktree paths (persisted)
   spaces: string[]; // user-designated non-git folders to run AI sessions in (persisted); shown atop the Worktrees panel
@@ -250,6 +254,8 @@ const PERSIST: (keyof AppState)[] = [
   "fsCwd",
   "sidebarWidth",
   "zoom",
+  "tabZoom",
+  "resumeTabs",
   "wtExpanded",
   "wtFavorites",
   "spaces",
@@ -306,6 +312,8 @@ function load(): AppState {
     fsCwd: loadKey<string>("fsCwd", "~"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     zoom: loadKey<number>("zoom", 1),
+    tabZoom: loadKey<Record<string, number>>("tabZoom", {}),
+    resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
     wtFavorites: loadKey<string[]>("wtFavorites", []),
     spaces: loadKey<string[]>("spaces", []),

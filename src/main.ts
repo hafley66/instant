@@ -610,7 +610,7 @@ function openTabAtPwd() {
   refreshSessions();
 }
 
-// ---- webview zoom ----
+// ---- webview zoom (chrome: rail + toolbars + non-terminal panels) ----
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
 const ZOOM_STEP = 0.1;
@@ -627,6 +627,42 @@ function resetZoom() {
   applyZoom();
 }
 
+// ---- per-terminal zoom (font size, persisted per tab id) ----
+// The terminal that currently holds keyboard focus. ⌘+/-/0 zoom THAT terminal's
+// font when set; otherwise they fall back to the webview/chrome zoom above. Set
+// on the xterm textarea focus/blur in openTab.
+let focusedTermId: string | null = null;
+const TERM_FONT_DEFAULT = 13;
+const TERM_FONT_MIN = 6;
+const TERM_FONT_MAX = 40;
+const termFontSize = (id: string) => store.get().tabZoom[id] ?? TERM_FONT_DEFAULT;
+function applyTermFontSize(id: string, px: number) {
+  const t = tabs.get(id);
+  if (!t) return;
+  t.term.options.fontSize = px;
+  t.fit.fit(); // reflow cols/rows + tell the pty via onResize
+}
+function setTermFontSize(id: string, px: number) {
+  const clamped = Math.min(TERM_FONT_MAX, Math.max(TERM_FONT_MIN, px));
+  store.set({ tabZoom: { ...store.get().tabZoom, [id]: clamped } });
+  applyTermFontSize(id, clamped);
+}
+// Route a zoom gesture: a focused terminal zooms its own font; else the chrome.
+function zoomGesture(delta: number) {
+  if (focusedTermId && tabs.has(focusedTermId)) {
+    setTermFontSize(focusedTermId, termFontSize(focusedTermId) + (delta > 0 ? 1 : -1));
+  } else {
+    nudgeZoom(delta);
+  }
+}
+function zoomResetGesture() {
+  if (focusedTermId && tabs.has(focusedTermId)) {
+    setTermFontSize(focusedTermId, TERM_FONT_DEFAULT);
+  } else {
+    resetZoom();
+  }
+}
+
 const TAB_COMMANDS: Command[] = [
   { id: "tab.next", keys: ["$mod+Shift+BracketRight", "Control+Tab"], run: () => focusTabByOffset(1) },
   { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], run: () => focusTabByOffset(-1) },
@@ -639,10 +675,11 @@ const TAB_COMMANDS: Command[] = [
   // Reload the webview — recover from a crashed React render without restarting
   // the app (tmux sessions outlive the reload, so nothing is lost).
   { id: "app.reload", keys: ["$mod+r"], run: () => location.reload() },
-  // UI zoom: cmd +/-/0 scale the whole webview (persisted, clamped 0.5–2.0).
-  { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], run: () => nudgeZoom(ZOOM_STEP) },
-  { id: "app.zoomOut", keys: ["$mod+Minus"], run: () => nudgeZoom(-ZOOM_STEP) },
-  { id: "app.zoomReset", keys: ["$mod+Digit0"], run: resetZoom },
+  // Zoom: cmd +/-/0. A focused terminal zooms its own font (persisted per tab);
+  // otherwise the webview chrome (rail + toolbars) zooms (persisted, 0.5–2.0).
+  { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], run: () => zoomGesture(ZOOM_STEP) },
+  { id: "app.zoomOut", keys: ["$mod+Minus"], run: () => zoomGesture(-ZOOM_STEP) },
+  { id: "app.zoomReset", keys: ["$mod+Digit0"], run: zoomResetGesture },
   // cmd/ctrl+1..9 jump to a tab (9 = last).
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.goto${i + 1}`,
@@ -660,6 +697,19 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     return;
   }
 
+  // Reopen of an agent tab we exited on close: relaunch with --resume <id> when
+  // the caller didn't specify its own command (a worktree open resolves resume
+  // itself via resumeCommand). Either way the record is consumed.
+  const resume = store.get().resumeTabs[name];
+  if (resume) {
+    if (opts.command == null) {
+      opts = { command: resumeLaunch(resume.editor, resume.sessionId), cwd: opts.cwd ?? resume.cwd };
+    }
+    const rest = { ...store.get().resumeTabs };
+    delete rest[name];
+    store.set({ resumeTabs: rest });
+  }
+
   const el = document.createElement("div");
   el.className = "term-host";
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
@@ -674,7 +724,7 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     //   brew install --cask font-hack-nerd-font
     fontFamily:
       'Menlo, "Hack Nerd Font Mono", "MesloLGS NF", "DejaVu Sans Mono for Powerline", monospace',
-    fontSize: 13,
+    fontSize: termFontSize(id), // persisted per-tab zoom (default 13)
     cursorBlink: true,
     allowProposedApi: true,
     theme: THEMES[store.get().skin],
@@ -684,6 +734,14 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   term.open(el);
 
   tabs.set(id, { id, name, term, fit, el });
+
+  // Track which terminal owns keyboard focus so ⌘+/-/0 zoom the right one.
+  term.textarea?.addEventListener("focus", () => {
+    focusedTermId = id;
+  });
+  term.textarea?.addEventListener("blur", () => {
+    if (focusedTermId === id) focusedTermId = null;
+  });
 
   term.onData((data) => invoke("write_pty", { id, data }).catch(console.error));
   term.onResize(({ cols, rows }) =>
@@ -780,14 +838,27 @@ function closeTab(id: string) {
 function onTermClosed(id: string) {
   const t = tabs.get(id);
   if (!t) return;
-  invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
+  const name = t.name;
+  // Capture before teardown: cwd/command + the live foreground proc decide
+  // whether this is an agent tab to EXIT (free RAM) vs a shell we just detach.
+  const tabMeta = tabMetaById(id);
+  const live = store.get().sessions.find((s) => s.name === name);
+  const proc = foregroundProc(live?.commands ?? []);
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
   // Remember it for reopen (⌘⇧T), carrying the original command/cwd.
-  const meta = store.get().openTabs.find((o) => o.name === t.name);
-  closedTabs.push({ name: t.name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
+  const meta = store.get().openTabs.find((o) => o.name === name);
+  closedTabs.push({ name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
   forgetTab(id); // don't reattach a tab the user closed
+  // Agent tab → resolve its session id, remember it for --resume, kill the tmux
+  // session so claude/opencode isn't left burning RAM. Anything else → detach
+  // the pty; the tmux session survives (so a reload reattaches it).
+  if (tabMeta && AGENT_PROCS.has(proc)) {
+    void exitAgentTab(id, name, tabMeta);
+  } else {
+    invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
+  }
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -795,6 +866,30 @@ function onTermClosed(id: string) {
     if (nextId) activate(nextId);
   }
   renderSessionActive();
+  refreshSessions();
+}
+
+// Exit a closed agent tab's tmux session (frees the RAM claude/opencode hold)
+// after recording its session id so reopen relaunches with --resume <id>. The
+// agent writes its jsonl incrementally, so killing mid-run stays resumable. If
+// no on-disk session is found we detach instead of stranding a live session.
+async function exitAgentTab(
+  id: string,
+  name: string,
+  meta: { cwd: string; command: string | null },
+) {
+  const s = (await tabSessions(meta.cwd, meta.command))[0]; // declared-agent-first, latest
+  if (s) {
+    store.set({
+      resumeTabs: {
+        ...store.get().resumeTabs,
+        [name]: { editor: s.editor, sessionId: s.sessionId, cwd: meta.cwd },
+      },
+    });
+    await invoke("kill_session", { name }).catch(console.error);
+  } else {
+    await invoke("close_pty", { id }).catch(() => {});
+  }
   refreshSessions();
 }
 
@@ -856,6 +951,10 @@ const SHELLS = new Set(["zsh", "bash", "fish", "sh", "tmux", "-zsh", "-bash"]);
 function foregroundProc(commands: string[]): string {
   return commands.find((c) => !SHELLS.has(c)) ?? "";
 }
+// Foreground procs that mean "an agent is running here" (vs an idle shell), so
+// closing the tab exits it instead of leaving it resident. node/bun cover
+// claude/opencode launched through their JS shim.
+const AGENT_PROCS = new Set(["claude", "opencode", "node", "bun"]);
 const isPinnedSession = (name: string) => store.get().pinnedSessions.includes(name);
 function togglePinSession(name: string) {
   const cur = store.get().pinnedSessions;
@@ -1058,6 +1157,11 @@ const KNOWN_RESUME: Record<string, string> = {
   claude: "--resume",
   opencode: "--session",
 };
+
+// Relaunch command for a previously-exited agent tab: "claude --resume <id>" /
+// "opencode --session <id>".
+const resumeLaunch = (editor: "claude" | "opencode", sessionId: string) =>
+  `${editor} ${KNOWN_RESUME[editor]} ${sessionId}`;
 
 // Parse the inline agent-list editor: "claude:claude, vim:nvim ." -> WtAgent[].
 // Each entry is "label:command"; a bare token is used as both label and command.
