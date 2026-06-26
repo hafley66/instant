@@ -228,54 +228,220 @@ function flashStatus(msg: string) {
 }
 
 // ---- favorited AI turns (ledger.rs reads, favorites.db persists) ----
-// The agent + cwd behind the active tab, derived from its launch command. cwd
-// keys both the harness session lookup and the claude ledger path; the command's
-// first token tells claude vs opencode (null/other = a plain shell, no harness).
-function activeHarness(): { editor: "claude" | "opencode"; cwd: string } | null {
+// cwd + launch command of the active tab. cwd keys the harness session lookup
+// and the claude ledger path; the command's first token hints the agent (but we
+// don't require it — a folder can have a claude/opencode session even if the tab
+// is a plain shell the user ran the agent inside).
+function activeTabMeta(): { cwd: string; command: string | null } | null {
   const name = activeTabName();
   if (!name) return null;
   const tab = store.get().openTabs.find((t) => t.name === name);
-  const cwd = tab?.cwd;
-  if (!cwd) return null;
-  const bin = (tab?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
-  if (bin === "claude" || bin === "opencode") return { editor: bin, cwd };
-  return null;
+  if (!tab?.cwd) return null;
+  return { cwd: tab.cwd, command: tab.command };
 }
 
-// Favorite the latest turn of the active tab's harness session. cwd → latest
-// session id (harness_session) → newest message (latest_ai_message) → fav_add,
-// which snapshots it into favorites.db and returns the fresh list.
-async function favoriteCurrentTurn() {
-  const h = activeHarness();
-  if (!h) {
-    flashStatus("no AI session in this tab");
-    return;
+// Resolve the candidate harness sessions for a cwd by probing BOTH editors'
+// on-disk stores (harness_session). The tab's launch command, when it names an
+// agent, just orders the probe so the declared agent wins ties.
+async function tabSessions(
+  cwd: string,
+  command: string | null,
+): Promise<{ editor: "claude" | "opencode"; sessionId: string }[]> {
+  const bin = (command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
+  const order: ("claude" | "opencode")[] =
+    bin === "opencode" ? ["opencode", "claude"] : ["claude", "opencode"];
+  const out: { editor: "claude" | "opencode"; sessionId: string }[] = [];
+  for (const editor of order) {
+    const sid = await invoke<string | null>("harness_session", { tool: editor, cwd }).catch(
+      () => null,
+    );
+    if (sid) out.push({ editor, sessionId: sid });
   }
-  const sessionId = await invoke<string | null>("harness_session", {
-    tool: h.editor,
-    cwd: h.cwd,
-  }).catch(() => null);
-  if (!sessionId) {
-    flashStatus(`no ${h.editor} session for this folder`);
-    return;
-  }
-  const msg = await invoke<AiMessage | null>("latest_ai_message", {
-    editor: h.editor,
+  return out;
+}
+
+// Per-(editor,session) ledger cache + the per-tab merged turn list the terminal
+// right-click matches against. Warmed on tab activation so the context menu can
+// stay synchronous.
+const ledgerCache = new Map<string, AiMessage[]>();
+const tabTurns = new Map<string, AiMessage[]>();
+async function turnsFor(
+  editor: "claude" | "opencode",
+  sessionId: string,
+  cwd: string,
+): Promise<AiMessage[]> {
+  const key = `${editor}:${sessionId}`;
+  const hit = ledgerCache.get(key);
+  if (hit) return hit;
+  const msgs = await invoke<AiMessage[]>("read_ai_messages", {
+    editor,
     sessionId,
-    cwd: h.cwd,
-  }).catch(() => null);
-  if (!msg) {
-    flashStatus("no turn found yet");
-    return;
+    cwd,
+    afterSeq: null,
+  }).catch(() => [] as AiMessage[]);
+  ledgerCache.set(key, msgs);
+  return msgs;
+}
+// Load (or refresh) the turns behind a terminal tab into tabTurns. Re-reads the
+// latest session each call (drops the cache for it) so a live conversation's new
+// turns become matchable.
+async function warmTurns(id: string) {
+  const meta = tabMetaById(id);
+  if (!meta) return;
+  const sessions = await tabSessions(meta.cwd, meta.command);
+  const all: AiMessage[] = [];
+  for (const s of sessions) {
+    ledgerCache.delete(`${s.editor}:${s.sessionId}`); // pick up new turns
+    all.push(...(await turnsFor(s.editor, s.sessionId, meta.cwd)));
   }
-  const favs = await invoke<Fav[]>("fav_add", { msg, cwd: h.cwd }).catch((e) => {
+  tabTurns.set(id, all);
+}
+function tabMetaById(id: string): { cwd: string; command: string | null } | null {
+  const t = tabs.get(id);
+  if (!t) return null;
+  const rec = store.get().openTabs.find((o) => o.name === t.name);
+  return rec?.cwd ? { cwd: rec.cwd, command: rec.command } : null;
+}
+
+// --- on-screen turn identification (the alt-screen blocks text selection, so we
+// read the xterm buffer directly). Each harness marks turn boundaries visually:
+// claude prefixes assistant turns with a ⏺ bullet; opencode paints message blocks
+// with a non-default background. We find the block under the pointer via those
+// signatures, then match its rendered text to a ledger turn. ---
+const TURN_BULLETS = new Set(["⏺", "●", "◉", "⏵", "•", "◆"]);
+let lastCtxY = 0; // viewport Y of the last right-click, for terminal turn-identify
+
+function rowText(line: import("@xterm/xterm").IBufferLine): string {
+  return line.translateToString(true);
+}
+// First visible glyph + whether any cell has a non-default bg (opencode block).
+function rowSignature(line: import("@xterm/xterm").IBufferLine, cols: number) {
+  let firstGlyph = "";
+  let hasBg = false;
+  for (let x = 0; x < cols; x++) {
+    const cell = line.getCell(x);
+    if (!cell) continue;
+    if (!hasBg && !cell.isBgDefault()) hasBg = true;
+    const ch = cell.getChars();
+    if (!firstGlyph && ch && ch.trim()) firstGlyph = ch;
+    if (firstGlyph && hasBg) break;
+  }
+  return { isBullet: TURN_BULLETS.has(firstGlyph), hasBg };
+}
+
+// The rendered text block under clientY: bounded by claude bullets if present,
+// else by an opencode bg-color run, else a ±pad line window.
+function blockTextAt(id: string, clientY: number): string {
+  const t = tabs.get(id);
+  if (!t) return "";
+  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
+  const rect = screen.getBoundingClientRect();
+  const cellH = rect.height / t.term.rows || 1;
+  let vr = Math.floor((clientY - rect.top) / cellH);
+  vr = Math.max(0, Math.min(t.term.rows - 1, vr));
+  const buf = t.term.buffer.active;
+  const top = buf.viewportY;
+  const rows: { text: string; isBullet: boolean; hasBg: boolean }[] = [];
+  for (let r = 0; r < t.term.rows; r++) {
+    const line = buf.getLine(top + r);
+    if (!line) {
+      rows.push({ text: "", isBullet: false, hasBg: false });
+      continue;
+    }
+    const sig = rowSignature(line, t.term.cols);
+    rows.push({ text: rowText(line), isBullet: sig.isBullet, hasBg: sig.hasBg });
+  }
+  const hasBullets = rows.some((r) => r.isBullet);
+  let lo = vr;
+  let hi = vr;
+  if (hasBullets) {
+    while (lo > 0 && !rows[lo].isBullet) lo--;
+    while (hi < rows.length - 1 && !rows[hi + 1].isBullet) hi++;
+  } else if (rows[vr].hasBg) {
+    while (lo > 0 && rows[lo - 1].hasBg) lo--;
+    while (hi < rows.length - 1 && rows[hi + 1].hasBg) hi++;
+  } else {
+    lo = Math.max(0, vr - 4);
+    hi = Math.min(rows.length - 1, vr + 4);
+  }
+  return rows
+    .slice(lo, hi + 1)
+    .map((r) => r.text)
+    .join("\n")
+    .trim();
+}
+
+const normText = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+// Match a rendered block to a ledger turn by 6-word phrase overlap (phrases are
+// internal, so TUI gutter glyphs/wrapping at the edges don't break the match).
+// Newest-first so ties prefer the most recent turn.
+function matchTurn(turns: AiMessage[], blockText: string): AiMessage | null {
+  const bt = normText(blockText);
+  if (bt.length < 10) return null;
+  const words = bt.split(" ");
+  const probes: string[] = [];
+  for (let i = 0; i + 4 <= words.length; i += 3) probes.push(words.slice(i, i + 6).join(" "));
+  if (!probes.length) probes.push(bt);
+  let best: { t: AiMessage; score: number } | null = null;
+  for (const t of [...turns].reverse()) {
+    const text = normText(t.text);
+    let score = 0;
+    for (const p of probes) if (p.length >= 12 && text.includes(p)) score++;
+    if (score > 0 && (!best || score > best.score)) best = { t, score };
+  }
+  return best?.t ?? null;
+}
+function identifyTurnAt(id: string, clientY: number): AiMessage | null {
+  const turns = tabTurns.get(id);
+  if (!turns?.length) return null;
+  return matchTurn(turns, blockTextAt(id, clientY));
+}
+
+const relTime = (ts: number): string => {
+  if (!ts) return "";
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+};
+
+// Snapshot one identified turn into favorites.db.
+async function favoriteTurn(turn: AiMessage, cwd: string) {
+  const favs = await invoke<Fav[]>("fav_add", { msg: turn, cwd }).catch((e) => {
     console.error("fav_add", e);
     return null;
   });
   if (favs) {
     store.set({ aiFavs: favs });
-    flashStatus(`★ favorited ${msg.role} turn`);
+    flashStatus(`★ favorited ${turn.role} turn`);
   }
+}
+
+// cmd+shift+s: favorite the active tab's latest turn (no pointer needed). Probes
+// the cwd for a session, so it works even when the tab is a plain shell.
+async function favoriteCurrentTurn() {
+  const meta = activeTabMeta();
+  if (!meta) {
+    flashStatus("no folder for this tab");
+    return;
+  }
+  const sessions = await tabSessions(meta.cwd, meta.command);
+  if (!sessions.length) {
+    flashStatus("no AI session for this folder");
+    return;
+  }
+  const s = sessions[0];
+  const msg = await invoke<AiMessage | null>("latest_ai_message", {
+    editor: s.editor,
+    sessionId: s.sessionId,
+    cwd: meta.cwd,
+  }).catch(() => null);
+  if (!msg) {
+    flashStatus("no turn found yet");
+    return;
+  }
+  await favoriteTurn(msg, meta.cwd);
 }
 
 function registerFavoritesBridge() {
@@ -519,6 +685,7 @@ function onTermShown(id: string) {
   setActive(id);
   touchTab(id);
   logTabVisit(t.name);
+  void warmTurns(id); // warm the ledger so right-click turn-identify stays sync
   requestAnimationFrame(() => {
     t.fit.fit();
     invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
@@ -2485,7 +2652,26 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
 
   // Inside a terminal.
   if (target.closest(".term-host")) {
+    const id = activeId();
+    const meta = id ? tabMetaById(id) : null;
+    const turn = id ? identifyTurnAt(id, lastCtxY) : null;
+    const turnItems: CtxItem[] = [];
+    const noop = () => {};
+    if (turn && meta) {
+      const preview = turn.preview.slice(0, 48);
+      turnItems.push({ label: `turn · ${turn.role} · ${relTime(turn.ts)}`, action: noop, disabled: true });
+      turnItems.push({ label: `“${preview}${turn.preview.length > 48 ? "…" : ""}”`, action: noop, disabled: true });
+      turnItems.push({ label: "★ Favorite this turn", action: () => void favoriteTurn(turn, meta.cwd) });
+      turnItems.push({ label: "Copy this turn", action: () => copy(turn.text) });
+      turnItems.push({ sep: true });
+    } else if (meta) {
+      // No match (cache cold, or pointer not over a turn) — warm for next time.
+      if (id) void warmTurns(id);
+      turnItems.push({ label: "favorite: no turn under pointer", action: noop, disabled: true });
+      turnItems.push({ sep: true });
+    }
     return [
+      ...turnItems,
       {
         label: "Paste",
         action: async () => {
@@ -3177,6 +3363,9 @@ async function main() {
   wireWindowResize();
   wireRailResize();
   wireOsDrop().catch((e) => showError("wireOsDrop", e));
+  // Capture the right-click Y (capture phase, before wireContextMenu's bubble
+  // handler) so ctxItemsFor can map it to a terminal buffer row for turn-identify.
+  document.addEventListener("contextmenu", (e) => (lastCtxY = e.clientY), true);
   wireContextMenu(ctxItemsFor);
   await refreshSessions();
   // Scan worktrees in the background so session rows can show which worktrees
