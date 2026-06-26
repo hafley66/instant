@@ -233,11 +233,8 @@ function flashStatus(msg: string) {
 // don't require it — a folder can have a claude/opencode session even if the tab
 // is a plain shell the user ran the agent inside).
 function activeTabMeta(): { cwd: string; command: string | null } | null {
-  const name = activeTabName();
-  if (!name) return null;
-  const tab = store.get().openTabs.find((t) => t.name === name);
-  if (!tab?.cwd) return null;
-  return { cwd: tab.cwd, command: tab.command };
+  const id = activeId();
+  return id ? tabMetaById(id) : null;
 }
 
 // Resolve the candidate harness sessions for a cwd by probing BOTH editors'
@@ -296,11 +293,17 @@ async function warmTurns(id: string) {
   }
   tabTurns.set(id, all);
 }
+// The tab's working dir. The recorded launch cwd is often null/HOME (the user
+// cd's then runs the agent inside a shell), so prefer the LIVE tmux pane cwd
+// (store.sessions[].paths) — that's where claude/opencode actually keyed their
+// session — and fall back to the launch cwd.
 function tabMetaById(id: string): { cwd: string; command: string | null } | null {
   const t = tabs.get(id);
   if (!t) return null;
   const rec = store.get().openTabs.find((o) => o.name === t.name);
-  return rec?.cwd ? { cwd: rec.cwd, command: rec.command } : null;
+  const live = store.get().sessions.find((s) => s.name === t.name);
+  const cwd = live?.paths?.[0] || rec?.cwd || null;
+  return cwd ? { cwd, command: rec?.command ?? null } : null;
 }
 
 // --- on-screen turn identification (the alt-screen blocks text selection, so we
@@ -308,7 +311,9 @@ function tabMetaById(id: string): { cwd: string; command: string | null } | null
 // claude prefixes assistant turns with a ⏺ bullet; opencode paints message blocks
 // with a non-default background. We find the block under the pointer via those
 // signatures, then match its rendered text to a ledger turn. ---
-const TURN_BULLETS = new Set(["⏺", "●", "◉", "⏵", "•", "◆"]);
+// Turn-boundary glyphs: claude's ⏺ assistant bullet + the › chevron on human
+// turns; opencode delimits with a non-default bg run instead.
+const TURN_BULLETS = new Set(["⏺", "●", "◉", "⏵", "•", "◆", "›", "❯", "»", "▶", "🭬"]);
 let lastCtxY = 0; // viewport Y of the last right-click, for terminal turn-identify
 
 function rowText(line: import("@xterm/xterm").IBufferLine): string {
@@ -372,29 +377,33 @@ function blockTextAt(id: string, clientY: number): string {
 }
 
 const normText = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
-// Match a rendered block to a ledger turn by 6-word phrase overlap (phrases are
-// internal, so TUI gutter glyphs/wrapping at the edges don't break the match).
-// Newest-first so ties prefer the most recent turn.
-function matchTurn(turns: AiMessage[], blockText: string): AiMessage | null {
-  const bt = normText(blockText);
-  if (bt.length < 10) return null;
-  const words = bt.split(" ");
-  const probes: string[] = [];
-  for (let i = 0; i + 4 <= words.length; i += 3) probes.push(words.slice(i, i + 6).join(" "));
-  if (!probes.length) probes.push(bt);
-  let best: { t: AiMessage; score: number } | null = null;
-  for (const t of [...turns].reverse()) {
-    const text = normText(t.text);
-    let score = 0;
-    for (const p of probes) if (p.length >= 12 && text.includes(p)) score++;
-    if (score > 0 && (!best || score > best.score)) best = { t, score };
-  }
-  return best?.t ?? null;
+
+// The search query for a right-click: the live selection if there is one, else
+// the rendered block under the pointer (surrounding lines, signature-bounded).
+function ledgerQuery(id: string, clientY: number): string {
+  const sel = tabs.get(id)?.term.getSelection()?.trim();
+  if (sel && sel.length >= 3) return sel;
+  return blockTextAt(id, clientY);
 }
-function identifyTurnAt(id: string, clientY: number): AiMessage | null {
-  const turns = tabTurns.get(id);
-  if (!turns?.length) return null;
-  return matchTurn(turns, blockTextAt(id, clientY));
+
+// ripgrep/ILIKE over the tab's ledger turns: a turn matches when ALL query words
+// appear in its text (case-insensitive, %word% each). Ranked: an exact contiguous
+// phrase hit first, then word-hit count, then recency. Returns the top matches.
+function searchTurns(turns: AiMessage[], query: string, limit = 6): AiMessage[] {
+  const q = normText(query);
+  const words = [...new Set(q.split(" ").filter((w) => w.length >= 2))];
+  if (!words.length) return [];
+  const phrase = words.join(" ");
+  const scored: { t: AiMessage; score: number }[] = [];
+  for (const t of turns) {
+    const text = normText(t.text);
+    let hit = 0;
+    for (const w of words) if (text.includes(w)) hit++;
+    if (hit < words.length) continue; // ILIKE AND: every term must appear
+    scored.push({ t, score: (text.includes(phrase) ? 1000 : 0) + hit });
+  }
+  scored.sort((a, b) => b.score - a.score || b.t.seq - a.t.seq);
+  return scored.slice(0, limit).map((s) => s.t);
 }
 
 const relTime = (ts: number): string => {
@@ -2654,20 +2663,32 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
   if (target.closest(".term-host")) {
     const id = activeId();
     const meta = id ? tabMetaById(id) : null;
-    const turn = id ? identifyTurnAt(id, lastCtxY) : null;
+    const turns = id ? tabTurns.get(id) ?? [] : [];
+    const matches = id && meta ? searchTurns(turns, ledgerQuery(id, lastCtxY)) : [];
     const turnItems: CtxItem[] = [];
     const noop = () => {};
-    if (turn && meta) {
-      const preview = turn.preview.slice(0, 48);
-      turnItems.push({ label: `turn · ${turn.role} · ${relTime(turn.ts)}`, action: noop, disabled: true });
-      turnItems.push({ label: `“${preview}${turn.preview.length > 48 ? "…" : ""}”`, action: noop, disabled: true });
-      turnItems.push({ label: "★ Favorite this turn", action: () => void favoriteTurn(turn, meta.cwd) });
-      turnItems.push({ label: "Copy this turn", action: () => copy(turn.text) });
+    if (matches.length && meta) {
+      turnItems.push({
+        label: `${matches.length} turn match${matches.length > 1 ? "es" : ""} (★ to save)`,
+        action: noop,
+        disabled: true,
+      });
+      for (const m of matches) {
+        const p = m.preview.slice(0, 44);
+        turnItems.push({
+          label: `★ ${m.role} · ${relTime(m.ts)} · ${p}${m.preview.length > 44 ? "…" : ""}`,
+          action: () => void favoriteTurn(m, meta.cwd),
+        });
+      }
       turnItems.push({ sep: true });
     } else if (meta) {
-      // No match (cache cold, or pointer not over a turn) — warm for next time.
+      // No match — cache may be cold (warm for next time) or no ledger text hit.
       if (id) void warmTurns(id);
-      turnItems.push({ label: "favorite: no turn under pointer", action: noop, disabled: true });
+      turnItems.push({
+        label: turns.length ? "no turn matches selection" : "no AI session for this tab",
+        action: noop,
+        disabled: true,
+      });
       turnItems.push({ sep: true });
     }
     return [
