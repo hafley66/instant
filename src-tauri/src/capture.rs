@@ -161,7 +161,7 @@ pub fn take(app: AppHandle, kind: &str) {
 /// frontmost app; we return its owner name. Pure Core Graphics — no extra TCC
 /// prompt beyond the Screen Recording we already need for the shot. (lsappinfo's
 /// ASN lookup returns empty on current macOS, so we don't shell out.)
-fn frontmost_app() -> String {
+pub(crate) fn frontmost_app() -> String {
     let opts = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
     let Some(info) = copy_window_info(opts, kCGNullWindowID) else {
         return String::new();

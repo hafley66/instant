@@ -39,6 +39,11 @@ const RSHIFT_BIT: u64 = 0x04;
 // Global throttle between screen captures, across all gesture kinds.
 const MIN_GAP: Duration = Duration::from_millis(350);
 
+// The app that was frontmost when we last summoned the overlay. On dismiss we
+// reactivate it so focus lands back where the user was (e.g. Chrome) instead of
+// the desktop — an accessory app's hidden window doesn't restore focus itself.
+static PREV_APP: Mutex<Option<String>> = Mutex::new(None);
+
 // Tap-thread gesture state (behind a Mutex, since with_enabled takes `impl Fn`).
 #[derive(Default)]
 struct Gesture {
@@ -275,7 +280,17 @@ fn toggle_window(app: &AppHandle) {
 
     if win.is_visible().unwrap_or(false) {
         let _ = win.hide();
+        reactivate_prev_app();
         return;
+    }
+
+    // Remember who was frontmost so dismiss can hand focus back. Our window is
+    // still hidden here, so this is the user's real prior app, not us.
+    {
+        let name = capture::frontmost_app();
+        if !name.is_empty() {
+            *PREV_APP.lock().unwrap() = Some(name);
+        }
     }
 
     if let Mouse::Position { x, y } = Mouse::get_mouse_position() {
@@ -286,6 +301,19 @@ fn toggle_window(app: &AppHandle) {
     let _ = win.set_focus();
     // Tell the front to play its entrance animation + refocus the active term.
     let _ = win.emit("summoned", ());
+}
+
+// Bring the pre-summon app back to the foreground. `open -a <name>` reactivates
+// a running app with no extra TCC prompt (osascript/System Events would need
+// Automation access). Best-effort: a missing/renamed app just no-ops.
+fn reactivate_prev_app() {
+    let Some(name) = PREV_APP.lock().unwrap().take() else { return };
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("/usr/bin/open")
+            .arg("-a")
+            .arg(&name)
+            .output();
+    });
 }
 
 /// Place the window so a corner sits at the cursor and it grows into the screen,
