@@ -415,7 +415,23 @@ const relTime = (ts: number): string => {
   return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 };
 
-// Snapshot one identified turn into favorites.db.
+// Is this turn already in favorites? (identity = editor + session + message id)
+function isTurnFav(turn: AiMessage): boolean {
+  return store.get().aiFavs.some(
+    (f) =>
+      f.editor === turn.editor &&
+      f.session_id === turn.session_id &&
+      f.message_id === turn.id,
+  );
+}
+
+// Open (or focus) the Favorites panel so a just-saved turn is visible.
+function showFavoritesPanel() {
+  if (!isOpen("favorites")) togglePanel("favorites");
+  else focusPanelById("favorites");
+}
+
+// Snapshot one identified turn into favorites.db, then reveal the panel.
 async function favoriteTurn(turn: AiMessage, cwd: string) {
   const favs = await invoke<Fav[]>("fav_add", { msg: turn, cwd }).catch((e) => {
     console.error("fav_add", e);
@@ -424,6 +440,22 @@ async function favoriteTurn(turn: AiMessage, cwd: string) {
   if (favs) {
     store.set({ aiFavs: favs });
     flashStatus(`★ favorited ${turn.role} turn`);
+    showFavoritesPanel();
+  }
+}
+
+async function unfavoriteTurn(turn: AiMessage) {
+  const favs = await invoke<Fav[]>("fav_remove", {
+    editor: turn.editor,
+    sessionId: turn.session_id,
+    messageId: turn.id,
+  }).catch((e) => {
+    console.error("fav_remove", e);
+    return null;
+  });
+  if (favs) {
+    store.set({ aiFavs: favs });
+    flashStatus("unfavorited turn");
   }
 }
 
@@ -2675,9 +2707,10 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
       });
       for (const m of matches) {
         const p = m.preview.slice(0, 44);
+        const star = isTurnFav(m) ? "✓" : "★";
         turnItems.push({
-          label: `★ ${m.role} · ${relTime(m.ts)} · ${p}${m.preview.length > 44 ? "…" : ""}`,
-          action: () => void favoriteTurn(m, meta.cwd),
+          label: `${star} ${m.role} · ${relTime(m.ts)} · ${p}${m.preview.length > 44 ? "…" : ""}`,
+          action: () => void (isTurnFav(m) ? unfavoriteTurn(m) : favoriteTurn(m, meta.cwd)),
         });
       }
       turnItems.push({ sep: true });
