@@ -10,9 +10,18 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
-# full app: Rust backend + webview (this is the normal dev loop)
+# full app: Rust backend + webview (this is the normal dev loop). The linker
+# shim signs the dev binary with the stable "Instant Dev" identity (run
+# `just signing-setup` once) so its macOS TCC grants survive rebuilds. Without
+# the cert the shim is a harmless no-op (binary stays ad-hoc, as before).
 dev:
-    npm run tauri dev
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
+
+# one-time: create the self-signed "Instant Dev" code-signing identity used by
+# the dev linker shim. Prompts for your login-keychain password (and the first
+# build will ask to allow codesign to use the key — click "Always Allow").
+signing-setup:
+    ./scripts/setup-signing.sh
 
 # frontend only in a browser (no backend; invoke() calls fail)
 web:
