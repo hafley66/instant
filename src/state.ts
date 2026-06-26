@@ -282,6 +282,13 @@ function loadKey<T>(k: string, fallback: T): T {
 }
 
 function load(): AppState {
+  // One-time reset: resumeTabs changed from cwd-probe keys (which collided across
+  // sessions sharing a cwd, resuming a random sibling) to session-name keys whose
+  // ids we own via `claude --session-id`. Drop the old poisoned entries once.
+  if (localStorage.getItem("resumeTabsV2") !== "1") {
+    localStorage.removeItem("resumeTabs");
+    localStorage.setItem("resumeTabsV2", "1");
+  }
   return {
     skin: loadKey<Skin>("skin", "xp"),
     mode: loadKey<Mode>("mode", "light"),

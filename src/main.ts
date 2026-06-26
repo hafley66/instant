@@ -1,6 +1,6 @@
 import "xp.css";
 import "@xterm/xterm/css/xterm.css";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -380,32 +380,6 @@ function blockTextAt(id: string, clientY: number): string {
 // clientX/Y → buffer cell, reads that row's text, expands around the column over
 // non-space chars, then trims wrapping brackets/quotes + trailing sentence
 // punctuation (keeping a `:line:col` suffix, whose digits aren't stripped).
-function tokenAt(id: string, clientX: number, clientY: number): string {
-  const t = tabs.get(id);
-  if (!t) return "";
-  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
-  const rect = screen.getBoundingClientRect();
-  const cellH = rect.height / t.term.rows || 1;
-  const cellW = rect.width / t.term.cols || 1;
-  let row = Math.floor((clientY - rect.top) / cellH);
-  let col = Math.floor((clientX - rect.left) / cellW);
-  row = Math.max(0, Math.min(t.term.rows - 1, row));
-  col = Math.max(0, Math.min(t.term.cols - 1, col));
-  const buf = t.term.buffer.active;
-  const line = buf.getLine(buf.viewportY + row);
-  if (!line) return "";
-  const text = line.translateToString(true);
-  if (col >= text.length || /\s/.test(text[col] ?? "")) return "";
-  let lo = col;
-  let hi = col;
-  while (lo > 0 && !/\s/.test(text[lo - 1])) lo--;
-  while (hi < text.length - 1 && !/\s/.test(text[hi + 1])) hi++;
-  return text
-    .slice(lo, hi + 1)
-    .replace(/^[('"<[{]+/, "")
-    .replace(/[.,;:)\]}>'"]+$/, "");
-}
-
 // Cheap front gate so a ⌘-click on a plain word does nothing (no window hide):
 // a URL scheme, a www. host, or a token bearing a slash/dot/tilde path marker.
 function looksOpenable(tok: string): boolean {
@@ -616,16 +590,13 @@ function reopenLastTab() {
   const last = closedTabs.pop();
   if (!last) return;
   // ⌘⇧T is the "bring back what I just closed" gesture — so if we exited an agent
-  // here, resume its conversation (cwd-keyed killed record) instead of replaying
-  // the stale original command. Consumed on use. "new · X" never comes through
-  // here, so a fresh session stays fresh.
-  const killed = last.cwd ? store.get().resumeTabs[last.cwd] : undefined;
+  // in this SESSION NAME, resume its conversation (name-keyed record) instead of
+  // replaying the stale original command. The record is kept (not consumed) so the
+  // name->id identity is stable across repeated reopens; "new · X" overwrites it.
+  const killed = store.get().resumeTabs[last.name];
   let command = last.command;
   if (killed) {
     command = resumeLaunch(killed.editor, killed.sessionId);
-    const rest = { ...store.get().resumeTabs };
-    delete rest[last.cwd!];
-    store.set({ resumeTabs: rest });
     console.log("[resume] ⌘⇧T", last.name, "->", command);
   }
   openTab(last.name, { command, cwd: last.cwd });
@@ -784,31 +755,46 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
 
   tabs.set(id, { id, name, term, fit, el });
 
-  // ⌘-click a path or URL to open it (iTerm2 semantic-history). Capture phase +
-  // stop so xterm never starts a selection. Only handles tokens that look like a
-  // path/url; anything else falls through to the focus handler below.
-  el.addEventListener(
-    "mousedown",
-    (e) => {
-      if (!e.metaKey || e.button !== 0) return;
-      const tok = tokenAt(id, e.clientX, e.clientY);
-      if (!tok || !looksOpenable(tok)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const cwd = tabMetaById(id)?.cwd ?? "";
-      invoke<string>("open_target", { target: tok, cwd })
-        .then((kind) =>
-          invoke("activity_log", {
-            source: "session",
-            kind: "open",
-            title: tok,
-            text: `${kind}: ${tok}`,
-          }).catch(() => {}),
-        )
-        .catch(() => {}); // unresolved path/url: ignore silently
+  // ⌘-click a path or URL to open it (iTerm2 semantic-history). xterm's link
+  // provider does the hit-testing (correct cell mapping, works under a TUI's
+  // mouse mode) and gives the hover underline + pointer cursor for free. It
+  // activates on plain click, so we gate on ⌘ to leave plain clicks to the app.
+  term.registerLinkProvider({
+    provideLinks(y, cb) {
+      const line = term.buffer.active.getLine(y - 1); // y is 1-based absolute row
+      if (!line) return cb(undefined);
+      const text = line.translateToString(true);
+      const links: ILink[] = [];
+      for (const m of text.matchAll(/\S+/g)) {
+        const raw = m[0];
+        // Strip wrapping punctuation, tracking the offset for column math.
+        const lead = raw.match(/^[('"<[{]+/)?.[0].length ?? 0;
+        const trail = raw.match(/[.,;:)\]}>'"]+$/)?.[0].length ?? 0;
+        const tok = raw.slice(lead, raw.length - trail);
+        if (!tok || !looksOpenable(tok)) continue;
+        const start = (m.index ?? 0) + lead; // 0-based col
+        links.push({
+          text: tok,
+          range: { start: { x: start + 1, y }, end: { x: start + tok.length, y } },
+          activate(e, t) {
+            if (!e.metaKey) return; // ⌘ required; plain click stays with the app
+            const cwd = tabMetaById(id)?.cwd ?? "";
+            invoke<string>("open_target", { target: t, cwd })
+              .then((kind) =>
+                invoke("activity_log", {
+                  source: "session",
+                  kind: "open",
+                  title: t,
+                  text: `${kind}: ${t}`,
+                }).catch(() => {}),
+              )
+              .catch(() => {}); // unresolved path/url: ignore silently
+          },
+        });
+      }
+      cb(links);
     },
-    { capture: true },
-  );
+  });
 
   // Click anywhere in the host (incl. padding around the xterm) focuses the
   // terminal, so keyboard + scroll work without hunting for the text area.
@@ -857,17 +843,25 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
       return false;
     }
     const send = (data: string) => {
+      // preventDefault is essential: returning false stops xterm from processing
+      // the key but does NOT stop the browser default. For keys like Shift+Enter
+      // the default inserts a newline into xterm's hidden helper <textarea>, which
+      // xterm later flushes on an `input` event — leaking a stray \n at random
+      // times (and Alt+Left would trigger browser back-nav). Swallow it here.
+      e.preventDefault();
       invoke("write_pty", { id, data }).catch(console.error);
       return false;
     };
     const only = (a: boolean, b: boolean, c: boolean) => a && !b && !c;
     // Shift+Enter: insert a newline instead of submitting. At the byte level
-    // Shift+Enter == Enter (both \r); the only way claude/opencode can tell them
-    // apart is the Kitty keyboard protocol's CSI-u encoding: ESC [ 13 ; 2 u
-    // (13 = Enter, 2 = Shift). tmux forwards this only with `extended-keys on`
-    // (see enable_extended_keys in pty.rs).
+    // Shift+Enter == Enter (both \r), and tmux squashes \r/\n/extended-key
+    // sequences down to a bare \n before they reach the app — so the app can't
+    // tell it from a submit. The robust path is bracketed paste: wrap one \n in
+    // the paste markers and the app inserts it as a literal, editable newline
+    // (same as pasting multi-line text), no submit. Survives tmux untouched.
+    // Verified through `tmux new-session`; \r\n becomes \n\n, so use one \n.
     if (e.key === "Enter" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey)
-      return send("\x1b[13;2u");
+      return send("\x1b[200~\n\x1b[201~");
     if (only(e.altKey, e.metaKey, e.ctrlKey)) {
       if (e.key === "ArrowLeft") return send("\x1bb"); // word back
       if (e.key === "ArrowRight") return send("\x1bf"); // word forward
@@ -963,20 +957,12 @@ function onTermClosed(id: string) {
   // Remember it for reopen (⌘⇧T), carrying the original command/cwd.
   const meta = store.get().openTabs.find((o) => o.name === name);
   closedTabs.push({ name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
-  // The exact cwds ⌘⇧T can key on: the pane cwd where the agent ran (tabMeta.cwd)
-  // and the path the tab was opened with (openTabs.cwd, what closedTabs stores as
-  // last.cwd). Captured NOW, before forgetTab clears the record. Kept precise (no
-  // enclosing-worktree widening) so two tabs in the same repo don't cross-resume.
-  const recordKeys = [
-    ...(tabMeta ? [tabMeta.cwd] : []),
-    ...(meta?.cwd ? [meta.cwd] : []),
-  ];
   forgetTab(id); // don't reattach a tab the user closed
   // Agent tab → kill the tmux session so claude/opencode isn't left burning RAM
-  // (recording its id for --resume first). Anything else → detach the pty; the
-  // tmux session survives (so a reload reattaches it). Decided async because the
-  // on-disk session probe is async; see exitOrDetachTab.
-  void exitOrDetachTab(id, name, tabMeta, proc, recordKeys);
+  // (recording its id for --resume first, keyed by session name). Anything else →
+  // detach the pty; the tmux session survives (so a reload reattaches it). Decided
+  // async because the on-disk session probe is async; see exitOrDetachTab.
+  void exitOrDetachTab(id, name, tabMeta, proc);
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -998,32 +984,39 @@ async function exitOrDetachTab(
   name: string,
   meta: { cwd: string; command: string | null } | null,
   proc: string,
-  recordKeys: string[] = [],
 ) {
   const sessions = meta ? await tabSessions(meta.cwd, meta.command) : [];
   const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
-  // Agent when: the live foreground proc is an agent; the launch command names
-  // one; or the proc was unknown (stale session list) but the cwd has an on-disk
-  // agent session. A known non-agent proc (vim, …) is never killed.
+  // Agent when: the live foreground proc looks like one (claude's version title,
+  // opencode.exe, node/bun), the launch command names one, or the proc was
+  // unknown (stale list) but the cwd has an on-disk agent session. A known
+  // non-agent proc (vim, …) is never killed.
   const isAgent =
-    AGENT_PROCS.has(proc) || KNOWN_RESUME[bin] != null || (proc === "" && sessions.length > 0);
+    looksLikeAgentProc(proc) ||
+    KNOWN_RESUME[bin] != null ||
+    (proc === "" && sessions.length > 0);
   if (!isAgent) {
     invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
     return;
   }
-  const s = sessions[0]; // declared-agent-first, latest
-  if (s && meta) {
-    // Key by cwd (reopen mints a fresh tmux name, so name keys never recur).
-    // Record only under the precise cwds ⌘⇧T will look up (recordKeys), so a
-    // reopen resumes the tab actually closed and nothing else.
-    const val = { editor: s.editor, sessionId: s.sessionId };
-    const keys = new Set<string>([meta.cwd, ...recordKeys].filter(Boolean));
-    const next = { ...store.get().resumeTabs };
-    for (const k of keys) next[k] = val;
-    store.set({ resumeTabs: next });
-    console.log("[resume] recorded", s.editor, s.sessionId.slice(0, 8), "under", [...keys]);
+  // Resume id is keyed by SESSION NAME — the stable identity of this tab. A claude
+  // session we launched already has the AUTHORITATIVE id recorded at launch
+  // (newAgentLaunch's --session-id), so DON'T clobber it with the close-time cwd
+  // probe, which only resolves "latest jsonl in this cwd" and would grab a sibling
+  // when several sessions share the cwd. The probe is a fallback for agents we
+  // didn't launch with a chosen id (e.g. opencode, or a reattached external one).
+  if (!store.get().resumeTabs[name]) {
+    const s = sessions[0]; // declared-agent-first, latest in this cwd
+    if (s) {
+      store.set({
+        resumeTabs: { ...store.get().resumeTabs, [name]: { editor: s.editor, sessionId: s.sessionId } },
+      });
+      console.log("[resume] recorded (probe)", name, "->", s.editor, s.sessionId.slice(0, 8));
+    } else {
+      console.log("[resume] killed", name, "(no id to resume)");
+    }
   } else {
-    console.log("[resume] NOT recorded (no session id) for", name, "cwd", meta?.cwd);
+    console.log("[resume] killed", name, "(keeping launch id)");
   }
   await invoke("kill_session", { name }).catch(console.error); // kill regardless of id resolution
   refreshSessions();
@@ -1091,6 +1084,12 @@ function foregroundProc(commands: string[]): string {
 // closing the tab exits it instead of leaving it resident. node/bun cover
 // claude/opencode launched through their JS shim.
 const AGENT_PROCS = new Set(["claude", "opencode", "node", "bun"]);
+// claude reports its VERSION ("2.1.193") as the process title, not "claude", so a
+// version-shaped foreground proc is an agent; opencode shows as "opencode.exe".
+// Without this, AGENT_PROCS never matches a live claude pane and close detaches
+// (leaving claude alive) instead of killing it.
+const looksLikeAgentProc = (p: string) =>
+  AGENT_PROCS.has(p) || /^\d+\.\d+/.test(p) || p.includes("opencode");
 const isPinnedSession = (name: string) => store.get().pinnedSessions.includes(name);
 function togglePinSession(name: string) {
   const cur = store.get().pinnedSessions;
@@ -1254,40 +1253,36 @@ function freshSessionName(clone: string, branch: string): string {
   return `${base}-${n}`;
 }
 
-// Open a tmux session for a worktree, optionally launching an agent the first
-// time it's created. `fresh` forces a brand-new session (suffixed name) even
-// when one already exists here; otherwise reattach/create the base session.
-async function openWorktree(
-  clone: string,
-  branch: string,
-  wtPath: string,
-  command?: string,
-  fresh = false,
-) {
+// Open a tmux session for a worktree. `fresh` mints a NEW conversation under a
+// suffixed name ("new · X"); otherwise it targets the base name and RESUMES the
+// session we last ran there if we know its id (double-click "take me to my
+// session here"). A still-live base session is reattached by tmux -A regardless
+// (open_session ignores the command on reattach), so the resume command only
+// matters when the base session was killed.
+function openWorktree(clone: string, branch: string, wtPath: string, command?: string, fresh = false) {
   const name = fresh ? freshSessionName(clone, branch) : baseSessionName(clone, branch);
-  openTab(name, { cwd: wtPath, command: await resumeCommand(command, wtPath) });
+  const known = store.get().resumeTabs[name];
+  const cmd = !fresh && known ? resumeLaunch(known.editor, known.sessionId) : newAgentLaunch(name, command);
+  openTab(name, { cwd: wtPath, command: cmd });
   refreshSessions();
 }
 
-// Turn a bare agent command into a resume-aware one for `cwd`: when autoResume
-// is on and the matching agent declares a resume flag, ask the backend for the
-// latest harness session id in this cwd and append `<flag> <id>` so the agent
-// continues its last conversation. No id (fresh worktree) -> launch blank.
-async function resumeCommand(
-  command: string | undefined,
-  cwd: string,
-): Promise<string | undefined> {
+// Launch a NEW agent conversation with a session id WE choose, so reopening this
+// tmux name later resumes exactly it — no guessing the latest jsonl in a cwd that
+// several sessions share (the "random old session" bug). Only claude supports
+// picking the id at launch (--session-id); other agents launch bare and fall back
+// to a close-time cwd probe. The id is recorded under the session name now, at
+// launch, overwriting any prior record for this name (a genuine new conversation).
+function newAgentLaunch(name: string, command: string | undefined): string | undefined {
   if (!command) return command;
-  const agent = store.get().wtAgents.find((a) => a.command === command);
-  if (!agent?.resume) return command;
-  const tool = command.trim().split(/\s+/)[0];
-  // "new · X" / double-click are explicitly NEW sessions: only resume when the
-  // user opted into "auto-resume latest". The killed-on-close record is reserved
-  // for the ⌘⇧T reopen gesture (see reopenLastTab), so opening a new session in a
-  // worktree you just closed an agent in doesn't silently reattach.
-  if (!store.get().autoResume) return command;
-  const id = await invoke<string | null>("harness_session", { tool, cwd }).catch(() => null);
-  return id ? `${command} ${agent.resume} ${id}` : command;
+  const bin = command.trim().split(/\s+/)[0]?.split("/").pop() ?? "";
+  if (bin === "claude" && !/\s--(resume|session-id|continue|from-pr)\b/.test(command)) {
+    const id = crypto.randomUUID();
+    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: "claude", sessionId: id } } });
+    console.log("[resume] launch", name, "-> claude --session-id", id.slice(0, 8));
+    return `${command} --session-id ${id}`;
+  }
+  return command;
 }
 
 // Resume flag per known harness binary; auto-attached so the simple text editor
@@ -1359,18 +1354,16 @@ function showAgentMenu(
     label: isFavWorktree(wtPath) ? "★ unfavorite" : "☆ favorite",
     action: () => toggleFavWorktree(wtPath),
   });
-  items.push({
-    label: `${store.get().autoResume ? "✓" : "○"} auto-resume latest`,
-    action: () => store.set({ autoResume: !store.get().autoResume }),
-  });
   items.push({ label: "edit agents…", action: openWtAgentsEditor });
   showContextMenu(x, y, items);
 }
 
-// Default-agent launch (first configured agent) for the double-click gesture.
+// Double-click a worktree: go to its default session — RESUME the one we last ran
+// here if it's known/killed (fresh=false targets the base name), else start one.
+// "new · X" in the menu is the path that forces a brand-new conversation.
 function openWorktreeDefault(clone: string, branch: string, wtPath: string) {
   const agent = store.get().wtAgents[0];
-  openWorktree(clone, branch, wtPath, agent?.command, true);
+  openWorktree(clone, branch, wtPath, agent?.command, false);
 }
 
 // ---- favorites (stars) + focus filter ----
