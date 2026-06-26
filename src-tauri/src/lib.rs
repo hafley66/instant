@@ -354,6 +354,81 @@ fn position_at_cursor(win: &WebviewWindow, cx: f64, cy: f64) {
     let _ = win.set_position(LogicalPosition::new(left, top));
 }
 
+// Drop a trailing :line or :line:col (editor/grep style) so "src/main.ts:42:5"
+// resolves as "src/main.ts". Only strips when the tail is all digits.
+fn strip_line_suffix(s: &str) -> &str {
+    let mut base = s;
+    for _ in 0..2 {
+        match base.rsplit_once(':') {
+            Some((head, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => {
+                base = head;
+            }
+            _ => break,
+        }
+    }
+    base
+}
+
+// Expand a leading ~ and resolve relative paths against the pane cwd.
+fn resolve_path(raw: &str, cwd: &str) -> Result<std::path::PathBuf, String> {
+    use std::path::PathBuf;
+    let home = || std::env::var_os("HOME").map(PathBuf::from).ok_or("no HOME");
+    let p = if raw == "~" {
+        home()?
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        home()?.join(rest)
+    } else {
+        PathBuf::from(raw)
+    };
+    Ok(if p.is_absolute() { p } else { PathBuf::from(cwd).join(p) })
+}
+
+/// Open a path or URL the user ⌘-clicked in a terminal, iTerm2-style. URLs go to
+/// the default browser; existing paths open in their default app (Finder for a
+/// dir) via Launch Services. Relative paths + `~` resolve against the pane cwd;
+/// a trailing `:line[:col]` is stripped before the existence check. Hides the
+/// summon window so the opened app comes forward. Returns "url" | "path" for the
+/// front to log, or Err when nothing resolved (the caller ignores it silently).
+#[tauri::command]
+fn open_target(app: AppHandle, target: String, cwd: String) -> Result<String, String> {
+    let t = target.trim();
+    if t.is_empty() {
+        return Err("empty".into());
+    }
+    // URL: a bare www. host, or an explicit scheme://… with an alnum+[-+.] scheme.
+    let scheme_ok = t.split_once("://").is_some_and(|(s, _)| {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+    });
+    let hide_window = || {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.hide();
+        }
+    };
+    if t.starts_with("www.") || scheme_ok {
+        let url = if t.starts_with("www.") {
+            format!("https://{t}")
+        } else {
+            t.to_string()
+        };
+        std::process::Command::new("/usr/bin/open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        hide_window();
+        return Ok("url".into());
+    }
+    let path = resolve_path(strip_line_suffix(t), &cwd)?;
+    if !path.exists() {
+        return Err(format!("not found: {}", path.display()));
+    }
+    std::process::Command::new("/usr/bin/open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    hide_window();
+    Ok("path".into())
+}
+
 /// Interactive screen-region capture to a temp PNG; returns the file path.
 /// Uses macOS `screencapture -i` (the crosshair selector). If the user presses
 /// Esc no file is written, which we report as an error so the front skips it.
@@ -526,6 +601,7 @@ pub fn run() {
             sprefa_plugin::commands::sprefa_query_sql,
             sprefa_plugin::commands::sprefa_rel_source,
             screenshot,
+            open_target,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

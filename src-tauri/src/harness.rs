@@ -2,7 +2,7 @@
 // the UI can launch `claude --resume <id>` / `opencode --session <id>` instead
 // of a blank conversation. Each harness keys its sessions by working directory;
 // we read that mapping straight from its on-disk store (no harness invocation):
-//   - claude:   ~/.claude/projects/<cwd with '/'->'-'>/<uuid>.jsonl, newest mtime
+//   - claude:   ~/.claude/projects/<cwd, non-alnum->'-'>/<uuid>.jsonl, newest mtime
 //   - opencode: ~/.local/share/opencode/opencode.db, session table by directory
 // Returns None when no session exists (fresh worktree) -> caller launches blank.
 
@@ -14,10 +14,14 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-// claude encodes the project dir by replacing every '/' with '-' (leading slash
-// becomes a leading '-'), then stores one <session-uuid>.jsonl per conversation.
+// claude encodes the project dir by replacing every non-alphanumeric char with
+// '-' (so '/', '.', '_', space all collapse to '-'; a '.worktrees' segment turns
+// into '-worktrees'), then stores one <session-uuid>.jsonl per conversation.
 fn latest_claude_session(cwd: &str) -> Option<String> {
-    let enc = cwd.replace('/', "-");
+    let enc: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
     let dir = home()?.join(".claude").join("projects").join(enc);
     let mut newest: Option<(SystemTime, String)> = None;
     for entry in fs::read_dir(&dir).ok()? {

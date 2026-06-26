@@ -376,6 +376,42 @@ function blockTextAt(id: string, clientY: number): string {
     .trim();
 }
 
+// The whitespace-delimited token under a pointer cell, for ⌘-click open. Maps
+// clientX/Y → buffer cell, reads that row's text, expands around the column over
+// non-space chars, then trims wrapping brackets/quotes + trailing sentence
+// punctuation (keeping a `:line:col` suffix, whose digits aren't stripped).
+function tokenAt(id: string, clientX: number, clientY: number): string {
+  const t = tabs.get(id);
+  if (!t) return "";
+  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
+  const rect = screen.getBoundingClientRect();
+  const cellH = rect.height / t.term.rows || 1;
+  const cellW = rect.width / t.term.cols || 1;
+  let row = Math.floor((clientY - rect.top) / cellH);
+  let col = Math.floor((clientX - rect.left) / cellW);
+  row = Math.max(0, Math.min(t.term.rows - 1, row));
+  col = Math.max(0, Math.min(t.term.cols - 1, col));
+  const buf = t.term.buffer.active;
+  const line = buf.getLine(buf.viewportY + row);
+  if (!line) return "";
+  const text = line.translateToString(true);
+  if (col >= text.length || /\s/.test(text[col] ?? "")) return "";
+  let lo = col;
+  let hi = col;
+  while (lo > 0 && !/\s/.test(text[lo - 1])) lo--;
+  while (hi < text.length - 1 && !/\s/.test(text[hi + 1])) hi++;
+  return text
+    .slice(lo, hi + 1)
+    .replace(/^[('"<[{]+/, "")
+    .replace(/[.,;:)\]}>'"]+$/, "");
+}
+
+// Cheap front gate so a ⌘-click on a plain word does nothing (no window hide):
+// a URL scheme, a www. host, or a token bearing a slash/dot/tilde path marker.
+function looksOpenable(tok: string): boolean {
+  return /:\/\//.test(tok) || /^www\./.test(tok) || /[/~]/.test(tok) || /\.[a-z0-9]/i.test(tok);
+}
+
 const normText = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
 // The search query for a right-click: the live selection if there is one, else
@@ -578,7 +614,21 @@ function togglePinActiveTab() {
 const closedTabs: OpenTab[] = [];
 function reopenLastTab() {
   const last = closedTabs.pop();
-  if (last) openTab(last.name, { command: last.command, cwd: last.cwd });
+  if (!last) return;
+  // ⌘⇧T is the "bring back what I just closed" gesture — so if we exited an agent
+  // here, resume its conversation (cwd-keyed killed record) instead of replaying
+  // the stale original command. Consumed on use. "new · X" never comes through
+  // here, so a fresh session stays fresh.
+  const killed = last.cwd ? store.get().resumeTabs[last.cwd] : undefined;
+  let command = last.command;
+  if (killed) {
+    command = resumeLaunch(killed.editor, killed.sessionId);
+    const rest = { ...store.get().resumeTabs };
+    delete rest[last.cwd!];
+    store.set({ resumeTabs: rest });
+    console.log("[resume] ⌘⇧T", last.name, "->", command);
+  }
+  openTab(last.name, { command, cwd: last.cwd });
 }
 
 // Float pinned tabs to the left of the bar, in pinnedTabs order. Each open
@@ -697,19 +747,9 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
     return;
   }
 
-  // Reopen of an agent we exited on close: when the caller gave no command but a
-  // cwd, relaunch with --resume <id> from the cwd-keyed record (the worktree
-  // open path resolves resume itself via resumeCommand). Consumed on use.
-  const resumeCwd = opts.cwd;
-  if (opts.command == null && resumeCwd) {
-    const resume = store.get().resumeTabs[resumeCwd];
-    if (resume) {
-      opts = { ...opts, command: resumeLaunch(resume.editor, resume.sessionId) };
-      const rest = { ...store.get().resumeTabs };
-      delete rest[resumeCwd];
-      store.set({ resumeTabs: rest });
-    }
-  }
+  // openTab is mechanical: it opens exactly the command it's handed. Resume is a
+  // deliberate gesture (⌘⇧T reopen, or the worktree "auto-resume latest" toggle),
+  // resolved by the caller — NOT here — so "new · X" stays a fresh session.
 
   // Visible confirmation that a reopen actually resumed (vs started fresh) —
   // matches either reopen path since both bake the --resume/--session flag in.
@@ -743,6 +783,32 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   term.open(el);
 
   tabs.set(id, { id, name, term, fit, el });
+
+  // ⌘-click a path or URL to open it (iTerm2 semantic-history). Capture phase +
+  // stop so xterm never starts a selection. Only handles tokens that look like a
+  // path/url; anything else falls through to the focus handler below.
+  el.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!e.metaKey || e.button !== 0) return;
+      const tok = tokenAt(id, e.clientX, e.clientY);
+      if (!tok || !looksOpenable(tok)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const cwd = tabMetaById(id)?.cwd ?? "";
+      invoke<string>("open_target", { target: tok, cwd })
+        .then((kind) =>
+          invoke("activity_log", {
+            source: "session",
+            kind: "open",
+            title: tok,
+            text: `${kind}: ${tok}`,
+          }).catch(() => {}),
+        )
+        .catch(() => {}); // unresolved path/url: ignore silently
+    },
+    { capture: true },
+  );
 
   // Click anywhere in the host (incl. padding around the xterm) focuses the
   // terminal, so keyboard + scroll work without hunting for the text area.
@@ -795,6 +861,13 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
       return false;
     };
     const only = (a: boolean, b: boolean, c: boolean) => a && !b && !c;
+    // Shift+Enter: insert a newline instead of submitting. At the byte level
+    // Shift+Enter == Enter (both \r); the only way claude/opencode can tell them
+    // apart is the Kitty keyboard protocol's CSI-u encoding: ESC [ 13 ; 2 u
+    // (13 = Enter, 2 = Shift). tmux forwards this only with `extended-keys on`
+    // (see enable_extended_keys in pty.rs).
+    if (e.key === "Enter" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey)
+      return send("\x1b[13;2u");
     if (only(e.altKey, e.metaKey, e.ctrlKey)) {
       if (e.key === "ArrowLeft") return send("\x1bb"); // word back
       if (e.key === "ArrowRight") return send("\x1bf"); // word forward
@@ -890,12 +963,20 @@ function onTermClosed(id: string) {
   // Remember it for reopen (⌘⇧T), carrying the original command/cwd.
   const meta = store.get().openTabs.find((o) => o.name === name);
   closedTabs.push({ name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
+  // The exact cwds ⌘⇧T can key on: the pane cwd where the agent ran (tabMeta.cwd)
+  // and the path the tab was opened with (openTabs.cwd, what closedTabs stores as
+  // last.cwd). Captured NOW, before forgetTab clears the record. Kept precise (no
+  // enclosing-worktree widening) so two tabs in the same repo don't cross-resume.
+  const recordKeys = [
+    ...(tabMeta ? [tabMeta.cwd] : []),
+    ...(meta?.cwd ? [meta.cwd] : []),
+  ];
   forgetTab(id); // don't reattach a tab the user closed
   // Agent tab → kill the tmux session so claude/opencode isn't left burning RAM
   // (recording its id for --resume first). Anything else → detach the pty; the
   // tmux session survives (so a reload reattaches it). Decided async because the
   // on-disk session probe is async; see exitOrDetachTab.
-  void exitOrDetachTab(id, name, tabMeta, proc);
+  void exitOrDetachTab(id, name, tabMeta, proc, recordKeys);
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -917,6 +998,7 @@ async function exitOrDetachTab(
   name: string,
   meta: { cwd: string; command: string | null } | null,
   proc: string,
+  recordKeys: string[] = [],
 ) {
   const sessions = meta ? await tabSessions(meta.cwd, meta.command) : [];
   const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
@@ -931,13 +1013,17 @@ async function exitOrDetachTab(
   }
   const s = sessions[0]; // declared-agent-first, latest
   if (s && meta) {
-    // Key by cwd (reopen mints a fresh tmux name, so name keys never recur). The
-    // live pane cwd is where claude ran, but a worktree reopen passes the scan's
-    // worktree-root path — record under BOTH so either reopen path matches.
+    // Key by cwd (reopen mints a fresh tmux name, so name keys never recur).
+    // Record only under the precise cwds ⌘⇧T will look up (recordKeys), so a
+    // reopen resumes the tab actually closed and nothing else.
     const val = { editor: s.editor, sessionId: s.sessionId };
-    const next = { ...store.get().resumeTabs, [meta.cwd]: val };
-    for (const wt of worktreesForPaths([meta.cwd], store.get().worktrees)) next[wt] = val;
+    const keys = new Set<string>([meta.cwd, ...recordKeys].filter(Boolean));
+    const next = { ...store.get().resumeTabs };
+    for (const k of keys) next[k] = val;
     store.set({ resumeTabs: next });
+    console.log("[resume] recorded", s.editor, s.sessionId.slice(0, 8), "under", [...keys]);
+  } else {
+    console.log("[resume] NOT recorded (no session id) for", name, "cwd", meta?.cwd);
   }
   await invoke("kill_session", { name }).catch(console.error); // kill regardless of id resolution
   refreshSessions();
@@ -1195,16 +1281,10 @@ async function resumeCommand(
   const agent = store.get().wtAgents.find((a) => a.command === command);
   if (!agent?.resume) return command;
   const tool = command.trim().split(/\s+/)[0];
-  // A session we killed on close for this cwd → always bring it back, even if
-  // auto-resume-latest is off (closing then reopening is an explicit continue).
-  // Consume the record so a later fresh open isn't pinned to the old id.
-  const killed = store.get().resumeTabs[cwd]?.sessionId;
-  if (killed) {
-    const rest = { ...store.get().resumeTabs };
-    delete rest[cwd];
-    store.set({ resumeTabs: rest });
-    return `${command} ${agent.resume} ${killed}`;
-  }
+  // "new · X" / double-click are explicitly NEW sessions: only resume when the
+  // user opted into "auto-resume latest". The killed-on-close record is reserved
+  // for the ⌘⇧T reopen gesture (see reopenLastTab), so opening a new session in a
+  // worktree you just closed an agent in doesn't silently reattach.
   if (!store.get().autoResume) return command;
   const id = await invoke<string | null>("harness_session", { tool, cwd }).catch(() => null);
   return id ? `${command} ${agent.resume} ${id}` : command;
