@@ -1232,6 +1232,72 @@ body[data-mode="dark"] .act-last.ok {
 .wt-scan input.wt-space-input {
   flex: 0 1 40%;
 }
+
+/* One-shot corner toast (favorite saved / nothing to favorite). */
+.app-toast {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 9999;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #000);
+  border: 1px solid var(--frame, #888);
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+.app-toast.on {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Favorites panel: stacked turn cards with a header row + preview line. */
+.fav-list {
+  padding: 2px;
+}
+.fav-row {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--frame, #ddd);
+}
+.fav-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.fav-badge {
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+.fav-badge.fav-opencode {
+  background: #8b5cf6;
+}
+.fav-role {
+  opacity: 0.7;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.fav-when {
+  opacity: 0.5;
+  font-size: 10px;
+}
+.fav-preview {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  max-height: 3.6em;
+  overflow: hidden;
+  opacity: 0.9;
+  cursor: default;
+}
 .wt-table {
   flex: 1;
   min-height: 0;

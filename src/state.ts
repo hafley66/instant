@@ -108,6 +108,28 @@ export interface ConfigView {
   excluded_count: number;
 }
 
+// One AI-harness turn read off disk (Rust ledger::AiMessage). Identity is
+// (editor, session_id, id); `text` is the full extracted plain text.
+export interface AiMessage {
+  editor: "claude" | "opencode";
+  session_id: string;
+  id: string;
+  seq: number;
+  role: string;
+  ts: number;
+  preview: string;
+  text: string;
+  locator: string;
+}
+
+// A favorited turn (Rust favorites::Fav) — a snapshot persisted to favorites.db,
+// surfaced here as runtime state (the db, not localStorage, is authoritative).
+export interface Fav extends AiMessage {
+  message_id: string; // = AiMessage.id (the db column name)
+  cwd: string;
+  created: number;
+}
+
 // A reattachable tab: enough to re-`open_session` after a frontend reload. The
 // tmux session (and the agent inside) survives in the Rust backend; only the
 // xterm wiring is lost on reload, so we replay these on boot.
@@ -170,6 +192,7 @@ export interface AppState {
   terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
   activity: Event[]; // unified activity timeline (runtime)
+  aiFavs: Fav[]; // favorited AI turns, mirrored from favorites.db (runtime)
   activitySource: ActivitySource; // source filter chip (persisted)
   activityType: ActivityType; // event-type sub-filter chip (persisted)
   activityQuery: string; // fuzzy search box (runtime)
@@ -265,6 +288,7 @@ function load(): AppState {
     terminalTabs: [],
     worktrees: [],
     activity: [],
+    aiFavs: [],
     activitySource: loadKey<ActivitySource>("activitySource", "all"),
     activityType: loadKey<ActivityType>("activityType", "all"),
     activityQuery: "",

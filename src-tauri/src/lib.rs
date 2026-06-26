@@ -1,8 +1,10 @@
 mod activity;
 mod capture;
 mod config;
+mod favorites;
 mod fs;
 mod harness;
+mod ledger;
 mod pty;
 mod sprefa_plugin;
 mod workspace;
@@ -357,6 +359,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(pty::PtyStore::default())
         .manage(workspace::Workspaces::default())
+        .manage(favorites::Favorites::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -394,6 +397,9 @@ pub fn run() {
             // Hydrate the workspace registry from disk.
             let loaded = workspace::load(app.handle());
             *app.state::<workspace::Workspaces>().0.lock().unwrap() = loaded;
+
+            // Open (create) the favorited-AI-turns db.
+            favorites::init(app.handle());
 
             // Unified activity store + localhost ingest endpoint for the extension.
             let data_dir = app.path().app_data_dir()?;
@@ -479,6 +485,12 @@ pub fn run() {
             fs::read_image,
             fs::read_text,
             harness::harness_session,
+            ledger::list_ai_sessions,
+            ledger::read_ai_messages,
+            ledger::latest_ai_message,
+            favorites::fav_add,
+            favorites::fav_remove,
+            favorites::fav_list,
             sprefa_plugin::commands::sprefa_schema,
             sprefa_plugin::commands::sprefa_ping,
             sprefa_plugin::commands::sprefa_eval,

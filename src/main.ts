@@ -27,6 +27,8 @@ import {
   type ConfigView,
   type DirListing,
   type Event,
+  type AiMessage,
+  type Fav,
   type FsEntry,
   type OpenTab,
   type Skin,
@@ -41,10 +43,12 @@ import {
   WorktreesPanelV2,
   FilesPanelV2,
   ActivityPanelV2,
+  FavoritesPanelV2,
   setTmuxPanel,
   setWorktreesPanel,
   setFilesPanel,
   setActivityPanel,
+  setFavoritesPanel,
   type TmuxRow,
   type WtTreeRow,
   type FsRow,
@@ -200,6 +204,98 @@ function activeTabName(): string {
   return id ? id.slice(sessionId("").length) : "";
 }
 
+// Transient corner toast for one-shot feedback (favorite saved, nothing to
+// favorite, …). Self-removing; reuses one node so rapid calls don't stack.
+let toastEl: HTMLElement | null = null;
+let toastTimer: number | null = null;
+function flashStatus(msg: string) {
+  if (!toastEl) {
+    toastEl = document.createElement("div");
+    toastEl.className = "app-toast";
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = msg;
+  toastEl.classList.add("on");
+  if (toastTimer !== null) clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl?.classList.remove("on"), 1800);
+}
+
+// ---- favorited AI turns (ledger.rs reads, favorites.db persists) ----
+// The agent + cwd behind the active tab, derived from its launch command. cwd
+// keys both the harness session lookup and the claude ledger path; the command's
+// first token tells claude vs opencode (null/other = a plain shell, no harness).
+function activeHarness(): { editor: "claude" | "opencode"; cwd: string } | null {
+  const name = activeTabName();
+  if (!name) return null;
+  const tab = store.get().openTabs.find((t) => t.name === name);
+  const cwd = tab?.cwd;
+  if (!cwd) return null;
+  const bin = (tab?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
+  if (bin === "claude" || bin === "opencode") return { editor: bin, cwd };
+  return null;
+}
+
+// Favorite the latest turn of the active tab's harness session. cwd → latest
+// session id (harness_session) → newest message (latest_ai_message) → fav_add,
+// which snapshots it into favorites.db and returns the fresh list.
+async function favoriteCurrentTurn() {
+  const h = activeHarness();
+  if (!h) {
+    flashStatus("no AI session in this tab");
+    return;
+  }
+  const sessionId = await invoke<string | null>("harness_session", {
+    tool: h.editor,
+    cwd: h.cwd,
+  }).catch(() => null);
+  if (!sessionId) {
+    flashStatus(`no ${h.editor} session for this folder`);
+    return;
+  }
+  const msg = await invoke<AiMessage | null>("latest_ai_message", {
+    editor: h.editor,
+    sessionId,
+    cwd: h.cwd,
+  }).catch(() => null);
+  if (!msg) {
+    flashStatus("no turn found yet");
+    return;
+  }
+  const favs = await invoke<Fav[]>("fav_add", { msg, cwd: h.cwd }).catch((e) => {
+    console.error("fav_add", e);
+    return null;
+  });
+  if (favs) {
+    store.set({ aiFavs: favs });
+    flashStatus(`★ favorited ${msg.role} turn`);
+  }
+}
+
+function registerFavoritesBridge() {
+  setFavoritesPanel({
+    favs: () => store.get().aiFavs,
+    onShow: () => refreshFavorites(),
+    copy: (f) => navigator.clipboard.writeText(f.text).catch(() => {}),
+    // The locator (claude:<path>#L<n> / opencode:#msg=<id>) is the on-disk
+    // address; copy it so it can be pasted/opened. A real reveal is phase-2.
+    locate: (f) => navigator.clipboard.writeText(f.locator).catch(() => {}),
+    remove: (f) =>
+      invoke<Fav[]>("fav_remove", {
+        editor: f.editor,
+        sessionId: f.session_id,
+        messageId: f.message_id,
+      })
+        .then((favs) => store.set({ aiFavs: favs }))
+        .catch((e) => console.error("fav_remove", e)),
+  });
+}
+
+function refreshFavorites() {
+  invoke<Fav[]>("fav_list")
+    .then((favs) => store.set({ aiFavs: favs }))
+    .catch(() => {});
+}
+
 // ---- pinned terminal tabs (persisted by session name) ----
 // Visual is a 📌 prefix on the dockview tab title, pushed via reactdock's
 // setTermTitle (a public API) so we don't have to touch reactdock's renderer.
@@ -290,6 +386,8 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.open", keys: ["$mod+t"], run: openTabAtPwd },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], run: reopenLastTab },
   { id: "tab.pin", keys: ["$mod+Shift+p"], run: togglePinActiveTab },
+  // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
+  { id: "ai.favTurn", keys: ["$mod+Shift+s"], run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
   // the app (tmux sessions outlive the reload, so nothing is lost).
   { id: "app.reload", keys: ["$mod+r"], run: () => location.reload() },
@@ -2505,6 +2603,15 @@ function registerBuiltin() {
         component: ActivityPanelV2,
       },
       {
+        id: "favorites",
+        title: "Favorites",
+        icon: "★",
+        iconLabel: "Favorites",
+        html: "",
+        component: FavoritesPanelV2,
+        onShow: () => refreshFavorites(),
+      },
+      {
         id: "config",
         title: "Config",
         icon: "⚙",
@@ -3038,6 +3145,8 @@ async function main() {
   registerV2Bridges();
   registerFilesBridge();
   registerActivityBridge();
+  registerFavoritesBridge();
+  refreshFavorites();
   injectPanelHtml();
   buildActivityRail();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail
@@ -3095,6 +3204,13 @@ async function main() {
   // drives the Activity panel's live status line + permission banner.
   await listen<CaptureStatus>("capture-status", (e) => {
     store.set({ captureStatus: e.payload });
+  });
+
+  // favorites.db mutated (add/remove) — refresh the mirror so any open panel
+  // re-renders. The emitting command also returns the list, but this keeps
+  // multiple windows / out-of-band edits in sync.
+  await listen<Fav[]>("favorites-changed", (e) => {
+    store.set({ aiFavs: e.payload });
   });
 
   // Summon: replay entrance animation + refocus active terminal.

@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "./useStore";
 import { TreeTable, type TreeColumn } from "./treetable";
 import type { SortingState } from "@tanstack/react-table";
-import type { SessionSort, SessionSortKey } from "./state";
+import type { SessionSort, SessionSortKey, Fav } from "./state";
 
 // ---- tmux v2 ----
 export interface TmuxRow {
@@ -835,6 +835,80 @@ export function ActivityPanelV2() {
           />
         ) : (
           <ActivitySetup />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- favorites (saved AI turns) ----
+// Flat list of favorited harness messages (a snapshot from favorites.db). Each
+// row: editor + role + relative time + preview, with copy / locate / remove.
+export interface FavBridge {
+  favs: () => Fav[];
+  onShow?: () => void;
+  copy: (f: Fav) => void; // full text → clipboard
+  locate: (f: Fav) => void; // reveal the source (jsonl line / db id)
+  remove: (f: Fav) => void;
+}
+let favBridge: FavBridge | null = null;
+export function setFavoritesPanel(b: FavBridge) {
+  favBridge = b;
+}
+
+function favWhen(ts: number): string {
+  if (!ts) return "";
+  const d = Date.now() - ts;
+  const m = Math.floor(d / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+export function FavoritesPanelV2() {
+  useApp();
+  const b = favBridge;
+  useEffect(() => {
+    b?.onShow?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const favs = b?.favs() ?? [];
+  return (
+    <div className="v2-panel">
+      <div className="act-bar">
+        <span className="spy-title">favorites</span>
+        <span className="wt-count">{favs.length ? `${favs.length} saved` : ""}</span>
+      </div>
+      <div className="panel-scroll fav-list">
+        {favs.length === 0 ? (
+          <div className="session-empty">
+            no saved turns — favorite the current turn from a terminal
+          </div>
+        ) : (
+          favs.map((f) => (
+            <div className="fav-row" key={`${f.editor}:${f.session_id}:${f.message_id}`}>
+              <div className="fav-head">
+                <span className={"fav-badge fav-" + f.editor}>{f.editor}</span>
+                <span className={"fav-role fav-role-" + f.role}>{f.role}</span>
+                <span className="fav-when">{favWhen(f.created)}</span>
+                <span className="spy-spacer" />
+                <button className="wt-act" title="copy full text" onClick={() => b?.copy(f)}>
+                  copy
+                </button>
+                <button className="wt-act" title="reveal source" onClick={() => b?.locate(f)}>
+                  locate
+                </button>
+                <button className="wt-act" title="remove favorite" onClick={() => b?.remove(f)}>
+                  ×
+                </button>
+              </div>
+              <div className="fav-preview" title={f.locator}>
+                {f.preview}
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>
