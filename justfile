@@ -17,6 +17,12 @@ default:
 dev:
     CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
 
+# one-time: install the Tauri CLI machine-global (~/.cargo/bin, on PATH across
+# all checkouts and nvm node versions) so any repo can run `cargo tauri …` /
+# `tauri …` without the per-checkout node_modules devDep.
+install-cli:
+    cargo install tauri-cli --version "^2" --locked
+
 # one-time: create the self-signed "Instant Dev" code-signing identity used by
 # the dev linker shim. Prompts for your login-keychain password (and the first
 # build will ask to allow codesign to use the key — click "Always Allow").
