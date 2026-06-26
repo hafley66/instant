@@ -221,6 +221,7 @@ export interface AppState {
   wtFocus: boolean; // when on, the worktree view shows only starred rows
   wtAddingClone: string | null; // clone path whose inline "+ worktree" branch input is open (runtime)
   wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
+  aiEnabled: boolean; // master switch for AI integrations; off hides wtAgents from the launch pickers (persisted, default true)
   clickRules: ClickRule[]; // ⌘-click token -> shell command table (persisted)
   autoResume: boolean; // when on, launching an agent resumes its latest session in that cwd (persisted, default true)
   pinnedSessions: string[]; // tmux session names pinned to the top of the list (persisted)
@@ -283,6 +284,7 @@ const PERSIST: (keyof AppState)[] = [
   "spaces",
   "wtFocus",
   "wtAgents",
+  "aiEnabled",
   "clickRules",
   "autoResume",
   "pinnedSessions",
@@ -376,6 +378,7 @@ function load(): AppState {
     wtFocus: loadKey<boolean>("wtFocus", false),
     wtAddingClone: null,
     wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
+    aiEnabled: loadKey<boolean>("aiEnabled", true),
     clickRules: loadKey<ClickRule[]>("clickRules", DEFAULT_CLICK_RULES),
     autoResume: loadKey<boolean>("autoResume", true),
     pinnedSessions: loadKey<string[]>("pinnedSessions", []),

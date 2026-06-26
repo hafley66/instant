@@ -458,6 +458,15 @@ export function addPreviewPanel(
 export function isPreviewOpen(path: string): boolean {
   return !!api?.getPanel(PREVIEW + path);
 }
+// Focus an already-open preview panel by its key (the path/key passed to
+// addPreviewPanel). Used for "back" routing from a file preview to the rg results
+// panel it was opened from. No-op if that panel was since closed.
+export function activatePreviewPanel(key: string): boolean {
+  const p = api?.getPanel(PREVIEW + key);
+  if (!p) return false;
+  p.api.setActive();
+  return true;
+}
 export function closePreviewPanel(path: string) {
   const p = api?.getPanel(PREVIEW + path);
   if (p) api!.removePanel(p);

@@ -68,6 +68,7 @@ import {
   onDockChange,
   addPreviewPanel,
   isPreviewOpen,
+  activatePreviewPanel,
   addTermPanel,
   focusTermPanel,
   removeTermPanel,
@@ -824,21 +825,40 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
       if (!line) return cb(undefined);
       const text = line.translateToString(true);
       const links: ILink[] = [];
+      const activate = (e: MouseEvent, t: string) => {
+        if (!e.metaKey) return; // ⌘ required; plain click stays with the app
+        dispatchClick(t, tabMetaById(id)?.cwd ?? "");
+      };
+      // Quoted spans first: '…'/"…"/`…` is one openable unit (paths with spaces).
+      // Record the quote columns so the \S+ pass below skips the fragments inside.
+      const spans: Array<{ o: number; c: number }> = [];
+      for (const m of text.matchAll(/(['"`])(.+?)\1/g)) {
+        const inner = m[2];
+        if (!inner.trim()) continue;
+        const o = m.index ?? 0; // opening-quote col
+        const c = o + m[0].length - 1; // closing-quote col
+        spans.push({ o, c });
+        const start = o + 1; // inner content col (0-based)
+        links.push({
+          text: inner,
+          range: { start: { x: start + 1, y }, end: { x: start + inner.length, y } },
+          activate,
+        });
+      }
       for (const m of text.matchAll(/\S+/g)) {
+        const idx0 = m.index ?? 0;
+        if (spans.some((s) => idx0 >= s.o && idx0 <= s.c)) continue; // inside a quoted span
         const raw = m[0];
         // Strip wrapping punctuation, tracking the offset for column math.
         const lead = raw.match(/^[('"<[{]+/)?.[0].length ?? 0;
         const trail = raw.match(/[.,;:)\]}>'"]+$/)?.[0].length ?? 0;
         const tok = raw.slice(lead, raw.length - trail);
         if (!tok || !looksOpenable(tok)) continue;
-        const start = (m.index ?? 0) + lead; // 0-based col
+        const start = idx0 + lead; // 0-based col
         links.push({
           text: tok,
           range: { start: { x: start + 1, y }, end: { x: start + tok.length, y } },
-          activate(e, t) {
-            if (!e.metaKey) return; // ⌘ required; plain click stays with the app
-            dispatchClick(t, tabMetaById(id)?.cwd ?? "");
-          },
+          activate,
         });
       }
       cb(links);
@@ -1416,12 +1436,13 @@ function showAgentMenu(
     });
   }
   if (live.length) items.push({ sep: true });
-  for (const a of store.get().wtAgents) {
-    items.push({
-      label: `new · ${a.label}`,
-      action: () => openWorktree(clone, branch, wtPath, a.command, true),
-    });
-  }
+  if (store.get().aiEnabled)
+    for (const a of store.get().wtAgents) {
+      items.push({
+        label: `new · ${a.label}`,
+        action: () => openWorktree(clone, branch, wtPath, a.command, true),
+      });
+    }
   items.push({
     label: dirty ? "new shell · uncommitted changes" : "new shell",
     action: () => openWorktree(clone, branch, wtPath, undefined, true),
@@ -1439,7 +1460,8 @@ function showAgentMenu(
 // here if it's known/killed (fresh=false targets the base name), else start one.
 // "new · X" in the menu is the path that forces a brand-new conversation.
 function openWorktreeDefault(clone: string, branch: string, wtPath: string) {
-  const agent = store.get().wtAgents[0];
+  // AI off: double-click opens a plain shell instead of the default agent.
+  const agent = store.get().aiEnabled ? store.get().wtAgents[0] : undefined;
   openWorktree(clone, branch, wtPath, agent?.command, false);
 }
 
@@ -1740,12 +1762,13 @@ function showSpaceMenu(r: WtTreeRow, x: number, y: number) {
     });
   }
   if (live.length) items.push({ sep: true });
-  for (const a of store.get().wtAgents) {
-    items.push({
-      label: `new · ${a.label}`,
-      action: () => openWorktree(path, "", path, a.command, true),
-    });
-  }
+  if (store.get().aiEnabled)
+    for (const a of store.get().wtAgents) {
+      items.push({
+        label: `new · ${a.label}`,
+        action: () => openWorktree(path, "", path, a.command, true),
+      });
+    }
   items.push({ label: "new shell", action: () => openWorktree(path, "", path, undefined, true) });
   items.push({ sep: true });
   items.push({
@@ -1775,6 +1798,16 @@ function renderWtAgentsEditor() {
     return;
   }
   host.innerHTML = "";
+  // Master switch: when off, the launch pickers hide all agent entries (shell
+  // only). Co-located with the agent list it governs.
+  const toggle = document.createElement("label");
+  toggle.className = "wt-ai-toggle";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = store.get().aiEnabled;
+  cb.onchange = () => store.set({ aiEnabled: cb.checked });
+  toggle.append(cb, document.createTextNode(" AI integrations"));
+  host.appendChild(toggle);
   const inp = document.createElement("input");
   inp.className = "wt-add-input";
   inp.placeholder = "label:command, … (e.g. claude, sonnet:claude --model sonnet)";
@@ -2591,6 +2624,54 @@ async function dispatchClick(rawToken: string, cwd: string) {
   if (out.trim()) openClickPanel(token, out, cwd, rule);
 }
 
+// cwd to search from when a ⌘-click happens outside a terminal: the focused
+// terminal tab's cwd (best proxy for "where am I"), else empty (run_click falls
+// back to HOME).
+const activeCwd = (): string =>
+  focusedTermId ? tabMetaById(focusedTermId)?.cwd ?? "" : "";
+
+// The word under a viewport point in DOM text (preview / rg panels). Mirrors the
+// terminal's wordAt: expands to whitespace, trimming the wrapping punctuation the
+// clickRules grep would choke on otherwise.
+function domWordAt(x: number, y: number): string {
+  const range = document.caretRangeFromPoint?.(x, y);
+  const node = range?.startContainer;
+  if (!range || !node || node.nodeType !== Node.TEXT_NODE) return "";
+  const text = node.nodeValue ?? "";
+  const quoted = quotedSpanAt(text, range.startOffset);
+  if (quoted) return quoted;
+  const isWord = (c: string | undefined) => !!c && /\S/.test(c) && !/['"<>(){}\[\],;:]/.test(c);
+  let a = range.startOffset;
+  let b = range.startOffset;
+  while (a > 0 && isWord(text[a - 1])) a--;
+  while (b < text.length && isWord(text[b])) b++;
+  return text.slice(a, b).trim();
+}
+
+// ⌘-click on free text inside a preview / rg panel runs the same clickRules
+// search as the terminal. Capture phase, so it beats the panels' own click
+// handlers; interactive bits (back, config link, hit rows, buttons) are skipped
+// so their own actions still fire on ⌘-click.
+function wireDomCmdClick() {
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!e.metaKey || e.button !== 0) return;
+      const t = e.target as HTMLElement;
+      if (t.closest(".term-host") || t.closest(".xterm")) return; // terminals self-handle
+      if (!t.closest(".fs-preview, .rg-panel")) return;
+      if (t.closest(".fs-back, .rg-cfg, .rg-file, .rg-hit, a, button")) return;
+      const sel = window.getSelection()?.toString().trim() ?? "";
+      const word = sel || domWordAt(e.clientX, e.clientY);
+      if (!word) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void dispatchClick(word, activeCwd());
+    },
+    { capture: true },
+  );
+}
+
 const clickPanelEls = new Map<string, HTMLElement>();
 
 // Adopt a per-query results node into a right-side panel (same plumbing as file
@@ -2647,7 +2728,9 @@ function renderClickOutput(el: HTMLElement, query: string, output: string, cwd: 
 
   el.innerHTML =
     `<div class="rg-head">${escapeHtml(query)}` +
-    (hitCount ? ` <span class="rg-count">${hitCount} in ${groups.length}</span>` : "") +
+    (hitCount
+      ? ` <span class="rg-count">${hitCount} match${hitCount === 1 ? "" : "es"} · ${groups.length} file${groups.length === 1 ? "" : "s"}</span>`
+      : "") +
     `</div>` +
     `<div class="rg-sub">ran <code>${escapeHtml(rule.command)}</code> · ` +
     `<a class="rg-cfg" href="#">config</a></div>` +
@@ -2661,41 +2744,73 @@ function renderClickOutput(el: HTMLElement, query: string, output: string, cwd: 
     node.addEventListener("click", () => {
       const p = node.getAttribute("data-path") ?? "";
       const ln = Number(node.getAttribute("data-line") ?? "0");
-      if (p) openPreviewPanel(resolve(p), ln > 0 ? ln : undefined);
+      if (!p) return;
+      const full = resolve(p);
+      previewOrigin.set(full, `rg:${query}`); // record before render so "← back" shows
+      openPreviewPanel(full, ln > 0 ? ln : undefined);
     }),
   );
 
-  // Syntax-highlight the match text after the plain rows are up (so the panel
-  // shows instantly). One shiki pass per file group — join its hits, highlight by
-  // the file's language, then swap each line's HTML back into its .rg-tx.
-  void highlightClickHits(el, groups);
+  // Highlight the matched token. NB: no shiki syntax-coloring on hit rows — it
+  // splits a row into per-token spans, so a multi-token / punctuated query (e.g.
+  // "markTokenInNode(root") spans several text nodes and the per-node search finds
+  // nothing. Plain text keeps each row as one text node, so the match (punctuation
+  // and all) is always found and wrapped.
+  markClickMatches(el, query);
 }
 
-async function highlightClickHits(el: HTMLElement, groups: RgGroup[]) {
-  const total = groups.reduce((n, g) => n + g.hits.length, 0);
-  if (total === 0 || total > 600) return; // keep large result sets snappy
-  const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
-  const groupEls = Array.from(el.querySelectorAll<HTMLElement>(".rg-group"));
-  await Promise.all(
-    groupEls.map(async (gEl, gi) => {
-      const g = groups[gi];
-      if (!g) return;
-      const name = g.path.split("/").pop() ?? g.path;
-      const ext = (name.includes(".") ? name.split(".").pop()! : name).toLowerCase();
-      const lang = SHIKI_LANG[ext];
-      if (!lang) return; // unknown language: leave the plain rows
-      let html: string;
-      try {
-        html = await codeToHtml(g.hits.map((h) => h.text).join("\n"), { lang, theme });
-      } catch {
-        return;
-      }
-      const spans = new DOMParser().parseFromString(html, "text/html").querySelectorAll(".line");
-      gEl.querySelectorAll<HTMLElement>(".rg-tx").forEach((tx, i) => {
-        if (spans[i]) tx.innerHTML = spans[i].innerHTML;
-      });
-    }),
-  );
+// Wrap each occurrence of the searched token inside the hit rows with a
+// translucent highlighter, superscripted with its 1-based global index — so the
+// "N matches" count is visible at a glance (you can find all N, not just the
+// files). Operates on text nodes, so it works whether or not shiki colored the
+// row, and a match nested inside a colored span is still wrapped.
+function markClickMatches(el: HTMLElement, query: string) {
+  const q = query.trim();
+  if (!q) return;
+  const txs = Array.from(el.querySelectorAll<HTMLElement>(".rg-tx"));
+  if (txs.length === 0 || txs.length > 1000) return; // keep huge result sets snappy
+  const lc = q.toLowerCase();
+  let idx = 0;
+  for (const tx of txs) {
+    // Unwrap any prior marks first so re-runs (e.g. after shiki recolors a row)
+    // re-index cleanly instead of nesting <mark> inside <mark>. The match text is
+    // the mark's first child; the <sup> badge is dropped.
+    tx.querySelectorAll<HTMLElement>(".rg-mark").forEach((m) => {
+      m.replaceWith(document.createTextNode(m.childNodes[0]?.nodeValue ?? ""));
+    });
+    tx.normalize();
+    idx = markTokenInNode(tx, lc, q.length, idx);
+  }
+}
+
+function markTokenInNode(root: HTMLElement, lc: string, len: number, startIdx: number): number {
+  let idx = startIdx;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) textNodes.push(n as Text);
+  for (const tn of textNodes) {
+    const text = tn.nodeValue ?? "";
+    const hay = text.toLowerCase();
+    if (!hay.includes(lc)) continue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (let pos = hay.indexOf(lc); pos >= 0; pos = hay.indexOf(lc, last)) {
+      if (pos > last) frag.appendChild(document.createTextNode(text.slice(last, pos)));
+      const mark = document.createElement("mark");
+      mark.className = "rg-mark";
+      mark.textContent = text.slice(pos, pos + len);
+      idx += 1;
+      const badge = document.createElement("span");
+      badge.className = "rg-idx";
+      badge.textContent = String(idx);
+      mark.appendChild(badge);
+      frag.appendChild(mark);
+      last = pos + len;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    tn.parentNode?.replaceChild(frag, tn);
+  }
+  return idx;
 }
 
 // The ⌘-click action table, editable in-app. This is our "internal routing": the
@@ -2745,9 +2860,28 @@ function renderClickConfig(el: HTMLElement) {
   });
 }
 
+// If `col` (0-based) sits inside a '…' / "…" / `…` span, return the unquoted
+// contents — spaces and all — so ⌘-click treats a quoted path (e.g. a screenshot
+// path with spaces) as one token instead of splitting on whitespace.
+function quotedSpanAt(text: string, col: number): string | null {
+  for (const q of ["'", '"', "`"]) {
+    let from = 0;
+    for (;;) {
+      const open = text.indexOf(q, from);
+      if (open < 0) break;
+      const close = text.indexOf(q, open + 1);
+      if (close < 0) break;
+      if (col > open && col < close) return text.slice(open + 1, close);
+      from = close + 1;
+    }
+  }
+  return null;
+}
+
 // The word/path token under the pointer, for a ⌘-click miss (no link hit). Uses
 // the screen-cell geometry to map clientX/Y to a buffer cell, then expands to the
-// surrounding non-whitespace run and strips wrapping punctuation.
+// surrounding non-whitespace run and strips wrapping punctuation. A quoted span
+// under the cursor wins (so spaces inside quotes stay together).
 function wordAt(id: string, clientX: number, clientY: number): string {
   const t = tabs.get(id);
   if (!t) return "";
@@ -2761,6 +2895,8 @@ function wordAt(id: string, clientX: number, clientY: number): string {
   const line = buf.getLine(buf.viewportY + row);
   if (!line) return "";
   const text = line.translateToString(true);
+  const quoted = quotedSpanAt(text, col);
+  if (quoted) return quoted;
   if (col >= text.length || /\s/.test(text[col] ?? "")) return "";
   let lo = col;
   let hi = col;
@@ -2779,6 +2915,12 @@ function wordAt(id: string, clientX: number, clientY: number): string {
 type PreviewInst = { el: HTMLElement; line?: number };
 const previewInsts = new Map<string, PreviewInst>();
 
+// Internal routing: which panel a file preview was opened FROM (an rg results
+// panel), so the preview's "← back" returns there. Keyed by preview path, value
+// is the origin panel key (e.g. `rg:<query>`). Set by the rg hit click before
+// openPreviewPanel renders.
+const previewOrigin = new Map<string, string>();
+
 // Open (or focus) the preview tab for `path`. A `line` (>0) selects the
 // line-numbered source view scrolled to that row; otherwise the rendered view
 // (image / markdown / syntax-highlighted code).
@@ -2793,6 +2935,14 @@ function openPreviewPanel(
     el.className = "fs-preview";
     inst = { el, line };
     previewInsts.set(path, inst);
+    // Delegated so it survives renderPathInto's innerHTML rewrites: "← back"
+    // returns to the originating panel (internal routing).
+    el.addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>(".fs-back");
+      if (!b) return;
+      const origin = b.getAttribute("data-origin");
+      if (origin) activatePreviewPanel(origin);
+    });
   } else {
     inst.line = line;
   }
@@ -2806,7 +2956,13 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   const name = path.split("/").pop() ?? path;
   const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
   const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
-  const meta = `<div class="fs-preview-meta">${name}<br><span>${line ? `${path}:${line}` : path}</span></div>`;
+  const origin = previewOrigin.get(path);
+  const back = origin
+    ? `<button class="fs-back" data-origin="${escapeHtml(origin)}" title="back to ${escapeHtml(origin)}">← back</button> `
+    : "";
+  const meta =
+    `<div class="fs-preview-meta">${back}<span class="fs-preview-name">${escapeHtml(name)}</span>` +
+    `<br><span>${escapeHtml(line ? `${path}:${line}` : path)}</span></div>`;
   node.innerHTML = meta + empty("loading…");
 
   if (!line && IMAGE_EXTS.has(ext)) {
@@ -2829,17 +2985,31 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
 
   if (line) {
     // Whole file with line numbers; the target row is highlighted and scrolled
-    // to center. Capped so a giant source file stays responsive.
+    // to center. Syntax-highlighted via shiki (per-line spans, same trick as the
+    // rg panel), falling back to escaped text if the language is unknown / shiki
+    // fails. Capped so a giant source file stays responsive.
     const lines = text.split("\n");
     const CAP = 2000;
     const hi = Math.min(lines.length, CAP);
+    const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
+    const lang = SHIKI_LANG[ext] || SHIKI_LANG[name.toLowerCase()] || "text";
+    let hl: string[] | null = null;
+    try {
+      const html = await codeToHtml(lines.slice(0, hi).join("\n"), { lang, theme });
+      hl = Array.from(
+        new DOMParser().parseFromString(html, "text/html").querySelectorAll(".line"),
+      ).map((s) => s.innerHTML);
+    } catch {
+      hl = null;
+    }
     const body = lines
       .slice(0, hi)
       .map((l, i) => {
         const n = i + 1;
         const cls = n === line ? "src-line on" : "src-line";
         const num = String(n).padStart(4, " ");
-        return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${escapeHtml(l) || " "}</div>`;
+        const code = hl?.[i] ?? escapeHtml(l);
+        return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${code || " "}</div>`;
       })
       .join("");
     const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} more lines</div>` : "";
@@ -2864,11 +3034,12 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   }
 }
 
-// On theme flip, re-render the open (non-source) previews so syntax colors track
-// light/dark. Closed instances keep their cached node; reopening re-renders.
+// On theme flip, re-render the open previews so syntax colors track light/dark
+// (the line-numbered source view is shiki-colored too now). Closed instances keep
+// their cached node; reopening re-renders.
 store.subscribe(() => {
   for (const [path, inst] of previewInsts) {
-    if (!inst.line && isPreviewOpen(path)) renderPathInto(inst.el, path, inst.line);
+    if (isPreviewOpen(path)) renderPathInto(inst.el, path, inst.line);
   }
 }, ["mode"]);
 
@@ -4013,6 +4184,7 @@ async function main() {
     anchorPolyfill({ useAnimationFrame: true }).catch(console.error);
   }
   wireChrome();
+  wireDomCmdClick(); // ⌘-click search inside preview / rg panels (not just terminals)
   // A dock failure must not abort the rest of boot (sessions, pty listeners).
   try {
     onDockChange(syncToggles); // keep rail highlights in sync as panels open/close
@@ -4114,6 +4286,14 @@ async function main() {
 
   // Tray menu "Recording" item toggles capture (same path as the panel button).
   await listen("toggle-record", () => toggleRecording());
+
+  // Tray menu "AI Integrations" master switch: off hides agents from the launch
+  // pickers (shell only). Persisted via the store.
+  await listen("toggle-ai", () => {
+    const on = !store.get().aiEnabled;
+    store.set({ aiEnabled: on });
+    flashStatus(`AI integrations ${on ? "on" : "off"}`);
+  });
 
   // Click-outside dismiss: hide when the window loses focus. Gated on a prior
   // focus so it doesn't self-hide at launch, and suppressed during screenshot.

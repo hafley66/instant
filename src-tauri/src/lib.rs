@@ -633,14 +633,18 @@ pub fn run() {
             let toggle_i = MenuItem::with_id(app, "toggle", "Summon / Hide", true, None::<&str>)?;
             let record_i =
                 MenuItem::with_id(app, "record", "Toggle Recording", true, None::<&str>)?;
+            let ai_i =
+                MenuItem::with_id(app, "ai", "Toggle AI Integrations", true, None::<&str>)?;
             // Recovery: reload skipping persisted layout/state (safe), or wipe it.
             let safe_i =
                 MenuItem::with_id(app, "safe", "Safe Reopen (skip restore)", true, None::<&str>)?;
             let reset_i =
                 MenuItem::with_id(app, "reset", "Reset All State…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu =
-                Menu::with_items(app, &[&toggle_i, &record_i, &safe_i, &reset_i, &quit_i])?;
+            let menu = Menu::with_items(
+                app,
+                &[&toggle_i, &record_i, &ai_i, &safe_i, &reset_i, &quit_i],
+            )?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -652,6 +656,13 @@ pub fn run() {
                     "record" => {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.emit("toggle-record", ());
+                        }
+                    }
+                    // Route through the webview so the persisted store stays the
+                    // single source of truth (Rust doesn't read localStorage).
+                    "ai" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.emit("toggle-ai", ());
                         }
                     }
                     // Set the one-shot flag in sessionStorage (survives reload, not
