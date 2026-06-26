@@ -214,6 +214,9 @@ export interface WtTreeRow {
   open?: boolean;
   // clone
   adding?: boolean; // its inline "+ worktree" branch input is open
+  // space: a user-added non-git folder (anonymous AI-session workspace). Rendered
+  // as a leaf, but its context menu offers "remove space" instead of git actions.
+  space?: boolean;
   children?: WtTreeRow[];
 }
 
@@ -238,6 +241,9 @@ export interface WtBridge {
   revealAdd: (clonePath: string) => void;
   submitAdd: (clonePath: string, branch: string) => void;
   cancelAdd: () => void;
+  // non-git "spaces" (anonymous AI-session folders)
+  addSpace: (path: string) => void;
+  removeSpace: (path: string) => void;
 }
 
 let wtBridge: WtBridge | null = null;
@@ -398,11 +404,19 @@ const WT_COLUMNS: TreeColumn<WtTreeRow>[] = [
 // replaces the old Tree/Table button (the v2 panel is flat-only).
 function WtToolbar() {
   const [root, setRoot] = useState(wtBridge?.scanRoot() ?? "");
+  const [space, setSpace] = useState(""); // inline non-git folder add (empty = closed)
+  const [adding, setAdding] = useState(false);
   const focus = wtBridge?.focus() ?? false;
   const { shown, total } = wtBridge?.counts() ?? { shown: 0, total: 0 };
   const scan = (e: React.FormEvent) => {
     e.preventDefault();
     wtBridge?.scan(root.trim());
+  };
+  const commitSpace = () => {
+    const p = space.trim();
+    if (p) wtBridge?.addSpace(p);
+    setSpace("");
+    setAdding(false);
   };
   return (
     <form className="wt-scan" onSubmit={scan}>
@@ -416,6 +430,34 @@ function WtToolbar() {
       >
         {focus ? "★ Focus" : "☆ Focus"}
       </button>
+      {adding ? (
+        <input
+          className="wt-space-input"
+          autoFocus
+          placeholder="folder path (non-git workspace)…"
+          value={space}
+          onChange={(e) => setSpace(e.target.value)}
+          onBlur={commitSpace}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitSpace();
+            } else if (e.key === "Escape") {
+              setSpace("");
+              setAdding(false);
+            }
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="wt-space-btn"
+          title="add a non-git folder as an AI-session workspace"
+          onClick={() => setAdding(true)}
+        >
+          + Space
+        </button>
+      )}
       <span className="wt-count">
         {total ? (focus ? `${shown}/${total} ★` : `${total} worktrees`) : ""}
       </span>

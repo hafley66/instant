@@ -426,6 +426,20 @@ body[data-skin] .actbar-item.active {
 #dock .dv-default-tab-content {
   padding-right: 8px;
 }
+/* Inline tab-rename editor (double-click a tab). Sized to the tab, no chrome so
+   it reads as the title text becoming editable. */
+#dock .dv-tab-rename {
+  width: 11ch;
+  min-width: 60px;
+  font: inherit;
+  color: inherit;
+  background: var(--surface, #fff);
+  border: 1px solid var(--accent, #3b82f6);
+  border-radius: 2px;
+  padding: 0 3px;
+  margin: 0;
+  outline: none;
+}
 /* The close ✕ is dim by default; a bigger square hit target makes it easy to
    click, and it brightens (with a subtle disc) on hover. */
 #dock .dv-default-tab-action {
@@ -1212,6 +1226,11 @@ body[data-mode="dark"] .act-last.ok {
 .wt-count {
   font-size: 10px;
   opacity: 0.7;
+}
+/* "+ Space" inline add: the path input shares the row but stays narrower than
+   the scan-root input so both fit when open. */
+.wt-scan input.wt-space-input {
+  flex: 0 1 40%;
 }
 .wt-table {
   flex: 1;

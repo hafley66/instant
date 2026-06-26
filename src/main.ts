@@ -66,6 +66,7 @@ import {
   focusTermPanel,
   removeTermPanel,
   setTermTitle,
+  customTermTitle,
   moveTermPanel,
   allPanelIds,
   activePanelId,
@@ -203,7 +204,12 @@ function activeTabName(): string {
 // Visual is a 📌 prefix on the dockview tab title, pushed via reactdock's
 // setTermTitle (a public API) so we don't have to touch reactdock's renderer.
 const isPinnedTab = (name: string) => store.get().pinnedTabs.includes(name);
-const tabTitle = (name: string) => (isPinnedTab(name) ? `📌 ${name}` : name);
+// Base = the durable rename override (store.tabTitles) if set, else the session
+// name; the pin prefix rides on top so pin + rename compose.
+const tabTitle = (name: string) => {
+  const base = customTermTitle(sessionId(name)) ?? name;
+  return isPinnedTab(name) ? `📌 ${base}` : base;
+};
 function applyTabTitle(name: string) {
   setTermTitle(sessionId(name), tabTitle(name));
 }
@@ -646,7 +652,7 @@ function buildTree(rows: WorktreeRow[]): OrgNode[] {
 // The base tmux session name for a worktree (deterministic: same checkout +
 // branch always resolves here, so "resume" reattaches the same session).
 const baseSessionName = (clone: string, branch: string) =>
-  tmuxName(`${baseName(clone)}-${branch}`);
+  tmuxName(branch ? `${baseName(clone)}-${branch}` : baseName(clone));
 
 // A session name not already taken, so "new session" on a worktree spawns a
 // second/third session instead of reattaching the first. Considers BOTH live
@@ -866,10 +872,53 @@ function tmuxRows(): TmuxRow[] {
 // worktrees panel. Mirrors the v1 renderTree hierarchy via buildTree; the React
 // panel indents the name column + chevron (MUI-X tree-data style) and renders
 // the per-row star / open / resume / +worktree actions from these fields.
+// Live tmux sessions sitting in `wtPath` as session child rows. Shared by git
+// worktree leaves and non-git space leaves so both show "what's running where".
+function sessionChildRows(wtPath: string): WtTreeRow[] {
+  return sessionsForWorktree(wtPath).map((s) => ({
+    id: `${wtPath}::sess:${s.name}`,
+    kind: "session" as const,
+    label: s.name,
+    sessionName: s.name,
+    attached: s.attached,
+    proc: foregroundProc(s.commands ?? []),
+    windows: s.windows,
+    open: tabs.has(sessionId(s.name)),
+  }));
+}
+
+// Synthetic top-level "Spaces" org: user-added non-git folders, each a leaf that
+// opens an AI session in that folder (clone/branch empty → name = folder base).
+function spaceTreeRows(): WtTreeRow[] {
+  const spaces = store.get().spaces;
+  if (!spaces.length) return [];
+  return [
+    {
+      id: "o:spaces",
+      kind: "org",
+      label: "📁 Spaces",
+      meta: `${spaces.length} folder${spaces.length > 1 ? "s" : ""}`,
+      children: spaces.map((p) => ({
+        id: `space:${p}`,
+        kind: "leaf",
+        label: baseName(p),
+        space: true,
+        clonePath: p, // gestures pass this as `clone` → session cwd
+        worktree: p, // gesture key + fav + sessions + drag entity
+        branch: "",
+        pathDisplay: tildify(p),
+        dirty: false,
+        fav: isFavWorktree(p),
+        children: sessionChildRows(p),
+      })),
+    },
+  ];
+}
+
 function wtTreeRows(): WtTreeRow[] {
   const rows = focusRows(store.get().worktrees);
   const adding = store.get().wtAddingClone;
-  return buildTree(rows).map((org) => ({
+  return spaceTreeRows().concat(buildTree(rows).map((org) => ({
     id: `o:${org.origin}`,
     kind: "org",
     label: prettyOrigin(org.origin),
@@ -894,19 +943,10 @@ function wtTreeRows(): WtTreeRow[] {
         fav: isFavWorktree(wt.worktree),
         // Live tmux sessions sitting in this worktree show as child rows, so the
         // tree doubles as "what's running where". Empty → leaf has no twisty.
-        children: sessionsForWorktree(wt.worktree).map((s) => ({
-          id: `${wt.worktree}::sess:${s.name}`,
-          kind: "session" as const,
-          label: s.name,
-          sessionName: s.name,
-          attached: s.attached,
-          proc: foregroundProc(s.commands ?? []),
-          windows: s.windows,
-          open: tabs.has(sessionId(s.name)),
-        })),
+        children: sessionChildRows(wt.worktree),
       })),
     })),
-  }));
+  })));
 }
 
 // Gestures for a leaf tree row (single/dbl/right-click → agent chooser).
@@ -950,7 +990,8 @@ function registerV2Bridges() {
     // leaf gestures (single/dbl/right-click → chooser) + the open ▾ anchored menu.
     onLeafSingle: (r, x, y) => wtLeafGestures(r).onSingle(x, y),
     onLeafDouble: (r) => wtLeafGestures(r).onDouble(),
-    onLeafContext: (r, x, y) => wtLeafGestures(r).onContext(x, y),
+    onLeafContext: (r, x, y) =>
+      r.space ? showSpaceMenu(r, x, y) : wtLeafGestures(r).onContext(x, y),
     onLeafMenu: (r, x, y) =>
       showAgentMenu(x, y, r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty),
     onResume: (name) => openTab(name),
@@ -965,7 +1006,49 @@ function registerV2Bridges() {
     revealAdd: (clonePath) => store.set({ wtAddingClone: clonePath }),
     submitAdd: (clonePath, branch) => submitAddWorktree(clonePath, branch),
     cancelAdd: () => store.set({ wtAddingClone: null }),
+    addSpace: (path) => addSpace(path),
+    removeSpace: (path) => removeSpace(path),
   });
+}
+
+// ---- spaces (non-git AI-session folders) ----
+function addSpace(path: string) {
+  const p = path.trim();
+  if (!p) return;
+  const cur = store.get().spaces;
+  if (!cur.includes(p)) store.set({ spaces: [...cur, p] });
+}
+function removeSpace(path: string) {
+  store.set({ spaces: store.get().spaces.filter((p) => p !== path) });
+}
+// Right-click chooser for a space leaf: same agent options as a worktree, plus
+// "remove space" (clone=branch empty so the session name is the folder base).
+function showSpaceMenu(r: WtTreeRow, x: number, y: number) {
+  const path = r.worktree ?? "";
+  const live = sessionsForWorktree(path);
+  const items: CtxItem[] = [];
+  for (const s of live) {
+    const proc = foregroundProc(s.commands ?? []);
+    items.push({
+      label: `resume · ${s.name}${proc ? ` (${proc})` : ""}`,
+      action: () => openTab(s.name),
+    });
+  }
+  if (live.length) items.push({ sep: true });
+  for (const a of store.get().wtAgents) {
+    items.push({
+      label: `new · ${a.label}`,
+      action: () => openWorktree(path, "", path, a.command, true),
+    });
+  }
+  items.push({ label: "new shell", action: () => openWorktree(path, "", path, undefined, true) });
+  items.push({ sep: true });
+  items.push({
+    label: isFavWorktree(path) ? "★ unfavorite" : "☆ favorite",
+    action: () => toggleFavWorktree(path),
+  });
+  items.push({ label: "remove space", action: () => removeSpace(path) });
+  showContextMenu(x, y, items);
 }
 
 // Reveal the inline agent-list editor in the worktree panel header, seeded with
@@ -2929,6 +3012,7 @@ async function main() {
     onTermActivate: onTermShown,
     onTermClose: onTermClosed,
     onTermLayout: fitTerm,
+    onTermRetitle: (sid) => applyTabTitle(sid.slice(sessionId("").length)),
   });
   store.subscribe(renderWorktreesPanel, [
     "worktrees",

@@ -27,6 +27,7 @@ type SplitDir = "left" | "right" | "above" | "below";
 function CustomTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const [title, setTitle] = useState(api.title ?? "");
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     setTitle(api.title ?? "");
     const sub = api.onDidTitleChange((e) => setTitle(e.title));
@@ -41,6 +42,11 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
     e.preventDefault();
     e.stopPropagation();
     const items: CtxItem[] = [
+      { label: "Rename…", action: () => setEditing(true) },
+      ...(customTitle(api.id) != null
+        ? [{ label: "Reset name", action: () => renameTab(api.id, "") }]
+        : []),
+      { sep: true },
       { label: "Split right", action: () => split("right") },
       { label: "Split down", action: () => split("below") },
       { label: "Split left", action: () => split("left") },
@@ -51,9 +57,49 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
     showContextMenu(e.clientX, e.clientY, items);
   };
 
+  // Inline editor: commit on Enter/blur, cancel on Escape. stopPropagation on
+  // pointer events so dockview's tab drag/activate doesn't hijack the input.
+  if (editing) {
+    return (
+      <div className="dv-default-tab">
+        <input
+          className="dv-tab-rename"
+          autoFocus
+          defaultValue={seedTitle(api.id)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={(e) => {
+            renameTab(api.id, e.currentTarget.value);
+            setEditing(false);
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") {
+              renameTab(api.id, e.currentTarget.value);
+              setEditing(false);
+            } else if (e.key === "Escape") {
+              setEditing(false);
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="dv-default-tab" onContextMenu={onContextMenu}>
-      <span className="dv-default-tab-content">{title}</span>
+      <span
+        className="dv-default-tab-content"
+        title="Double-click to rename"
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          setEditing(true);
+        }}
+      >
+        {title}
+      </span>
       <span
         className="dv-default-tab-action"
         title="Close"
@@ -87,11 +133,14 @@ type Hooks = {
   onTermActivate: (sid: string) => void;
   onTermClose: (sid: string) => void;
   onTermLayout: (sid: string) => void;
+  // Re-derive a terminal's tab title (override + pin prefix live in main.ts).
+  onTermRetitle: (sid: string) => void;
 };
 let hooks: Hooks = {
   onTermActivate: () => {},
   onTermClose: () => {},
   onTermLayout: () => {},
+  onTermRetitle: () => {},
 };
 export function setDockHooks(h: Partial<Hooks>) {
   hooks = { ...hooks, ...h };
@@ -155,7 +204,7 @@ function buildDefault() {
     id: "sessions",
     component: "sessions",
     params: { panelId: "sessions" },
-    title: getPanel("sessions")?.title ?? "Sessions",
+    title: withOverride("sessions", getPanel("sessions")?.title ?? "Sessions"),
   });
 }
 
@@ -252,6 +301,43 @@ export function removeTermPanel(sid: string) {
 export function setTermTitle(sid: string, title: string) {
   api?.getPanel(TERM + sid)?.api.setTitle(title);
 }
+
+// Durable per-panel title override (store.tabTitles, keyed by full panel id).
+// Terminals/previews are recreated fresh on reload, so their renames can't ride
+// the dock JSON — they're replayed from here. Tool panels persist in dock JSON
+// too, but go through the same map so one path handles every tab.
+export function customTitle(pid: string): string | undefined {
+  return (store.get().tabTitles as Record<string, string>)[pid];
+}
+// Override for a terminal by its session id (main.ts keys by sid, not panel id).
+export function customTermTitle(sid: string): string | undefined {
+  return customTitle(TERM + sid);
+}
+// Apply `base` unless an override exists for this id. Used wherever a panel is
+// (re)created so a renamed tab comes back named.
+function withOverride(pid: string, base: string): string {
+  return customTitle(pid) ?? base;
+}
+// Commit (or clear, when blank) a rename, then re-apply the visible title.
+// Terminals route through onTermRetitle so main.ts can re-add the pin prefix.
+export function renameTab(pid: string, title: string) {
+  const t = title.trim();
+  const cur = { ...(store.get().tabTitles as Record<string, string>) };
+  if (t) cur[pid] = t;
+  else delete cur[pid];
+  store.set({ tabTitles: cur });
+  if (isTerm(pid)) hooks.onTermRetitle(termSid(pid));
+  else api?.getPanel(pid)?.api.setTitle(t || getPanel(pid)?.title || pid);
+}
+// What to seed the inline editor with: the override if present, else the
+// natural base (session name for terminals, current title otherwise) so a
+// pinned terminal's 📌 prefix isn't baked into the editable text.
+function seedTitle(pid: string): string {
+  const ov = customTitle(pid);
+  if (ov != null) return ov;
+  if (isTerm(pid)) return termSid(pid);
+  return api?.getPanel(pid)?.api.title ?? "";
+}
 // Reorder a terminal tab within its group (used to float pinned tabs left).
 export function moveTermPanel(sid: string, index: number) {
   const p = api?.getPanel(TERM + sid);
@@ -347,7 +433,7 @@ export function addPreviewPanel(
     id: pid,
     component: "preview-instance",
     params: { panelId: pid },
-    title,
+    title: withOverride(pid, title),
     ...(position ? { position } : {}),
   });
 }
@@ -376,7 +462,7 @@ export function togglePanel(id: string) {
     id,
     component: id,
     params: { panelId: id },
-    title: def?.title ?? id,
+    title: withOverride(id, def?.title ?? id),
     ...(position ? { position } : {}),
   });
 }

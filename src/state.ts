@@ -163,6 +163,7 @@ export interface AppState {
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
+  tabTitles: Record<string, string>; // durable per-panel title overrides, keyed by full panel id (persisted)
   dockJSON: unknown; // serialized dockview layout (persisted); null until first save
   sessions: Session[]; // live tmux sessions (runtime)
   sessionWorktrees: Record<string, string[]>; // session name -> worktree paths it has touched (persisted, accumulated)
@@ -188,6 +189,7 @@ export interface AppState {
   zoom: number; // webview zoom factor (persisted; applied via getCurrentWebview().setZoom)
   wtExpanded: string[]; // expanded tree node keys
   wtFavorites: string[]; // starred worktree paths (persisted)
+  spaces: string[]; // user-designated non-git folders to run AI sessions in (persisted); shown atop the Worktrees panel
   wtFocus: boolean; // when on, the worktree view shows only starred rows
   wtAddingClone: string | null; // clone path whose inline "+ worktree" branch input is open (runtime)
   wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
@@ -212,6 +214,7 @@ const PERSIST: (keyof AppState)[] = [
   "sidebar",
   "active",
   "openTabs",
+  "tabTitles",
   "dockJSON",
   "sessionWorktrees",
   "activitySource",
@@ -226,6 +229,7 @@ const PERSIST: (keyof AppState)[] = [
   "zoom",
   "wtExpanded",
   "wtFavorites",
+  "spaces",
   "wtFocus",
   "wtAgents",
   "autoResume",
@@ -254,6 +258,7 @@ function load(): AppState {
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),
+    tabTitles: loadKey<Record<string, string>>("tabTitles", {}),
     dockJSON: loadKey<unknown>("dockJSON", null),
     sessions: [],
     sessionWorktrees: loadKey<Record<string, string[]>>("sessionWorktrees", {}),
@@ -279,6 +284,7 @@ function load(): AppState {
     zoom: loadKey<number>("zoom", 1),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
     wtFavorites: loadKey<string[]>("wtFavorites", []),
+    spaces: loadKey<string[]>("spaces", []),
     wtFocus: loadKey<boolean>("wtFocus", false),
     wtAddingClone: null,
     wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
