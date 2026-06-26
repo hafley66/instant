@@ -1261,6 +1261,28 @@ body[data-mode="dark"] .act-last.ok {
   transform: translate(-50%, 0);
 }
 
+/* Count badge on the ★ favorites rail button (passive "it saved" signal). */
+.actbar-item {
+  position: relative;
+}
+.rail-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--accent, #e53935);
+  color: #fff;
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 /* Favorites panel: stacked turn cards with a header row + preview line. */
 .fav-list {
   padding: 2px;

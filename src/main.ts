@@ -425,13 +425,8 @@ function isTurnFav(turn: AiMessage): boolean {
   );
 }
 
-// Open (or focus) the Favorites panel so a just-saved turn is visible.
-function showFavoritesPanel() {
-  if (!isOpen("favorites")) togglePanel("favorites");
-  else focusPanelById("favorites");
-}
-
-// Snapshot one identified turn into favorites.db, then reveal the panel.
+// Snapshot one identified turn into favorites.db. No navigation — the toast
+// confirms and the ★ rail badge ticks up; open the panel yourself when you want.
 async function favoriteTurn(turn: AiMessage, cwd: string) {
   const favs = await invoke<Fav[]>("fav_add", { msg: turn, cwd }).catch((e) => {
     console.error("fav_add", e);
@@ -440,7 +435,6 @@ async function favoriteTurn(turn: AiMessage, cwd: string) {
   if (favs) {
     store.set({ aiFavs: favs });
     flashStatus(`★ favorited ${turn.role} turn`);
-    showFavoritesPanel();
   }
 }
 
@@ -457,6 +451,26 @@ async function unfavoriteTurn(turn: AiMessage) {
     store.set({ aiFavs: favs });
     flashStatus("unfavorited turn");
   }
+}
+
+// "locate" a favorite: open the saved turn's full text in a split-right preview
+// tab (keyed by the turn identity). We already hold the text, so this works for
+// both editors and never reads the (multi-MB) jsonl. The locator line shows the
+// on-disk address (claude path#line / opencode msg id).
+function locateFav(f: Fav) {
+  const key = `fav:${f.editor}:${f.session_id}:${f.message_id}`;
+  let inst = previewInsts.get(key);
+  if (!inst) {
+    const el = document.createElement("div");
+    el.className = "fs-preview";
+    inst = { el };
+    previewInsts.set(key, inst);
+  }
+  const title = `★ ${f.editor} · ${f.role}`;
+  inst.el.innerHTML =
+    `<div class="fs-preview-meta">${escapeHtml(title)}<br><span>${escapeHtml(f.locator)}</span></div>` +
+    `<pre class="code-plain">${escapeHtml(f.text)}</pre>`;
+  addPreviewPanel(key, title, inst.el, "right");
 }
 
 // cmd+shift+s: favorite the active tab's latest turn (no pointer needed). Probes
@@ -489,10 +503,11 @@ function registerFavoritesBridge() {
   setFavoritesPanel({
     favs: () => store.get().aiFavs,
     onShow: () => refreshFavorites(),
-    copy: (f) => navigator.clipboard.writeText(f.text).catch(() => {}),
-    // The locator (claude:<path>#L<n> / opencode:#msg=<id>) is the on-disk
-    // address; copy it so it can be pasted/opened. A real reveal is phase-2.
-    locate: (f) => navigator.clipboard.writeText(f.locator).catch(() => {}),
+    copy: (f) => {
+      navigator.clipboard.writeText(f.text).catch(() => {});
+      flashStatus("turn copied");
+    },
+    locate: (f) => locateFav(f),
     remove: (f) =>
       invoke<Fav[]>("fav_remove", {
         editor: f.editor,
@@ -508,6 +523,25 @@ function refreshFavorites() {
   invoke<Fav[]>("fav_list")
     .then((favs) => store.set({ aiFavs: favs }))
     .catch(() => {});
+}
+
+// Passive count badge on the ★ favorites rail button, so a saved turn registers
+// in the UI without navigating there. Subscribed to aiFavs.
+function updateFavBadge() {
+  const btn = document.getElementById("favorites-toggle");
+  if (!btn) return;
+  let badge = btn.querySelector(".rail-badge") as HTMLElement | null;
+  const n = store.get().aiFavs.length;
+  if (!n) {
+    badge?.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "rail-badge";
+    btn.appendChild(badge);
+  }
+  badge.textContent = n > 99 ? "99+" : String(n);
 }
 
 // ---- pinned terminal tabs (persisted by session name) ----
@@ -3396,6 +3430,8 @@ async function main() {
   refreshFavorites();
   injectPanelHtml();
   buildActivityRail();
+  store.subscribe(updateFavBadge, ["aiFavs"]);
+  updateFavBadge();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail
   // exists, so the polyfill discovers the .rail-tip anchors. useAnimationFrame
   // keeps anchored elements positioned as layout/scroll changes. Gate on the
