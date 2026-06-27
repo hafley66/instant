@@ -746,12 +746,36 @@ export function ActivityPanelV2() {
   );
 }
 
-// ---- favorites (saved AI turns) ----
-// Flat list of favorited harness messages (a snapshot from favorites.db). Each
-// row: editor + role + relative time + preview, with copy / locate / remove.
+// ---- favorites (saved AI turns), grouped by session ----
+// Tree-data table (MUI-X style, same as the worktrees panel): each parent row is
+// an on-disk AI session (editor + cwd), folding its favorited turns. The session
+// row is "starred at" the latest of its turns, shows how many are saved, whether
+// a live tmux session sits in its cwd, and a "resume" action that reattaches /
+// relaunches the conversation. Turn children carry copy / locate / remove.
+export interface FavTreeRow {
+  id: string;
+  kind: "session" | "turn";
+  editor: "claude" | "opencode";
+  label: string; // session: cwd basename / short id · turn: role
+  starredAt: number; // session: max(created) · turn: this fav's `created`
+  // session
+  sessionId?: string; // on-disk conversation id (resume key)
+  cwd?: string;
+  count?: number; // # favorited turns folded under it
+  live?: boolean; // a live tmux session exists in this cwd
+  // turn
+  role?: string;
+  preview?: string;
+  fav?: Fav; // the underlying fav (copy/locate/remove payload)
+  children?: FavTreeRow[];
+}
+
 export interface FavBridge {
-  favs: () => Fav[];
+  rows: () => FavTreeRow[];
   onShow?: () => void;
+  expanded: () => ExpandedState;
+  setExpanded: (e: ExpandedState) => void;
+  resume: (r: FavTreeRow) => void; // resume an on-disk session in its cwd
   copy: (f: Fav) => void; // full text → clipboard
   locate: (f: Fav) => void; // reveal the source (jsonl line / db id)
   remove: (f: Fav) => void;
@@ -772,6 +796,111 @@ function favWhen(ts: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// Name column: session → live dot + editor badge + label + count; turn → role
+// badge + preview text.
+function FavNameCell({ row }: { row: FavTreeRow }) {
+  if (row.kind === "session") {
+    return (
+      <>
+        <span
+          className={"dot" + (row.live ? " on" : "")}
+          title={row.live ? "live session in this cwd" : "on disk"}
+        />
+        <span className={"fav-badge fav-" + row.editor}>{row.editor}</span>
+        <span className="wt-label">{row.label}</span>
+        <span className="wt-meta">{row.count} starred</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className={"fav-role fav-role-" + row.role}>{row.role}</span>
+      <span className="fav-preview-inline" title={row.fav?.locator}>
+        {row.preview}
+      </span>
+    </>
+  );
+}
+
+// Trailing actions: session → resume; turn → copy / locate / remove.
+function FavActionsCell({ row }: { row: FavTreeRow }) {
+  if (row.kind === "session") {
+    return (
+      <span className="wt-actions">
+        <button
+          className="wt-act wt-open"
+          title="resume this conversation in its cwd"
+          onClick={(e) => {
+            e.stopPropagation();
+            favBridge?.resume(row);
+          }}
+        >
+          resume
+        </button>
+      </span>
+    );
+  }
+  const f = row.fav!;
+  return (
+    <span className="wt-actions">
+      <button
+        className="wt-act"
+        title="copy full text"
+        onClick={(e) => {
+          e.stopPropagation();
+          favBridge?.copy(f);
+        }}
+      >
+        copy
+      </button>
+      <button
+        className="wt-act"
+        title="reveal source"
+        onClick={(e) => {
+          e.stopPropagation();
+          favBridge?.locate(f);
+        }}
+      >
+        locate
+      </button>
+      <button
+        className="wt-act"
+        title="remove favorite"
+        onClick={(e) => {
+          e.stopPropagation();
+          favBridge?.remove(f);
+        }}
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+const FAV_COLUMNS: TreeColumn<FavTreeRow>[] = [
+  { id: "name", header: "favorite", tree: true, cell: (r) => <FavNameCell row={r} /> },
+  {
+    id: "starred",
+    header: "starred at",
+    sortValue: (r) => r.starredAt,
+    cell: (r) => <span className="fav-when">{favWhen(r.starredAt)}</span>,
+  },
+  { id: "actions", header: "", noRowClick: true, cell: (r) => <FavActionsCell row={r} /> },
+];
+
+// Search predicate: match editor/label/role/preview/cwd substring. A session row
+// is kept when it or any child turn matches (filterFromLeafRows keeps ancestors).
+function favFilter(r: FavTreeRow, q: string): boolean {
+  const s = q.toLowerCase();
+  return (
+    r.label.toLowerCase().includes(s) ||
+    r.editor.toLowerCase().includes(s) ||
+    (r.role?.toLowerCase().includes(s) ?? false) ||
+    (r.preview?.toLowerCase().includes(s) ?? false) ||
+    (r.cwd?.toLowerCase().includes(s) ?? false)
+  );
+}
+
 export function FavoritesPanelV2() {
   useApp();
   const b = favBridge;
@@ -779,41 +908,41 @@ export function FavoritesPanelV2() {
     b?.onShow?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const favs = b?.favs() ?? [];
+  const rows = b?.rows() ?? [];
+  const total = rows.reduce((n, r) => n + (r.count ?? 0), 0);
   return (
     <div className="v2-panel">
       <div className="act-bar">
         <span className="spy-title">favorites</span>
-        <span className="wt-count">{favs.length ? `${favs.length} saved` : ""}</span>
+        <span className="wt-count">
+          {total ? `${total} in ${rows.length} session${rows.length > 1 ? "s" : ""}` : ""}
+        </span>
       </div>
       <div className="panel-scroll fav-list">
-        {favs.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="session-empty">
             no saved turns — favorite the current turn from a terminal
           </div>
         ) : (
-          favs.map((f) => (
-            <div className="fav-row" key={`${f.editor}:${f.session_id}:${f.message_id}`}>
-              <div className="fav-head">
-                <span className={"fav-badge fav-" + f.editor}>{f.editor}</span>
-                <span className={"fav-role fav-role-" + f.role}>{f.role}</span>
-                <span className="fav-when">{favWhen(f.created)}</span>
-                <span className="spy-spacer" />
-                <button className="wt-act" title="copy full text" onClick={() => b?.copy(f)}>
-                  copy
-                </button>
-                <button className="wt-act" title="reveal source" onClick={() => b?.locate(f)}>
-                  locate
-                </button>
-                <button className="wt-act" title="remove favorite" onClick={() => b?.remove(f)}>
-                  ×
-                </button>
-              </div>
-              <div className="fav-preview" title={f.locator}>
-                {f.preview}
-              </div>
-            </div>
-          ))
+          <TreeTable<FavTreeRow>
+            columns={FAV_COLUMNS}
+            data={rows}
+            getRowId={(r) => r.id}
+            getSubRows={(r) => r.children}
+            controls
+            filter={favFilter}
+            searchPlaceholder="filter favorites…"
+            expanded={b?.expanded() ?? {}}
+            onExpandedChange={(e) => b?.setExpanded(e)}
+            rowClass={(r) => `fav-${r.kind}`}
+            rowTitle={(r) => (r.kind === "session" ? (r.cwd ?? r.label) : (r.fav?.locator ?? ""))}
+            // Session rows are group nodes: double-click folds. A turn
+            // double-click copies its text.
+            toggleOnDoubleClick={(r) => r.kind === "session"}
+            onRowDoubleClick={(r) => {
+              if (r.kind === "turn" && r.fav) b?.copy(r.fav);
+            }}
+          />
         )}
       </div>
     </div>

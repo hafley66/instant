@@ -206,6 +206,7 @@ export interface AppState {
   // worktree" (a reopen mints a fresh tmux name, so name keys don't recur).
   resumeTabs: Record<string, { editor: "claude" | "opencode"; sessionId: string }>;
   wtExpanded: string[]; // expanded tree node keys
+  favExpanded: string[]; // expanded favorite-session node keys (persisted)
   wtFavorites: string[]; // starred worktree paths (persisted)
   spaces: string[]; // user-designated non-git folders to run AI sessions in (persisted); shown atop the Worktrees panel
   wtFocus: boolean; // when on, the worktree view shows only starred rows
@@ -269,6 +270,7 @@ const PERSIST: (keyof AppState)[] = [
   "tabZoom",
   "resumeTabs",
   "wtExpanded",
+  "favExpanded",
   "wtFavorites",
   "spaces",
   "wtFocus",
@@ -359,6 +361,7 @@ function load(): AppState {
     tabZoom: loadKey<Record<string, number>>("tabZoom", {}),
     resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
+    favExpanded: loadKey<string[]>("favExpanded", []),
     wtFavorites: loadKey<string[]>("wtFavorites", []),
     spaces: loadKey<string[]>("spaces", []),
     wtFocus: loadKey<boolean>("wtFocus", false),

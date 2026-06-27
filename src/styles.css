@@ -1536,6 +1536,20 @@ body[data-mode="dark"] .act-last.ok {
   opacity: 0.9;
   cursor: default;
 }
+/* Turn preview inline in the tree row's name cell: single line, ellipsised so
+   the grouped table stays one row per turn. */
+.fav-preview-inline {
+  margin-left: 6px;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* Session parent rows read a touch heavier than their folded turns. */
+.fav-session .wt-label {
+  font-weight: 600;
+}
 .wt-table {
   flex: 1;
   min-height: 0;
