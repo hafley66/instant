@@ -243,6 +243,7 @@ export interface WtBridge {
   onLeafDouble: (r: WtTreeRow) => void;
   onLeafContext: (r: WtTreeRow, x: number, y: number) => void;
   onLeafMenu: (r: WtTreeRow, x: number, y: number) => void; // open ▾ anchored chooser
+  onCloneContext: (r: WtTreeRow, x: number, y: number) => void; // clone/org repo-name ctx menu
   onResume: (name: string) => void; // resume/focus a session row
   onKill: (name: string) => void; // kill a session row
   toggleFav: (worktree: string) => void;
@@ -885,6 +886,8 @@ export function WorktreesPanelV2() {
               if (r.kind === "leaf") wtBridge?.onLeafContext(r, e.clientX, e.clientY);
               else if (r.kind === "file" || r.kind === "dir")
                 wtBridge?.onPathContext(r, e.clientX, e.clientY);
+              else if (r.kind === "clone" || r.kind === "org")
+                wtBridge?.onCloneContext(r, e.clientX, e.clientY);
             }}
           />
         )}

@@ -1434,14 +1434,10 @@ function parseWtAgents(text: string): WtAgent[] {
 // "new session" options per configured agent + a plain shell. This is the one
 // menu used by single click, right click, and the "open ▾" button so the
 // reuse-vs-new decision is always explicit.
-function showAgentMenu(
-  x: number,
-  y: number,
-  clone: string,
-  branch: string,
-  wtPath: string,
-  dirty: boolean,
-) {
+// The session chooser items for a checkout dir (wtPath): resume each live
+// session here, then a "new · <agent>" per configured agent, "new shell",
+// favorite + edit-agents. Shared by the leaf chooser and the clone/repo menu.
+function agentMenuItems(clone: string, branch: string, wtPath: string, dirty: boolean): CtxItem[] {
   const live = sessionsForWorktree(wtPath);
   const items: CtxItem[] = [];
   for (const s of live) {
@@ -1464,12 +1460,132 @@ function showAgentMenu(
     action: () => openWorktree(clone, branch, wtPath, undefined, true),
   });
   items.push({ sep: true });
+  items.push({ label: "git diff", action: () => openDiffPanel(wtPath) });
   items.push({
     label: isFavWorktree(wtPath) ? "★ unfavorite" : "☆ favorite",
     action: () => toggleFavWorktree(wtPath),
   });
   items.push({ label: "edit agents…", action: openWtAgentsEditor });
+  return items;
+}
+
+function showAgentMenu(
+  x: number,
+  y: number,
+  clone: string,
+  branch: string,
+  wtPath: string,
+  dirty: boolean,
+  removable = false,
+) {
+  const items = agentMenuItems(clone, branch, wtPath, dirty);
+  // A linked (non-main) worktree can be removed. Routed through a confirm menu
+  // so the destructive action takes two clicks.
+  if (removable) {
+    items.push({ sep: true });
+    items.push({
+      label: "remove worktree…",
+      action: () => confirmRemoveWorktree(clone, wtPath, dirty, x, y),
+    });
+  }
   showContextMenu(x, y, items);
+}
+
+// Working-tree diff panel for a worktree (staged+unstaged vs HEAD, untracked
+// appended). Rendered with shiki's `diff` grammar in a split-right preview tab,
+// keyed so reopening re-renders fresh.
+const diffInsts = new Map<string, { el: HTMLElement }>();
+function openDiffPanel(wtPath: string) {
+  if (!wtPath) return;
+  const key = `diff:${wtPath}`;
+  let inst = diffInsts.get(key);
+  if (!inst) {
+    inst = { el: document.createElement("div") };
+    inst.el.className = "fs-preview diff-preview";
+    diffInsts.set(key, inst);
+  }
+  addPreviewPanel(key, `diff · ${baseName(wtPath)}`, inst.el, "right");
+  renderDiffInto(inst.el, wtPath);
+}
+async function renderDiffInto(node: HTMLElement, wtPath: string) {
+  const meta =
+    `<div class="fs-preview-meta"><span class="fs-preview-name">git diff</span>` +
+    `<br><span>${escapeHtml(tildify(wtPath))}</span></div>`;
+  const empty = (s: string) => `<div class="fs-preview-empty">${escapeHtml(s)}</div>`;
+  node.innerHTML = meta + empty("loading…");
+  let text: string;
+  try {
+    text = await invoke<string>("git_diff", { path: wtPath });
+  } catch (e) {
+    node.innerHTML = meta + empty(String(e));
+    return;
+  }
+  if (!text.trim()) {
+    node.innerHTML = meta + empty("no changes — working tree clean");
+    return;
+  }
+  const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
+  try {
+    const html = await codeToHtml(text, { lang: "diff", theme });
+    // Band each row by its leading char (+/-/@) — shiki colors the text but
+    // doesn't tint line backgrounds. Tag the .line spans in document order
+    // against the raw lines, then re-serialize.
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const raw = text.split("\n");
+    doc.querySelectorAll<HTMLElement>(".line").forEach((el, i) => {
+      const c = raw[i]?.[0];
+      if (c === "+") el.classList.add("add");
+      else if (c === "-") el.classList.add("del");
+      else if (c === "@") el.classList.add("hunk");
+    });
+    node.innerHTML = meta + `<div class="code-body diff-body">${doc.body.innerHTML}</div>`;
+  } catch {
+    node.innerHTML = meta + `<pre class="code-plain">${escapeHtml(text)}</pre>`;
+  }
+}
+
+// Two-click remove: the first menu item opens this confirm menu; a clean tree
+// removes plainly, a dirty one offers a force (discards changes).
+function confirmRemoveWorktree(repo: string, wtPath: string, dirty: boolean, x: number, y: number) {
+  showContextMenu(x, y, [
+    {
+      label: dirty ? `force remove ${baseName(wtPath)} (discard changes)` : `confirm remove ${baseName(wtPath)}`,
+      action: () => doRemoveWorktree(repo, wtPath, dirty),
+    },
+  ]);
+}
+function doRemoveWorktree(repo: string, wtPath: string, force: boolean) {
+  invoke("remove_worktree", { repo, worktree: wtPath, force })
+    .then(() => {
+      // Drop a stale favorite + close any open diff/preview, then rescan.
+      if (isFavWorktree(wtPath)) toggleFavWorktree(wtPath);
+      flashStatus(`removed ${baseName(wtPath)}`);
+      scanWorktrees();
+    })
+    .catch((e) => flashStatus(String(e)));
+}
+
+// Right-click on a clone (repo checkout) or single-clone org row. Leads with
+// "new worktree…" (the inline branch input), then the same session chooser the
+// checkout dir would offer. A multi-clone org has no single checkout → only the
+// new-worktree entries for each clone underneath it.
+function showCloneMenu(r: WtTreeRow, x: number, y: number) {
+  const clones = r.kind === "org" ? (r.children ?? []) : [r];
+  const items: CtxItem[] = [];
+  for (const c of clones) {
+    if (!c.clonePath) continue;
+    const label =
+      clones.length > 1 ? `new worktree under ${baseName(c.clonePath)}…` : "new worktree…";
+    items.push({ label, action: () => store.set({ wtAddingClone: c.clonePath! }) });
+  }
+  // A single checkout also gets the full session chooser, rooted at its dir.
+  if (clones.length === 1 && clones[0].clonePath) {
+    const c = clones[0];
+    const branch = c.meta?.startsWith("@") ? c.meta.slice(1) : "";
+    items.push({ sep: true });
+    items.push(...agentMenuItems(c.clonePath!, branch, c.clonePath!, false));
+  }
+  if (items.length) showContextMenu(x, y, items);
 }
 
 // Double-click a worktree: go to its default session — RESUME the one we last ran
@@ -1806,10 +1922,16 @@ function registerV2Bridges() {
     // leaf gestures (single/dbl/right-click → chooser) + the open ▾ anchored menu.
     onLeafSingle: (r, x, y) => wtLeafGestures(r).onSingle(x, y),
     onLeafDouble: (r) => wtLeafGestures(r).onDouble(),
-    onLeafContext: (r, x, y) =>
-      r.space ? showSpaceMenu(r, x, y) : wtLeafGestures(r).onContext(x, y),
+    onLeafContext: (r, x, y) => {
+      if (r.space) return showSpaceMenu(r, x, y);
+      // A linked worktree (path differs from its clone's main checkout) is
+      // removable; the main checkout is not.
+      const removable = !!(r.worktree && r.clonePath && r.worktree !== r.clonePath);
+      showAgentMenu(x, y, r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty, removable);
+    },
     onLeafMenu: (r, x, y) =>
       showAgentMenu(x, y, r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty),
+    onCloneContext: (r, x, y) => showCloneMenu(r, x, y),
     onResume: (name) => openTab(name),
     onKill: (name) => {
       closeTab(sessionId(name)); // drop the panel + dispose xterm, then kill tmux
@@ -3083,6 +3205,12 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
 store.subscribe(() => {
   for (const [path, inst] of previewInsts) {
     if (isPreviewOpen(path)) renderPathInto(inst.el, path, inst.line);
+  }
+  // Diff panels are shiki-colored too; re-render so +/- tracks light/dark. The
+  // key (`diff:<wtPath>`) doubles as the addPreviewPanel key, so isPreviewOpen
+  // matches. wtPath = key after the `diff:` prefix.
+  for (const [key, inst] of diffInsts) {
+    if (isPreviewOpen(key)) renderDiffInto(inst.el, key.slice("diff:".length));
   }
 }, ["mode"]);
 

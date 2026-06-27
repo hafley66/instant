@@ -1066,6 +1066,22 @@ body[data-mode="dark"] .act-last.ok {
   border: var(--frame-w) solid var(--frame);
 }
 
+/* git-diff preview: shiki's `diff` grammar colors +/- text; renderDiffInto tags
+   each row's leading char so we can band added/removed lines GitHub-style. */
+.diff-body .line {
+  display: inline-block;
+  width: 100%;
+}
+.diff-body .line.add {
+  background: rgba(46, 160, 67, 0.15);
+}
+.diff-body .line.del {
+  background: rgba(248, 81, 73, 0.15);
+}
+.diff-body .line.hunk {
+  background: rgba(88, 166, 255, 0.12);
+}
+
 /* Each preview is its own per-path dockview tab now (preview:<path>); its
    content node (.fs-preview) is hosted in a .dv-host-scroll and fills the tab
    instead of the fixed 180px column it used while embedded beside the Files

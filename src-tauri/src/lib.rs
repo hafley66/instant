@@ -717,6 +717,8 @@ pub fn run() {
             workspace::remove_workspace,
             worktrees::scan_worktrees,
             worktrees::add_worktree,
+            worktrees::git_diff,
+            worktrees::remove_worktree,
             activity::activity_events,
             activity::activity_clear,
             activity::activity_log,

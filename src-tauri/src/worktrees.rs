@@ -79,6 +79,49 @@ pub fn add_worktree(repo: String, branch: String) -> Result<String, String> {
     Ok(path_str)
 }
 
+/// Unified working-tree diff for a worktree (or any checkout): staged + unstaged
+/// changes against HEAD, plus a list of untracked files appended as a note. The
+/// frontend renders it with shiki's `diff` grammar. Read-only.
+#[tauri::command]
+pub fn git_diff(path: String) -> Result<String, String> {
+    let p = Path::new(&path);
+    git(p, &["rev-parse", "--is-inside-work-tree"])
+        .map_err(|_| format!("{path} is not a git repository"))?;
+    let diff = git(p, &["diff", "HEAD", "--no-color"])?;
+    let untracked = git(p, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
+    let mut out = diff;
+    if !untracked.trim().is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("# untracked files\n");
+        for f in untracked.lines() {
+            out.push_str("+ ");
+            out.push_str(f);
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
+/// Remove a linked git worktree. Runs from the main checkout `repo` so a linked
+/// worktree is removable even when the cwd is elsewhere. `force` passes
+/// `--force` (drops uncommitted changes); without it git refuses a dirty tree.
+/// The main worktree cannot be removed. Caller rescans on success.
+#[tauri::command]
+pub fn remove_worktree(repo: String, worktree: String, force: bool) -> Result<(), String> {
+    let repo_path = Path::new(&repo);
+    if std::fs::canonicalize(&repo).ok() == std::fs::canonicalize(&worktree).ok() {
+        return Err("cannot remove the main worktree".into());
+    }
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(&worktree);
+    git(repo_path, &args).map(|_| ())
+}
+
 fn expand(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix('~') {
         if let Some(home) = std::env::var_os("HOME") {
