@@ -58,6 +58,12 @@ export function openPalette(): void {
 
   const root = document.createElement("div");
   root.className = "cmdp-root";
+  // Click on the dimmed backdrop (the root itself, not the box) closes it. The
+  // window-level onOutside can't catch this: the backdrop IS openEl, so it reads
+  // as an inside click.
+  root.addEventListener("pointerdown", (e) => {
+    if (e.target === root) dismiss();
+  });
 
   const box = document.createElement("div");
   box.className = "cmdp-box";
