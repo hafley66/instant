@@ -326,6 +326,25 @@ fn toggle_window(app: &AppHandle) {
     let _ = win.emit("summoned", ());
 }
 
+// Poll the frontmost app and emit `frontmost-app` (the owner name) on every
+// change. Polling (vs an NSWorkspace observer) keeps this off the objc delegate
+// path and reuses capture::frontmost_app() — 400ms is well under human focus-
+// switch cadence. The front drives the overlay state machine off this stream.
+// Our own window is reported as "instant" while focused; the front ignores self.
+fn spawn_frontmost_watch(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = String::new();
+        loop {
+            let cur = capture::frontmost_app();
+            if !cur.is_empty() && cur != last {
+                last = cur.clone();
+                let _ = app.emit("frontmost-app", cur);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+    });
+}
+
 // Bring the pre-summon app back to the foreground. `open -a <name>` reactivates
 // a running app with no extra TCC prompt (osascript/System Events would need
 // Automation access). Best-effort: a missing/renamed app just no-ops.
@@ -601,6 +620,10 @@ pub fn run() {
                     }
                 });
             }
+
+            // Stream frontmost-app changes to the front so the overlay can react
+            // to focus (e.g. raise/fade when VSCode comes forward).
+            spawn_frontmost_watch(app.handle().clone());
 
             // Hydrate the workspace registry from disk.
             let loaded = workspace::load(app.handle());

@@ -11,6 +11,28 @@ body[data-skin="p5"] {
 * {
   box-sizing: border-box;
 }
+/* ---- overlay modes (coexist with another app) ---- */
+/* Faded panel: dim the whole window so it reads as a background overlay over the
+   focused app; mousing over it wakes it back to full opacity. Pointer events
+   still work — click-through is a separate keyboard toggle ($mod+Shift+i). */
+#app.overlay-faded {
+  opacity: 0.5;
+  transition: opacity 120ms ease;
+}
+#app.overlay-faded:hover {
+  opacity: 1;
+}
+/* Mini mode: the window is resized small (LogicalSize in applyOverlay); compact
+   the chrome so the tree/terminal keep the room. */
+#app.mini .wt-count,
+#app.mini .spy-title {
+  display: none;
+}
+#app.mini .wt-scan,
+#app.mini .act-bar {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
 html,
 body {
   margin: 0;

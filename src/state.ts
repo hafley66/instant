@@ -186,6 +186,12 @@ export interface AppState {
   worktrees: WorktreeRow[]; // last scan result (runtime)
   activity: Event[]; // unified activity timeline (runtime)
   aiFavs: Fav[]; // favorited AI turns, mirrored from favorites.db (runtime)
+  frontmostApp: string; // owner name of the current frontmost app (runtime; drives overlay focus behavior)
+  // ---- overlay (coexist with another app, e.g. VSCode) ----
+  overlayMode: "off" | "follow"; // off = normal summon window; follow = auto show/hide tracking overlayTarget's focus (persisted)
+  overlayTarget: string; // app whose focus drives `follow` (CGWindow owner name, e.g. "Code") (persisted)
+  overlayFade: boolean; // dim the window so it reads as a faded panel (persisted)
+  miniMode: boolean; // compact single-column layout + smaller window (persisted)
   activitySource: ActivitySource; // source filter chip (persisted)
   activityType: ActivityType; // event-type sub-filter chip (persisted)
   activityQuery: string; // fuzzy search box (runtime)
@@ -271,6 +277,10 @@ const PERSIST: (keyof AppState)[] = [
   "resumeTabs",
   "wtExpanded",
   "favExpanded",
+  "overlayMode",
+  "overlayTarget",
+  "overlayFade",
+  "miniMode",
   "wtFavorites",
   "spaces",
   "wtFocus",
@@ -344,6 +354,11 @@ function load(): AppState {
     worktrees: [],
     activity: [],
     aiFavs: [],
+    frontmostApp: "",
+    overlayMode: loadKey<"off" | "follow">("overlayMode", "off"),
+    overlayTarget: loadKey<string>("overlayTarget", "Code"),
+    overlayFade: loadKey<boolean>("overlayFade", false),
+    miniMode: loadKey<boolean>("miniMode", false),
     activitySource: loadKey<ActivitySource>("activitySource", "all"),
     activityType: loadKey<ActivityType>("activityType", "all"),
     activityQuery: "",

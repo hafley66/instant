@@ -804,6 +804,59 @@ function zoomResetGesture() {
   }
 }
 
+// ---- overlay controller ----
+// Coexist with another app (VSCode) using built-in window APIs only: a "follow"
+// mode that shows/hides as overlayTarget gains/loses focus (off the frontmost-app
+// stream), a faded (dimmed) look, a keyboard click-through toggle, and a compact
+// "mini" layout + window size. No non-activating NSPanel (needs a native crate),
+// so show() does activate us — but follow keys off frontmostApp, so the instant
+// focus moves to a third app we hide again.
+const OVERLAY_NORMAL = new LogicalSize(820, 540); // matches tauri.conf default
+const OVERLAY_MINI = new LogicalSize(440, 360);
+let overlayMiniApplied: boolean | null = null;
+let overlayClickThrough = false;
+
+function applyOverlay() {
+  const s = store.get();
+  const app = document.getElementById("app");
+  app?.classList.toggle("overlay-faded", s.overlayFade);
+  app?.classList.toggle("mini", s.miniMode);
+  const win = getCurrentWindow();
+  // Resize only on an actual mini flip, not every store change.
+  if (overlayMiniApplied !== s.miniMode) {
+    overlayMiniApplied = s.miniMode;
+    win.setSize(s.miniMode ? OVERLAY_MINI : OVERLAY_NORMAL).catch(() => {});
+  }
+  // Ride along over the target's desktop across Spaces while an overlay is active.
+  win.setVisibleOnAllWorkspaces(s.overlayMode !== "off").catch(() => {});
+  // Follow: mirror the target's focus (self-focus is filtered from frontmostApp).
+  if (s.overlayMode === "follow" && s.frontmostApp) {
+    if (s.frontmostApp === s.overlayTarget) win.show().catch(() => {});
+    else win.hide().catch(() => {});
+  }
+}
+
+function toggleMiniMode() {
+  store.set({ miniMode: !store.get().miniMode });
+  flashStatus(store.get().miniMode ? "mini mode" : "full mode");
+}
+function toggleOverlayFade() {
+  store.set({ overlayFade: !store.get().overlayFade });
+}
+function cycleOverlayMode() {
+  const next = store.get().overlayMode === "off" ? ("follow" as const) : ("off" as const);
+  store.set({ overlayMode: next });
+  flashStatus(next === "follow" ? `overlay: follow ${store.get().overlayTarget}` : "overlay: off");
+}
+// Click-through: the window stops receiving mouse events (they pass to the app
+// behind). Keyboard-only — while on you can't click the window to turn it back
+// off, so it toggles by key by design.
+async function toggleClickThrough() {
+  overlayClickThrough = !overlayClickThrough;
+  await getCurrentWindow().setIgnoreCursorEvents(overlayClickThrough).catch(() => {});
+  flashStatus(overlayClickThrough ? "click-through on" : "click-through off");
+}
+
 const TAB_COMMANDS: Command[] = [
   { id: "tab.next", keys: ["$mod+Shift+BracketRight", "Control+Tab"], run: () => focusTabByOffset(1) },
   { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], run: () => focusTabByOffset(-1) },
@@ -836,6 +889,11 @@ const TAB_COMMANDS: Command[] = [
   { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], run: () => zoomGesture(ZOOM_STEP) },
   { id: "app.zoomOut", keys: ["$mod+Minus"], run: () => zoomGesture(-ZOOM_STEP) },
   { id: "app.zoomReset", keys: ["$mod+Digit0"], run: zoomResetGesture },
+  // Overlay controls: mini layout, faded panel, follow-focus mode, click-through.
+  { id: "overlay.mini", keys: ["$mod+Shift+m"], run: toggleMiniMode },
+  { id: "overlay.fade", keys: ["$mod+Shift+d"], run: toggleOverlayFade },
+  { id: "overlay.mode", keys: ["$mod+Shift+o"], run: cycleOverlayMode },
+  { id: "overlay.clickThrough", keys: ["$mod+Shift+i"], run: () => void toggleClickThrough() },
   // cmd/ctrl+1..9 jump to a tab (9 = last).
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.goto${i + 1}`,
@@ -4448,6 +4506,14 @@ async function main() {
     store.set({ aiFavs: e.payload });
   });
 
+  // Frontmost-app stream (Rust polls every 400ms). Foundation for the overlay
+  // state machine: stash who's in front so panels can react to focus (e.g. raise
+  // / fade when VSCode comes forward). "instant" while we're focused; ignore self.
+  await listen<string>("frontmost-app", (e) => {
+    const app = e.payload;
+    if (app && app !== "instant") store.set({ frontmostApp: app });
+  });
+
   // Summon: replay entrance animation + refocus active terminal.
   await listen("summoned", () => {
     const app = $("#app");
@@ -4479,6 +4545,17 @@ async function main() {
   // path is intercepted inside attachCustomKeyEventHandler (runMatchingCommand)
   // so combos aren't typed into the pty.
   installKeymap(TAB_COMMANDS);
+
+  // Overlay: re-apply on any change to its config or the frontmost app, then once
+  // now so a persisted mini/fade/follow is restored on boot.
+  store.subscribe(applyOverlay, [
+    "overlayMode",
+    "overlayTarget",
+    "overlayFade",
+    "miniMode",
+    "frontmostApp",
+  ]);
+  applyOverlay();
 
   // Right-⌘ + Right-⇧ + V: the native tap (lib.rs) swallows the combo, copies
   // the focused app's selection, and emits the text here. Write it straight into
