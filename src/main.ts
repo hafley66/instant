@@ -58,6 +58,7 @@ import { renderTable, type SortState } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import { installKeymap, runMatchingCommand, type Command } from "./keymap";
+import { openPalette, isPaletteOpen } from "./palette";
 import {
   mountReactDock,
   togglePanel,
@@ -686,10 +687,6 @@ function togglePinTab(name: string) {
   applyTabTitle(name);
   reflowPinnedTabs();
 }
-function togglePinActiveTab() {
-  togglePinTab(activeTabName());
-}
-
 // Stack of recently closed tabs for reopen (⌘⇧T). In-memory only. A tmux session
 // survives a tab close, so reopen reattaches by name and the agent is still
 // alive; the stored command/cwd only matter if the session was actually killed.
@@ -858,23 +855,27 @@ async function toggleClickThrough() {
 }
 
 const TAB_COMMANDS: Command[] = [
-  { id: "tab.next", keys: ["$mod+Shift+BracketRight", "Control+Tab"], run: () => focusTabByOffset(1) },
-  { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], run: () => focusTabByOffset(-1) },
-  { id: "tab.close", keys: ["$mod+w"], run: closeActiveTab },
-  { id: "tab.open", keys: ["$mod+t"], run: openTabAtPwd },
-  { id: "tab.reopen", keys: ["$mod+Shift+t"], run: reopenLastTab },
-  { id: "tab.pin", keys: ["$mod+Shift+p"], run: togglePinActiveTab },
+  // The palette lists every command below that carries a `title`. ⌘⇧P, the
+  // VSCode-standard binding.
+  { id: "palette.open", keys: ["$mod+Shift+p"], title: "Show All Commands", group: "Palette", run: () => openPalette() },
+  { id: "tab.next", keys: ["$mod+Shift+BracketRight", "Control+Tab"], title: "Next Tab", group: "Tabs", run: () => focusTabByOffset(1) },
+  { id: "tab.prev", keys: ["$mod+Shift+BracketLeft", "Control+Shift+Tab"], title: "Previous Tab", group: "Tabs", run: () => focusTabByOffset(-1) },
+  { id: "tab.close", keys: ["$mod+w"], title: "Close Tab", group: "Tabs", run: closeActiveTab },
+  { id: "tab.open", keys: ["$mod+t"], title: "New Tab at Current Directory", group: "Tabs", run: openTabAtPwd },
+  { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
-  { id: "ai.favTurn", keys: ["$mod+Shift+s"], run: () => void favoriteCurrentTurn() },
+  { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
   // the app (tmux sessions outlive the reload, so nothing is lost).
-  { id: "app.reload", keys: ["$mod+r"], run: () => location.reload() },
+  { id: "app.reload", keys: ["$mod+r"], title: "Reload Window", group: "App", run: () => location.reload() },
   // Safe reload: reload but skip reading persisted state (dock layout, tabs, …)
   // so a corrupt value can't re-jam startup. One-shot; the next layout change
   // rewrites the bad copy. See SAFE_BOOT in state.ts.
   {
     id: "app.safeReload",
     keys: ["$mod+Shift+r"],
+    title: "Reload Window (Safe Boot)",
+    group: "App",
     run: () => {
       try {
         sessionStorage.setItem("SAFE_BOOT", "1");
@@ -886,15 +887,16 @@ const TAB_COMMANDS: Command[] = [
   },
   // Zoom: cmd +/-/0. A focused terminal zooms its own font (persisted per tab);
   // otherwise the webview chrome (rail + toolbars) zooms (persisted, 0.5–2.0).
-  { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], run: () => zoomGesture(ZOOM_STEP) },
-  { id: "app.zoomOut", keys: ["$mod+Minus"], run: () => zoomGesture(-ZOOM_STEP) },
-  { id: "app.zoomReset", keys: ["$mod+Digit0"], run: zoomResetGesture },
+  { id: "app.zoomIn", keys: ["$mod+Equal", "$mod+Shift+Equal"], title: "Zoom In", group: "App", run: () => zoomGesture(ZOOM_STEP) },
+  { id: "app.zoomOut", keys: ["$mod+Minus"], title: "Zoom Out", group: "App", run: () => zoomGesture(-ZOOM_STEP) },
+  { id: "app.zoomReset", keys: ["$mod+Digit0"], title: "Reset Zoom", group: "App", run: zoomResetGesture },
   // Overlay controls: mini layout, faded panel, follow-focus mode, click-through.
-  { id: "overlay.mini", keys: ["$mod+Shift+m"], run: toggleMiniMode },
-  { id: "overlay.fade", keys: ["$mod+Shift+d"], run: toggleOverlayFade },
-  { id: "overlay.mode", keys: ["$mod+Shift+o"], run: cycleOverlayMode },
-  { id: "overlay.clickThrough", keys: ["$mod+Shift+i"], run: () => void toggleClickThrough() },
-  // cmd/ctrl+1..9 jump to a tab (9 = last).
+  { id: "overlay.mini", keys: ["$mod+Shift+m"], title: "Toggle Mini Mode", group: "Overlay", run: toggleMiniMode },
+  { id: "overlay.fade", keys: ["$mod+Shift+d"], title: "Toggle Fade", group: "Overlay", run: toggleOverlayFade },
+  { id: "overlay.mode", keys: ["$mod+Shift+o"], title: "Cycle Overlay Mode", group: "Overlay", run: cycleOverlayMode },
+  { id: "overlay.clickThrough", keys: ["$mod+Shift+i"], title: "Toggle Click-Through", group: "Overlay", run: () => void toggleClickThrough() },
+  // cmd/ctrl+1..9 jump to a tab (9 = last). Palette-hidden (no title): too many,
+  // and the palette is for discovery, not numbered jumps.
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.goto${i + 1}`,
     keys: [`$mod+${i + 1}`],
@@ -4408,6 +4410,8 @@ async function main() {
     onTermClose: onTermClosed,
     onTermLayout: fitTerm,
     onTermRetitle: (sid) => applyTabTitle(sid.slice(sessionId("").length)),
+    isTermPinned: (sid) => isPinnedTab(sid.slice(sessionId("").length)),
+    toggleTermPin: (sid) => togglePinTab(sid.slice(sessionId("").length)),
   });
   store.subscribe(renderWorktreesPanel, [
     "worktrees",
@@ -4536,9 +4540,10 @@ async function main() {
   // Each terminal panel refits itself via dockview's onDidDimensionsChange
   // (wired through onTermLayout -> fitTerm), so no global ResizeObserver here.
 
-  // Esc hides the popover.
+  // Esc hides the popover — unless the command palette is open, where Esc just
+  // closes the palette (handled on its own input, which stops propagation).
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") getCurrentWindow().hide();
+    if (e.key === "Escape" && !isPaletteOpen()) getCurrentWindow().hide();
   });
 
   // Central keymap: binds the command table on the window. The focused-terminal

@@ -46,6 +46,14 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
       ...(customTitle(api.id) != null
         ? [{ label: "Reset name", action: () => renameTab(api.id, "") }]
         : []),
+      ...(isTerm(api.id)
+        ? [
+            {
+              label: hooks.isTermPinned(termSid(api.id)) ? "Unpin tab" : "Pin tab",
+              action: () => hooks.toggleTermPin(termSid(api.id)),
+            },
+          ]
+        : []),
       { sep: true },
       { label: "Split right", action: () => split("right") },
       { label: "Split down", action: () => split("below") },
@@ -135,12 +143,18 @@ type Hooks = {
   onTermLayout: (sid: string) => void;
   // Re-derive a terminal's tab title (override + pin prefix live in main.ts).
   onTermRetitle: (sid: string) => void;
+  // Pin state + toggle live in main.ts (keyed by session name); the tab context
+  // menu reads/writes through these.
+  isTermPinned: (sid: string) => boolean;
+  toggleTermPin: (sid: string) => void;
 };
 let hooks: Hooks = {
   onTermActivate: () => {},
   onTermClose: () => {},
   onTermLayout: () => {},
   onTermRetitle: () => {},
+  isTermPinned: () => false,
+  toggleTermPin: () => {},
 };
 export function setDockHooks(h: Partial<Hooks>) {
   hooks = { ...hooks, ...h };

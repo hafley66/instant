@@ -15,6 +15,18 @@ export interface Command {
   id: string;
   keys: string[]; // one or more bindings, tinykeys syntax
   run: () => void;
+  // Human label shown in the command palette. Optional so a binding can stay
+  // palette-hidden (e.g. tab.goto1..9); only titled commands are listed.
+  title?: string;
+  // Optional grouping label for the palette ("Tabs", "Overlay", …).
+  group?: string;
+}
+
+// The commands the palette should list (those with a title). Stashed by
+// installKeymap so the palette and keymap share one source.
+let registered: Command[] = [];
+export function paletteCommands(): Command[] {
+  return registered.filter((c) => c.title);
 }
 
 let unbind: (() => void) | null = null;
@@ -27,6 +39,7 @@ let presses: { press: KeybindingPress; run: () => void }[] = [];
 // stops propagation for matched combos so they don't double-run.
 export function installKeymap(commands: Command[], target: Window = window): void {
   unbind?.();
+  registered = commands;
   const map: Record<string, (e: KeyboardEvent) => void> = {};
   presses = [];
   for (const c of commands) {
