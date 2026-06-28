@@ -65,9 +65,10 @@ fn real_chrome_dir() -> Option<PathBuf> {
 }
 
 /// Clone Local State (holds the os_crypt key) + the Default profile into a
-/// dedicated user-data-dir, once. Skips the heavy cache dirs so it's quick and
-/// small; Cookies / Login Data / Local Storage carry the signed-in session.
-/// Same machine + user means Chrome's Keychain key still decrypts them.
+/// dedicated user-data-dir, once. Cookies / Login Data / Local Storage carry the
+/// signed-in session; same machine + user means Chrome's Keychain key still
+/// decrypts them. Uses APFS copy-on-write (`cp -c`) so it's near-instant and
+/// adds no real disk, regardless of profile size.
 fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
     if dest.join("Default").exists() {
         return Ok(()); // already cloned
@@ -81,25 +82,16 @@ fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
         let _ = std::fs::copy(&local_state, dest.join("Local State"));
     }
 
-    // rsync the Default profile, excluding caches so the copy is fast/lean.
-    let status = std::process::Command::new("rsync")
-        .args(["-a", "--delete"])
-        .args([
-            "--exclude=Cache",
-            "--exclude=Code Cache",
-            "--exclude=GPUCache",
-            "--exclude=DawnGraphiteCache",
-            "--exclude=DawnWebGPUCache",
-            "--exclude=Service Worker/CacheStorage",
-            "--exclude=Service Worker/ScriptCache",
-            "--exclude=Application Cache",
-        ])
-        .arg(format!("{}/", src.join("Default").display()))
+    // cp -c uses clonefile() on APFS: a COW clone of the whole Default tree,
+    // instant and free. Falls back to a normal copy off-APFS.
+    let status = std::process::Command::new("cp")
+        .args(["-c", "-R"])
+        .arg(src.join("Default"))
         .arg(dest.join("Default"))
         .status()
-        .map_err(|e| format!("rsync: {e}"))?;
+        .map_err(|e| format!("cp: {e}"))?;
     if !status.success() {
-        return Err("rsync failed cloning Chrome profile".into());
+        return Err("cp failed cloning Chrome profile".into());
     }
     Ok(())
 }
@@ -229,6 +221,10 @@ fn is_timeout(e: &tungstenite::Error) -> bool {
 
 // ---- commands ------------------------------------------------------------
 
+/// Thin command: returns immediately. The heavy work (profile clone, Chrome
+/// launch, DevTools wait, ws connect) runs on a worker thread so the Tauri main
+/// thread never blocks — non-async commands run on the main thread, and blocking
+/// it spins the whole UI. Frames/errors arrive later via events.
 #[tauri::command]
 pub fn cdp_open(
     app: AppHandle,
@@ -239,7 +235,28 @@ pub fn cdp_open(
     height: u32,
     dpr: f64,
 ) -> Result<(), String> {
+    if store.0.lock().unwrap().contains_key(&id) {
+        return Ok(());
+    }
+    std::thread::spawn(move || {
+        if let Err(e) = attach(app.clone(), id.clone(), url, width, height, dpr) {
+            let _ = app.emit("cdp-error", json!({ "id": id, "error": e }));
+        }
+    });
+    Ok(())
+}
+
+/// Blocking attach, run off the main thread by cdp_open.
+fn attach(
+    app: AppHandle,
+    id: String,
+    url: String,
+    width: u32,
+    height: u32,
+    dpr: f64,
+) -> Result<(), String> {
     ensure_engine(&app)?;
+    let store = app.state::<CdpStore>();
     if store.0.lock().unwrap().contains_key(&id) {
         return Ok(());
     }

@@ -1332,6 +1332,7 @@ async function openBrowserTab(url?: string) {
   const view = new CdpView(el, id, u);
   browserTabs.set(id, { id, name, el, view });
   addTermPanel(id, tabTitle(name), el); // dockview adopts el into the panel
+  flashStatus("starting browser… (first run clones your Chrome profile)");
   // Measure after layout so the screencast starts at the panel's real size;
   // the view's ResizeObserver corrects any later drift.
   requestAnimationFrame(() => {
@@ -4714,6 +4715,12 @@ async function main() {
   // Kitty graphics frames resolved by the Rust proxy (graphics sessions only).
   await listen<GraphicsFrame>("pty-graphics", (e) => {
     tabs.get(e.payload.id)?.overlay?.push(e.payload);
+  });
+
+  // CDP engine failed to launch/attach a browser tab.
+  await listen<{ id: string; error: string }>("cdp-error", (e) => {
+    console.error("[cdp]", e.payload.error);
+    flashStatus(`browser error: ${e.payload.error}`);
   });
 
   // Reattach tabs that were open before the reload. The tmux sessions (and the
