@@ -56,21 +56,25 @@ struct FrameEvent {
     data: String, // base64 JPEG straight from CDP
 }
 
-/// Injected into every page: on each (dispatched) mousemove, read the CSS cursor
-/// of the element under the pointer and push it back over the __cursorSync
-/// binding, deduped. Lets the webview canvas mirror the page's native cursor
-/// (text beam over text, hand over links, etc.) with no extra round trips — it
-/// rides the mouseMoved events we already send.
+/// Injected into every page: report the CSS cursor of the element under the
+/// pointer over the __cursorSync binding, deduped, so the webview canvas mirrors
+/// the page's native cursor (beam over text, hand over links, grabbing during a
+/// drag). Fires on move, press, release, and scroll — not just move — so a
+/// cursor change *caused by* a click (e.g. :active grabbing) or by content
+/// shifting under a stationary pointer propagates immediately. Rides the input
+/// we already dispatch, no extra round trips.
 const CURSOR_SYNC_JS: &str = r#"(() => {
   if (window.__cursorSyncInstalled) return;
   window.__cursorSyncInstalled = true;
-  let last = '';
+  let last = '', lx = 0, ly = 0;
+  const read = (el) => { try { return el && el.nodeType === 1 ? getComputedStyle(el).cursor : 'auto'; } catch (_) { return 'auto'; } };
   const send = (c) => { if (c !== last) { last = c; try { window.__cursorSync(c); } catch (_) {} } };
-  document.addEventListener('mousemove', (e) => {
-    let c = 'auto';
-    try { const el = e.target; if (el && el.nodeType === 1) c = getComputedStyle(el).cursor; } catch (_) {}
-    send(c);
-  }, true);
+  const fromEvent = (e) => { lx = e.clientX; ly = e.clientY; send(read(e.target)); };
+  const fromPoint = () => send(read(document.elementFromPoint(lx, ly)));
+  document.addEventListener('mousemove', fromEvent, true);
+  document.addEventListener('mousedown', fromEvent, true);
+  document.addEventListener('mouseup', () => requestAnimationFrame(fromPoint), true);
+  document.addEventListener('scroll', () => requestAnimationFrame(fromPoint), true);
 })();"#;
 
 // ---- profile clone -------------------------------------------------------
