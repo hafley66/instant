@@ -7,6 +7,37 @@ import { paletteCommands, type Command } from "./keymap";
 
 let openEl: HTMLElement | null = null;
 
+// Most-recently-used command ids, newest first. Persisted so the palette opens
+// with your recent commands on top (VSCode-style) across sessions.
+const MRU_KEY = "cmdp.mru";
+const MRU_CAP = 50;
+
+function loadMru(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(MRU_KEY) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushMru(id: string) {
+  const next = [id, ...loadMru().filter((x) => x !== id)].slice(0, MRU_CAP);
+  try {
+    localStorage.setItem(MRU_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota / disabled storage
+  }
+}
+
+// Stable-sort commands so recently-used ones lead, original order otherwise.
+function byRecency(all: Command[]): Command[] {
+  const rank = new Map(loadMru().map((id, i) => [id, i] as const));
+  return [...all].sort(
+    (a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity),
+  );
+}
+
 export function isPaletteOpen(): boolean {
   return openEl !== null;
 }
@@ -84,7 +115,9 @@ export function openPalette(): void {
   let active = 0;
 
   function render() {
-    shown = fuzzyFilter(input.value, all, label);
+    // Empty query: show everything MRU-first. Typed query: fuzzy rank by match.
+    const q = input.value.trim();
+    shown = q ? fuzzyFilter(q, all, label) : byRecency(all);
     if (active >= shown.length) active = Math.max(0, shown.length - 1);
     list.replaceChildren();
     shown.forEach((c, i) => {
@@ -115,6 +148,7 @@ export function openPalette(): void {
   function choose(i: number) {
     const cmd = shown[i];
     if (!cmd) return;
+    pushMru(cmd.id);
     dismiss();
     cmd.run();
   }
@@ -130,12 +164,12 @@ export function openPalette(): void {
       e.preventDefault();
       e.stopPropagation();
       choose(active);
-    } else if (e.key === "ArrowDown" || (e.key === "n" && e.ctrlKey)) {
+    } else if (e.key === "ArrowDown" || (e.key === "n" && e.ctrlKey) || (e.key === "Tab" && !e.shiftKey)) {
       e.preventDefault();
       e.stopPropagation();
       if (shown.length) active = (active + 1) % shown.length;
       render();
-    } else if (e.key === "ArrowUp" || (e.key === "p" && e.ctrlKey)) {
+    } else if (e.key === "ArrowUp" || (e.key === "p" && e.ctrlKey) || (e.key === "Tab" && e.shiftKey)) {
       e.preventDefault();
       e.stopPropagation();
       if (shown.length) active = (active - 1 + shown.length) % shown.length;
