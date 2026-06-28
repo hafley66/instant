@@ -339,6 +339,9 @@ fn attach(
         ));
     };
     send_boot("Page.enable", json!({}));
+    // Headless tabs aren't "focused" by default, so keyboard input is dropped;
+    // bringToFront gives the page input focus.
+    send_boot("Page.bringToFront", json!({}));
     send_boot(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),

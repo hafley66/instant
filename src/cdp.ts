@@ -26,6 +26,9 @@ export class CdpView {
   private unlisten?: UnlistenFn;
   private ro: ResizeObserver;
   private resizeTimer = 0;
+  private dragging = false;
+  private lastMove: MouseEvent | null = null;
+  private moveRaf = 0;
 
   constructor(host: HTMLElement, private id: string, url: string) {
     this.el = document.createElement("div");
@@ -144,24 +147,50 @@ export class CdpView {
     }).catch(console.error);
   }
 
+  // While a button is held, mousemove/up are tracked on the window so a drag
+  // (text select, slider, scrollbar) keeps going and *completes* even when the
+  // pointer leaves the canvas — otherwise the page gets a stuck, never-released
+  // button. Moves are coalesced to one per frame to avoid flooding the IPC.
+  private onWinMove = (e: MouseEvent) => this.queueMove(e);
+  private onWinUp = (e: MouseEvent) => {
+    this.dragging = false;
+    this.mouse("mouseReleased", e, {
+      button: MOUSE_BTN[e.button] ?? "left",
+      buttons: e.buttons,
+      clickCount: e.detail || 1,
+    });
+    window.removeEventListener("mousemove", this.onWinMove, true);
+    window.removeEventListener("mouseup", this.onWinUp, true);
+  };
+
+  private queueMove(e: MouseEvent) {
+    this.lastMove = e;
+    if (!this.moveRaf) {
+      this.moveRaf = requestAnimationFrame(() => {
+        this.moveRaf = 0;
+        const m = this.lastMove;
+        if (m) this.mouse("mouseMoved", m, { button: "none", buttons: m.buttons });
+      });
+    }
+  }
+
   private wireInput() {
     const c = this.canvas;
     c.addEventListener("mousedown", (e) => {
+      e.preventDefault();
       c.focus();
+      this.dragging = true;
       this.mouse("mousePressed", e, {
         button: MOUSE_BTN[e.button] ?? "left",
-        buttons: e.buttons,
+        buttons: e.buttons || 1,
         clickCount: e.detail || 1,
       });
+      window.addEventListener("mousemove", this.onWinMove, true);
+      window.addEventListener("mouseup", this.onWinUp, true);
     });
-    c.addEventListener("mouseup", (e) =>
-      this.mouse("mouseReleased", e, {
-        button: MOUSE_BTN[e.button] ?? "left",
-        buttons: e.buttons,
-        clickCount: e.detail || 1,
-      }),
-    );
-    c.addEventListener("mousemove", (e) => this.mouse("mouseMoved", e, { button: "none", buttons: e.buttons }));
+    c.addEventListener("mousemove", (e) => {
+      if (!this.dragging) this.queueMove(e);
+    });
     c.addEventListener("contextmenu", (e) => e.preventDefault());
     c.addEventListener(
       "wheel",
@@ -217,7 +246,10 @@ export class CdpView {
 
   dispose() {
     if (this.raf) cancelAnimationFrame(this.raf);
+    if (this.moveRaf) cancelAnimationFrame(this.moveRaf);
     clearTimeout(this.resizeTimer);
+    window.removeEventListener("mousemove", this.onWinMove, true);
+    window.removeEventListener("mouseup", this.onWinUp, true);
     this.ro.disconnect();
     this.unlisten?.();
     this.el.remove();
