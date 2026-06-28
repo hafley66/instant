@@ -7,11 +7,14 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+
+use crate::kitty::{KittyScanner, ScanOut};
 
 // GUI apps don't inherit the login shell PATH, so tmux/claude/opencode won't be
 // found without this. Prepend the usual homebrew + system locations.
@@ -24,8 +27,12 @@ pub(crate) fn path_env() -> String {
     }
 }
 
+/// Writer is shared so the per-pty reader thread can also write back to the pty
+/// (kitty graphics query acknowledgements) without taking the store lock.
+type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
 struct PtyHandle {
-    writer: Box<dyn Write + Send>,
+    writer: SharedWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
@@ -56,6 +63,34 @@ pub struct Session {
 struct PtyData {
     id: String,
     chunk: String,
+}
+
+/// Emitted to the webview as `pty-graphics` (one resolved kitty frame). v1 ships
+/// RGBA as base64 over the JSON event; switch to a binary Channel if 60fps
+/// throughput needs it (see plan task D).
+#[derive(Serialize, Clone)]
+struct GraphicsEvent {
+    id: String,
+    action: char,
+    img_id: u32,
+    format: u16,
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    no_scroll: bool,
+    delete: bool,
+    rgba_b64: String,
+}
+
+/// pixel_width/height for PtySize from cell metrics the frontend measured from
+/// xterm. tmux ignores these; kitty-graphics apps (awrit) read them via
+/// TIOCGWINSZ ws_xpixel/ws_ypixel to size their framebuffer.
+fn pixel_dims(cols: u16, rows: u16, cell_w: Option<u16>, cell_h: Option<u16>) -> (u16, u16) {
+    (
+        cell_w.unwrap_or(0).saturating_mul(cols),
+        cell_h.unwrap_or(0).saturating_mul(rows),
+    )
 }
 
 #[tauri::command]
@@ -160,8 +195,14 @@ fn enable_mouse(name: &str) {
     });
 }
 
-/// Open (or reattach to) a tmux session in a fresh pty bound to webview id `id`.
+/// Open (or reattach to) a session in a fresh pty bound to webview id `id`.
+///
+/// `graphics=true` spawns the command directly (no tmux, which filters kitty APC
+/// graphics), sets TERM=xterm-kitty, and runs the pty reader through the kitty
+/// graphics proxy. `cell_w`/`cell_h` are device pixels per terminal cell so the
+/// pty reports a real pixel size to graphics apps.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn open_session(
     app: AppHandle,
     store: State<PtyStore>,
@@ -171,41 +212,64 @@ pub fn open_session(
     cwd: Option<String>,
     cols: u16,
     rows: u16,
+    graphics: Option<bool>,
+    cell_w: Option<u16>,
+    cell_h: Option<u16>,
 ) -> Result<(), String> {
+    let graphics = graphics.unwrap_or(false);
     {
         // Already wired up for this tab; just resize and bail.
         let map = store.0.lock().unwrap();
         if map.contains_key(&id) {
             drop(map);
-            enable_mouse(&name);
-            return resize_pty(store, id, cols, rows);
+            if !graphics {
+                enable_mouse(&name);
+            }
+            return resize_pty(store, id, cols, rows, cell_w, cell_h);
         }
     }
 
+    let (pixel_width, pixel_height) = pixel_dims(cols, rows, cell_w, cell_h);
     let pair = native_pty_system()
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize { rows, cols, pixel_width, pixel_height })
         .map_err(|e| e.to_string())?;
 
-    // When creating, the trailing command runs inside; on reattach tmux ignores
-    // it. So a quick-start session "claude" launches `claude` the first time and
-    // just reattaches after.
-    // `-A` attaches if it exists else creates; `-D` detaches any OTHER client on
-    // attach. Without -D, a leaked client from a prior webview reload stays
-    // attached at its old 80x24 size and, under `window-size latest`, strands a
-    // ghost status line. -D guarantees one client, so one size.
-    let mut cmd = CommandBuilder::new("tmux");
-    cmd.args(["new-session", "-A", "-D", "-s", &name]);
-    // Start dir for a freshly-created session (a worktree path, usually). tmux
-    // ignores -c when reattaching, same as it ignores the trailing command.
     let start_dir = cwd.as_deref().filter(|s| !s.is_empty());
-    if let Some(dir) = start_dir {
-        cmd.args(["-c", dir]);
-    }
-    if let Some(run) = command.as_deref().filter(|s| !s.is_empty()) {
-        cmd.arg(run);
-    }
-    cmd.env("PATH", path_env());
-    cmd.env("TERM", "xterm-256color");
+    let cmd = if graphics {
+        // Direct spawn via the login shell so the command (e.g. "awrit <url>")
+        // gets PATH and arg parsing, then the session ends when it exits.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let mut c = CommandBuilder::new(&shell);
+        match command.as_deref().filter(|s| !s.is_empty()) {
+            Some(run) => c.args(["-lc", run]),
+            None => c.arg("-l"),
+        }
+        c.env("PATH", path_env());
+        c.env("TERM", "xterm-kitty");
+        c
+    } else {
+        // When creating, the trailing command runs inside; on reattach tmux
+        // ignores it. So a quick-start session "claude" launches `claude` the
+        // first time and just reattaches after.
+        // `-A` attaches if it exists else creates; `-D` detaches any OTHER client
+        // on attach. Without -D, a leaked client from a prior webview reload
+        // stays attached at its old 80x24 size and, under `window-size latest`,
+        // strands a ghost status line. -D guarantees one client, so one size.
+        let mut c = CommandBuilder::new("tmux");
+        c.args(["new-session", "-A", "-D", "-s", &name]);
+        // Start dir for a freshly-created session (a worktree path, usually).
+        // tmux ignores -c when reattaching, like the trailing command.
+        if let Some(dir) = start_dir {
+            c.args(["-c", dir]);
+        }
+        if let Some(run) = command.as_deref().filter(|s| !s.is_empty()) {
+            c.arg(run);
+        }
+        c.env("PATH", path_env());
+        c.env("TERM", "xterm-256color");
+        c
+    };
+    let mut cmd = cmd;
     match start_dir {
         Some(dir) => cmd.cwd(dir),
         None => {
@@ -219,25 +283,73 @@ pub fn open_session(
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let writer: SharedWriter =
+        Arc::new(Mutex::new(pair.master.take_writer().map_err(|e| e.to_string())?));
 
     store
         .0
         .lock()
         .unwrap()
-        .insert(id.clone(), PtyHandle { writer, master: pair.master });
+        .insert(id.clone(), PtyHandle { writer: writer.clone(), master: pair.master });
 
-    enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
+    if !graphics {
+        enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
+    }
 
     // Reader thread: pump pty -> webview until EOF (session detached/killed).
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        if !graphics {
+            // Fast path: plain terminal, no graphics parsing.
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                    }
+                }
+            }
+            return;
+        }
+        // Graphics path: split kitty APC frames out of the byte stream.
+        let mut scanner = KittyScanner::default();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                    for out in scanner.feed(&buf[..n]) {
+                        match out {
+                            ScanOut::Passthrough(bytes) => {
+                                let chunk = String::from_utf8_lossy(&bytes).to_string();
+                                let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                            }
+                            ScanOut::Graphics(g) => {
+                                let _ = app.emit(
+                                    "pty-graphics",
+                                    GraphicsEvent {
+                                        id: id.clone(),
+                                        action: g.action,
+                                        img_id: g.id,
+                                        format: g.format,
+                                        width: g.width,
+                                        height: g.height,
+                                        x: g.x,
+                                        y: g.y,
+                                        no_scroll: g.no_scroll,
+                                        delete: g.delete,
+                                        rgba_b64: STANDARD.encode(&g.rgba),
+                                    },
+                                );
+                            }
+                            ScanOut::Reply(bytes) => {
+                                if let Ok(mut w) = writer.lock() {
+                                    let _ = w.write_all(&bytes);
+                                    let _ = w.flush();
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -248,20 +360,29 @@ pub fn open_session(
 
 #[tauri::command]
 pub fn write_pty(store: State<PtyStore>, id: String, data: String) -> Result<(), String> {
-    let mut map = store.0.lock().unwrap();
-    if let Some(h) = map.get_mut(&id) {
-        h.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
-        h.writer.flush().map_err(|e| e.to_string())?;
+    let map = store.0.lock().unwrap();
+    if let Some(h) = map.get(&id) {
+        let mut w = h.writer.lock().unwrap();
+        w.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+        w.flush().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn resize_pty(store: State<PtyStore>, id: String, cols: u16, rows: u16) -> Result<(), String> {
+pub fn resize_pty(
+    store: State<PtyStore>,
+    id: String,
+    cols: u16,
+    rows: u16,
+    cell_w: Option<u16>,
+    cell_h: Option<u16>,
+) -> Result<(), String> {
+    let (pixel_width, pixel_height) = pixel_dims(cols, rows, cell_w, cell_h);
     let map = store.0.lock().unwrap();
     if let Some(h) = map.get(&id) {
         h.master
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .resize(PtySize { rows, cols, pixel_width, pixel_height })
             .map_err(|e| e.to_string())?;
     }
     Ok(())

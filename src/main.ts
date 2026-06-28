@@ -59,6 +59,7 @@ import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import { installKeymap, runMatchingCommand, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
+import { GraphicsOverlay, type GraphicsFrame } from "./graphics";
 import {
   mountReactDock,
   togglePanel,
@@ -100,7 +101,21 @@ type Tab = {
   term: Terminal;
   fit: FitAddon;
   el: HTMLElement;
+  graphics?: boolean;
+  overlay?: GraphicsOverlay;
 };
+
+// Device pixels per terminal cell, for the pty's TIOCGWINSZ pixel size. Graphics
+// apps (awrit) read ws_xpixel/ws_ypixel to size their framebuffer; without real
+// values they render at 0x0. Reads xterm's measured cell box (internal API) and
+// scales by devicePixelRatio. Returns camelCase keys; Tauri maps them to the
+// command's cell_w/cell_h. Yields {} if unavailable so callers spread harmlessly.
+function cellDims(term: Terminal): { cellW: number; cellH: number } | Record<string, never> {
+  const cell = (term as any)?._core?._renderService?.dimensions?.css?.cell;
+  if (!cell?.width || !cell?.height) return {};
+  const dpr = window.devicePixelRatio || 1;
+  return { cellW: Math.round(cell.width * dpr), cellH: Math.round(cell.height * dpr) };
+}
 
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
@@ -863,6 +878,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.close", keys: ["$mod+w"], title: "Close Tab", group: "Tabs", run: closeActiveTab },
   { id: "tab.open", keys: ["$mod+t"], title: "New Tab at Current Directory", group: "Tabs", run: openTabAtPwd },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
+  { id: "tab.browser", keys: [], title: "Open Browser (awrit)", group: "Tabs", run: () => openBrowserTab() },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -906,7 +922,10 @@ const TAB_COMMANDS: Command[] = [
 
 // opts let a Space override the agent command and launch cwd; plain sessions
 // fall back to QUICK_CMD and the backend default (HOME).
-function openTab(name: string, opts: { command?: string | null; cwd?: string | null } = {}) {
+function openTab(
+  name: string,
+  opts: { command?: string | null; cwd?: string | null; graphics?: boolean } = {},
+) {
   const id = sessionId(name);
   if (tabs.has(id)) {
     activate(id);
@@ -952,7 +971,11 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   term.loadAddon(fit);
   term.open(el);
 
-  tabs.set(id, { id, name, term, fit, el });
+  // Graphics sessions (awrit) get an overlay canvas for kitty-graphics frames
+  // forwarded by the Rust proxy, and skip tmux (which filters graphics APCs).
+  const graphics = opts.graphics ?? false;
+  const overlay = graphics ? new GraphicsOverlay(el) : undefined;
+  tabs.set(id, { id, name, term, fit, el, graphics, overlay });
 
   // OSC 52 -> macOS clipboard. tmux (set-clipboard on) emits this when a mouse
   // drag selects text in copy-mode, and TUIs (opencode) emit it on their own
@@ -1074,7 +1097,7 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
 
   term.onData((data) => invoke("write_pty", { id, data }).catch(console.error));
   term.onResize(({ cols, rows }) =>
-    invoke("resize_pty", { id, cols, rows }).catch(console.error),
+    invoke("resize_pty", { id, cols, rows, ...cellDims(term) }).catch(console.error),
   );
 
   // iTerm2-style word/line editing. xterm doesn't emit these by default on mac,
@@ -1138,7 +1161,9 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
-    invoke("open_session", { id, name, command, cwd, cols, rows }).catch(console.error);
+    invoke("open_session", {
+      id, name, command, cwd, cols, rows, graphics, ...cellDims(term),
+    }).catch(console.error);
   });
 
   // Hand the host element to dockview as a flat, draggable/splittable panel.
@@ -1146,6 +1171,57 @@ function openTab(name: string, opts: { command?: string | null; cwd?: string | n
   addTermPanel(id, tabTitle(name), el);
   activate(id);
   if (store.get().pinnedTabs.length) reflowPinnedTabs();
+}
+
+// Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
+// so reuse the command-palette overlay styling for a real input. Resolves to the
+// trimmed value, or null on Esc / backdrop click / empty.
+function askText(placeholder: string, initial = ""): Promise<string | null> {
+  return new Promise((resolve) => {
+    const root = document.createElement("div");
+    root.className = "cmdp-root";
+    const box = document.createElement("div");
+    box.className = "cmdp-box";
+    const input = document.createElement("input");
+    input.className = "cmdp-input";
+    input.type = "text";
+    input.placeholder = placeholder;
+    input.value = initial;
+    input.spellcheck = false;
+    box.appendChild(input);
+    root.appendChild(box);
+    const close = (val: string | null) => {
+      root.remove();
+      resolve(val);
+    };
+    root.addEventListener("pointerdown", (e) => {
+      if (e.target === root) close(null);
+    });
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        close(input.value.trim() || null);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        close(null);
+      }
+    });
+    document.body.appendChild(root);
+    queueMicrotask(() => {
+      input.focus();
+      input.select();
+    });
+  });
+}
+
+// Open a graphical browser tab backed by awrit (Chromium rendered via the kitty
+// graphics protocol → Rust proxy → overlay canvas). Runs outside tmux.
+async function openBrowserTab(url?: string) {
+  const u = (url ?? (await askText("URL", "https://example.com")) ?? "").trim();
+  if (!u) return;
+  const q = `'${u.replace(/'/g, `'\\''`)}'`;
+  openTab(`awrit:${u}`, { command: `awrit ${q}`, graphics: true });
 }
 
 // Make a terminal the active dockview panel. The store/active-sync + focus is
@@ -1175,7 +1251,9 @@ function onTermShown(id: string) {
   void warmTurns(id); // warm the ledger so right-click turn-identify stays sync
   requestAnimationFrame(() => {
     t.fit.fit();
-    invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
+    invoke("resize_pty", {
+      id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
+    }).catch(() => {});
   });
   focusTermSoon(id);
   renderSessionActive();
@@ -1198,6 +1276,7 @@ function onTermClosed(id: string) {
   const tabMeta = tabMetaById(id);
   const live = store.get().sessions.find((s) => s.name === name);
   const proc = foregroundProc(live?.commands ?? []);
+  t.overlay?.dispose();
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
@@ -1282,7 +1361,9 @@ function fitTerm(id: string) {
   const t = tabs.get(id);
   if (!t) return;
   t.fit.fit();
-  invoke("resize_pty", { id, cols: t.term.cols, rows: t.term.rows }).catch(() => {});
+  invoke("resize_pty", {
+    id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
+  }).catch(() => {});
 }
 
 function renderSessionActive() {
@@ -4475,6 +4556,11 @@ async function main() {
 
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
+  });
+
+  // Kitty graphics frames resolved by the Rust proxy (graphics sessions only).
+  await listen<GraphicsFrame>("pty-graphics", (e) => {
+    tabs.get(e.payload.id)?.overlay?.push(e.payload);
   });
 
   // Reattach tabs that were open before the reload. The tmux sessions (and the

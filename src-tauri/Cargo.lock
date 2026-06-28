@@ -1860,9 +1860,12 @@ dependencies = [
 name = "instant"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "core-foundation 0.10.1",
  "core-graphics 0.25.0",
+ "libc",
  "mouse_position",
+ "png 0.17.16",
  "portable-pty",
  "rusqlite",
  "serde",

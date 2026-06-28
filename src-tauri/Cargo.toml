@@ -29,4 +29,7 @@ core-graphics = "0.25"
 core-foundation = "0.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tiny_http = "0.12"
+base64 = "0.22"
+libc = "0.2"
+png = "0.17"
 

@@ -4,6 +4,7 @@ mod config;
 mod favorites;
 mod fs;
 mod harness;
+mod kitty;
 mod ledger;
 mod pty;
 mod sprefa_plugin;
