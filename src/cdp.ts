@@ -24,6 +24,7 @@ export class CdpView {
   private pendingData: string | null = null;
   private raf = 0;
   private unlisten?: UnlistenFn;
+  private unlistenCursor?: UnlistenFn;
   private ro: ResizeObserver;
   private resizeTimer = 0;
   private dragging = false;
@@ -99,6 +100,15 @@ export class CdpView {
       this.pendingData = ev.payload.data;
       if (!this.raf) this.raf = requestAnimationFrame(() => this.flush());
     }).then((u) => (this.unlisten = u));
+
+    // Native cursor: the page reports the CSS cursor under the pointer; mirror it
+    // onto the canvas so links show a hand, text a beam, etc. CSS keywords map
+    // 1:1 to canvas style.cursor; custom url() cursors fall back to default.
+    void listen<{ id: string; cursor: string }>("cdp-cursor", (ev) => {
+      if (ev.payload.id !== this.id) return;
+      const c = ev.payload.cursor;
+      this.canvas.style.cursor = !c || c.startsWith("url(") ? "default" : c;
+    }).then((u) => (this.unlistenCursor = u));
   }
 
   // CSS px size of the canvas (== CDP viewport CSS px) and the device ratio.
@@ -252,6 +262,7 @@ export class CdpView {
     window.removeEventListener("mouseup", this.onWinUp, true);
     this.ro.disconnect();
     this.unlisten?.();
+    this.unlistenCursor?.();
     this.el.remove();
   }
 }

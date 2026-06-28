@@ -56,6 +56,23 @@ struct FrameEvent {
     data: String, // base64 JPEG straight from CDP
 }
 
+/// Injected into every page: on each (dispatched) mousemove, read the CSS cursor
+/// of the element under the pointer and push it back over the __cursorSync
+/// binding, deduped. Lets the webview canvas mirror the page's native cursor
+/// (text beam over text, hand over links, etc.) with no extra round trips — it
+/// rides the mouseMoved events we already send.
+const CURSOR_SYNC_JS: &str = r#"(() => {
+  if (window.__cursorSyncInstalled) return;
+  window.__cursorSyncInstalled = true;
+  let last = '';
+  const send = (c) => { if (c !== last) { last = c; try { window.__cursorSync(c); } catch (_) {} } };
+  document.addEventListener('mousemove', (e) => {
+    let c = 'auto';
+    try { const el = e.target; if (el && el.nodeType === 1) c = getComputedStyle(el).cursor; } catch (_) {}
+    send(c);
+  }, true);
+})();"#;
+
 // ---- profile clone -------------------------------------------------------
 
 /// Where the real Chrome stores its profile.
@@ -342,6 +359,17 @@ fn attach(
     // Headless tabs aren't "focused" by default, so keyboard input is dropped;
     // bringToFront gives the page input focus.
     send_boot("Page.bringToFront", json!({}));
+    // Native cursor mirroring: a page binding + a mousemove listener report the
+    // CSS cursor under the pointer. addBinding must precede the script that calls
+    // it; addScriptToEvaluateOnNewDocument covers future navigations, and the
+    // evaluate installs it on the already-loaded current document.
+    send_boot("Runtime.enable", json!({}));
+    send_boot("Runtime.addBinding", json!({ "name": "__cursorSync" }));
+    send_boot(
+        "Page.addScriptToEvaluateOnNewDocument",
+        json!({ "source": CURSOR_SYNC_JS }),
+    );
+    send_boot("Runtime.evaluate", json!({ "expression": CURSOR_SYNC_JS }));
     send_boot(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),
@@ -371,7 +399,15 @@ fn attach(
             match ws.read() {
                 Ok(Message::Text(txt)) => {
                     if let Ok(v) = serde_json::from_str::<Value>(txt.as_str()) {
-                        if v["method"] == "Page.screencastFrame" {
+                        if v["method"] == "Runtime.bindingCalled"
+                            && v["params"]["name"] == "__cursorSync"
+                        {
+                            let c = v["params"]["payload"].as_str().unwrap_or("default");
+                            let _ = app2.emit(
+                                "cdp-cursor",
+                                json!({ "id": id2.clone(), "cursor": c }),
+                            );
+                        } else if v["method"] == "Page.screencastFrame" {
                             let data = v["params"]["data"].as_str().unwrap_or("");
                             let session = v["params"]["sessionId"].clone();
                             let _ = app2.emit(
