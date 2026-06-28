@@ -121,6 +121,84 @@ function cellDims(term: Terminal): { cellW: number; cellH: number } | Record<str
 // state, so they stay out of the store; the active tab *id* lives in the store.
 const tabs = new Map<string, Tab>();
 
+// --- kitty keyboard protocol (graphics tabs) -------------------------------
+// awrit pushes the full progressive-enhancement flags (CSI > 31 u) on launch and
+// then expects every key as a CSI ... u event. xterm.js doesn't speak it, so we
+// encode events ourselves for graphics tabs. MVP: text + common named/functional
+// keys, modifiers, press/release; standalone modifier keys are skipped.
+
+// Modifier bitfield per spec: 1 + shift(1) + alt(2) + ctrl(4) + super(8).
+function kittyMods(e: KeyboardEvent): number {
+  return 1 + (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0) + (e.metaKey ? 8 : 0);
+}
+
+// CSI encoding for one key event, or null to fall through to xterm.
+function kittyKeySeq(e: KeyboardEvent): string | null {
+  const CSI = "\x1b[";
+  const mods = kittyMods(e);
+  const event = e.type === "keyup" ? 3 : e.repeat ? 2 : 1;
+  // The modifiers field (with optional :event sub-param), omitted when default.
+  const me = mods > 1 || event > 1 ? `;${mods}:${event}` : "";
+  const u = (code: number) => `${CSI}${code}${me}u`;
+  const tilde = (n: number) => `${CSI}${n}${me}~`;
+  const letter = (L: string) => `${CSI}1${me}${L}`;
+
+  switch (e.key) {
+    case "Enter": return u(13);
+    case "Tab": return u(9);
+    case "Backspace": return u(127);
+    case "Escape": return u(27);
+    case "ArrowUp": return letter("A");
+    case "ArrowDown": return letter("B");
+    case "ArrowRight": return letter("C");
+    case "ArrowLeft": return letter("D");
+    case "Home": return letter("H");
+    case "End": return letter("F");
+    case "PageUp": return tilde(5);
+    case "PageDown": return tilde(6);
+    case "Insert": return tilde(2);
+    case "Delete": return tilde(3);
+  }
+  const fn = /^F([1-9]|1[0-2])$/.exec(e.key);
+  if (fn) {
+    const n = +fn[1];
+    const lett: Record<number, string> = { 1: "P", 2: "Q", 3: "R", 4: "S" };
+    if (lett[n]) return letter(lett[n]);
+    const tn: Record<number, number> = { 5: 15, 6: 17, 7: 18, 8: 19, 9: 20, 10: 21, 11: 23, 12: 24 };
+    if (tn[n]) return tilde(tn[n]);
+  }
+  if ([...e.key].length === 1) {
+    // Printable: keycode is the unshifted (lowercase) codepoint; associated text
+    // (the actually-typed char) goes in the 3rd field on press without ctrl/alt/meta.
+    const cp = e.key.codePointAt(0)!;
+    const base = e.key.toLowerCase().codePointAt(0)!;
+    if (event !== 3 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      return `${CSI}${base};${mods}:${event};${cp}u`;
+    }
+    return u(base);
+  }
+  return null;
+}
+
+function kittyKeyHandler(e: KeyboardEvent, id: string): boolean {
+  // App keybindings still win on graphics tabs (⌘⇧P palette, ⌘w close, …).
+  if (e.type === "keydown" && runMatchingCommand(e)) {
+    e.stopPropagation();
+    return false;
+  }
+  if (e.type !== "keydown" && e.type !== "keyup") return true;
+  // Standalone modifier keys: skip (pages read modifier state off real keys).
+  if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
+    e.preventDefault();
+    return false;
+  }
+  const seq = kittyKeySeq(e);
+  if (!seq) return true;
+  e.preventDefault();
+  invoke("write_pty", { id, data: seq }).catch(console.error);
+  return false;
+}
+
 // Open-tab ids in most-recently-focused order (front = newest). Drives the
 // "send to" picker's ordering; updated whenever a terminal becomes active.
 let tabRecency: string[] = [];
@@ -1105,6 +1183,9 @@ function openTab(
   // (and claude/opencode) understand. Returning false stops xterm's own handling
   // (e.g. Alt+b inserting "∫").
   term.attachCustomKeyEventHandler((e) => {
+    // Graphics tabs (awrit) speak the kitty keyboard protocol; handle before the
+    // keydown-only legacy path so key releases are reported too.
+    if (graphics) return kittyKeyHandler(e, id);
     if (e.type !== "keydown") return true;
     // App command? Run it, swallow the key (no pty write), and stop it bubbling
     // to the window keymap listener so it doesn't fire twice.
