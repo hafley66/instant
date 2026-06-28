@@ -98,26 +98,76 @@ fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
 
 // ---- engine lifecycle ----------------------------------------------------
 
-/// Minimal HTTP/1.1 client for the DevTools endpoint (localhost, tiny replies,
-/// `Connection: close` so we read to EOF). Avoids pulling in an http-client crate
-/// for four trivial calls. Returns the response body on a 2xx, else Err.
+/// Remove session-restore artifacts so the headless instance starts blank
+/// instead of reopening the user's real tabs. Run before every launch (the
+/// running engine rewrites these as it lives).
+fn clear_session(profile: &PathBuf) {
+    let d = profile.join("Default");
+    for f in ["Current Session", "Current Tabs", "Last Session", "Last Tabs"] {
+        let _ = std::fs::remove_file(d.join(f));
+    }
+    let _ = std::fs::remove_dir_all(d.join("Sessions"));
+}
+
+/// Kill any headless Chrome we previously launched (matched by our profile dir)
+/// that outlived the app — e.g. after a SIGTERM that skipped the exit handler.
+pub fn reap_orphans() {
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", "user-data-dir=.*cdp-chrome"])
+        .status();
+}
+
+fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Minimal HTTP/1.1 client for the DevTools endpoint. Chrome's DevTools server
+/// ignores `Connection: close` and keeps the socket open, so we must read by
+/// Content-Length rather than to EOF (else every call blocks until timeout).
+/// Avoids pulling in an http-client crate for four trivial localhost calls.
 fn http(method: &str, path: &str) -> Result<String, String> {
     let mut stream =
         TcpStream::connect(("127.0.0.1", DEBUG_PORT)).map_err(|e| e.to_string())?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .ok();
-    let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{DEBUG_PORT}\r\nConnection: close\r\n\r\n"
-    );
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    let req = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{DEBUG_PORT}\r\n\r\n");
     stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).map_err(|e| e.to_string())?;
-    let status = resp.lines().next().unwrap_or("");
+
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    // Read until end of headers.
+    let head_end = loop {
+        if let Some(p) = find_sub(&buf, b"\r\n\r\n") {
+            break p + 4;
+        }
+        let n = stream.read(&mut tmp).map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err(format!("http {method} {path}: connection closed in headers"));
+        }
+        buf.extend_from_slice(&tmp[..n]);
+    };
+
+    let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+    let status = head.lines().next().unwrap_or("");
     if !status.contains(" 200") && !status.contains(" 201") {
         return Err(format!("http {method} {path}: {status}"));
     }
-    Ok(resp.splitn(2, "\r\n\r\n").nth(1).unwrap_or("").to_string())
+    let clen: usize = head
+        .lines()
+        .find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse().ok())?
+        })
+        .unwrap_or(0);
+
+    // Read the body up to Content-Length.
+    while buf.len() < head_end + clen {
+        let n = stream.read(&mut tmp).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+    }
+    Ok(String::from_utf8_lossy(&buf[head_end..(head_end + clen).min(buf.len())]).to_string())
 }
 
 fn http_get(path: &str) -> Result<String, String> {
@@ -154,6 +204,7 @@ fn ensure_engine(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .join("cdp-chrome");
     ensure_profile(&profile)?;
+    clear_session(&profile); // don't restore the user's real tabs each launch
 
     let child = std::process::Command::new(CHROME)
         .args([
@@ -162,6 +213,9 @@ fn ensure_engine(app: &AppHandle) -> Result<(), String> {
             "--remote-allow-origins=*",
             "--no-first-run",
             "--no-default-browser-check",
+            "--no-startup-window",
+            "--disable-session-crashed-bubble",
+            "--hide-crash-restore-bubble",
             "--disable-features=Translate",
             "--hide-scrollbars",
         ])

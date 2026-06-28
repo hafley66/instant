@@ -654,6 +654,7 @@ pub fn run() {
 
             activity::spawn_server(app.handle().clone());
             pty::reap_orphan_graphics(); // clean awrit orphans from a prior crash/restart
+            cdp::reap_orphans(); // clean headless-Chrome orphans from a prior SIGTERM
 
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
