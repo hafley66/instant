@@ -34,6 +34,22 @@ const CHROME: &str =
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const DEBUG_PORT: u16 = 9333;
 
+/// Build the Page.startScreencast params at a given JPEG quality, pinning the
+/// frame to the full device-pixel size (width*dpr × height*dpr) so Chrome sends
+/// frames at native resolution instead of downscaling. Higher `quality` = less
+/// JPEG graininess at the cost of bytes per frame.
+fn screencast_params(width: u32, height: u32, dpr: f64, quality: u8) -> Value {
+    let max_w = ((width as f64) * dpr).round() as u32;
+    let max_h = ((height as f64) * dpr).round() as u32;
+    json!({
+        "format": "jpeg",
+        "quality": quality,
+        "maxWidth": max_w,
+        "maxHeight": max_h,
+        "everyNthFrame": 1
+    })
+}
+
 /// One attached Chrome tab.
 struct CdpTab {
     target_id: String,
@@ -309,12 +325,13 @@ pub fn cdp_open(
     width: u32,
     height: u32,
     dpr: f64,
+    quality: u8,
 ) -> Result<(), String> {
     if store.0.lock().unwrap().contains_key(&id) {
         return Ok(());
     }
     std::thread::spawn(move || {
-        if let Err(e) = attach(app.clone(), id.clone(), url, width, height, dpr) {
+        if let Err(e) = attach(app.clone(), id.clone(), url, width, height, dpr, quality) {
             let _ = app.emit("cdp-error", json!({ "id": id, "error": e }));
         }
     });
@@ -329,6 +346,7 @@ fn attach(
     width: u32,
     height: u32,
     dpr: f64,
+    quality: u8,
 ) -> Result<(), String> {
     ensure_engine(&app)?;
     let store = app.state::<CdpStore>();
@@ -378,10 +396,7 @@ fn attach(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),
     );
-    send_boot(
-        "Page.startScreencast",
-        json!({ "format": "jpeg", "quality": 70, "everyNthFrame": 1 }),
-    );
+    send_boot("Page.startScreencast", screencast_params(width, height, dpr, quality));
     let _ = boot_id; // (silence move warnings)
 
     let app2 = app.clone();
@@ -468,6 +483,7 @@ pub fn cdp_resize(
     width: u32,
     height: u32,
     dpr: f64,
+    quality: u8,
 ) -> Result<(), String> {
     let map = store.0.lock().unwrap();
     let tab = map.get(&id).ok_or("no such cdp tab")?;
@@ -481,12 +497,9 @@ pub fn cdp_resize(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),
     );
-    // Restart the screencast so frames come at the new size immediately.
+    // Restart the screencast so frames come at the new size/quality immediately.
     send("Page.stopScreencast", json!({}));
-    send(
-        "Page.startScreencast",
-        json!({ "format": "jpeg", "quality": 70, "everyNthFrame": 1 }),
-    );
+    send("Page.startScreencast", screencast_params(width, height, dpr, quality));
     Ok(())
 }
 

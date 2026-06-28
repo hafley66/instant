@@ -15,6 +15,23 @@ function cdpMods(e: KeyboardEvent | MouseEvent): number {
 
 const MOUSE_BTN = ["left", "middle", "right"] as const;
 
+// JPEG quality of the screencast (30–100). Higher = sharper, more bytes/frame.
+// Persisted so a chosen level sticks across sessions; cycled via the palette.
+const QUALITY_KEY = "cdp.quality";
+const DEFAULT_QUALITY = 90;
+export const QUALITY_STEPS = [75, 90, 100] as const;
+
+export function cdpQuality(): number {
+  const v = Number(localStorage.getItem(QUALITY_KEY));
+  return Number.isFinite(v) && v >= 30 && v <= 100 ? v : DEFAULT_QUALITY;
+}
+
+export function setCdpQuality(q: number): number {
+  const clamped = Math.max(30, Math.min(100, Math.round(q)));
+  localStorage.setItem(QUALITY_KEY, String(clamped));
+  return clamped;
+}
+
 export class CdpView {
   readonly el: HTMLDivElement;
   private urlbar: HTMLInputElement;
@@ -135,12 +152,19 @@ export class CdpView {
 
   private scheduleResize() {
     clearTimeout(this.resizeTimer);
-    this.resizeTimer = window.setTimeout(() => {
-      const m = this.metrics();
-      invoke("cdp_resize", { id: this.id, width: m.width, height: m.height, dpr: m.dpr }).catch(
-        console.error,
-      );
-    }, 120);
+    this.resizeTimer = window.setTimeout(() => this.applyMetrics(), 120);
+  }
+
+  /** Push current size + the active quality to the screencast (restarts it). */
+  applyMetrics() {
+    const m = this.metrics();
+    invoke("cdp_resize", {
+      id: this.id,
+      width: m.width,
+      height: m.height,
+      dpr: m.dpr,
+      quality: cdpQuality(),
+    }).catch(console.error);
   }
 
   private pos(e: MouseEvent) {

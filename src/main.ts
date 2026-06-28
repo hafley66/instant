@@ -60,7 +60,7 @@ import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import { installKeymap, runMatchingCommand, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
 import { GraphicsOverlay, type GraphicsFrame } from "./graphics";
-import { CdpView } from "./cdp";
+import { CdpView, cdpQuality, setCdpQuality, QUALITY_STEPS } from "./cdp";
 import {
   mountReactDock,
   togglePanel,
@@ -958,6 +958,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.open", keys: ["$mod+t"], title: "New Tab at Current Directory", group: "Tabs", run: openTabAtPwd },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
   { id: "tab.browser", keys: [], title: "Open Browser", group: "Tabs", run: () => openBrowserTab() },
+  { id: "browser.quality", keys: [], title: "Cycle Render Quality", group: "Browser", run: () => cycleBrowserQuality() },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -1338,13 +1339,24 @@ async function openBrowserTab(url?: string) {
   requestAnimationFrame(() => {
     const m = view.initialMetrics();
     invoke("cdp_open", {
-      id, url: u, width: m.width, height: m.height, dpr: m.dpr,
+      id, url: u, width: m.width, height: m.height, dpr: m.dpr, quality: cdpQuality(),
     }).catch((e) => {
       console.error(e);
       flashStatus("browser failed to start");
     });
     view.focus();
   });
+}
+
+// Step the screencast JPEG quality to the next preset and re-apply it to every
+// open browser tab live (cdp_resize restarts the screencast at the new quality).
+function cycleBrowserQuality() {
+  const cur = cdpQuality();
+  const idx = QUALITY_STEPS.findIndex((q) => q >= cur);
+  const next = QUALITY_STEPS[(idx + 1) % QUALITY_STEPS.length];
+  setCdpQuality(next);
+  for (const { view } of browserTabs.values()) view.applyMetrics();
+  flashStatus(`browser render quality: ${next}`);
 }
 
 // Make a terminal the active dockview panel. The store/active-sync + focus is
