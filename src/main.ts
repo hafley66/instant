@@ -1360,6 +1360,7 @@ function onTermClosed(id: string) {
   const tabMeta = tabMetaById(id);
   const live = store.get().sessions.find((s) => s.name === name);
   const proc = foregroundProc(live?.commands ?? []);
+  const isGraphics = t.graphics ?? false;
   t.overlay?.dispose();
   t.term.dispose();
   t.el.remove();
@@ -1376,7 +1377,7 @@ function onTermClosed(id: string) {
   // resumeTabs read-modify-write, or both probe-record the same newest-in-cwd id
   // and the 2nd reopen resumes the 1st's session ("rando old session"). Chaining
   // lets each close fully claim its id before the next one probes.
-  closeChain = closeChain.then(() => exitOrDetachTab(id, name, tabMeta, proc)).catch(() => {});
+  closeChain = closeChain.then(() => exitOrDetachTab(id, name, tabMeta, proc, isGraphics)).catch(() => {});
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -1398,7 +1399,14 @@ async function exitOrDetachTab(
   name: string,
   meta: { cwd: string; command: string | null } | null,
   proc: string,
+  isGraphics = false,
 ) {
+  // Graphics tabs (awrit) are never tmux sessions; close_pty kills the child so
+  // it can't orphan and hold its profile lock.
+  if (isGraphics) {
+    invoke("close_pty", { id }).catch(() => {});
+    return;
+  }
   const sessions = meta ? await tabSessions(tabCwds(id), meta.command) : [];
   const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
   // Agent when: the live foreground proc looks like one (claude's version title,

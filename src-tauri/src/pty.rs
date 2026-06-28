@@ -34,6 +34,12 @@ type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 struct PtyHandle {
     writer: SharedWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
+    /// Some only for direct-spawn graphics sessions (awrit). tmux sessions leave
+    /// this None: closing their pty detaches the client, the server lives on. A
+    /// direct child (awrit) catches SIGHUP, so dropping the master won't kill it
+    /// — we must kill it explicitly on close or it orphans and holds its
+    /// single-instance profile lock.
+    child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
 }
 
 #[derive(Default)]
@@ -195,6 +201,35 @@ fn enable_mouse(name: &str) {
     });
 }
 
+/// Kill orphaned graphics children (awrit) left by a previous app crash/restart.
+/// awrit ignores SIGHUP, so when our process dies its awrit children reparent to
+/// launchd (ppid 1) and keep running, holding their single-instance profile lock
+/// and blocking new launches. Reap them on startup. Targets the main browser
+/// process (not the CEF Helper subprocesses, which exit with their parent).
+pub fn reap_orphan_graphics() {
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid=,command="])
+        .output()
+    else {
+        return;
+    };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.split_whitespace();
+        let (Some(pid), Some(ppid)) = (it.next(), it.next()) else { continue };
+        if ppid != "1" {
+            continue; // only launchd-reparented orphans
+        }
+        if !line.contains("/MacOS/awrit") || line.contains("Helper") {
+            continue;
+        }
+        if let Ok(pid) = pid.parse::<i32>() {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 /// Open (or reattach to) a session in a fresh pty bound to webview id `id`.
 ///
 /// `graphics=true` spawns the command directly (no tmux, which filters kitty APC
@@ -279,8 +314,11 @@ pub fn open_session(
         }
     }
 
-    let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
+    // Keep the child only for graphics (direct spawn) so close_pty can kill it.
+    // tmux's child is a client we want to detach (drop), not kill.
+    let child = if graphics { Some(child) } else { None };
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: SharedWriter =
@@ -290,7 +328,7 @@ pub fn open_session(
         .0
         .lock()
         .unwrap()
-        .insert(id.clone(), PtyHandle { writer: writer.clone(), master: pair.master });
+        .insert(id.clone(), PtyHandle { writer: writer.clone(), master: pair.master, child });
 
     if !graphics {
         enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
@@ -388,10 +426,16 @@ pub fn resize_pty(
     Ok(())
 }
 
-/// Drop the pty for a tab. The tmux session (and claude/opencode inside) keeps running.
+/// Drop the pty for a tab. A tmux session (and claude/opencode inside) keeps
+/// running; a direct-spawn graphics child (awrit) is killed so it can't orphan
+/// and hold its single-instance profile lock.
 #[tauri::command]
 pub fn close_pty(store: State<PtyStore>, id: String) {
-    store.0.lock().unwrap().remove(&id);
+    if let Some(mut h) = store.0.lock().unwrap().remove(&id) {
+        if let Some(mut child) = h.child.take() {
+            let _ = child.kill();
+        }
+    }
 }
 
 /// Scroll a session's tmux history, independent of whatever app is running. A

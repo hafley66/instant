@@ -650,6 +650,7 @@ pub fn run() {
             });
 
             activity::spawn_server(app.handle().clone());
+            pty::reap_orphan_graphics(); // clean awrit orphans from a prior crash/restart
 
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
