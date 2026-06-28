@@ -130,6 +130,7 @@ export interface OpenTab {
   name: string;
   command: string | null;
   cwd: string | null;
+  graphics?: boolean; // kitty-graphics (awrit) tab — restore the overlay on reload
 }
 
 // A live tmux session row (Rust pty::Session).

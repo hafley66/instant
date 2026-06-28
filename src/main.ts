@@ -213,10 +213,10 @@ const activeId = () => store.get().active;
 const setActive = (id: string | null) => store.set({ active: id });
 
 // Persisted open-tab list (for reattach after reload). Keyed by tab name.
-function recordTab(name: string, command: string | null, cwd: string | null) {
+function recordTab(name: string, command: string | null, cwd: string | null, graphics = false) {
   const cur = store.get().openTabs;
   if (cur.some((t) => t.name === name)) return;
-  store.set({ openTabs: [...cur, { name, command, cwd }] });
+  store.set({ openTabs: [...cur, { name, command, cwd, graphics }] });
 }
 function forgetTab(id: string) {
   store.set({ openTabs: store.get().openTabs.filter((t) => sessionId(t.name) !== id) });
@@ -1051,7 +1051,10 @@ function openTab(
 
   // Graphics sessions (awrit) get an overlay canvas for kitty-graphics frames
   // forwarded by the Rust proxy, and skip tmux (which filters graphics APCs).
-  const graphics = opts.graphics ?? false;
+  // Infer from the command too, so reload records predating the graphics flag
+  // (and any awrit launch) still restore the overlay.
+  const cmd = opts.command ?? QUICK_CMD[name] ?? null;
+  const graphics = opts.graphics ?? /^\s*awrit\b/.test(cmd ?? "");
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
   tabs.set(id, { id, name, term, fit, el, graphics, overlay });
 
@@ -1236,9 +1239,9 @@ function openTab(
 
   // Fit AFTER layout so the pty spawns at the real grid size, not the pre-layout
   // 80x24 default that leaves full-screen TUIs (opencode) clipped.
-  const command = opts.command ?? QUICK_CMD[name] ?? null;
+  const command = cmd;
   const cwd = opts.cwd ?? null;
-  recordTab(name, command, cwd); // survives reload; tmux session outlives the webview
+  recordTab(name, command, cwd, graphics); // survives reload; tmux session outlives the webview
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
@@ -4651,7 +4654,7 @@ async function main() {
   const wantActive = store.get().active;
   replaying = true; // don't log restored tabs as fresh visits
   for (const t of store.get().openTabs) {
-    openTab(t.name, { command: t.command, cwd: t.cwd });
+    openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics });
   }
   replaying = false;
   if (wantActive && tabs.has(wantActive)) activate(wantActive);
