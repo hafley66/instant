@@ -206,7 +206,9 @@ export class CdpView {
       "wheel",
       (e) => {
         e.preventDefault();
-        this.mouse("mouseWheel", e, { deltaX: -e.deltaX, deltaY: -e.deltaY });
+        // Pass the OS-provided deltas straight through (no negation) so scroll
+        // matches the rest of the system instead of feeling inverted.
+        this.mouse("mouseWheel", e, { deltaX: e.deltaX, deltaY: e.deltaY });
       },
       { passive: false },
     );
