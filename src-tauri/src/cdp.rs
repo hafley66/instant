@@ -1,0 +1,391 @@
+// CDP (Chrome DevTools Protocol) browser engine.
+//
+// We launch a dedicated headless Chrome against a *clone* of the user's real
+// Chrome profile (cookies + logins, snapshot at first launch) so pages render
+// already signed in, without locking or coupling to their daily browser.
+//
+// Each browser tab in the app maps to one CDP *target* (a Chrome tab). We attach
+// to that target's own websocket, run Page.startScreencast, and forward each JPEG
+// frame to the webview as a `cdp-frame` event (the frontend draws it to a canvas,
+// same surface the kitty overlay used). Input and resize go the other way as
+// Input.dispatch* / Emulation.setDeviceMetricsOverride commands.
+//
+// Threading: one reader thread per target owns its websocket. Outgoing commands
+// arrive on an mpsc channel and are drained between reads (the socket has a short
+// read timeout so the loop interleaves reads and writes on the single ws object).
+
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde::Serialize;
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tungstenite::client::IntoClientRequest;
+use tungstenite::stream::MaybeTlsStream;
+use tungstenite::Message;
+
+const CHROME: &str =
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const DEBUG_PORT: u16 = 9333;
+
+/// One attached Chrome tab.
+struct CdpTab {
+    target_id: String,
+    cmd_tx: Sender<String>,
+    stop: Arc<AtomicBool>,
+    next_id: Arc<AtomicU64>,
+}
+
+#[derive(Default)]
+pub struct CdpStore(Mutex<HashMap<String, CdpTab>>);
+
+/// The shared headless Chrome process. Launched lazily on the first cdp_open and
+/// reused by every tab; killed on app exit via kill_engine().
+#[derive(Default)]
+pub struct ChromeEngine(Mutex<Option<std::process::Child>>);
+
+#[derive(Clone, Serialize)]
+struct FrameEvent {
+    id: String,
+    data: String, // base64 JPEG straight from CDP
+}
+
+// ---- profile clone -------------------------------------------------------
+
+/// Where the real Chrome stores its profile.
+fn real_chrome_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library/Application Support/Google/Chrome"))
+}
+
+/// Clone Local State (holds the os_crypt key) + the Default profile into a
+/// dedicated user-data-dir, once. Skips the heavy cache dirs so it's quick and
+/// small; Cookies / Login Data / Local Storage carry the signed-in session.
+/// Same machine + user means Chrome's Keychain key still decrypts them.
+fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
+    if dest.join("Default").exists() {
+        return Ok(()); // already cloned
+    }
+    let src = real_chrome_dir().ok_or("no HOME")?;
+    std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+
+    // Local State sits at the user-data-dir root.
+    let local_state = src.join("Local State");
+    if local_state.exists() {
+        let _ = std::fs::copy(&local_state, dest.join("Local State"));
+    }
+
+    // rsync the Default profile, excluding caches so the copy is fast/lean.
+    let status = std::process::Command::new("rsync")
+        .args(["-a", "--delete"])
+        .args([
+            "--exclude=Cache",
+            "--exclude=Code Cache",
+            "--exclude=GPUCache",
+            "--exclude=DawnGraphiteCache",
+            "--exclude=DawnWebGPUCache",
+            "--exclude=Service Worker/CacheStorage",
+            "--exclude=Service Worker/ScriptCache",
+            "--exclude=Application Cache",
+        ])
+        .arg(format!("{}/", src.join("Default").display()))
+        .arg(dest.join("Default"))
+        .status()
+        .map_err(|e| format!("rsync: {e}"))?;
+    if !status.success() {
+        return Err("rsync failed cloning Chrome profile".into());
+    }
+    Ok(())
+}
+
+// ---- engine lifecycle ----------------------------------------------------
+
+/// Minimal HTTP/1.1 client for the DevTools endpoint (localhost, tiny replies,
+/// `Connection: close` so we read to EOF). Avoids pulling in an http-client crate
+/// for four trivial calls. Returns the response body on a 2xx, else Err.
+fn http(method: &str, path: &str) -> Result<String, String> {
+    let mut stream =
+        TcpStream::connect(("127.0.0.1", DEBUG_PORT)).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .ok();
+    let req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{DEBUG_PORT}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).map_err(|e| e.to_string())?;
+    let status = resp.lines().next().unwrap_or("");
+    if !status.contains(" 200") && !status.contains(" 201") {
+        return Err(format!("http {method} {path}: {status}"));
+    }
+    Ok(resp.splitn(2, "\r\n\r\n").nth(1).unwrap_or("").to_string())
+}
+
+fn http_get(path: &str) -> Result<String, String> {
+    http("GET", path)
+}
+
+/// Block until the DevTools HTTP endpoint answers (Chrome finished booting).
+fn wait_devtools(secs: u64) -> Result<(), String> {
+    for _ in 0..(secs * 10) {
+        if http_get("/json/version").is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err("Chrome DevTools port never came up".into())
+}
+
+/// Launch the shared Chrome if it isn't already running.
+fn ensure_engine(app: &AppHandle) -> Result<(), String> {
+    // Already up? (our child this session, or a leftover on the port)
+    {
+        let eng = app.state::<ChromeEngine>();
+        if eng.0.lock().unwrap().is_some() {
+            return Ok(());
+        }
+    }
+    if http_get("/json/version").is_ok() {
+        return Ok(()); // someone's already serving the port
+    }
+
+    let profile = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("cdp-chrome");
+    ensure_profile(&profile)?;
+
+    let child = std::process::Command::new(CHROME)
+        .args([
+            "--headless=new",
+            &format!("--remote-debugging-port={DEBUG_PORT}"),
+            "--remote-allow-origins=*",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=Translate",
+            "--hide-scrollbars",
+        ])
+        .arg(format!("--user-data-dir={}", profile.display()))
+        .spawn()
+        .map_err(|e| format!("launch chrome: {e}"))?;
+
+    let eng = app.state::<ChromeEngine>();
+    *eng.0.lock().unwrap() = Some(child);
+    wait_devtools(15)
+}
+
+/// Kill the shared Chrome (called on app exit).
+pub fn kill_engine(app: &AppHandle) {
+    let child = {
+        let eng = app.state::<ChromeEngine>();
+        let taken = eng.0.lock().unwrap().take();
+        taken
+    };
+    if let Some(mut c) = child {
+        let _ = c.kill();
+    }
+}
+
+// ---- per-target attach ---------------------------------------------------
+
+/// Create a fresh target (tab) and return (target_id, ws_url).
+fn new_target(url: &str) -> Result<(String, String), String> {
+    // Newer Chrome wants PUT for /json/new; the query is the start URL.
+    let resp = http("PUT", &format!("/json/new?{url}"))?;
+    let v: Value = serde_json::from_str(&resp).map_err(|e| e.to_string())?;
+    let tid = v["id"].as_str().ok_or("no target id")?.to_string();
+    let ws = v["webSocketDebuggerUrl"]
+        .as_str()
+        .ok_or("no ws url")?
+        .to_string();
+    Ok((tid, ws))
+}
+
+fn set_read_timeout(ws: &tungstenite::WebSocket<MaybeTlsStream<TcpStream>>) {
+    if let MaybeTlsStream::Plain(s) = ws.get_ref() {
+        let _ = s.set_read_timeout(Some(Duration::from_millis(20)));
+    }
+}
+
+/// True when a ws read error is just the idle read-timeout (no data this tick).
+fn is_timeout(e: &tungstenite::Error) -> bool {
+    if let tungstenite::Error::Io(io) = e {
+        matches!(
+            io.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        )
+    } else {
+        false
+    }
+}
+
+// ---- commands ------------------------------------------------------------
+
+#[tauri::command]
+pub fn cdp_open(
+    app: AppHandle,
+    store: State<CdpStore>,
+    id: String,
+    url: String,
+    width: u32,
+    height: u32,
+    dpr: f64,
+) -> Result<(), String> {
+    ensure_engine(&app)?;
+    if store.0.lock().unwrap().contains_key(&id) {
+        return Ok(());
+    }
+    let (target_id, ws_url) = new_target(&url)?;
+    // Chrome 111+ rejects the DevTools ws unless the Origin is allowlisted (we
+    // launch with --remote-allow-origins=*); tungstenite sends none by default.
+    let mut req = ws_url
+        .as_str()
+        .into_client_request()
+        .map_err(|e| e.to_string())?;
+    req.headers_mut()
+        .insert("Origin", "http://localhost".parse().unwrap());
+    let (mut ws, _) = tungstenite::connect(req).map_err(|e| e.to_string())?;
+    set_read_timeout(&ws);
+
+    let (cmd_tx, cmd_rx) = channel::<String>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let next_id = Arc::new(AtomicU64::new(1));
+
+    // Boot sequence: enable Page, set the viewport, start the JPEG screencast.
+    let boot_id = next_id.clone();
+    let mut send_boot = |method: &str, params: Value| {
+        let n = boot_id.fetch_add(1, Ordering::Relaxed);
+        let _ = ws.send(Message::Text(
+            json!({ "id": n, "method": method, "params": params }).to_string().into(),
+        ));
+    };
+    send_boot("Page.enable", json!({}));
+    send_boot(
+        "Emulation.setDeviceMetricsOverride",
+        json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),
+    );
+    send_boot(
+        "Page.startScreencast",
+        json!({ "format": "jpeg", "quality": 70, "everyNthFrame": 1 }),
+    );
+    let _ = boot_id; // (silence move warnings)
+
+    let app2 = app.clone();
+    let id2 = id.clone();
+    let stop2 = stop.clone();
+    std::thread::spawn(move || {
+        loop {
+            if stop2.load(Ordering::Relaxed) {
+                let _ = ws.send(Message::Text(
+                    json!({ "id": 999999, "method": "Page.stopScreencast" }).to_string().into(),
+                ));
+                let _ = ws.close(None);
+                break;
+            }
+            // Drain outgoing commands.
+            while let Ok(msg) = cmd_rx.try_recv() {
+                let _ = ws.send(Message::Text(msg.into()));
+            }
+            match ws.read() {
+                Ok(Message::Text(txt)) => {
+                    if let Ok(v) = serde_json::from_str::<Value>(txt.as_str()) {
+                        if v["method"] == "Page.screencastFrame" {
+                            let data = v["params"]["data"].as_str().unwrap_or("");
+                            let session = v["params"]["sessionId"].clone();
+                            let _ = app2.emit(
+                                "cdp-frame",
+                                FrameEvent { id: id2.clone(), data: data.to_string() },
+                            );
+                            // Ack so Chrome keeps sending frames.
+                            let _ = ws.send(Message::Text(
+                                json!({
+                                    "id": 999998,
+                                    "method": "Page.screencastFrameAck",
+                                    "params": { "sessionId": session }
+                                })
+                                .to_string()
+                                .into(),
+                            ));
+                        }
+                    }
+                }
+                Ok(Message::Close(_)) => break,
+                Ok(_) => {}
+                Err(e) if is_timeout(&e) => {}
+                Err(_) => break,
+            }
+        }
+    });
+
+    store.0.lock().unwrap().insert(
+        id,
+        CdpTab { target_id, cmd_tx, stop, next_id },
+    );
+    Ok(())
+}
+
+/// Generic CDP command pump for a tab (frontend builds Input.dispatch*, etc.).
+#[tauri::command]
+pub fn cdp_send(
+    store: State<CdpStore>,
+    id: String,
+    method: String,
+    params: Value,
+) -> Result<(), String> {
+    let map = store.0.lock().unwrap();
+    let tab = map.get(&id).ok_or("no such cdp tab")?;
+    let n = tab.next_id.fetch_add(1, Ordering::Relaxed);
+    let msg = json!({ "id": n, "method": method, "params": params }).to_string();
+    tab.cmd_tx.send(msg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn cdp_resize(
+    store: State<CdpStore>,
+    id: String,
+    width: u32,
+    height: u32,
+    dpr: f64,
+) -> Result<(), String> {
+    let map = store.0.lock().unwrap();
+    let tab = map.get(&id).ok_or("no such cdp tab")?;
+    let send = |method: &str, params: Value| {
+        let n = tab.next_id.fetch_add(1, Ordering::Relaxed);
+        let _ = tab
+            .cmd_tx
+            .send(json!({ "id": n, "method": method, "params": params }).to_string());
+    };
+    send(
+        "Emulation.setDeviceMetricsOverride",
+        json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),
+    );
+    // Restart the screencast so frames come at the new size immediately.
+    send("Page.stopScreencast", json!({}));
+    send(
+        "Page.startScreencast",
+        json!({ "format": "jpeg", "quality": 70, "everyNthFrame": 1 }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cdp_navigate(store: State<CdpStore>, id: String, url: String) -> Result<(), String> {
+    cdp_send(store, id, "Page.navigate".into(), json!({ "url": url }))
+}
+
+#[tauri::command]
+pub fn cdp_close(app: AppHandle, store: State<CdpStore>, id: String) {
+    if let Some(tab) = store.0.lock().unwrap().remove(&id) {
+        tab.stop.store(true, Ordering::Relaxed);
+        let _ = http_get(&format!("/json/close/{}", tab.target_id));
+        let _ = app; // engine stays up for other tabs
+    }
+}

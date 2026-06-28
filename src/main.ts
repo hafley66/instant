@@ -60,6 +60,7 @@ import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import { installKeymap, runMatchingCommand, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
 import { GraphicsOverlay, type GraphicsFrame } from "./graphics";
+import { CdpView } from "./cdp";
 import {
   mountReactDock,
   togglePanel,
@@ -956,7 +957,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.close", keys: ["$mod+w"], title: "Close Tab", group: "Tabs", run: closeActiveTab },
   { id: "tab.open", keys: ["$mod+t"], title: "New Tab at Current Directory", group: "Tabs", run: openTabAtPwd },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
-  { id: "tab.browser", keys: [], title: "Open Browser (awrit)", group: "Tabs", run: () => openBrowserTab() },
+  { id: "tab.browser", keys: [], title: "Open Browser", group: "Tabs", run: () => openBrowserTab() },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -1299,19 +1300,56 @@ function askText(placeholder: string, initial = ""): Promise<string | null> {
   });
 }
 
-// Open a graphical browser tab backed by awrit (Chromium rendered via the kitty
-// graphics protocol → Rust proxy → overlay canvas). Runs outside tmux.
+// Browser tabs run in a shared headless Chrome over CDP: Rust streams the page's
+// JPEG screencast to a canvas (`cdp-frame`), input/resize go back as CDP commands.
+// These are NOT terminals — no xterm, no pty — but reuse the dockview panel
+// lifecycle (addTermPanel/onTermShown/onTermClosed) keyed by the same id.
+const browserTabs = new Map<
+  string,
+  { id: string; name: string; el: HTMLElement; view: CdpView }
+>();
+
+function normalizeUrl(s: string): string {
+  if (!s) return "";
+  if (/^[a-z]+:\/\//i.test(s) || s.startsWith("about:")) return s;
+  if (/^\S+\.\S+/.test(s)) return "https://" + s;
+  return "https://www.google.com/search?q=" + encodeURIComponent(s);
+}
+
 async function openBrowserTab(url?: string) {
-  const u = (url ?? (await askText("URL", "https://example.com")) ?? "").trim();
-  if (!u) return;
-  const q = `'${u.replace(/'/g, `'\\''`)}'`;
-  openTab(`awrit:${u}`, { command: `awrit ${q}`, graphics: true });
+  const raw = (url ?? (await askText("URL", "https://example.com")) ?? "").trim();
+  if (!raw) return;
+  const u = normalizeUrl(raw);
+  const name = `web:${raw}`;
+  const id = sessionId(name);
+  if (browserTabs.has(id) || tabs.has(id)) {
+    activate(id);
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = "term-host";
+  document.getElementById("panel-pool")!.appendChild(el);
+  const view = new CdpView(el, id, u);
+  browserTabs.set(id, { id, name, el, view });
+  addTermPanel(id, tabTitle(name), el); // dockview adopts el into the panel
+  // Measure after layout so the screencast starts at the panel's real size;
+  // the view's ResizeObserver corrects any later drift.
+  requestAnimationFrame(() => {
+    const m = view.initialMetrics();
+    invoke("cdp_open", {
+      id, url: u, width: m.width, height: m.height, dpr: m.dpr,
+    }).catch((e) => {
+      console.error(e);
+      flashStatus("browser failed to start");
+    });
+    view.focus();
+  });
 }
 
 // Make a terminal the active dockview panel. The store/active-sync + focus is
 // done in onTermShown when dockview reports the active change.
 function activate(id: string) {
-  if (tabs.has(id)) focusTermPanel(id);
+  if (tabs.has(id) || browserTabs.has(id)) focusTermPanel(id);
 }
 
 // Focus a terminal reliably across a tab switch. A single rAF races dockview:
@@ -1327,6 +1365,14 @@ function focusTermSoon(id: string) {
 // dockview reports a terminal panel became active (tab click, open, or a
 // neighbour closing). Sync the store, log the visit, refit, focus.
 function onTermShown(id: string) {
+  const b = browserTabs.get(id);
+  if (b) {
+    setActive(id);
+    touchTab(id);
+    requestAnimationFrame(() => b.view.focus());
+    renderSessionActive();
+    return;
+  }
   const t = tabs.get(id);
   if (!t) return;
   setActive(id);
@@ -1352,6 +1398,21 @@ function closeTab(id: string) {
 // dockview removed a terminal panel (close button, menu, or closeTab). Tear
 // down the live resources and re-point active at a surviving terminal.
 function onTermClosed(id: string) {
+  const b = browserTabs.get(id);
+  if (b) {
+    b.view.dispose();
+    b.el.remove();
+    browserTabs.delete(id);
+    invoke("cdp_close", { id }).catch(() => {});
+    if (activeId() === id) {
+      const next = tabs.keys().next();
+      const nextId = next.done ? (browserTabs.keys().next().value ?? null) : next.value;
+      setActive(nextId ?? null);
+      if (nextId) activate(nextId);
+    }
+    renderSessionActive();
+    return;
+  }
   const t = tabs.get(id);
   if (!t) return;
   const name = t.name;

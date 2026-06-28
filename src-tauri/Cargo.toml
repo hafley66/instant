@@ -32,4 +32,5 @@ tiny_http = "0.12"
 base64 = "0.22"
 libc = "0.2"
 png = "0.17"
+tungstenite = "0.29"
 

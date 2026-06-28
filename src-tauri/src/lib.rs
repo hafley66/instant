@@ -1,5 +1,6 @@
 mod activity;
 mod capture;
+mod cdp;
 mod config;
 mod favorites;
 mod fs;
@@ -576,6 +577,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(pty::PtyStore::default())
+        .manage(cdp::CdpStore::default())
+        .manage(cdp::ChromeEngine::default())
         .manage(workspace::Workspaces::default())
         .manage(favorites::Favorites::default())
         .plugin(tauri_plugin_opener::init())
@@ -737,6 +740,11 @@ pub fn run() {
             pty::close_pty,
             pty::kill_session,
             pty::scroll_session,
+            cdp::cdp_open,
+            cdp::cdp_send,
+            cdp::cdp_resize,
+            cdp::cdp_navigate,
+            cdp::cdp_close,
             workspace::list_workspaces,
             workspace::create_workspace,
             workspace::remove_workspace,
@@ -778,6 +786,13 @@ pub fn run() {
             log_path,
             log_reveal,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Tear down the shared headless Chrome when the app exits so it
+            // doesn't linger holding its profile/port.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                cdp::kill_engine(app);
+            }
+        });
 }
