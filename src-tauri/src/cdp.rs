@@ -158,6 +158,36 @@ fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+/// One read that retries on EAGAIN/timeout (macOS "os error 35") until a wall
+/// deadline. The socket has a short read timeout so we can bound total wait, but
+/// a single timed-out read just means "no bytes yet" — not a failure. Without
+/// this, a slow DevTools response surfaced the raw EAGAIN as an error toast.
+fn read_until(
+    stream: &mut TcpStream,
+    tmp: &mut [u8],
+    deadline: std::time::Instant,
+) -> Result<usize, String> {
+    loop {
+        match stream.read(tmp) {
+            Ok(n) => return Ok(n),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                if std::time::Instant::now() >= deadline {
+                    return Err("http: timed out waiting for DevTools".into());
+                }
+                // loop and retry
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
 /// Minimal HTTP/1.1 client for the DevTools endpoint. Chrome's DevTools server
 /// ignores `Connection: close` and keeps the socket open, so we must read by
 /// Content-Length rather than to EOF (else every call blocks until timeout).
@@ -165,7 +195,9 @@ fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
 fn http(method: &str, path: &str) -> Result<String, String> {
     let mut stream =
         TcpStream::connect(("127.0.0.1", DEBUG_PORT)).map_err(|e| e.to_string())?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    // Short per-read timeout so read_until can poll; the deadline bounds the total.
+    stream.set_read_timeout(Some(Duration::from_millis(250))).ok();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let req = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{DEBUG_PORT}\r\n\r\n");
     stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
 
@@ -176,7 +208,7 @@ fn http(method: &str, path: &str) -> Result<String, String> {
         if let Some(p) = find_sub(&buf, b"\r\n\r\n") {
             break p + 4;
         }
-        let n = stream.read(&mut tmp).map_err(|e| e.to_string())?;
+        let n = read_until(&mut stream, &mut tmp, deadline)?;
         if n == 0 {
             return Err(format!("http {method} {path}: connection closed in headers"));
         }
@@ -198,7 +230,7 @@ fn http(method: &str, path: &str) -> Result<String, String> {
 
     // Read the body up to Content-Length.
     while buf.len() < head_end + clen {
-        let n = stream.read(&mut tmp).map_err(|e| e.to_string())?;
+        let n = read_until(&mut stream, &mut tmp, deadline)?;
         if n == 0 {
             break;
         }
