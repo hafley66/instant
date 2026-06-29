@@ -61,7 +61,7 @@ import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
 import { installKeymap, runMatchingCommand, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
 import { GraphicsOverlay, type GraphicsFrame } from "./graphics";
-import { CdpView, cdpQuality, setCdpQuality, QUALITY_STEPS } from "./cdp";
+import { CdpView, cdpQuality, setCdpQuality, QUALITY_STEPS, cdpPerf, setCdpPerf } from "./cdp";
 import {
   mountReactDock,
   togglePanel,
@@ -972,6 +972,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
   { id: "tab.browser", keys: [], title: "Open Browser", group: "Tabs", run: () => openBrowserTab() },
   { id: "browser.quality", keys: [], title: "Cycle Render Quality", group: "Browser", run: () => cycleBrowserQuality() },
+  { id: "browser.perf", keys: [], title: "Toggle Performance Mode (1x)", group: "Browser", run: () => setBrowserPerf(!cdpPerf()) },
   // "Super XP": grainy pixel font everywhere (chrome + terminal). Persisted.
   { id: "skin.xpPixel", keys: [], title: "Toggle Super XP (pixel font)", group: "Skin", run: () => store.set({ xpPixel: !store.get().xpPixel }) },
   { id: "skin.cycle", keys: [], title: "Cycle Skin", group: "Skin", run: () => store.set({ skin: nextSkin(store.get().skin) }) },
@@ -1389,6 +1390,14 @@ function cycleBrowserQuality() {
   setCdpQuality(next);
   for (const { view } of browserTabs.values()) view.applyMetrics();
   flashStatus(`browser render quality: ${next}`);
+}
+
+// Flip performance mode (1x screencast) and re-apply to every open browser tab
+// so the change takes effect live (cdp_resize restarts the screencast).
+function setBrowserPerf(on: boolean) {
+  setCdpPerf(on);
+  for (const { view } of browserTabs.values()) view.applyMetrics();
+  flashStatus(`browser performance mode: ${on ? "on (1x)" : "off"}`);
 }
 
 // Make a terminal the active dockview panel. The store/active-sync + focus is
@@ -4266,6 +4275,13 @@ function registerBuiltin() {
         hint: "grainy bitmap font everywhere, incl. the terminal",
         get: () => store.get().xpPixel,
         set: (on) => store.set({ xpPixel: on }),
+      },
+      {
+        id: "cdpPerf",
+        label: "Browser performance mode",
+        hint: "render at 1x — lower latency / better A/V sync, softer text",
+        get: () => cdpPerf(),
+        set: (on) => setBrowserPerf(on),
       },
     ],
     panels: [

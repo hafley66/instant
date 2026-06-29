@@ -35,6 +35,18 @@ export function setCdpQuality(q: number): number {
   return clamped;
 }
 
+// Performance mode: render the screencast at 1x instead of the display's device
+// pixel ratio. On a retina panel that's 4x fewer pixels per frame (2x each axis),
+// which roughly quarters encode + transport + decode time — the biggest single
+// lever on the lip-sync lag, at the cost of slightly softer text.
+const PERF_KEY = "cdp.perf";
+export function cdpPerf(): boolean {
+  return localStorage.getItem(PERF_KEY) === "1";
+}
+export function setCdpPerf(on: boolean): void {
+  localStorage.setItem(PERF_KEY, on ? "1" : "0");
+}
+
 export class CdpView {
   readonly el: HTMLDivElement;
   private urlbar: HTMLInputElement;
@@ -60,9 +72,11 @@ export class CdpView {
   private suggestIdx = -1;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private img = new Image();
   private pendingData: string | null = null;
   private raf = 0;
+  // Monotonic frame id so an out-of-order async decode never paints over a newer
+  // frame (newest-wins): a decode only draws if it's still the latest issued.
+  private drawSeq = 0;
   private unlisten?: UnlistenFn;
   private unlistenCursor?: UnlistenFn;
   private unlistenUrl?: UnlistenFn;
@@ -268,17 +282,6 @@ export class CdpView {
     if (getComputedStyle(host).position === "static") host.style.position = "relative";
     host.appendChild(this.el);
 
-    this.img.onload = () => {
-      const { naturalWidth: w, naturalHeight: h } = this.img;
-      if (w && h) {
-        if (this.canvas.width !== w || this.canvas.height !== h) {
-          this.canvas.width = w;
-          this.canvas.height = h;
-        }
-        this.ctx.drawImage(this.img, 0, 0);
-      }
-    };
-
     this.wireInput();
     this.ro = new ResizeObserver(() => this.scheduleResize());
     this.ro.observe(this.canvas);
@@ -325,12 +328,14 @@ export class CdpView {
   }
 
   // CSS px size of the canvas (== CDP viewport CSS px) and the device ratio.
+  // Performance mode pins dpr to 1 so the screencast renders at CSS resolution
+  // (far fewer pixels per frame on a retina display).
   private metrics() {
     const r = this.canvas.getBoundingClientRect();
     return {
       width: Math.max(1, Math.round(r.width)),
       height: Math.max(1, Math.round(r.height)),
-      dpr: window.devicePixelRatio || 1,
+      dpr: cdpPerf() ? 1 : window.devicePixelRatio || 1,
     };
   }
 
@@ -343,7 +348,26 @@ export class CdpView {
     this.raf = 0;
     const d = this.pendingData;
     this.pendingData = null;
-    if (d) this.img.src = "data:image/jpeg;base64," + d;
+    if (!d) return;
+    const seq = ++this.drawSeq;
+    // Base64 → bytes on the main thread (cheap), then createImageBitmap does the
+    // JPEG decode off-thread and returns a directly-drawable bitmap — no <img>
+    // data-URL load round-trip. Skip atob via a manual loop (no fetch, so no CSP
+    // worries with data: URLs).
+    const bin = atob(d);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    createImageBitmap(new Blob([bytes], { type: "image/jpeg" }))
+      .then((bmp) => {
+        if (seq !== this.drawSeq) { bmp.close(); return; } // a newer frame already won
+        if (this.canvas.width !== bmp.width || this.canvas.height !== bmp.height) {
+          this.canvas.width = bmp.width;
+          this.canvas.height = bmp.height;
+        }
+        this.ctx.drawImage(bmp, 0, 0);
+        bmp.close();
+      })
+      .catch(() => {});
   }
 
   private onVisibility = () => this.syncStreaming();
