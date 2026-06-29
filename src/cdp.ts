@@ -49,6 +49,10 @@ export class CdpView {
   private urls: string[] = [];
   private idx = -1;
   private pendingNav: -1 | 0 | 1 = 0;
+  // Target index for a multi-step jump (history.go) from the back/forward menu;
+  // the next cdp-url lands idx here instead of stepping by one.
+  private pendingTarget: number | null = null;
+  private histMenu!: HTMLDivElement;
   // Omnibar suggestion dropdown: recent history when the bar is empty, fuzzy
   // matches over history while typing. suggestIdx is the keyboard-highlighted row.
   private suggestBox!: HTMLDivElement;
@@ -142,7 +146,9 @@ export class CdpView {
       padding: "5px 6px",
       background: "#2a2a2a",
     } satisfies Partial<CSSStyleDeclaration>);
-    const mkBtn = (glyph: string, title: string, on: () => void) => {
+    // onHold (optional): a long-press or right-click opens a menu instead of the
+    // plain click action — Chrome's press-and-hold-the-back-button history list.
+    const mkBtn = (glyph: string, title: string, on: () => void, onHold?: (b: HTMLButtonElement) => void) => {
       const b = document.createElement("button");
       b.type = "button";
       b.textContent = glyph;
@@ -163,15 +169,34 @@ export class CdpView {
         font: "18px/1 system-ui, sans-serif",
         cursor: "pointer",
       } satisfies Partial<CSSStyleDeclaration>);
+      let holdTimer = 0;
+      let held = false;
       // Don't let a button click steal focus from / blur the page selection.
-      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        if (!onHold || b.disabled) return;
+        held = false;
+        holdTimer = window.setTimeout(() => { held = true; onHold(b); }, 350);
+      });
+      const clearHold = () => clearTimeout(holdTimer);
+      b.addEventListener("mouseup", clearHold);
+      b.addEventListener("mouseleave", () => { clearHold(); b.style.background = "#383838"; });
       b.addEventListener("mouseenter", () => { if (!b.disabled) b.style.background = "#4a4a4a"; });
-      b.addEventListener("mouseleave", () => { b.style.background = "#383838"; });
-      b.addEventListener("click", () => { on(); this.canvas.focus(); });
+      b.addEventListener("contextmenu", (e) => {
+        if (!onHold || b.disabled) return;
+        e.preventDefault();
+        held = true; // also suppress the trailing click
+        onHold(b);
+      });
+      b.addEventListener("click", () => {
+        if (held) { held = false; return; } // a hold/right-click already acted
+        on();
+        this.canvas.focus();
+      });
       return b;
     };
-    this.backBtn = mkBtn("←", "Back", () => this.goBack());
-    this.fwdBtn = mkBtn("→", "Forward", () => this.goForward());
+    this.backBtn = mkBtn("←", "Back", () => this.goBack(), (b) => this.showHistMenu(b, -1));
+    this.fwdBtn = mkBtn("→", "Forward", () => this.goForward(), (b) => this.showHistMenu(b, 1));
     const reloadBtn = mkBtn("⟳", "Reload", () => this.reload());
     Object.assign(this.urlbar.style, {
       flex: "1 1 auto",
@@ -208,6 +233,25 @@ export class CdpView {
     navrow.append(this.backBtn, this.fwdBtn, reloadBtn, urlWrap);
     this.updateNavButtons();
 
+    // Back/forward history menu (Chrome's press-and-hold list), anchored under
+    // whichever button opened it. Absolutely positioned inside the view root.
+    this.histMenu = document.createElement("div");
+    Object.assign(this.histMenu.style, {
+      position: "absolute",
+      zIndex: "30",
+      display: "none",
+      flexDirection: "column",
+      minWidth: "260px",
+      maxWidth: "440px",
+      maxHeight: "360px",
+      overflowY: "auto",
+      background: "#2a2a2a",
+      border: "1px solid #4a4a4a",
+      borderRadius: "6px",
+      boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
+      font: "12px system-ui, sans-serif",
+    } satisfies Partial<CSSStyleDeclaration>);
+
     this.canvas = document.createElement("canvas");
     this.canvas.tabIndex = 0; // focusable for keyboard
     Object.assign(this.canvas.style, {
@@ -220,7 +264,7 @@ export class CdpView {
     } satisfies Partial<CSSStyleDeclaration>);
     this.ctx = this.canvas.getContext("2d")!;
 
-    this.el.append(navrow, this.canvas);
+    this.el.append(navrow, this.canvas, this.histMenu);
     if (getComputedStyle(host).position === "static") host.style.position = "relative";
     host.appendChild(this.el);
 
@@ -511,7 +555,11 @@ export class CdpView {
   // (pendingNav) just shifts idx; anything else is a new navigation that
   // truncates the forward entries and appends — same as a browser's address bar.
   private onNavigated(url: string) {
-    if (this.pendingNav === -1) {
+    if (this.pendingTarget !== null) {
+      this.idx = Math.max(0, Math.min(this.urls.length - 1, this.pendingTarget));
+      this.pendingTarget = null;
+      this.pendingNav = 0;
+    } else if (this.pendingNav === -1) {
       this.idx = Math.max(0, this.idx - 1);
       this.pendingNav = 0;
     } else if (this.pendingNav === 1) {
@@ -545,6 +593,73 @@ export class CdpView {
     if (this.idx >= this.urls.length - 1) return;
     this.pendingNav = 1;
     this.evalJs("history.forward()");
+  }
+
+  // Jump straight to a history entry (the back/forward menu). history.go(delta)
+  // walks the page's own session history in one hop; onNavigated lands idx there.
+  private jumpTo(target: number) {
+    const t = Math.max(0, Math.min(this.urls.length - 1, target));
+    if (t === this.idx) return;
+    this.pendingTarget = t;
+    this.closeHistMenu();
+    this.evalJs(`history.go(${t - this.idx})`);
+  }
+
+  // Chrome-style press-and-hold (or right-click) history list. dir = -1 lists the
+  // back entries (most-recent first), dir = +1 the forward entries.
+  private showHistMenu(anchor: HTMLButtonElement, dir: -1 | 1) {
+    const items: { url: string; target: number }[] = [];
+    if (dir === -1) for (let i = this.idx - 1; i >= 0; i--) items.push({ url: this.urls[i], target: i });
+    else for (let i = this.idx + 1; i < this.urls.length; i++) items.push({ url: this.urls[i], target: i });
+    if (items.length === 0) return;
+
+    const menu = this.histMenu;
+    menu.replaceChildren();
+    for (const { url, target } of items) {
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        padding: "7px 12px",
+        color: "#ddd",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      } satisfies Partial<CSSStyleDeclaration>);
+      row.textContent = this.histLabel(url);
+      row.title = url;
+      row.addEventListener("mouseenter", () => { row.style.background = "#3b6ea5"; row.style.color = "#fff"; });
+      row.addEventListener("mouseleave", () => { row.style.background = "transparent"; row.style.color = "#ddd"; });
+      row.addEventListener("mousedown", (e) => { e.preventDefault(); this.jumpTo(target); });
+      menu.appendChild(row);
+    }
+    // Anchor under the button, clamped to the view's left edge.
+    const br = anchor.getBoundingClientRect();
+    const er = this.el.getBoundingClientRect();
+    menu.style.left = `${Math.max(0, br.left - er.left)}px`;
+    menu.style.top = `${br.bottom - er.top + 4}px`;
+    menu.style.display = "flex";
+    // Close on the next outside pointerdown (capture so it beats other handlers).
+    setTimeout(() => window.addEventListener("pointerdown", this.onHistOutside, true), 0);
+  }
+
+  private onHistOutside = (e: PointerEvent) => {
+    if (!this.histMenu.contains(e.target as Node)) this.closeHistMenu();
+  };
+
+  private closeHistMenu() {
+    this.histMenu.style.display = "none";
+    window.removeEventListener("pointerdown", this.onHistOutside, true);
+  }
+
+  // Compact label for a history row: host + truncated path, no scheme.
+  private histLabel(url: string): string {
+    try {
+      const u = new URL(url);
+      const path = (u.pathname + u.search).replace(/^\/$/, "");
+      return u.host + (path.length > 48 ? path.slice(0, 48) + "…" : path);
+    } catch {
+      return url;
+    }
   }
 
   reload() {
@@ -674,6 +789,7 @@ export class CdpView {
     window.removeEventListener("mousemove", this.onWinMove, true);
     window.removeEventListener("mouseup", this.onWinUp, true);
     document.removeEventListener("visibilitychange", this.onVisibility);
+    window.removeEventListener("pointerdown", this.onHistOutside, true);
     this.io?.disconnect();
     this.ro.disconnect();
     this.unlisten?.();
