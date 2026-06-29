@@ -64,6 +64,13 @@ export class CdpView {
   private unlistenUrl?: UnlistenFn;
   private unlistenCopy?: UnlistenFn;
   private ro: ResizeObserver;
+  // Stream gating: stop the screencast while the tab is hidden (panel switched
+  // away or the display/app is not visible) so a backgrounded page — especially
+  // a playing video — isn't decoding full frames into an off-screen canvas, and
+  // restart it (fresh frame) the moment it's shown again.
+  private io?: IntersectionObserver;
+  private inViewport = true;
+  private streaming = true;
   private resizeTimer = 0;
   private dragging = false;
   private lastMove: MouseEvent | null = null;
@@ -231,6 +238,14 @@ export class CdpView {
     this.wireInput();
     this.ro = new ResizeObserver(() => this.scheduleResize());
     this.ro.observe(this.canvas);
+    // display:none (dockview hides inactive panels) leaves the canvas with no box,
+    // so it stops intersecting — that's our "tab hidden" signal.
+    this.io = new IntersectionObserver((ents) => {
+      this.inViewport = ents[ents.length - 1].isIntersecting;
+      this.syncStreaming();
+    });
+    this.io.observe(this.canvas);
+    document.addEventListener("visibilitychange", this.onVisibility);
 
     void listen<FrameEvent>("cdp-frame", (ev) => {
       if (ev.payload.id !== this.id) return;
@@ -287,6 +302,18 @@ export class CdpView {
     if (d) this.img.src = "data:image/jpeg;base64," + d;
   }
 
+  private onVisibility = () => this.syncStreaming();
+
+  // Start/stop the screencast to match real visibility (in-viewport AND the
+  // document visible). Restart (applyMetrics) yields a fresh frame on resume.
+  private syncStreaming() {
+    const want = this.inViewport && !document.hidden;
+    if (want === this.streaming) return;
+    this.streaming = want;
+    if (want) this.applyMetrics();
+    else invoke("cdp_send", { id: this.id, method: "Page.stopScreencast", params: {} }).catch(console.error);
+  }
+
   private scheduleResize() {
     clearTimeout(this.resizeTimer);
     this.resizeTimer = window.setTimeout(() => this.applyMetrics(), 120);
@@ -294,6 +321,9 @@ export class CdpView {
 
   /** Push current size + the active quality to the screencast (restarts it). */
   applyMetrics() {
+    // Don't (re)start a stream we deliberately paused while hidden — a hidden
+    // panel's ResizeObserver fires 0×0 and would otherwise revive it.
+    if (!this.streaming) return;
     const m = this.metrics();
     invoke("cdp_resize", {
       id: this.id,
@@ -643,6 +673,8 @@ export class CdpView {
     clearTimeout(this.resizeTimer);
     window.removeEventListener("mousemove", this.onWinMove, true);
     window.removeEventListener("mouseup", this.onWinUp, true);
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    this.io?.disconnect();
     this.ro.disconnect();
     this.unlisten?.();
     this.unlistenCursor?.();

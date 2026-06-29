@@ -295,6 +295,13 @@ fn ensure_engine(app: &AppHandle) -> Result<(), String> {
             "--hide-crash-restore-bubble",
             "--disable-features=Translate",
             "--hide-scrollbars",
+            // Keep painting when the page is occluded/backgrounded. Without these
+            // a headless renderer throttles or pauses when our panel is hidden or
+            // the display sleeps, so the screencast stalls on a stale frame and
+            // the tab looks dead after you leave and come back.
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-background-timer-throttling",
         ])
         .arg(format!("--user-data-dir={}", profile.display()))
         .spawn()

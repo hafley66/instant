@@ -37,10 +37,16 @@ export function history(): HistEntry[] {
 export function recordVisit(url: string): void {
   const u = (url ?? "").trim();
   if (!u || u === "about:blank" || u.startsWith("chrome://")) return;
-  const list = load().filter((e) => e.url !== u);
-  list.unshift({ url: u, ts: Date.now() });
-  if (list.length > CAP) list.length = CAP;
-  save(list);
+  const list = load();
+  // No-op when it's already the most-recent entry. Chatty SPAs fire
+  // history.replaceState many times a second for the same URL; without this guard
+  // each one is a synchronous localStorage write + change event on the UI thread,
+  // which thrashes (and can freeze) the app.
+  if (list[0]?.url === u) return;
+  const next = list.filter((e) => e.url !== u);
+  next.unshift({ url: u, ts: Date.now() });
+  if (next.length > CAP) next.length = CAP;
+  save(next);
 }
 
 export function clearHistory(): void {
