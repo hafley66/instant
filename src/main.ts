@@ -3909,6 +3909,13 @@ function wireWindowResize() {
       grip.setPointerCapture(e.pointerId);
 
       const onMove = (ev: PointerEvent) => {
+        // The primary button is no longer down — a pointerup was missed (the
+        // setSize/setPosition reflow below can swallow it via lostpointercapture
+        // with no pointerup). Tear down so moves stop resizing "from far away".
+        if ((ev.buttons & 1) === 0) {
+          stop(ev.pointerId);
+          return;
+        }
         const dx = ev.screenX - startX;
         const dy = ev.screenY - startY;
         let w = ow;
@@ -3929,15 +3936,29 @@ function wireWindowResize() {
           win.setPosition(new LogicalPosition(nx, ny));
         }
       };
-      const onUp = (ev: PointerEvent) => {
-        grip.releasePointerCapture(ev.pointerId);
+      // Single idempotent teardown, reachable from every end condition.
+      const stop = (pointerId: number) => {
+        try {
+          grip.releasePointerCapture(pointerId);
+        } catch {
+          // capture may already be gone
+        }
         grip.removeEventListener("pointermove", onMove);
         grip.removeEventListener("pointerup", onUp);
         grip.removeEventListener("pointercancel", onUp);
+        grip.removeEventListener("lostpointercapture", onUp);
+        window.removeEventListener("pointerup", onUp, true);
+        window.removeEventListener("pointercancel", onUp, true);
       };
+      const onUp = (ev: PointerEvent) => stop(ev.pointerId);
       grip.addEventListener("pointermove", onMove);
       grip.addEventListener("pointerup", onUp);
       grip.addEventListener("pointercancel", onUp);
+      // lostpointercapture fires when the reflow steals capture without a
+      // pointerup; window-level up/cancel catch a release outside the grip.
+      grip.addEventListener("lostpointercapture", onUp);
+      window.addEventListener("pointerup", onUp, true);
+      window.addEventListener("pointercancel", onUp, true);
     });
   });
 }
