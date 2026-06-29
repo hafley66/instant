@@ -168,6 +168,44 @@ fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<Str
     (paths, commands)
 }
 
+/// Decode as much valid UTF-8 from `pending` as possible and return it, leaving
+/// only an incomplete trailing multibyte sequence (at most 3 bytes) in `pending`
+/// for the next read to complete. Without this, a char split across an 8KB read
+/// boundary was decoded as U+FFFD on both sides (the random ?? glyphs). Genuine
+/// invalid bytes mid-stream are passed through as a single U+FFFD so the stream
+/// never stalls.
+fn drain_utf8(pending: &mut Vec<u8>) -> String {
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(s) => {
+                out.push_str(s);
+                pending.clear();
+                break;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                // SAFETY-equivalent: bytes [..valid] are valid UTF-8 by definition.
+                out.push_str(std::str::from_utf8(&pending[..valid]).unwrap());
+                match e.error_len() {
+                    // Incomplete sequence at the very end: keep it for next time.
+                    None => {
+                        pending.drain(..valid);
+                        break;
+                    }
+                    // A real invalid byte mid-stream: emit one replacement char and
+                    // skip past it, then keep decoding the rest.
+                    Some(bad) => {
+                        out.push('\u{FFFD}');
+                        pending.drain(..valid + bad);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Turn on mouse mode for a session so the wheel scrolls the pane / forwards to
 /// mouse-aware TUIs (claude, opencode). Per-session (not `-g`) to leave the
 /// user's other tmux sessions alone. Retries: a freshly-created session may not
@@ -337,14 +375,21 @@ pub fn open_session(
     // Reader thread: pump pty -> webview until EOF (session detached/killed).
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        // Bytes left over when a multibyte UTF-8 char straddles a read boundary;
+        // carried to the next read so it isn't mangled into U+FFFD (the random
+        // ?? glyphs). See drain_utf8.
+        let mut pending: Vec<u8> = Vec::new();
         if !graphics {
             // Fast path: plain terminal, no graphics parsing.
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                        pending.extend_from_slice(&buf[..n]);
+                        let chunk = drain_utf8(&mut pending);
+                        if !chunk.is_empty() {
+                            let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                        }
                     }
                 }
             }
@@ -359,7 +404,11 @@ pub fn open_session(
                     for out in scanner.feed(&buf[..n]) {
                         match out {
                             ScanOut::Passthrough(bytes) => {
-                                let chunk = String::from_utf8_lossy(&bytes).to_string();
+                                pending.extend_from_slice(&bytes);
+                                let chunk = drain_utf8(&mut pending);
+                                if chunk.is_empty() {
+                                    continue;
+                                }
                                 let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
                             }
                             ScanOut::Graphics(g) => {
