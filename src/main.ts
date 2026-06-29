@@ -3034,25 +3034,32 @@ function appearanceGroup(): HTMLElement {
   h.innerHTML = `<b>Appearance</b> <span class="muted">visual options</span>`;
   sec.appendChild(h);
 
+  // xp.css draws its pixel checkbox only for the `input + label[for]` sibling
+  // pattern (it sets the raw input to opacity:0/position:fixed). So emit that
+  // exact structure, not a wrapping label, or the box never renders.
   const toggle = (
+    id: string,
     labelText: string,
     hint: string,
     checked: boolean,
     onChange: (on: boolean) => void,
   ) => {
-    const row = document.createElement("label");
+    const row = document.createElement("div");
     row.className = "cfg-toggle";
     const cb = document.createElement("input");
     cb.type = "checkbox";
+    cb.id = id;
     cb.checked = checked;
     cb.addEventListener("change", () => onChange(cb.checked));
-    const text = document.createElement("span");
-    text.innerHTML = `${escapeHtml(labelText)} <span class="muted">${escapeHtml(hint)}</span>`;
-    row.append(cb, text);
+    const lab = document.createElement("label");
+    lab.htmlFor = id;
+    lab.innerHTML = `${escapeHtml(labelText)} <span class="muted">${escapeHtml(hint)}</span>`;
+    row.append(cb, lab);
     sec.appendChild(row);
   };
 
   toggle(
+    "cfg-xp-pixel",
     "Super XP (pixel font)",
     "grainy bitmap font everywhere, incl. the terminal",
     store.get().xpPixel,
@@ -3736,11 +3743,22 @@ function syncSkin(s: AppState) {
 // changes the cell box, so fit() reflows cols/rows and we push the new size +
 // pixel dims to the pty (mirrors the focus path; onResize also fires resize_pty
 // but cellDims can change without cols/rows, so we send it explicitly).
-function syncXpPixel(s: AppState) {
+async function syncXpPixel(s: AppState) {
   document.body.classList.toggle("xp-pixel", s.xpPixel);
+  // xterm's canvas renderer measures the font synchronously; if the pixel
+  // webfont isn't loaded yet it silently falls back to Menlo and the terminal
+  // never changes. Load it first, then apply + reflow.
+  if (s.xpPixel) {
+    try {
+      await document.fonts.load('16px "Perfect DOS VGA 437 Win"');
+    } catch {
+      // font API unavailable / load failed; apply anyway (falls back to Menlo)
+    }
+  }
   const family = termFontFamily();
   for (const t of tabs.values()) {
     t.term.options.fontFamily = family;
+    t.term.refresh(0, t.term.rows - 1); // force a redraw with the new metrics
     t.fit.fit();
     invoke("resize_pty", {
       id: t.id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),

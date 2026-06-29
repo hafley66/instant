@@ -845,13 +845,14 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   opacity: 0.55;
   font-size: 11px;
 }
+/* Plain block (not flex): xp.css's checkbox uses an absolutely-positioned
+   :before box + a label margin, which flex/gap would shove around. */
 .cfg-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   font-size: 12px;
+  padding: 3px 0;
+}
+.cfg-toggle label {
   cursor: pointer;
-  padding: 2px 0;
 }
 .cfg-toggle .muted {
   opacity: 0.55;
