@@ -6,6 +6,8 @@ import { fuzzyFilter } from "./fuzzy";
 import { paletteCommands, type Command } from "./keymap";
 
 let openEl: HTMLElement | null = null;
+// The outside-click handler, assigned per-open so it can close over the box.
+let onOutside: ((e: Event) => void) | null = null;
 
 // Most-recently-used command ids, newest first. Persisted so the palette opens
 // with your recent commands on top (VSCode-style) across sessions.
@@ -45,13 +47,13 @@ export function isPaletteOpen(): boolean {
 function dismiss() {
   openEl?.remove();
   openEl = null;
-  document.removeEventListener("pointerdown", onOutside, true);
+  if (onOutside) {
+    document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("mousedown", onOutside, true);
+    onOutside = null;
+  }
   window.removeEventListener("blur", dismiss);
   window.removeEventListener("resize", dismiss);
-}
-
-function onOutside(e: PointerEvent) {
-  if (openEl && !openEl.contains(e.target as Node)) dismiss();
 }
 
 // The pretty label: "Group: Title" when grouped, else the title.
@@ -89,12 +91,6 @@ export function openPalette(): void {
 
   const root = document.createElement("div");
   root.className = "cmdp-root";
-  // Click on the dimmed backdrop (the root itself, not the box) closes it. The
-  // window-level onOutside can't catch this: the backdrop IS openEl, so it reads
-  // as an inside click.
-  root.addEventListener("pointerdown", (e) => {
-    if (e.target === root) dismiss();
-  });
 
   const box = document.createElement("div");
   box.className = "cmdp-box";
@@ -202,7 +198,15 @@ export function openPalette(): void {
   render();
   input.focus();
 
+  // Close on any press that lands outside the box (the dimmed backdrop, a
+  // terminal, the browser canvas, the rail). Capture phase so it fires before
+  // the target (e.g. the CdpView canvas) can swallow the event. Both pointerdown
+  // and mousedown are bound because the browser canvas consumes pointer events.
+  onOutside = (e: Event) => {
+    if (!box.contains(e.target as Node)) dismiss();
+  };
   document.addEventListener("pointerdown", onOutside, true);
+  document.addEventListener("mousedown", onOutside, true);
   window.addEventListener("blur", dismiss);
   window.addEventListener("resize", dismiss);
 }

@@ -1023,7 +1023,10 @@ body[data-mode="dark"] .act-last.ok {
   box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
-.cmdp-input {
+/* body[data-skin] prefix (0,2,1) outranks xp.css's `input[type="text"]` (0,1,1),
+   whose light system color otherwise wins over a bare `.cmdp-input` and makes
+   the typed text near-invisible on the panel surface. */
+body[data-skin] .cmdp-input {
   flex: 0 0 auto;
   margin: 0;
   padding: 7px 10px;
@@ -1034,6 +1037,10 @@ body[data-mode="dark"] .act-last.ok {
   border: none;
   border-bottom: 1px solid var(--frame);
   outline: none;
+}
+body[data-skin] .cmdp-input::placeholder {
+  color: var(--panel-fg);
+  opacity: 0.5;
 }
 /* The prompt opens with its initial value selected; without an explicit
    selection contrast the highlighted text washes out (light-on-light). Pin it

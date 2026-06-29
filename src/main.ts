@@ -4891,8 +4891,18 @@ async function main() {
 
   // Central keymap: binds the command table on the window. The focused-terminal
   // path is intercepted inside attachCustomKeyEventHandler (runMatchingCommand)
-  // so combos aren't typed into the pty.
-  installKeymap(TAB_COMMANDS);
+  // so combos aren't typed into the pty. The rail panels (tmux, Worktrees,
+  // Activity, Favorites, Config, Sprefa, …) are added as palette commands so
+  // they're reachable from ⌘⇧P, not just the rail buttons. Built here because
+  // plugins are registered by now.
+  const panelCommands: Command[] = allPanels().map((p) => ({
+    id: `panel.${p.id}`,
+    keys: [],
+    title: `Toggle ${p.title}`,
+    group: "Panel",
+    run: () => togglePanel(p.id),
+  }));
+  installKeymap([...TAB_COMMANDS, ...panelCommands]);
 
   // Overlay: re-apply on any change to its config or the frontmost app, then once
   // now so a persisted mini/fade/follow is restored on boot.
