@@ -500,10 +500,23 @@ fn run_click(command: String, cwd: String) -> Result<String, String> {
     Ok(s)
 }
 
+/// Per-build state directory. A release ("prod") build nests all of its state
+/// (headless-Chrome profile, sqlite dbs, config.json, captures, log) under a
+/// `prod` subfolder so it can run alongside a `tauri dev` ("dev") instance
+/// without the two trashing each other. Dev keeps the bare app_data_dir, so a
+/// running dev instance is unaffected by this split. Discriminated by
+/// cfg!(debug_assertions): true under `tauri dev`, false in a release bundle.
+pub fn state_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let mut dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if !cfg!(debug_assertions) {
+        dir.push("prod");
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
 fn log_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let _ = std::fs::create_dir_all(&dir);
-    Ok(dir.join("instant.log"))
+    Ok(state_dir(app)?.join("instant.log"))
 }
 
 /// Append one line to app_data_dir/instant.log. The webview has no console a user
@@ -637,8 +650,8 @@ pub fn run() {
             favorites::init(app.handle());
 
             // Unified activity store + localhost ingest endpoint for the extension.
-            let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir).ok();
+            // state_dir keeps dev and a prod build on separate dbs/config.
+            let data_dir = state_dir(app.handle())?;
             let conn = activity::open(&data_dir.join("activity.db"))?;
             app.manage(activity::ActivityDb(Mutex::new(conn)));
 

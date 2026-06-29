@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 // GUI apps don't inherit the login PATH, so git/worktree tooling needs this.
 const EXTRA_PATH: &str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
@@ -28,9 +28,7 @@ pub struct Workspace {
 pub struct Workspaces(pub Mutex<Vec<Workspace>>);
 
 fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("workspaces.json"))
+    Ok(crate::state_dir(app)?.join("workspaces.json"))
 }
 
 /// Read the persisted registry (empty on first run / parse error).

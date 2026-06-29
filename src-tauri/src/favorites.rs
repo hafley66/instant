@@ -36,9 +36,7 @@ pub struct Fav {
 }
 
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("favorites.db"))
+    Ok(crate::state_dir(app)?.join("favorites.db"))
 }
 
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS favorites (\
