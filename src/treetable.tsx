@@ -106,7 +106,13 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
   const colDefs: ColumnDef<T>[] = columns.map((c) => ({
     id: c.id,
     header: c.header,
-    accessorFn: c.sortValue ? (row) => c.sortValue!(row) : undefined,
+    // Every column needs an accessorFn or react-table's getCanGlobalFilter() is
+    // false for it; a table with zero filterable columns skips global filtering
+    // entirely (the symptom: a panel whose columns are all display-only, like
+    // worktrees, never filters). The "" fallback makes the column filterable
+    // without affecting sort (gated on enableSorting) or render (cells use
+    // c.cell). The globalFilterFn ignores the column and tests the whole row.
+    accessorFn: c.sortValue ? (row) => c.sortValue!(row) : () => "",
     enableSorting: !!c.sortValue,
     // null/undefined sink last regardless of direction.
     sortUndefined: "last",
