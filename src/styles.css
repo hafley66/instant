@@ -1035,6 +1035,13 @@ body[data-mode="dark"] .act-last.ok {
   border-bottom: 1px solid var(--frame);
   outline: none;
 }
+/* The prompt opens with its initial value selected; without an explicit
+   selection contrast the highlighted text washes out (light-on-light). Pin it
+   to the active-row colors so the selected URL stays readable. */
+.cmdp-input::selection {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+}
 .cmdp-list {
   flex: 1 1 auto;
   overflow-y: auto;
