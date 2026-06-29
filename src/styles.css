@@ -2706,3 +2706,46 @@ body[data-skin="ac3"] .summon-in {
     opacity: 1;
   }
 }
+
+/* =========================================================
+   SUPER XP  (body.xp-pixel)  -- the funny, maximal one.
+   Forces xp.css's grainy bitmap UI font ("Pixelated MS Sans Serif")
+   onto ALL chrome (tabs, rail, sidebar, buttons, panels, palette,
+   status bar) and KILLS antialiasing so it stays crisp/blocky like a
+   2002 CRT instead of the smooth Tahoma/Arial/Menlo the components
+   ask for. font-smoothing:none is the part that actually reads as
+   "pixel"; swapping the family alone just looks like another smooth
+   font. Toggled by store.xpPixel via syncXpPixel() in main.ts.
+
+   Specificity: `body.xp-pixel *` is (0,1,1), already above every
+   xp.css font rule (body=0,0,1; `code *`/`pre *`=0,0,2). We add
+   !important anyway because many rules in THIS file pin Menlo at
+   (0,1,0)+ and Super XP is the one global switch meant to beat them.
+
+   Terminal: the live xterm font is set in JS (term.options.fontFamily
+   -> Perfect DOS VGA 437, a pixel MONOSPACE) because xterm paints
+   glyphs to a <canvas> from that option, so CSS never reaches the
+   grid. MS Sans is proportional and must not size the grid; the rule
+   landing on .xterm DOM is harmless (canvas ignores font-family). */
+body.xp-pixel,
+body.xp-pixel * {
+  font-family: "Pixelated MS Sans Serif", Tahoma, sans-serif !important;
+  -webkit-font-smoothing: none !important;
+  font-smooth: never; /* non-standard alias; ignored where unsupported */
+}
+/* Re-assert a pixel MONOSPACE on code/pre/terminal DOM so anything that
+   relies on column alignment stays aligned (and still grainy). Mirrors
+   xp.css, which itself sets Perfect DOS VGA on <pre>. */
+body.xp-pixel pre,
+body.xp-pixel code,
+body.xp-pixel code *,
+body.xp-pixel .xterm,
+body.xp-pixel .xterm * {
+  font-family: "Perfect DOS VGA 437 Win", "Pixelated MS Sans Serif",
+    monospace !important;
+}
+/* Keep the terminal's bitmap canvas crisp when the webview is zoomed. */
+body.xp-pixel .term-host,
+body.xp-pixel .xterm canvas {
+  image-rendering: pixelated;
+}

@@ -122,6 +122,18 @@ function cellDims(term: Terminal): { cellW: number; cellH: number } | Record<str
 // state, so they stay out of the store; the active tab *id* lives in the store.
 const tabs = new Map<string, Tab>();
 
+// Terminal font chains. Default is Menlo + powerline/Nerd fallbacks (see the
+// Terminal ctor for why). "Super XP" swaps in a pixel font, but MS Sans Serif is
+// PROPORTIONAL and would shear the terminal grid, so we use Perfect DOS VGA 437
+// (a pixel MONOSPACE) instead. That family ships with xp.css (already imported in
+// main.ts:1) and is declared @font-face there, so no new font file is needed.
+// Menlo stays as the fallback so missing glyphs still render monospaced.
+const TERM_FONT_FAMILY_DEFAULT =
+  'Menlo, "Hack Nerd Font Mono", "MesloLGS NF", "DejaVu Sans Mono for Powerline", monospace';
+const TERM_FONT_FAMILY_PIXEL = '"Perfect DOS VGA 437 Win", Menlo, monospace';
+const termFontFamily = (): string =>
+  store.get().xpPixel ? TERM_FONT_FAMILY_PIXEL : TERM_FONT_FAMILY_DEFAULT;
+
 // --- kitty keyboard protocol (graphics tabs) -------------------------------
 // awrit pushes the full progressive-enhancement flags (CSI > 31 u) on launch and
 // then expects every key as a CSI ... u event. xterm.js doesn't speak it, so we
@@ -959,6 +971,8 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
   { id: "tab.browser", keys: [], title: "Open Browser", group: "Tabs", run: () => openBrowserTab() },
   { id: "browser.quality", keys: [], title: "Cycle Render Quality", group: "Browser", run: () => cycleBrowserQuality() },
+  // "Super XP": grainy pixel font everywhere (chrome + terminal). Persisted.
+  { id: "skin.xpPixel", keys: [], title: "Toggle Super XP (pixel font)", group: "Skin", run: () => store.set({ xpPixel: !store.get().xpPixel }) },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -1036,8 +1050,7 @@ function openTab(
     // "Nerd Font" names win if installed; "for Powerline" is the guaranteed
     // separator fallback already on disk. Install full icons with:
     //   brew install --cask font-hack-nerd-font
-    fontFamily:
-      'Menlo, "Hack Nerd Font Mono", "MesloLGS NF", "DejaVu Sans Mono for Powerline", monospace',
+    fontFamily: termFontFamily(), // Menlo chain, or Perfect DOS VGA when Super XP is on
     fontSize: termFontSize(id), // persisted per-tab zoom (default 13)
     cursorBlink: true,
     allowProposedApi: true,
@@ -3679,6 +3692,22 @@ function syncSkin(s: AppState) {
     t.fit.fit();
   }
 }
+// "Super XP": toggle the body class that forces the grainy pixel UI font on the
+// chrome (CSS in styles.css), and re-font every live terminal. The font swap
+// changes the cell box, so fit() reflows cols/rows and we push the new size +
+// pixel dims to the pty (mirrors the focus path; onResize also fires resize_pty
+// but cellDims can change without cols/rows, so we send it explicitly).
+function syncXpPixel(s: AppState) {
+  document.body.classList.toggle("xp-pixel", s.xpPixel);
+  const family = termFontFamily();
+  for (const t of tabs.values()) {
+    t.term.options.fontFamily = family;
+    t.fit.fit();
+    invoke("resize_pty", {
+      id: t.id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
+    }).catch(() => {});
+  }
+}
 function syncMode(s: AppState) {
   document.body.dataset.mode = s.mode;
   ($("#mode-toggle") as HTMLButtonElement).textContent =
@@ -4091,6 +4120,10 @@ function ctxItemsFor(target: HTMLElement): CtxItem[] {
     },
     { sep: true },
     { label: "Cycle skin", action: () => store.set({ skin: nextSkin(store.get().skin) }) },
+    {
+      label: store.get().xpPixel ? "Super XP: off" : "Super XP: on",
+      action: () => store.set({ xpPixel: !store.get().xpPixel }),
+    },
     {
       label: store.get().mode === "dark" ? "Light mode" : "Dark mode",
       action: () =>
@@ -4696,6 +4729,7 @@ async function main() {
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
+  store.subscribe(syncXpPixel, ["xpPixel"]);
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncSidebar, ["sidebar"]);
   // dockview owns the layout; we only react: refit the active terminal
@@ -4719,6 +4753,7 @@ async function main() {
   ]);
   store.subscribe(renderConfigPanel, ["config"]);
   syncSkin(store.get());
+  syncXpPixel(store.get());
   syncMode(store.get());
   syncSidebar(store.get());
   renderWorktreesPanel();
