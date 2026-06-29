@@ -115,11 +115,21 @@ export function openPalette(): void {
   let active = 0;
 
   function render() {
-    // Empty query: show everything MRU-first. Typed query: fuzzy rank by match.
+    // Empty query: recently-used first, then a divider, then the rest. Typed
+    // query: fuzzy rank by match (no divider — recency isn't the order).
     const q = input.value.trim();
-    shown = q ? fuzzyFilter(q, all, label) : byRecency(all);
+    let dividerAfter = -1; // index of last recent command; -1 = no divider
+    if (q) {
+      shown = fuzzyFilter(q, all, label);
+    } else {
+      shown = byRecency(all);
+      const recent = new Set(loadMru());
+      const n = shown.filter((c) => recent.has(c.id)).length;
+      if (n > 0 && n < shown.length) dividerAfter = n - 1;
+    }
     if (active >= shown.length) active = Math.max(0, shown.length - 1);
     list.replaceChildren();
+    const rows: HTMLElement[] = [];
     shown.forEach((c, i) => {
       const row = document.createElement("div");
       row.className = "cmdp-item" + (i === active ? " cmdp-active" : "");
@@ -141,8 +151,14 @@ export function openPalette(): void {
       };
       row.onclick = () => choose(i);
       list.appendChild(row);
+      rows.push(row);
+      if (i === dividerAfter) {
+        const sep = document.createElement("div");
+        sep.className = "cmdp-divider";
+        list.appendChild(sep);
+      }
     });
-    list.children[active]?.scrollIntoView({ block: "nearest" });
+    rows[active]?.scrollIntoView({ block: "nearest" });
   }
 
   function choose(i: number) {

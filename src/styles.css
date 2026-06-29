@@ -1061,6 +1061,13 @@ body[data-mode="dark"] .act-last.ok {
   background: var(--row-active-bg);
   color: var(--row-active-fg);
 }
+/* Separates the recently-used commands from the rest (empty query only). */
+.cmdp-divider {
+  height: 0;
+  margin: 3px 6px;
+  border-top: 1px solid var(--frame);
+  opacity: 0.6;
+}
 .cmdp-label {
   overflow: hidden;
   text-overflow: ellipsis;
