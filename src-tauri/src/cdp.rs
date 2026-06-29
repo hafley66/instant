@@ -419,6 +419,9 @@ fn attach(
     // evaluate installs it on the already-loaded current document.
     send_boot("Runtime.enable", json!({}));
     send_boot("Runtime.addBinding", json!({ "name": "__cursorSync" }));
+    // Copy bridge: the frontend calls this binding via Runtime.evaluate with the
+    // page selection on ⌘C; we forward the text to the OS clipboard.
+    send_boot("Runtime.addBinding", json!({ "name": "__cdpCopy" }));
     send_boot(
         "Page.addScriptToEvaluateOnNewDocument",
         json!({ "source": CURSOR_SYNC_JS }),
@@ -457,6 +460,14 @@ fn attach(
                             let _ = app2.emit(
                                 "cdp-cursor",
                                 json!({ "id": id2.clone(), "cursor": c }),
+                            );
+                        } else if v["method"] == "Runtime.bindingCalled"
+                            && v["params"]["name"] == "__cdpCopy"
+                        {
+                            let t = v["params"]["payload"].as_str().unwrap_or("");
+                            let _ = app2.emit(
+                                "cdp-copy",
+                                json!({ "id": id2.clone(), "text": t }),
                             );
                         } else if v["method"] == "Page.frameNavigated"
                             && v["params"]["frame"]["parentId"].is_null()

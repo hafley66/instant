@@ -1317,11 +1317,17 @@ function normalizeUrl(s: string): string {
   return "https://www.google.com/search?q=" + encodeURIComponent(s);
 }
 
-async function openBrowserTab(url?: string) {
-  const raw = (url ?? (await askText("URL", "https://example.com")) ?? "").trim();
-  if (!raw) return;
-  const u = normalizeUrl(raw);
-  const name = `web:${raw}`;
+// Persist a browser tab so a reload reopens it (the CDP target survives a
+// webview reload in the Rust CdpStore; a full restart re-creates it at the url).
+function recordBrowserTab(name: string, url: string) {
+  const cur = store.get().openTabs;
+  if (cur.some((t) => t.name === name)) return;
+  store.set({ openTabs: [...cur, { name, command: null, cwd: null, browser: true, url }] });
+}
+
+// Create the panel + CdpView for a browser tab with an explicit name (so the id
+// is stable across reloads). Shared by the URL prompt and the boot replay.
+function spawnBrowserTab(name: string, u: string) {
   const id = sessionId(name);
   if (browserTabs.has(id) || tabs.has(id)) {
     activate(id);
@@ -1332,6 +1338,7 @@ async function openBrowserTab(url?: string) {
   document.getElementById("panel-pool")!.appendChild(el);
   const view = new CdpView(el, id, u);
   browserTabs.set(id, { id, name, el, view });
+  recordBrowserTab(name, u); // survives reload
   addTermPanel(id, tabTitle(name), el); // dockview adopts el into the panel
   flashStatus("starting browser… (first run clones your Chrome profile)");
   // Measure after layout so the screencast starts at the panel's real size;
@@ -1346,6 +1353,12 @@ async function openBrowserTab(url?: string) {
     });
     view.focus();
   });
+}
+
+async function openBrowserTab(url?: string) {
+  const raw = (url ?? (await askText("URL", "https://example.com")) ?? "").trim();
+  if (!raw) return;
+  spawnBrowserTab(`web:${raw}`, normalizeUrl(raw));
 }
 
 // Step the screencast JPEG quality to the next preset and re-apply it to every
@@ -1405,7 +1418,7 @@ function onTermShown(id: string) {
 // Close a terminal: remove its dockview panel; dockview then fires
 // onDidRemovePanel -> onTermClosed which disposes the xterm + pty.
 function closeTab(id: string) {
-  if (tabs.has(id)) removeTermPanel(id);
+  if (tabs.has(id) || browserTabs.has(id)) removeTermPanel(id);
 }
 
 // dockview removed a terminal panel (close button, menu, or closeTab). Tear
@@ -1416,6 +1429,7 @@ function onTermClosed(id: string) {
     b.view.dispose();
     b.el.remove();
     browserTabs.delete(id);
+    forgetTab(id); // don't reopen a browser tab the user closed
     invoke("cdp_close", { id }).catch(() => {});
     if (activeId() === id) {
       const next = tabs.keys().next();
@@ -4115,14 +4129,28 @@ function wireChrome() {
   // Own the drag region in JS instead of `data-tauri-drag-region`: that attribute
   // only matches the exact event target, so grabbing the caption text (a child)
   // started a text-selection instead of a window drag. Listening on the bar and
-  // routing by target covers every child. `e.detail === 2` is the double-click
-  // (same trick Tauri's built-in uses) → maximize toggle.
-  $(".title-bar").addEventListener("mousedown", (e) => {
+  // routing by target covers every child.
+  //
+  // Drag is single-press only; maximize is a dedicated dblclick. The old code
+  // toggled maximize on the *second* mousedown (detail===2) but had already
+  // begun a native startDragging on the first — that drag racing the maximize
+  // resize left the window in a half-drag state and spat mouse-report garbage
+  // into the focused tmux/xterm. Starting the drag only on detail===1 (and
+  // maximizing from dblclick) removes the race.
+  const titleBar = $(".title-bar");
+  const onControls = (t: EventTarget | null) =>
+    !!(t as HTMLElement | null)?.closest(".title-bar-controls");
+  titleBar.addEventListener("mousedown", (e) => {
     const me = e as MouseEvent;
-    if (me.button !== 0) return;
-    if ((me.target as HTMLElement).closest(".title-bar-controls")) return;
-    if (me.detail === 2) getCurrentWindow().toggleMaximize();
-    else getCurrentWindow().startDragging();
+    if (me.button !== 0 || onControls(me.target)) return;
+    me.preventDefault(); // no caption text-selection / focus steal
+    if (me.detail === 1) getCurrentWindow().startDragging();
+  });
+  titleBar.addEventListener("dblclick", (e) => {
+    const me = e as MouseEvent;
+    if (me.button !== 0 || onControls(me.target)) return;
+    me.preventDefault();
+    getCurrentWindow().toggleMaximize();
   });
 
 }
@@ -4763,10 +4791,11 @@ async function main() {
   const wantActive = store.get().active;
   replaying = true; // don't log restored tabs as fresh visits
   for (const t of store.get().openTabs) {
-    openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics });
+    if (t.browser && t.url) spawnBrowserTab(t.name, t.url);
+    else openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics });
   }
   replaying = false;
-  if (wantActive && tabs.has(wantActive)) activate(wantActive);
+  if (wantActive && (tabs.has(wantActive) || browserTabs.has(wantActive))) activate(wantActive);
 
   // Each new activity row (browser ingest, os capture, file open) arrives here;
   // prepend, newest-first, capped.

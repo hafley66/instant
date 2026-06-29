@@ -43,6 +43,7 @@ export class CdpView {
   private unlisten?: UnlistenFn;
   private unlistenCursor?: UnlistenFn;
   private unlistenUrl?: UnlistenFn;
+  private unlistenCopy?: UnlistenFn;
   private ro: ResizeObserver;
   private resizeTimer = 0;
   private dragging = false;
@@ -143,6 +144,13 @@ export class CdpView {
       // CSS zoom is per-document; re-apply after a navigation if it isn't 1.
       if (this.zoom !== 1) this.applyZoom();
     }).then((u) => (this.unlistenUrl = u));
+
+    // Copy bridge: the page pushes its selection over __cdpCopy on ⌘C; write it
+    // to the OS clipboard so it pastes into other apps.
+    void listen<{ id: string; text: string }>("cdp-copy", (ev) => {
+      if (ev.payload.id !== this.id) return;
+      if (ev.payload.text) navigator.clipboard.writeText(ev.payload.text).catch(console.error);
+    }).then((u) => (this.unlistenCopy = u));
   }
 
   // CSS px size of the canvas (== CDP viewport CSS px) and the device ratio.
@@ -272,6 +280,38 @@ export class CdpView {
         invoke("cdp_send", { id: this.id, method: "Page.reload", params: {} }).catch(console.error);
         return;
       }
+      // Clipboard bridge: the headless page has its own clipboard, so route copy/
+      // paste through the OS clipboard explicitly. Copy pushes the page selection
+      // out via the __cdpCopy binding (handled in the cdp-copy listener); paste
+      // reads the OS clipboard and inserts it at the page's focus.
+      if (k === "c") {
+        e.preventDefault();
+        e.stopPropagation();
+        invoke("cdp_send", {
+          id: this.id,
+          method: "Runtime.evaluate",
+          params: { expression: "window.__cdpCopy((window.getSelection&&getSelection().toString())||'')" },
+        }).catch(console.error);
+        return;
+      }
+      if (k === "v") {
+        e.preventDefault();
+        e.stopPropagation();
+        navigator.clipboard.readText().then((text) => {
+          if (text) invoke("cdp_send", { id: this.id, method: "Input.insertText", params: { text } });
+        }).catch(console.error);
+        return;
+      }
+      if (k === "a") {
+        e.preventDefault();
+        e.stopPropagation();
+        invoke("cdp_send", {
+          id: this.id,
+          method: "Runtime.evaluate",
+          params: { expression: "document.execCommand('selectAll')" },
+        }).catch(console.error);
+        return;
+      }
       if (k === "=" || k === "+") { e.preventDefault(); e.stopPropagation(); this.setZoom(this.zoom + 0.1); return; }
       if (k === "-" || k === "_") { e.preventDefault(); e.stopPropagation(); this.setZoom(this.zoom - 0.1); return; }
       if (k === "0") { e.preventDefault(); e.stopPropagation(); this.setZoom(1); return; }
@@ -339,6 +379,7 @@ export class CdpView {
     this.unlisten?.();
     this.unlistenCursor?.();
     this.unlistenUrl?.();
+    this.unlistenCopy?.();
     this.el.remove();
   }
 }

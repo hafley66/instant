@@ -131,6 +131,8 @@ export interface OpenTab {
   command: string | null;
   cwd: string | null;
   graphics?: boolean; // kitty-graphics (awrit) tab — restore the overlay on reload
+  browser?: boolean; // CDP browser tab — re-open the canvas on reload
+  url?: string; // browser tab's URL (normalized) to reopen at
 }
 
 // A live tmux session row (Rust pty::Session).
