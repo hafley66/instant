@@ -48,6 +48,7 @@ export class CdpView {
   private dragging = false;
   private lastMove: MouseEvent | null = null;
   private moveRaf = 0;
+  private zoom = 1;
 
   constructor(host: HTMLElement, private id: string, url: string) {
     this.el = document.createElement("div");
@@ -139,6 +140,8 @@ export class CdpView {
     void listen<{ id: string; url: string }>("cdp-url", (ev) => {
       if (ev.payload.id !== this.id) return;
       if (document.activeElement !== this.urlbar) this.urlbar.value = ev.payload.url;
+      // CSS zoom is per-document; re-apply after a navigation if it isn't 1.
+      if (this.zoom !== 1) this.applyZoom();
     }).then((u) => (this.unlistenUrl = u));
   }
 
@@ -255,9 +258,25 @@ export class CdpView {
   }
 
   private key(e: KeyboardEvent) {
-    // Let app shortcuts (⌘⇧P, ⌘W, …) through to the window; everything else goes
-    // to the page.
-    if (e.metaKey && (e.key === "w" || e.key === "p" || e.key === "t")) return;
+    // ⌘/⌃ combos: handle the browser-local ones here, and let everything else
+    // bubble to the app keymap (tab switch, ⌘W close, ⌘⇧P palette, …). The old
+    // code stopPropagation'd every key, which is why tab controls died on a
+    // browser tab. We only act on keydown for these; the matching keyup bubbles.
+    if (e.metaKey || e.ctrlKey) {
+      if (e.type !== "keydown") return; // let keyup bubble
+      const k = e.key.toLowerCase();
+      if (k === "l") { e.preventDefault(); e.stopPropagation(); this.urlbar.focus(); return; }
+      if (k === "r") {
+        e.preventDefault();
+        e.stopPropagation();
+        invoke("cdp_send", { id: this.id, method: "Page.reload", params: {} }).catch(console.error);
+        return;
+      }
+      if (k === "=" || k === "+") { e.preventDefault(); e.stopPropagation(); this.setZoom(this.zoom + 0.1); return; }
+      if (k === "-" || k === "_") { e.preventDefault(); e.stopPropagation(); this.setZoom(this.zoom - 0.1); return; }
+      if (k === "0") { e.preventDefault(); e.stopPropagation(); this.setZoom(1); return; }
+      return; // ⌘1-9, ⌘W, ⌘⇧P, … fall through to the window keymap
+    }
     e.preventDefault();
     e.stopPropagation();
     const printable = [...e.key].length === 1 || e.key === "Enter" || e.key === "Tab";
@@ -280,6 +299,22 @@ export class CdpView {
         autoRepeat: e.repeat,
         modifiers: cdpMods(e),
       },
+    }).catch(console.error);
+  }
+
+  // Page zoom via CSS zoom on the document element (reflows like Chrome's own
+  // ⌘+/-). Clamped 25%–500%. CSS zoom resets on navigation, so it's re-applied
+  // from the cdp-url listener whenever it isn't 1.
+  private setZoom(z: number) {
+    this.zoom = Math.max(0.25, Math.min(5, Math.round(z * 100) / 100));
+    this.applyZoom();
+  }
+
+  private applyZoom() {
+    invoke("cdp_send", {
+      id: this.id,
+      method: "Runtime.evaluate",
+      params: { expression: `document.documentElement.style.zoom=${this.zoom}` },
     }).catch(console.error);
   }
 
