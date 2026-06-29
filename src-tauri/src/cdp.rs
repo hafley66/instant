@@ -510,9 +510,16 @@ pub fn cdp_navigate(store: State<CdpStore>, id: String, url: String) -> Result<(
 
 #[tauri::command]
 pub fn cdp_close(app: AppHandle, store: State<CdpStore>, id: String) {
+    // Setting stop makes the reader thread close its ws and exit promptly. The
+    // /json/close HTTP call can block (DevTools is occasionally slow to answer),
+    // so run it on a worker thread — this command runs on the Tauri main thread
+    // and blocking it freezes the whole UI (the "spinning beachball" on close).
     if let Some(tab) = store.0.lock().unwrap().remove(&id) {
         tab.stop.store(true, Ordering::Relaxed);
-        let _ = http_get(&format!("/json/close/{}", tab.target_id));
+        let target_id = tab.target_id;
+        std::thread::spawn(move || {
+            let _ = http_get(&format!("/json/close/{}", target_id));
+        });
         let _ = app; // engine stays up for other tabs
     }
 }
