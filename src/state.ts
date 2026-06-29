@@ -195,6 +195,7 @@ export interface AppState {
   overlayTarget: string; // app whose focus drives `follow` (CGWindow owner name, e.g. "Code") (persisted)
   overlayFade: boolean; // dim the window so it reads as a faded panel (persisted)
   miniMode: boolean; // compact single-column layout + smaller window (persisted)
+  xpPixel: boolean; // "Super XP": force the grainy pixel font everywhere incl. terminal (persisted)
   activitySource: ActivitySource; // source filter chip (persisted)
   activityType: ActivityType; // event-type sub-filter chip (persisted)
   activityQuery: string; // fuzzy search box (runtime)
@@ -284,6 +285,7 @@ const PERSIST: (keyof AppState)[] = [
   "overlayTarget",
   "overlayFade",
   "miniMode",
+  "xpPixel",
   "wtFavorites",
   "spaces",
   "wtFocus",
@@ -362,6 +364,7 @@ function load(): AppState {
     overlayTarget: loadKey<string>("overlayTarget", "Code"),
     overlayFade: loadKey<boolean>("overlayFade", false),
     miniMode: loadKey<boolean>("miniMode", false),
+    xpPixel: loadKey<boolean>("xpPixel", false),
     activitySource: loadKey<ActivitySource>("activitySource", "all"),
     activityType: loadKey<ActivityType>("activityType", "all"),
     activityQuery: "",
