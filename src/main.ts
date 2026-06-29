@@ -3134,9 +3134,9 @@ function renderConfigPanel() {
     ${errLine}
     <div class="muted">${cfg.excluded_count} events blocked since launch ·
       patterns are case-insensitive; <code>*</code> is a wildcard</div>`;
-  body.appendChild(head);
 
-  body.appendChild(appearanceGroup());
+  body.appendChild(appearanceGroup()); // toggles first, up top
+  body.appendChild(head);
 
   body.appendChild(
     cfgGroup(
