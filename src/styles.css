@@ -734,6 +734,38 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   font-size: 11px;
   opacity: 0.5;
 }
+
+/* History panel: one clickable row per visited page, host over path + time. */
+.nav-hist-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+.nav-hist-row:hover {
+  background: var(--accent, #3b6ea5);
+  color: #fff;
+}
+.nav-hist-row:hover .muted {
+  color: #e0e8f0;
+}
+.nav-hist-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.nav-hist-rest {
+  margin-left: 6px;
+}
+.nav-hist-time {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
 .sidebar-create {
   border-top: var(--frame-w) solid var(--frame);
 }

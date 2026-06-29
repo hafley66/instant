@@ -36,6 +36,17 @@ export function setCdpQuality(q: number): number {
 export class CdpView {
   readonly el: HTMLDivElement;
   private urlbar: HTMLInputElement;
+  private backBtn!: HTMLButtonElement;
+  private fwdBtn!: HTMLButtonElement;
+  // Per-tab session history mirror. `urls[idx]` is the current page. Back/forward
+  // drive the page's own history.back()/forward() (so scroll + form state come
+  // back natively); this stack only tracks position to enable/disable the buttons
+  // and detect new vs. history navigations. `pendingNav` flags a navigation we
+  // triggered (-1 back, +1 forward) so the resulting cdp-url shifts idx instead
+  // of pushing a new entry.
+  private urls: string[] = [];
+  private idx = -1;
+  private pendingNav: -1 | 0 | 1 = 0;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private img = new Image();
@@ -91,6 +102,41 @@ export class CdpView {
     // destination (URL or search terms) over the current address.
     this.urlbar.addEventListener("focus", () => this.urlbar.select());
 
+    // Nav row: back / forward / reload buttons sit left of the URL bar.
+    const navrow = document.createElement("div");
+    Object.assign(navrow.style, {
+      flex: "0 0 auto",
+      display: "flex",
+      alignItems: "stretch",
+      background: "#2a2a2a",
+    } satisfies Partial<CSSStyleDeclaration>);
+    const mkBtn = (glyph: string, title: string, on: () => void) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = glyph;
+      b.title = title;
+      Object.assign(b.style, {
+        flex: "0 0 auto",
+        width: "28px",
+        border: "none",
+        outline: "none",
+        background: "transparent",
+        color: "#ddd",
+        font: "13px monospace",
+        cursor: "pointer",
+      } satisfies Partial<CSSStyleDeclaration>);
+      // Don't let a button click steal focus from / blur the page selection.
+      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("click", () => { on(); this.canvas.focus(); });
+      return b;
+    };
+    this.backBtn = mkBtn("‹", "Back", () => this.goBack());
+    this.fwdBtn = mkBtn("›", "Forward", () => this.goForward());
+    const reloadBtn = mkBtn("↻", "Reload", () => this.reload());
+    navrow.append(this.backBtn, this.fwdBtn, reloadBtn, this.urlbar);
+    this.urlbar.style.flex = "1 1 auto";
+    this.updateNavButtons();
+
     this.canvas = document.createElement("canvas");
     this.canvas.tabIndex = 0; // focusable for keyboard
     Object.assign(this.canvas.style, {
@@ -103,7 +149,7 @@ export class CdpView {
     } satisfies Partial<CSSStyleDeclaration>);
     this.ctx = this.canvas.getContext("2d")!;
 
-    this.el.append(this.urlbar, this.canvas);
+    this.el.append(navrow, this.canvas);
     if (getComputedStyle(host).position === "static") host.style.position = "relative";
     host.appendChild(this.el);
 
@@ -142,6 +188,7 @@ export class CdpView {
     void listen<{ id: string; url: string }>("cdp-url", (ev) => {
       if (ev.payload.id !== this.id) return;
       if (document.activeElement !== this.urlbar) this.urlbar.value = ev.payload.url;
+      this.onNavigated(ev.payload.url);
       // CSS zoom is per-document; re-apply after a navigation if it isn't 1.
       if (this.zoom !== 1) this.applyZoom();
     }).then((u) => (this.unlistenUrl = u));
@@ -278,7 +325,21 @@ export class CdpView {
       if (k === "r") {
         e.preventDefault();
         e.stopPropagation();
-        invoke("cdp_send", { id: this.id, method: "Page.reload", params: {} }).catch(console.error);
+        this.reload();
+        return;
+      }
+      // Chrome-on-mac back/forward: ⌘[ / ⌘] (plain — ⌘⇧[ / ] stays the app's tab
+      // switch, handled by runMatchingCommand below). Also accept ⌘← / ⌘→.
+      if ((k === "[" && !e.shiftKey) || e.key === "ArrowLeft") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.goBack();
+        return;
+      }
+      if ((k === "]" && !e.shiftKey) || e.key === "ArrowRight") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.goForward();
         return;
       }
       // Clipboard bridge: the headless page has its own clipboard, so route copy/
@@ -349,6 +410,58 @@ export class CdpView {
         autoRepeat: e.repeat,
         modifiers: cdpMods(e),
       },
+    }).catch(console.error);
+  }
+
+  // Fold one navigation into the per-tab history mirror. A nav we triggered
+  // (pendingNav) just shifts idx; anything else is a new navigation that
+  // truncates the forward entries and appends — same as a browser's address bar.
+  private onNavigated(url: string) {
+    if (this.pendingNav === -1) {
+      this.idx = Math.max(0, this.idx - 1);
+      this.pendingNav = 0;
+    } else if (this.pendingNav === 1) {
+      this.idx = Math.min(this.urls.length - 1, this.idx + 1);
+      this.pendingNav = 0;
+    } else if (this.urls[this.idx] !== url) {
+      this.urls = this.urls.slice(0, this.idx + 1);
+      this.urls.push(url);
+      this.idx = this.urls.length - 1;
+    }
+    this.updateNavButtons();
+  }
+
+  private updateNavButtons() {
+    if (this.backBtn) this.backBtn.disabled = this.idx <= 0;
+    if (this.fwdBtn) this.fwdBtn.disabled = this.idx >= this.urls.length - 1;
+    const dim = (b: HTMLButtonElement) => (b.style.opacity = b.disabled ? "0.3" : "1");
+    if (this.backBtn) dim(this.backBtn);
+    if (this.fwdBtn) dim(this.fwdBtn);
+  }
+
+  // Back/forward run the page's own session history so scroll position and form
+  // state restore natively; the resulting cdp-url is reconciled in onNavigated.
+  goBack() {
+    if (this.idx <= 0) return;
+    this.pendingNav = -1;
+    this.evalJs("history.back()");
+  }
+
+  goForward() {
+    if (this.idx >= this.urls.length - 1) return;
+    this.pendingNav = 1;
+    this.evalJs("history.forward()");
+  }
+
+  reload() {
+    invoke("cdp_send", { id: this.id, method: "Page.reload", params: {} }).catch(console.error);
+  }
+
+  private evalJs(expression: string) {
+    invoke("cdp_send", {
+      id: this.id,
+      method: "Runtime.evaluate",
+      params: { expression },
     }).catch(console.error);
   }
 
