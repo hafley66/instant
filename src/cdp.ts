@@ -88,7 +88,7 @@ export class CdpView {
   // restart it (fresh frame) the moment it's shown again.
   private io?: IntersectionObserver;
   private inViewport = true;
-  private streaming = true;
+  private paused = false; // true while the screencast is stopped (tab hidden)
   private resizeTimer = 0;
   private dragging = false;
   private lastMove: MouseEvent | null = null;
@@ -372,14 +372,21 @@ export class CdpView {
 
   private onVisibility = () => this.syncStreaming();
 
-  // Start/stop the screencast to match real visibility (in-viewport AND the
-  // document visible). Restart (applyMetrics) yields a fresh frame on resume.
+  // Stop the screencast when the tab is hidden (off-screen panel or hidden
+  // document) and restart it when it comes back. Visibility is recomputed from
+  // live state every call — never cached as the gate for applyMetrics — so a
+  // stale IntersectionObserver reading can't wedge the stream off (the bug where
+  // resize + video froze after toggling perf). Resume goes through scheduleResize
+  // so it coalesces with the ResizeObserver tick a show also produces.
   private syncStreaming() {
-    const want = this.inViewport && !document.hidden;
-    if (want === this.streaming) return;
-    this.streaming = want;
-    if (want) this.applyMetrics();
-    else invoke("cdp_send", { id: this.id, method: "Page.stopScreencast", params: {} }).catch(console.error);
+    const visible = this.inViewport && !document.hidden;
+    if (visible && this.paused) {
+      this.paused = false;
+      this.scheduleResize();
+    } else if (!visible && !this.paused) {
+      this.paused = true;
+      invoke("cdp_send", { id: this.id, method: "Page.stopScreencast", params: {} }).catch(console.error);
+    }
   }
 
   private scheduleResize() {
@@ -389,10 +396,11 @@ export class CdpView {
 
   /** Push current size + the active quality to the screencast (restarts it). */
   applyMetrics() {
-    // Don't (re)start a stream we deliberately paused while hidden — a hidden
-    // panel's ResizeObserver fires 0×0 and would otherwise revive it.
-    if (!this.streaming) return;
     const m = this.metrics();
+    // No layout box (hidden panel reports 0×0): don't restart at 1×1. When the
+    // panel is shown again its ResizeObserver fires with the real size and we
+    // restart then — this is the only gate, so the stream always recovers.
+    if (m.width <= 1 || m.height <= 1) return;
     invoke("cdp_resize", {
       id: this.id,
       width: m.width,
