@@ -759,6 +759,7 @@ pub fn run() {
             cdp::cdp_resize,
             cdp::cdp_navigate,
             cdp::cdp_close,
+            cdp::cdp_status,
             workspace::list_workspaces,
             workspace::create_workspace,
             workspace::remove_workspace,

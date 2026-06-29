@@ -585,6 +585,20 @@ pub fn cdp_navigate(store: State<CdpStore>, id: String, url: String) -> Result<(
     cdp_send(store, id, "Page.navigate".into(), json!({ "url": url }))
 }
 
+/// True when the shared Chrome engine is up: either our child is alive this
+/// session, or something is already answering the DevTools port. The engine is
+/// spawned lazily on first cdp_open, so `false` means "idle", not "broken".
+#[tauri::command]
+pub fn cdp_status(app: AppHandle) -> bool {
+    {
+        let eng = app.state::<ChromeEngine>();
+        if eng.0.lock().unwrap().is_some() {
+            return true;
+        }
+    }
+    http_get("/json/version").is_ok()
+}
+
 #[tauri::command]
 pub fn cdp_close(app: AppHandle, store: State<CdpStore>, id: String) {
     // Setting stop makes the reader thread close its ws and exit promptly. The

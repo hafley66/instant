@@ -55,6 +55,7 @@ import {
   type ActRow,
   type FavTreeRow,
 } from "./tablepanels";
+import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { renderTable, type SortState } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
@@ -2334,7 +2335,7 @@ function registerV2Bridges() {
   });
   setWorktreesPanel({
     treeRows: wtTreeRows,
-    onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
+    onShow: () => { if (!wtScanned) scanWorktrees(); },
     scanRoot: () => store.get().scanRoot,
     scan: (root) => {
       store.set({ scanRoot: root });
@@ -2830,26 +2831,93 @@ function renderWorktreesPanel() {
   else renderFlatTable(worktrees);
 }
 
-async function scanWorktrees() {
-  // Read from the panel input when it's mounted, else fall back to the persisted
-  // root: onPanelShown can fire this before the worktrees DOM is queryable.
-  const input = document.querySelector<HTMLInputElement>("#wt-root");
-  const root = (input?.value ?? store.get().scanRoot).trim();
-  store.set({ scanRoot: root }); // remember it
-  const setCount = (s: string) => {
-    const c = document.querySelector<HTMLElement>("#wt-count");
-    if (c) c.textContent = s;
-  };
-  setCount("scanning…");
+// Worktree data comes from the ghcacher daemon (HTTP snapshot + SSE push on
+// 127.0.0.1:7748) when it's running, else falls back to the local Rust git scan.
+// The daemon runs a bounded, debounced background sweep, so neither path forks
+// hundreds of `git status` on the UI's hot path.
+const GHCACHE_BASE = "http://127.0.0.1:7748";
+let wtScanning = false; // in-flight guard: stops overlapping scans stacking
+let wtScanned = false; // one scan has completed (any source) -> stop auto-refire
+let wtSse: EventSource | null = null;
+
+// Apply one SSE change_log frame to the worktrees store, keyed by worktree path.
+function applyWorktreeDelta(msg: {
+  event: string;
+  payload: WorktreeRow | { worktree: string };
+}) {
+  const cur = store.get().worktrees;
+  if (msg.event === "deleted") {
+    const path = (msg.payload as { worktree: string }).worktree;
+    store.set({ worktrees: cur.filter((r) => r.worktree !== path) });
+    return;
+  }
+  const row = msg.payload as WorktreeRow;
+  if (!row?.worktree) return;
+  const next = cur.slice();
+  const i = next.findIndex((r) => r.worktree === row.worktree);
+  if (i >= 0) next[i] = row;
+  else next.push(row);
+  store.set({ worktrees: next });
+}
+
+// Subscribe to ghcacher's SSE stream once; filter to worktree deltas. The browser
+// EventSource auto-reconnects; on a hard error we drop it so the next scan re-subs.
+function subscribeWorktrees() {
+  if (wtSse) return;
   try {
+    const es = new EventSource(`${GHCACHE_BASE}/events`);
+    wtSse = es;
+    es.onmessage = (ev) => {
+      let msg: { entity_type?: string; event: string; payload: WorktreeRow | { worktree: string } };
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (msg.entity_type !== "worktree") return;
+      applyWorktreeDelta(msg);
+    };
+    es.onerror = () => {
+      es.close();
+      if (wtSse === es) wtSse = null;
+    };
+  } catch {
+    wtSse = null;
+  }
+}
+
+async function scanWorktrees() {
+  if (wtScanning) return; // never stack scans (the old volley)
+  wtScanning = true;
+  try {
+    // Preferred path: ghcacher snapshot + live SSE. Short timeout so a missing
+    // daemon falls through to the local scan quickly.
+    try {
+      const res = await fetch(`${GHCACHE_BASE}/worktrees`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) throw new Error(`ghcache ${res.status}`);
+      const rows = (await res.json()) as WorktreeRow[];
+      store.set({ worktrees: rows });
+      subscribeWorktrees();
+      wtScanned = true;
+      return;
+    } catch {
+      // ghcacher down/unreachable -> local git scan below.
+    }
+
+    const root = store.get().scanRoot.trim();
     const rows = await invoke<WorktreeRow[]>("scan_worktrees", {
       roots: root ? [root] : [],
       maxDepth: null,
     });
     store.set({ worktrees: rows });
+    wtScanned = true;
   } catch (e) {
     console.error("scan_worktrees:", e);
-    setCount("scan failed");
+    wtScanned = true; // a failed scan still counts: don't auto-refire on every show
+  } finally {
+    wtScanning = false;
   }
 }
 
@@ -4326,7 +4394,7 @@ function registerBuiltin() {
         iconLabel: "Worktrees",
         html: "",
         component: WorktreesPanelV2,
-        onShow: () => { if (store.get().worktrees.length === 0) scanWorktrees(); },
+        onShow: () => { if (!wtScanned) scanWorktrees(); },
       },
       {
         id: "activity",
@@ -4362,8 +4430,17 @@ function registerBuiltin() {
         <div id="config-body" class="cfg-body"></div>`,
         onShow: () => { if (!store.get().config) refreshConfig(); },
       },
+      {
+        id: "status",
+        title: "Status",
+        icon: "●", // glyph (not raster) so CSS can tint it by aggregate health
+        iconLabel: "Status",
+        html: "",
+        component: StatusPanelV2,
+      },
     ],
   });
+  registerBuiltinStatus();
 }
 
 // ---- sprefa plugin: schema explorer over the daemon socket ----

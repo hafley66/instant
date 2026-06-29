@@ -2823,3 +2823,85 @@ body.xp-pixel .term-host,
 body.xp-pixel .xterm canvas {
   image-rendering: pixelated;
 }
+
+/* ---- Status panel: one block per probe (dot · label · state, detail, links) ---- */
+.status-panel .panel-scroll {
+  padding: 4px 0;
+}
+.status-row {
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--frame, #0002);
+}
+.status-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.status-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-state {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.5;
+}
+.status-detail {
+  font-size: 11px;
+  opacity: 0.7;
+  margin: 2px 0 0 15px;
+}
+.status-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0 15px;
+}
+.status-link {
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: #b0b0b0;
+}
+.status-dot.s-up {
+  background: #34c759;
+  box-shadow: 0 0 4px #34c759;
+}
+.status-dot.s-idle {
+  background: #8a8a8a;
+}
+.status-dot.s-degraded {
+  background: #f5a623;
+  box-shadow: 0 0 4px #f5a623;
+}
+.status-dot.s-down {
+  background: #ff2b2b;
+  box-shadow: 0 0 4px #ff2b2b;
+}
+.status-dot.s-unknown {
+  background: #b0b0b0;
+}
+
+/* Rail item glyph tints to the worst probe health (set by StatusPanelV2). */
+#status-toggle[data-health="up"] .ai {
+  color: #34c759;
+}
+#status-toggle[data-health="degraded"] .ai {
+  color: #f5a623;
+}
+#status-toggle[data-health="down"] .ai {
+  color: #ff2b2b;
+}
+#status-toggle[data-health="idle"] .ai,
+#status-toggle[data-health="unknown"] .ai {
+  color: inherit;
+}

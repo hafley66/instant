@@ -19,6 +19,8 @@
     "core:window:allow-start-dragging",
     "core:webview:allow-set-webview-zoom",
     "opener:default",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered"

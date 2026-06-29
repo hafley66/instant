@@ -25,20 +25,62 @@ export interface ConfigOption {
   set: (on: boolean) => void;
 }
 
+// Health of a background service a plugin owns (a daemon, socket, engine, …).
+// `idle` is a healthy not-running (e.g. a lazily-spawned engine); `unknown` is
+// pre-first-check. The Status panel ranks these worst-first for the rail dot.
+export type StatusState = "up" | "down" | "degraded" | "idle" | "unknown";
+
+// A file/dir a plugin wants reachable from the Status panel (log, db, config).
+// Clicking opens it; `reveal: true` shows it in Finder instead of opening it.
+export interface StatusLink {
+  label: string;
+  path: string;
+  reveal?: boolean;
+}
+
+export interface StatusReport {
+  state: StatusState;
+  detail?: string; // one short line, e.g. ":7748 · 142 worktrees"
+  links?: StatusLink[];
+}
+
+// A plugin's contribution to the Status panel. `check` is polled on an interval;
+// it brings its own logic (fetch a port, invoke a command, stat a file) so the
+// panel needs no per-service wiring. Throwing from check() reads as `down`.
+export interface StatusProbe {
+  id: string;
+  label: string;
+  check: () => Promise<StatusReport>;
+}
+
 export interface Plugin {
   id: string;
   panels: PanelDef[];
   options?: ConfigOption[]; // config toggles surfaced in the Config panel
+  status?: StatusProbe[]; // service health surfaced in the Status panel
 }
 
 const panelMap = new Map<string, PanelDef>();
 const optionList: ConfigOption[] = [];
+const statusList: StatusProbe[] = [];
 
 export function registerPlugin(p: Plugin) {
   for (const panel of p.panels) {
     panelMap.set(panel.id, panel);
   }
   if (p.options) optionList.push(...p.options);
+  if (p.status) statusList.push(...p.status);
+}
+
+// Register a status probe on its own (for plugins with no panel/option to add).
+export function registerStatus(p: StatusProbe) {
+  statusList.push(p);
+}
+
+/// Every status probe declared across all registered plugins, in registration
+/// order. The Status panel polls each and lists them.
+export function statusProbes(): StatusProbe[] {
+  return statusList;
 }
 
 /// Every config option declared across all registered plugins, in registration
