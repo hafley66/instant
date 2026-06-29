@@ -12,17 +12,39 @@ export interface PanelDef {
   onShow?: () => void;
 }
 
+// A declarative config toggle a plugin contributes to the Config panel's
+// Options section. get/set bind it to wherever the value lives (the store, a
+// settings bag, …) so the panel needs no per-option wiring — it just renders a
+// checkbox and calls set() on change. Effects (re-font, show/hide chrome) belong
+// in a store.subscribe so they run however the value is changed.
+export interface ConfigOption {
+  id: string; // unique; used as the checkbox id + render key
+  label: string;
+  hint?: string;
+  get: () => boolean;
+  set: (on: boolean) => void;
+}
+
 export interface Plugin {
   id: string;
   panels: PanelDef[];
+  options?: ConfigOption[]; // config toggles surfaced in the Config panel
 }
 
 const panelMap = new Map<string, PanelDef>();
+const optionList: ConfigOption[] = [];
 
 export function registerPlugin(p: Plugin) {
   for (const panel of p.panels) {
     panelMap.set(panel.id, panel);
   }
+  if (p.options) optionList.push(...p.options);
+}
+
+/// Every config option declared across all registered plugins, in registration
+/// order. The Config panel renders these as checkboxes.
+export function configOptions(): ConfigOption[] {
+  return optionList;
 }
 
 export function getPanel(id: string): PanelDef | undefined {

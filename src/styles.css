@@ -159,8 +159,10 @@ body[data-skin="xp"] .title-bar-text {
 /* ---- toolbar (app actions live here, not in the window controls) ---- */
 /* Horizontal margin matches the body's inset so the window's blue inset-border
    shows around it; without it the toolbar covers the frame and looks outset. */
+/* Opt-in: the top toolbar is hidden unless `body.show-toolbar` (Config →
+   Options → Show top toolbar). Its actions stay reachable from the palette. */
 .toolbar {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
@@ -168,6 +170,9 @@ body[data-skin="xp"] .title-bar-text {
   padding: 3px 5px;
   background: var(--toolbar-bg);
   border: var(--frame-w) solid var(--toolbar-frame);
+}
+body.show-toolbar .toolbar {
+  display: flex;
 }
 .toolbar button {
   min-width: 0; /* xp.css forces 75px; lets the icon buttons shrink to content */

@@ -178,6 +178,7 @@ export interface WorktreeRow {
 export interface AppState {
   skin: Skin;
   mode: Mode;
+  showToolbar: boolean; // top toolbar (Shot/dark/skin); hidden by default, opt in via Config
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
@@ -262,6 +263,7 @@ export const DEFAULT_CLICK_RULES: ClickRule[] = [
 const PERSIST: (keyof AppState)[] = [
   "skin",
   "mode",
+  "showToolbar",
   "sidebar",
   "active",
   "openTabs",
@@ -348,6 +350,7 @@ function load(): AppState {
   return {
     skin: loadKey<Skin>("skin", "xp"),
     mode: loadKey<Mode>("mode", "light"),
+    showToolbar: loadKey<boolean>("showToolbar", false),
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),

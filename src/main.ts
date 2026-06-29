@@ -39,7 +39,7 @@ import {
   type WorktreeRow,
   type WtAgent,
 } from "./state";
-import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
+import { registerPlugin, injectPanelHtml, buildActivityRail, allPanels, configOptions } from "./plugin";
 import {
   TmuxPanelV2,
   WorktreesPanelV2,
@@ -973,6 +973,11 @@ const TAB_COMMANDS: Command[] = [
   { id: "browser.quality", keys: [], title: "Cycle Render Quality", group: "Browser", run: () => cycleBrowserQuality() },
   // "Super XP": grainy pixel font everywhere (chrome + terminal). Persisted.
   { id: "skin.xpPixel", keys: [], title: "Toggle Super XP (pixel font)", group: "Skin", run: () => store.set({ xpPixel: !store.get().xpPixel }) },
+  { id: "skin.cycle", keys: [], title: "Cycle Skin", group: "Skin", run: () => store.set({ skin: nextSkin(store.get().skin) }) },
+  // The top toolbar is opt-in; these keep its actions reachable when it's hidden.
+  { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
+  { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
+  { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -3024,47 +3029,36 @@ async function applyConfig(sites: string[], files: string[], apps: string[]) {
 
 // One editable rule group: removable chips + an add input. onChange gets the
 // full next list for this group.
-// Appearance section for the Config panel: toggles that don't fit the
-// pattern-list shape. Reuses .cfg-group chrome so it sits with the rest.
-function appearanceGroup(): HTMLElement {
+// Options section for the Config panel: every config toggle declared by a
+// plugin (see plugin.tsx configOptions). Returns null when none are declared.
+// Reuses .cfg-group chrome so it sits with the rest.
+function optionsGroup(): HTMLElement | null {
+  const opts = configOptions();
+  if (!opts.length) return null;
   const sec = document.createElement("div");
   sec.className = "cfg-group";
   const h = document.createElement("div");
   h.className = "cfg-group-head";
-  h.innerHTML = `<b>Appearance</b> <span class="muted">visual options</span>`;
+  h.innerHTML = `<b>Options</b> <span class="muted">appearance &amp; behavior</span>`;
   sec.appendChild(h);
 
   // xp.css draws its pixel checkbox only for the `input + label[for]` sibling
   // pattern (it sets the raw input to opacity:0/position:fixed). So emit that
   // exact structure, not a wrapping label, or the box never renders.
-  const toggle = (
-    id: string,
-    labelText: string,
-    hint: string,
-    checked: boolean,
-    onChange: (on: boolean) => void,
-  ) => {
+  for (const o of opts) {
     const row = document.createElement("div");
     row.className = "cfg-toggle";
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.id = id;
-    cb.checked = checked;
-    cb.addEventListener("change", () => onChange(cb.checked));
+    cb.id = `cfgopt-${o.id}`;
+    cb.checked = o.get();
+    cb.addEventListener("change", () => o.set(cb.checked));
     const lab = document.createElement("label");
-    lab.htmlFor = id;
-    lab.innerHTML = `${escapeHtml(labelText)} <span class="muted">${escapeHtml(hint)}</span>`;
+    lab.htmlFor = cb.id;
+    lab.innerHTML = `${escapeHtml(o.label)} <span class="muted">${escapeHtml(o.hint ?? "")}</span>`;
     row.append(cb, lab);
     sec.appendChild(row);
-  };
-
-  toggle(
-    "cfg-xp-pixel",
-    "Super XP (pixel font)",
-    "grainy bitmap font everywhere, incl. the terminal",
-    store.get().xpPixel,
-    (on) => store.set({ xpPixel: on }),
-  );
+  }
   return sec;
 }
 
@@ -3142,7 +3136,8 @@ function renderConfigPanel() {
     <div class="muted">${cfg.excluded_count} events blocked since launch ·
       patterns are case-insensitive; <code>*</code> is a wildcard</div>`;
 
-  body.appendChild(appearanceGroup()); // toggles first, up top
+  const opts = optionsGroup(); // plugin-declared toggles, up top
+  if (opts) body.appendChild(opts);
   body.appendChild(head);
 
   body.appendChild(
@@ -3765,6 +3760,11 @@ async function syncXpPixel(s: AppState) {
     }).catch(() => {});
   }
 }
+// Top toolbar (Shot / dark / skin) is opt-in: hidden unless showToolbar. Its
+// functions stay reachable from the palette, so hiding it strands nothing.
+function applyToolbar(s: AppState) {
+  document.body.classList.toggle("show-toolbar", s.showToolbar);
+}
 function syncMode(s: AppState) {
   document.body.dataset.mode = s.mode;
   ($("#mode-toggle") as HTMLButtonElement).textContent =
@@ -4248,6 +4248,25 @@ function wireChrome() {
 function registerBuiltin() {
   registerPlugin({
     id: "builtin",
+    // Config-panel toggles. Effects live in store.subscribe(applyToolbar /
+    // syncXpPixel), so set() only flips state and any source (here, palette,
+    // keymap) triggers the same effect.
+    options: [
+      {
+        id: "showToolbar",
+        label: "Show top toolbar",
+        hint: "Shot / dark-mode / skin buttons (hidden by default)",
+        get: () => store.get().showToolbar,
+        set: (on) => store.set({ showToolbar: on }),
+      },
+      {
+        id: "xpPixel",
+        label: "Super XP (pixel font)",
+        hint: "grainy bitmap font everywhere, incl. the terminal",
+        get: () => store.get().xpPixel,
+        set: (on) => store.set({ xpPixel: on }),
+      },
+    ],
     panels: [
       {
         id: "sessions",
@@ -4788,6 +4807,7 @@ async function main() {
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncXpPixel, ["xpPixel"]);
   store.subscribe(syncMode, ["mode"]);
+  store.subscribe(applyToolbar, ["showToolbar"]);
   store.subscribe(syncSidebar, ["sidebar"]);
   // dockview owns the layout; we only react: refit the active terminal
   // whenever dockview re-lays-out a group. Panel lazy-load is handled per-panel
@@ -4808,10 +4828,11 @@ async function main() {
     "wtFavorites",
     "wtAgents",
   ]);
-  store.subscribe(renderConfigPanel, ["config", "xpPixel"]);
+  store.subscribe(renderConfigPanel, ["config", "xpPixel", "showToolbar"]);
   syncSkin(store.get());
   syncXpPixel(store.get());
   syncMode(store.get());
+  applyToolbar(store.get());
   syncSidebar(store.get());
   renderWorktreesPanel();
   // Re-apply the persisted recording flag to the backend (default off there).
