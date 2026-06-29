@@ -3024,6 +3024,43 @@ async function applyConfig(sites: string[], files: string[], apps: string[]) {
 
 // One editable rule group: removable chips + an add input. onChange gets the
 // full next list for this group.
+// Appearance section for the Config panel: toggles that don't fit the
+// pattern-list shape. Reuses .cfg-group chrome so it sits with the rest.
+function appearanceGroup(): HTMLElement {
+  const sec = document.createElement("div");
+  sec.className = "cfg-group";
+  const h = document.createElement("div");
+  h.className = "cfg-group-head";
+  h.innerHTML = `<b>Appearance</b> <span class="muted">visual options</span>`;
+  sec.appendChild(h);
+
+  const toggle = (
+    labelText: string,
+    hint: string,
+    checked: boolean,
+    onChange: (on: boolean) => void,
+  ) => {
+    const row = document.createElement("label");
+    row.className = "cfg-toggle";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = checked;
+    cb.addEventListener("change", () => onChange(cb.checked));
+    const text = document.createElement("span");
+    text.innerHTML = `${escapeHtml(labelText)} <span class="muted">${escapeHtml(hint)}</span>`;
+    row.append(cb, text);
+    sec.appendChild(row);
+  };
+
+  toggle(
+    "Super XP (pixel font)",
+    "grainy bitmap font everywhere, incl. the terminal",
+    store.get().xpPixel,
+    (on) => store.set({ xpPixel: on }),
+  );
+  return sec;
+}
+
 function cfgGroup(
   title: string,
   hint: string,
@@ -3098,6 +3135,8 @@ function renderConfigPanel() {
     <div class="muted">${cfg.excluded_count} events blocked since launch ·
       patterns are case-insensitive; <code>*</code> is a wildcard</div>`;
   body.appendChild(head);
+
+  body.appendChild(appearanceGroup());
 
   body.appendChild(
     cfgGroup(
@@ -4751,7 +4790,7 @@ async function main() {
     "wtFavorites",
     "wtAgents",
   ]);
-  store.subscribe(renderConfigPanel, ["config"]);
+  store.subscribe(renderConfigPanel, ["config", "xpPixel"]);
   syncSkin(store.get());
   syncXpPixel(store.get());
   syncMode(store.get());

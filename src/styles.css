@@ -845,6 +845,18 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   opacity: 0.55;
   font-size: 11px;
 }
+.cfg-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.cfg-toggle .muted {
+  opacity: 0.55;
+  font-size: 11px;
+}
 .cfg-chips {
   display: flex;
   flex-wrap: wrap;
