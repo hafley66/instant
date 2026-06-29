@@ -6,6 +6,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { runMatchingCommand } from "./keymap";
+import { history as navHistory } from "./nav";
+import { fuzzyFilter } from "./fuzzy";
 
 type FrameEvent = { id: string; data: string };
 
@@ -47,6 +49,11 @@ export class CdpView {
   private urls: string[] = [];
   private idx = -1;
   private pendingNav: -1 | 0 | 1 = 0;
+  // Omnibar suggestion dropdown: recent history when the bar is empty, fuzzy
+  // matches over history while typing. suggestIdx is the keyboard-highlighted row.
+  private suggestBox!: HTMLDivElement;
+  private suggestions: string[] = [];
+  private suggestIdx = -1;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private img = new Image();
@@ -87,27 +94,45 @@ export class CdpView {
       color: "#ddd",
     } satisfies Partial<CSSStyleDeclaration>);
     this.urlbar.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        const u = this.normalizeUrl(this.urlbar.value.trim());
-        if (u) invoke("cdp_navigate", { id: this.id, url: u }).catch(console.error);
-        this.canvas.focus();
+        this.moveSuggest(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        this.moveSuggest(-1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        // A highlighted suggestion wins; otherwise treat the typed text as a
+        // URL / search (normalizeUrl decides).
+        const pick = this.suggestIdx >= 0 ? this.suggestions[this.suggestIdx] : null;
+        this.navigateTo(pick ?? this.urlbar.value.trim());
       } else if (e.key === "Escape") {
         e.preventDefault();
-        this.canvas.focus(); // bail back to the page without navigating
+        if (this.suggestBox.style.display !== "none") this.hideSuggest();
+        else this.canvas.focus(); // bail back to the page without navigating
       }
       e.stopPropagation(); // don't leak typing to the page
     });
+    this.urlbar.addEventListener("input", () => this.openSuggest());
     // Omnibar feel: focusing the bar selects all so you can just type a new
-    // destination (URL or search terms) over the current address.
-    this.urlbar.addEventListener("focus", () => this.urlbar.select());
+    // destination (URL or search terms) over the current address, and surfaces
+    // recent history immediately.
+    this.urlbar.addEventListener("focus", () => {
+      this.urlbar.select();
+      this.openSuggest();
+    });
+    // Delay the close so a click on a suggestion (which blurs the input) still
+    // lands on the row's mousedown handler.
+    this.urlbar.addEventListener("blur", () => setTimeout(() => this.hideSuggest(), 120));
 
     // Nav row: back / forward / reload buttons sit left of the URL bar.
     const navrow = document.createElement("div");
     Object.assign(navrow.style, {
       flex: "0 0 auto",
       display: "flex",
-      alignItems: "stretch",
+      alignItems: "center",
+      gap: "4px",
+      padding: "5px 6px",
       background: "#2a2a2a",
     } satisfies Partial<CSSStyleDeclaration>);
     const mkBtn = (glyph: string, title: string, on: () => void) => {
@@ -117,24 +142,63 @@ export class CdpView {
       b.title = title;
       Object.assign(b.style, {
         flex: "0 0 auto",
-        width: "28px",
-        border: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "30px",
+        height: "30px",
+        padding: "0",
+        borderRadius: "6px",
+        border: "1px solid #4a4a4a",
         outline: "none",
-        background: "transparent",
-        color: "#ddd",
-        font: "13px monospace",
+        background: "#383838",
+        color: "#eee",
+        font: "18px/1 system-ui, sans-serif",
         cursor: "pointer",
       } satisfies Partial<CSSStyleDeclaration>);
       // Don't let a button click steal focus from / blur the page selection.
       b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("mouseenter", () => { if (!b.disabled) b.style.background = "#4a4a4a"; });
+      b.addEventListener("mouseleave", () => { b.style.background = "#383838"; });
       b.addEventListener("click", () => { on(); this.canvas.focus(); });
       return b;
     };
-    this.backBtn = mkBtn("‹", "Back", () => this.goBack());
-    this.fwdBtn = mkBtn("›", "Forward", () => this.goForward());
-    const reloadBtn = mkBtn("↻", "Reload", () => this.reload());
-    navrow.append(this.backBtn, this.fwdBtn, reloadBtn, this.urlbar);
-    this.urlbar.style.flex = "1 1 auto";
+    this.backBtn = mkBtn("←", "Back", () => this.goBack());
+    this.fwdBtn = mkBtn("→", "Forward", () => this.goForward());
+    const reloadBtn = mkBtn("⟳", "Reload", () => this.reload());
+    Object.assign(this.urlbar.style, {
+      flex: "1 1 auto",
+      width: "100%",
+      height: "30px",
+      borderRadius: "6px",
+      padding: "0 12px",
+      fontSize: "13px",
+    } satisfies Partial<CSSStyleDeclaration>);
+    // Wrap the bar so the suggestion dropdown can anchor under it.
+    const urlWrap = document.createElement("div");
+    Object.assign(urlWrap.style, {
+      position: "relative",
+      flex: "1 1 auto",
+      display: "flex",
+    } satisfies Partial<CSSStyleDeclaration>);
+    this.suggestBox = document.createElement("div");
+    Object.assign(this.suggestBox.style, {
+      position: "absolute",
+      top: "calc(100% + 4px)",
+      left: "0",
+      right: "0",
+      zIndex: "20",
+      display: "none",
+      flexDirection: "column",
+      maxHeight: "320px",
+      overflowY: "auto",
+      background: "#2a2a2a",
+      border: "1px solid #4a4a4a",
+      borderRadius: "6px",
+      boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
+    } satisfies Partial<CSSStyleDeclaration>);
+    urlWrap.append(this.urlbar, this.suggestBox);
+    navrow.append(this.backBtn, this.fwdBtn, reloadBtn, urlWrap);
     this.updateNavButtons();
 
     this.canvas = document.createElement("canvas");
@@ -479,6 +543,87 @@ export class CdpView {
       method: "Runtime.evaluate",
       params: { expression: `document.documentElement.style.zoom=${this.zoom}` },
     }).catch(console.error);
+  }
+
+  // Navigate to a typed string (URL or search) or a chosen suggestion, then drop
+  // focus back to the page. Empty input is a no-op.
+  private navigateTo(raw: string) {
+    const u = this.normalizeUrl(raw.trim());
+    this.hideSuggest();
+    if (u) invoke("cdp_navigate", { id: this.id, url: u }).catch(console.error);
+    this.canvas.focus();
+  }
+
+  // Compute the suggestion list for the current input: recent history when empty
+  // (temporal), fuzzy matches over history otherwise. Capped at 8.
+  private openSuggest() {
+    const q = this.urlbar.value.trim();
+    const urls = navHistory().map((e) => e.url);
+    const items = (q ? fuzzyFilter(q, urls, (u) => u) : urls).slice(0, 8);
+    this.suggestions = items;
+    this.suggestIdx = -1;
+    this.renderSuggest();
+  }
+
+  private hideSuggest() {
+    this.suggestBox.style.display = "none";
+    this.suggestIdx = -1;
+  }
+
+  private renderSuggest() {
+    const box = this.suggestBox;
+    box.replaceChildren();
+    if (this.suggestions.length === 0) {
+      box.style.display = "none";
+      return;
+    }
+    this.suggestions.forEach((url, i) => {
+      const row = document.createElement("div");
+      row.dataset.i = String(i);
+      Object.assign(row.style, {
+        padding: "6px 12px",
+        fontSize: "12px",
+        color: "#ddd",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      } satisfies Partial<CSSStyleDeclaration>);
+      row.textContent = url;
+      // mousedown (not click): fires before the input's blur, so the choice
+      // registers before the dropdown would otherwise close.
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        this.navigateTo(url);
+      });
+      row.addEventListener("mouseenter", () => {
+        this.suggestIdx = i;
+        this.highlightSuggest();
+      });
+      box.appendChild(row);
+    });
+    box.style.display = "flex";
+    this.highlightSuggest();
+  }
+
+  private moveSuggest(delta: number) {
+    if (this.suggestions.length === 0) return;
+    if (this.suggestBox.style.display === "none") this.renderSuggest();
+    const n = this.suggestions.length;
+    // Wrap, with -1 (input text) as a stop above the first row.
+    this.suggestIdx = this.suggestIdx + delta;
+    if (this.suggestIdx < -1) this.suggestIdx = n - 1;
+    if (this.suggestIdx >= n) this.suggestIdx = -1;
+    this.highlightSuggest();
+  }
+
+  private highlightSuggest() {
+    for (const child of Array.from(this.suggestBox.children)) {
+      const el = child as HTMLElement;
+      const on = Number(el.dataset.i) === this.suggestIdx;
+      el.style.background = on ? "#3b6ea5" : "transparent";
+      el.style.color = on ? "#fff" : "#ddd";
+    }
   }
 
   private normalizeUrl(s: string): string {
