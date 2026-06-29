@@ -119,7 +119,7 @@ pub fn take(app: AppHandle, kind: &str) {
         }
     }
 
-    let Ok(data_dir) = app.path().app_data_dir() else {
+    let Ok(data_dir) = crate::state_dir(&app) else {
         status(false, "no app data dir");
         return;
     };

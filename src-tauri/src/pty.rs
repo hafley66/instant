@@ -99,9 +99,23 @@ fn pixel_dims(cols: u16, rows: u16, cell_w: Option<u16>, cell_h: Option<u16>) ->
     )
 }
 
+/// A `tmux` command. A prod build talks to a private tmux server (`-L
+/// instant-prod`) so it can't see or clobber the sessions a `tauri dev` instance
+/// (or the user's own terminal) drives on the default socket. Dev keeps the
+/// default socket, so the running dev instance is unchanged. Every tmux call in
+/// this file goes through here, including the new-session in the pty itself, so
+/// the isolation is total. Discriminated by cfg!(debug_assertions).
+fn tmux_cmd() -> std::process::Command {
+    let mut c = std::process::Command::new("tmux");
+    if !cfg!(debug_assertions) {
+        c.args(["-L", "instant-prod"]);
+    }
+    c
+}
+
 #[tauri::command]
 pub fn list_sessions() -> Vec<Session> {
-    let out = std::process::Command::new("tmux")
+    let out = tmux_cmd()
         .args([
             "list-sessions",
             "-F",
@@ -134,7 +148,7 @@ pub fn list_sessions() -> Vec<Session> {
 /// `tmux list-panes -a` call. Empty on any failure (the session list still
 /// renders, just without worktree links or process labels).
 fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
-    let out = std::process::Command::new("tmux")
+    let out = tmux_cmd()
         .args([
             "list-panes",
             "-a",
@@ -214,7 +228,7 @@ fn enable_mouse(name: &str) {
     let name = name.to_string();
     std::thread::spawn(move || {
         for _ in 0..15 {
-            let ok = std::process::Command::new("tmux")
+            let ok = tmux_cmd()
                 .args(["set-option", "-t", &name, "mouse", "on"])
                 .env("PATH", path_env())
                 .status()
@@ -232,7 +246,7 @@ fn enable_mouse(name: &str) {
         // bridges it to navigator.clipboard. `external` (the common default) only
         // forwards apps' own OSC 52, not tmux's mouse copy, so bump to `on`.
         // Server-wide (one tmux clipboard policy); harmless for other sessions.
-        let _ = std::process::Command::new("tmux")
+        let _ = tmux_cmd()
             .args(["set-option", "-g", "set-clipboard", "on"])
             .env("PATH", path_env())
             .status();
@@ -329,6 +343,11 @@ pub fn open_session(
         // stays attached at its old 80x24 size and, under `window-size latest`,
         // strands a ghost status line. -D guarantees one client, so one size.
         let mut c = CommandBuilder::new("tmux");
+        // Match tmux_cmd's socket so the pty's own server is the same one all the
+        // management commands talk to (prod = private socket; dev = default).
+        if !cfg!(debug_assertions) {
+            c.args(["-L", "instant-prod"]);
+        }
         c.args(["new-session", "-A", "-D", "-s", &name]);
         // Start dir for a freshly-created session (a worktree path, usually).
         // tmux ignores -c when reattaching, like the trailing command.
@@ -497,11 +516,11 @@ pub fn scroll_session(name: String, up: bool, lines: u32) {
     let dir = if up { "scroll-up" } else { "scroll-down" };
     let path = path_env();
     // Enter copy-mode (no-op if already in it), then scroll N lines.
-    let _ = std::process::Command::new("tmux")
+    let _ = tmux_cmd()
         .args(["copy-mode", "-e", "-t", &name])
         .env("PATH", &path)
         .status();
-    let _ = std::process::Command::new("tmux")
+    let _ = tmux_cmd()
         .args(["send-keys", "-t", &name, "-X", "-N", &n, dir])
         .env("PATH", &path)
         .status();
@@ -510,7 +529,7 @@ pub fn scroll_session(name: String, up: bool, lines: u32) {
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
 #[tauri::command]
 pub fn kill_session(store: State<PtyStore>, name: String) -> Result<(), String> {
-    std::process::Command::new("tmux")
+    tmux_cmd()
         .args(["kill-session", "-t", &name])
         .env("PATH", path_env())
         .status()

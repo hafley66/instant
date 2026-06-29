@@ -32,7 +32,17 @@ use tungstenite::Message;
 
 const CHROME: &str =
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const DEBUG_PORT: u16 = 9333;
+
+/// DevTools port. Dev and a prod build pick different ports (plus separate
+/// profiles via crate::state_dir) so both can run a headless Chrome at once
+/// without colliding. Dev keeps 9333; prod uses 9334.
+fn debug_port() -> u16 {
+    if cfg!(debug_assertions) {
+        9333
+    } else {
+        9334
+    }
+}
 
 /// Build the Page.startScreencast params at a given JPEG quality, pinning the
 /// frame to the full device-pixel size (width*dpr × height*dpr) so Chrome sends
@@ -146,11 +156,12 @@ fn clear_session(profile: &PathBuf) {
     let _ = std::fs::remove_dir_all(d.join("Sessions"));
 }
 
-/// Kill any headless Chrome we previously launched (matched by our profile dir)
-/// that outlived the app — e.g. after a SIGTERM that skipped the exit handler.
+/// Kill any headless Chrome we previously launched that outlived the app — e.g.
+/// after a SIGTERM that skipped the exit handler. Matched by OUR debug port so a
+/// dev instance never reaps the prod instance's Chrome (and vice versa).
 pub fn reap_orphans() {
     let _ = std::process::Command::new("pkill")
-        .args(["-f", "user-data-dir=.*cdp-chrome"])
+        .args(["-f", &format!("remote-debugging-port={}", debug_port())])
         .status();
 }
 
@@ -193,12 +204,13 @@ fn read_until(
 /// Content-Length rather than to EOF (else every call blocks until timeout).
 /// Avoids pulling in an http-client crate for four trivial localhost calls.
 fn http(method: &str, path: &str) -> Result<String, String> {
+    let port = debug_port();
     let mut stream =
-        TcpStream::connect(("127.0.0.1", DEBUG_PORT)).map_err(|e| e.to_string())?;
+        TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     // Short per-read timeout so read_until can poll; the deadline bounds the total.
     stream.set_read_timeout(Some(Duration::from_millis(250))).ok();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    let req = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{DEBUG_PORT}\r\n\r\n");
+    let req = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
     stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
 
     let mut buf = Vec::new();
@@ -267,18 +279,14 @@ fn ensure_engine(app: &AppHandle) -> Result<(), String> {
         return Ok(()); // someone's already serving the port
     }
 
-    let profile = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("cdp-chrome");
+    let profile = crate::state_dir(app)?.join("cdp-chrome");
     ensure_profile(&profile)?;
     clear_session(&profile); // don't restore the user's real tabs each launch
 
     let child = std::process::Command::new(CHROME)
         .args([
             "--headless=new",
-            &format!("--remote-debugging-port={DEBUG_PORT}"),
+            &format!("--remote-debugging-port={}", debug_port()),
             "--remote-allow-origins=*",
             "--no-first-run",
             "--no-default-browser-check",
