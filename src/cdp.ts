@@ -5,6 +5,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { runMatchingCommand } from "./keymap";
 
 type FrameEvent = { id: string; data: string };
 
@@ -315,7 +316,16 @@ export class CdpView {
       if (k === "=" || k === "+") { e.preventDefault(); e.stopPropagation(); this.setZoom(this.zoom + 0.1); return; }
       if (k === "-" || k === "_") { e.preventDefault(); e.stopPropagation(); this.setZoom(this.zoom - 0.1); return; }
       if (k === "0") { e.preventDefault(); e.stopPropagation(); this.setZoom(1); return; }
-      return; // ⌘1-9, ⌘W, ⌘⇧P, … fall through to the window keymap
+      // Everything else (⌘1-9, ⌘W, ⌘⇧P, ⌘⇧[ / ]) goes to the app keymap. Run it
+      // through the app's own matcher rather than relying on the event bubbling
+      // to the window tinykeys listener: tinykeys won't match BracketLeft/Right
+      // once Shift turns the key into { / }, so tab-switch was dead on browser
+      // tabs. runMatchingCommand handles those bindings (it powers terminals too).
+      if (runMatchingCommand(e)) {
+        e.stopPropagation();
+        return;
+      }
+      return; // unmatched ⌘ combo: let it bubble
     }
     e.preventDefault();
     e.stopPropagation();
