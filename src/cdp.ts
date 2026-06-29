@@ -42,6 +42,7 @@ export class CdpView {
   private raf = 0;
   private unlisten?: UnlistenFn;
   private unlistenCursor?: UnlistenFn;
+  private unlistenUrl?: UnlistenFn;
   private ro: ResizeObserver;
   private resizeTimer = 0;
   private dragging = false;
@@ -77,9 +78,15 @@ export class CdpView {
         const u = this.normalizeUrl(this.urlbar.value.trim());
         if (u) invoke("cdp_navigate", { id: this.id, url: u }).catch(console.error);
         this.canvas.focus();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this.canvas.focus(); // bail back to the page without navigating
       }
       e.stopPropagation(); // don't leak typing to the page
     });
+    // Omnibar feel: focusing the bar selects all so you can just type a new
+    // destination (URL or search terms) over the current address.
+    this.urlbar.addEventListener("focus", () => this.urlbar.select());
 
     this.canvas = document.createElement("canvas");
     this.canvas.tabIndex = 0; // focusable for keyboard
@@ -126,6 +133,13 @@ export class CdpView {
       const c = ev.payload.cursor;
       this.canvas.style.cursor = !c || c.startsWith("url(") ? "default" : c;
     }).then((u) => (this.unlistenCursor = u));
+
+    // Address-bar sync: the page reports its URL on navigation (link click,
+    // redirect, SPA pushState). Reflect it unless the user is mid-edit in the bar.
+    void listen<{ id: string; url: string }>("cdp-url", (ev) => {
+      if (ev.payload.id !== this.id) return;
+      if (document.activeElement !== this.urlbar) this.urlbar.value = ev.payload.url;
+    }).then((u) => (this.unlistenUrl = u));
   }
 
   // CSS px size of the canvas (== CDP viewport CSS px) and the device ratio.
@@ -289,6 +303,7 @@ export class CdpView {
     this.ro.disconnect();
     this.unlisten?.();
     this.unlistenCursor?.();
+    this.unlistenUrl?.();
     this.el.remove();
   }
 }

@@ -426,6 +426,25 @@ fn attach(
                                 "cdp-cursor",
                                 json!({ "id": id2.clone(), "cursor": c }),
                             );
+                        } else if v["method"] == "Page.frameNavigated"
+                            && v["params"]["frame"]["parentId"].is_null()
+                        {
+                            // Main-frame full navigation (link click, redirect,
+                            // form submit). parentId null = top frame.
+                            if let Some(u) = v["params"]["frame"]["url"].as_str() {
+                                let _ = app2.emit(
+                                    "cdp-url",
+                                    json!({ "id": id2.clone(), "url": u }),
+                                );
+                            }
+                        } else if v["method"] == "Page.navigatedWithinDocument" {
+                            // SPA / history.pushState same-document navigation.
+                            if let Some(u) = v["params"]["url"].as_str() {
+                                let _ = app2.emit(
+                                    "cdp-url",
+                                    json!({ "id": id2.clone(), "url": u }),
+                                );
+                            }
                         } else if v["method"] == "Page.screencastFrame" {
                             let data = v["params"]["data"].as_str().unwrap_or("");
                             let session = v["params"]["sessionId"].clone();
