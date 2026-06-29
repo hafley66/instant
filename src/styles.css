@@ -1218,6 +1218,21 @@ body[data-skin] .cmdp-input::placeholder {
 .fs-back:hover {
   background: rgba(68, 147, 248, 0.25);
 }
+/* Copy the rendered text of a preview to the clipboard (text previews only). */
+.fs-copy {
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 5px;
+  margin-right: 4px;
+  color: #4493f8;
+  background: rgba(68, 147, 248, 0.12);
+  border: 1px solid rgba(68, 147, 248, 0.4);
+  border-radius: 3px;
+}
+.fs-copy:hover {
+  background: rgba(68, 147, 248, 0.25);
+}
 .fs-preview-img {
   max-width: 100%;
   height: auto;

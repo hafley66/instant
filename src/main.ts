@@ -3552,6 +3552,11 @@ function wordAt(id: string, clientX: number, clientY: number): string {
 type PreviewInst = { el: HTMLElement; line?: number };
 const previewInsts = new Map<string, PreviewInst>();
 
+// Raw text of the currently-rendered text preview, keyed by its content node, so
+// the meta-bar "copy" button can grab it without re-reading the file. Images
+// have no entry (and no copy button).
+const previewTextByNode = new WeakMap<HTMLElement, string>();
+
 // Internal routing: which panel a file preview was opened FROM (an rg results
 // panel), so the preview's "← back" returns there. Keyed by preview path, value
 // is the origin panel key (e.g. `rg:<query>`). Set by the rg hit click before
@@ -3575,7 +3580,19 @@ function openPreviewPanel(
     // Delegated so it survives renderPathInto's innerHTML rewrites: "← back"
     // returns to the originating panel (internal routing).
     el.addEventListener("click", (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>(".fs-back");
+      const t = e.target as HTMLElement;
+      const cp = t.closest<HTMLElement>(".fs-copy");
+      if (cp) {
+        const text = previewTextByNode.get(el);
+        if (text != null) {
+          navigator.clipboard.writeText(text).then(() => {
+            cp.textContent = "copied";
+            setTimeout(() => (cp.textContent = "copy"), 1200);
+          }).catch(console.error);
+        }
+        return;
+      }
+      const b = t.closest<HTMLElement>(".fs-back");
       if (!b) return;
       const origin = b.getAttribute("data-origin");
       if (origin) activatePreviewPanel(origin);
@@ -3597,12 +3614,17 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   const back = origin
     ? `<button class="fs-back" data-origin="${escapeHtml(origin)}" title="back to ${escapeHtml(origin)}">← back</button> `
     : "";
+  const isImage = !line && IMAGE_EXTS.has(ext);
+  // Copy the rendered text to the clipboard (text previews only; the handler in
+  // openPreviewPanel reads previewTextByNode). Images get no button.
+  const copy = isImage ? "" : `<button class="fs-copy" title="copy text">copy</button> `;
   const meta =
-    `<div class="fs-preview-meta">${back}<span class="fs-preview-name">${escapeHtml(name)}</span>` +
+    `<div class="fs-preview-meta">${back}${copy}<span class="fs-preview-name">${escapeHtml(name)}</span>` +
     `<br><span>${escapeHtml(line ? `${path}:${line}` : path)}</span></div>`;
+  previewTextByNode.delete(node); // cleared until the new text loads
   node.innerHTML = meta + empty("loading…");
 
-  if (!line && IMAGE_EXTS.has(ext)) {
+  if (isImage) {
     try {
       const url = await invoke<string>("read_image", { path });
       node.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
@@ -3619,6 +3641,7 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
     node.innerHTML = meta + empty(String(e));
     return;
   }
+  previewTextByNode.set(node, text); // back the meta-bar copy button
 
   if (line) {
     // Whole file with line numbers; the target row is highlighted and scrolled
