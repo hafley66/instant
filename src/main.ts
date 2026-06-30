@@ -842,13 +842,22 @@ async function reopenLastTab() {
   // name->id identity is stable across repeated reopens; "new · X" overwrites it.
   const killed = store.get().resumeTabs[last.name];
   let command = last.command;
-  if (killed && last.cwd && (await resumeIdIsLive(killed.editor, last.cwd, killed.sessionId))) {
-    command = resumeLaunch(killed.editor, killed.sessionId);
-    console.log("[resume] ⌘⇧T", last.name, "->", command);
-  } else if (killed) {
-    console.warn("[resume] ⌘⇧T", last.name, "dead id", killed.sessionId.slice(0, 8), "— dropping");
-    dropResumeTab(last.name);
-    flashStatus("previous session is gone — opening fresh");
+  if (killed && last.cwd) {
+    const target = await resumeTargetId(killed.editor, last.cwd, killed.sessionId);
+    if (target) {
+      command = resumeLaunch(killed.editor, target);
+      console.log("[resume] ⌘⇧T", last.name, "->", command);
+      if (target !== killed.sessionId) {
+        console.warn("[resume] ⌘⇧T", last.name, "recorded id gone, using newest", target.slice(0, 8));
+        store.set({
+          resumeTabs: { ...store.get().resumeTabs, [last.name]: { editor: killed.editor, sessionId: target } },
+        });
+      }
+    } else {
+      console.warn("[resume] ⌘⇧T", last.name, "no sessions left for this cwd — dropping");
+      dropResumeTab(last.name);
+      flashStatus("previous session is gone — opening fresh");
+    }
   }
   openTab(last.name, { command, cwd: last.cwd });
 }
@@ -1940,13 +1949,16 @@ async function openWorktree(clone: string, branch: string, wtPath: string, comma
   // enough to race it. Not needed for a fresh name (no prior session to race).
   if (!fresh) await settleClosures();
   const known = store.get().resumeTabs[name];
-  const live = !fresh && !!known && (await resumeIdIsLive(known!.editor, wtPath, known!.sessionId));
-  if (known && !fresh && !live) {
-    console.warn("[resume]", name, "dead id", known.sessionId.slice(0, 8), "— dropping");
+  const target = known && !fresh ? await resumeTargetId(known.editor, wtPath, known.sessionId) : null;
+  if (known && !fresh && target && target !== known.sessionId) {
+    console.warn("[resume]", name, "recorded id gone, using newest", target.slice(0, 8));
+    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: known.editor, sessionId: target } } });
+  } else if (known && !fresh && !target) {
+    console.warn("[resume]", name, "no sessions left for this cwd — dropping");
     dropResumeTab(name);
     flashStatus("previous session is gone — opening fresh");
   }
-  const cmd = live ? resumeLaunch(known!.editor, known!.sessionId) : newAgentLaunch(name, command);
+  const cmd = target ? resumeLaunch(known!.editor, target) : newAgentLaunch(name, command);
   openTab(name, { cwd: wtPath, command: cmd });
   refreshSessions();
 }
@@ -1981,20 +1993,29 @@ const KNOWN_RESUME: Record<string, string> = {
 const resumeLaunch = (editor: "claude" | "opencode", sessionId: string) =>
   `${editor} ${KNOWN_RESUME[editor]} ${sessionId}`;
 
-// resumeTabs can hold a sessionId that no longer resolves to anything on disk
-// (the harness pruned the conversation, or — before the close/reopen races
-// elsewhere in this file were fixed — a wrong id got recorded outright).
-// Resuming a dead id isn't a soft failure: the harness exits immediately,
-// tmux's session dies with it, and the tab shows a flash of "loading" then
-// tmux's own exit message, no diagnostic anywhere a user would think to look.
-// Verify against the on-disk session list before trusting it.
-async function resumeIdIsLive(
+// resumeTabs can hold a sessionId that no longer resolves to exactly the
+// recorded id (the harness rotated to a new id on its own resume — claude's
+// own --resume can mint a fresh id for the continued conversation, so the old
+// one we recorded at launch goes stale the moment it's used — or, before the
+// close/reopen races elsewhere in this file were fixed, a wrong id got
+// recorded outright). Resuming a dead id isn't a soft failure: the harness
+// exits immediately and the tab shows a flash of "loading" then exit, no
+// diagnostic anywhere a user would think to look.
+//
+// So this does NOT just validate and give up: it prefers the recorded id,
+// but falls back to the newest on-disk session for the same cwd before
+// concluding nothing is resumable. Abandoning to a blank conversation should
+// be the last resort, not the first thing tried on a single id mismatch —
+// that's how a close+reopen of a real, live conversation turns into "opening
+// fresh" with no way back.
+async function resumeTargetId(
   editor: "claude" | "opencode",
   cwd: string,
-  sessionId: string,
-): Promise<boolean> {
+  recordedId: string,
+): Promise<string | null> {
   const ids = await invoke<string[]>("harness_sessions", { tool: editor, cwd }).catch(() => [] as string[]);
-  return ids.includes(sessionId);
+  if (ids.includes(recordedId)) return recordedId;
+  return ids[0] ?? null; // newest session in this cwd, if any
 }
 
 // Drop a dead resumeTabs record so future opens stop retrying it.
