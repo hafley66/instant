@@ -192,50 +192,77 @@ pub fn scan_worktrees(roots: Vec<String>, max_depth: Option<usize>) -> Vec<Workt
 
     let mut rows = Vec::new();
     for probe in clones.values() {
-        let Ok(porcelain) = git(probe, &["worktree", "list", "--porcelain"]) else { continue };
-        // Porcelain: blocks separated by a blank line; first block is the main worktree.
-        let blocks: Vec<&str> = porcelain.split("\n\n").filter(|b| !b.trim().is_empty()).collect();
-        let main_path = blocks
-            .first()
-            .and_then(|b| b.lines().find_map(|l| l.strip_prefix("worktree ")))
-            .unwrap_or("")
-            .to_string();
-        let origin = git(Path::new(&main_path), &["config", "--get", "remote.origin.url"])
-            .unwrap_or_default();
-
-        for block in blocks {
-            let mut wt = String::new();
-            let mut head = String::new();
-            let mut branch = String::new();
-            for line in block.lines() {
-                if let Some(v) = line.strip_prefix("worktree ") {
-                    wt = v.to_string();
-                } else if let Some(v) = line.strip_prefix("HEAD ") {
-                    head = v.chars().take(8).collect();
-                } else if let Some(v) = line.strip_prefix("branch ") {
-                    branch = v.trim_start_matches("refs/heads/").to_string();
-                } else if line == "detached" {
-                    branch = "(detached)".to_string();
-                } else if line == "bare" {
-                    branch = "(bare)".to_string();
-                }
-            }
-            if wt.is_empty() {
-                continue;
-            }
-            let dirty = git(Path::new(&wt), &["status", "--porcelain"])
-                .map(|s| !s.is_empty())
-                .unwrap_or(false);
-            rows.push(WorktreeRow {
-                origin: origin.clone(),
-                clone: main_path.clone(),
-                worktree: wt.clone(),
-                branch,
-                head,
-                is_main: wt == main_path,
-                dirty,
-            });
-        }
+        rows.extend(worktree_rows_for_clone(probe));
     }
     rows
+}
+
+/// `git worktree list --porcelain` for one clone, parsed into a row per
+/// worktree (main + linked). `probe` is any path inside the clone. Shared by
+/// `scan_worktrees` (walks many clones) and `worktree_at` (resolves one path
+/// on demand, e.g. a live tmux session's cwd the walk never reached).
+fn worktree_rows_for_clone(probe: &Path) -> Vec<WorktreeRow> {
+    let Ok(porcelain) = git(probe, &["worktree", "list", "--porcelain"]) else { return Vec::new() };
+    // Porcelain: blocks separated by a blank line; first block is the main worktree.
+    let blocks: Vec<&str> = porcelain.split("\n\n").filter(|b| !b.trim().is_empty()).collect();
+    let main_path = blocks
+        .first()
+        .and_then(|b| b.lines().find_map(|l| l.strip_prefix("worktree ")))
+        .unwrap_or("")
+        .to_string();
+    let origin =
+        git(Path::new(&main_path), &["config", "--get", "remote.origin.url"]).unwrap_or_default();
+
+    let mut rows = Vec::new();
+    for block in blocks {
+        let mut wt = String::new();
+        let mut head = String::new();
+        let mut branch = String::new();
+        for line in block.lines() {
+            if let Some(v) = line.strip_prefix("worktree ") {
+                wt = v.to_string();
+            } else if let Some(v) = line.strip_prefix("HEAD ") {
+                head = v.chars().take(8).collect();
+            } else if let Some(v) = line.strip_prefix("branch ") {
+                branch = v.trim_start_matches("refs/heads/").to_string();
+            } else if line == "detached" {
+                branch = "(detached)".to_string();
+            } else if line == "bare" {
+                branch = "(bare)".to_string();
+            }
+        }
+        if wt.is_empty() {
+            continue;
+        }
+        let dirty = git(Path::new(&wt), &["status", "--porcelain"])
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        rows.push(WorktreeRow {
+            origin: origin.clone(),
+            clone: main_path.clone(),
+            worktree: wt.clone(),
+            branch,
+            head,
+            is_main: wt == main_path,
+            dirty,
+        });
+    }
+    rows
+}
+
+/// Resolve the single git worktree a path sits in, without a directory walk —
+/// `scan_worktrees` only finds checkouts under its configured roots, so a live
+/// tmux session sitting in a clone outside those roots (or one made after the
+/// last scan) is otherwise invisible to the worktree tree/chips. The frontend
+/// calls this on demand for any session cwd that didn't match a scanned row.
+/// None when `path` isn't inside a git work tree.
+#[tauri::command]
+pub fn worktree_at(path: String) -> Option<WorktreeRow> {
+    let p = Path::new(&path);
+    git(p, &["rev-parse", "--is-inside-work-tree"]).ok()?;
+    let canon_target = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    worktree_rows_for_clone(p).into_iter().find(|r| {
+        let wt_canon = std::fs::canonicalize(&r.worktree).unwrap_or_else(|_| PathBuf::from(&r.worktree));
+        canon_target == wt_canon || canon_target.starts_with(&wt_canon)
+    })
 }
