@@ -323,6 +323,14 @@ export function removeTermPanel(sid: string) {
   const p = api?.getPanel(TERM + sid);
   if (p) api!.removePanel(p);
 }
+// Ground truth for "does this terminal actually have a dockview panel right
+// now" — main.ts's `tabs` Map is a parallel bookkeeping structure that can
+// desync from dockview's own registry (e.g. a close whose onDidRemovePanel
+// hasn't been processed yet). Callers that are about to trust `tabs.has(id)`
+// to skip recreating a panel should cross-check this first.
+export function hasTermPanel(sid: string): boolean {
+  return !!api?.getPanel(TERM + sid);
+}
 export function setTermTitle(sid: string, title: string) {
   api?.getPanel(TERM + sid)?.api.setTitle(title);
 }

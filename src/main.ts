@@ -77,6 +77,7 @@ import {
   addTermPanel,
   focusTermPanel,
   removeTermPanel,
+  hasTermPanel,
   setTermTitle,
   customTermTitle,
   moveTermPanel,
@@ -800,7 +801,13 @@ function togglePinTab(name: string) {
 // Stack of recently closed tabs for reopen (⌘⇧T). In-memory only. A tmux session
 // survives a tab close, so reopen reattaches by name and the agent is still
 // alive; the stored command/cwd only matter if the session was actually killed.
-const closedTabs: OpenTab[] = [];
+// Timestamped + TTL'd: this stack lives for the whole app session (days), and
+// without an expiry a reopen whose real target silently failed to surface (the
+// "nada" case openTab's stale-bookkeeping self-heal now fixes) used to read as
+// "press ⌘⇧T again" — which pops the NEXT entry down: a tab closed hours or
+// days ago, reopening as a "random old session out of nowhere".
+const CLOSED_TAB_TTL_MS = 30 * 60 * 1000;
+const closedTabs: { tab: OpenTab; ts: number }[] = [];
 // Runs close-time agent teardown one-at-a-time; see onTermClosed for why.
 let closeChain: Promise<unknown> = Promise.resolve();
 // Await all in-flight close teardown (kill_session / close_pty). Reopen paths
@@ -808,8 +815,13 @@ let closeChain: Promise<unknown> = Promise.resolve();
 // reattached to a dying corpse or torn down by a kill still queued from its close.
 const settleClosures = () => closeChain;
 async function reopenLastTab() {
-  const last = closedTabs.pop();
-  if (!last) return;
+  let entry = closedTabs.pop();
+  while (entry && Date.now() - entry.ts > CLOSED_TAB_TTL_MS) entry = closedTabs.pop();
+  if (!entry) {
+    flashStatus("nothing to reopen");
+    return;
+  }
+  const last = entry.tab;
   // Wait for the close's teardown to finish before recreating this name. The
   // close runs exitOrDetachTab on closeChain (async kill_session / close_pty); if
   // we recreate first, either tmux -A reattaches the dying corpse (dropping the
@@ -1040,8 +1052,22 @@ function openTab(
 ) {
   const id = sessionId(name);
   if (tabs.has(id)) {
-    activate(id);
-    return;
+    if (hasTermPanel(id)) {
+      activate(id);
+      return;
+    }
+    // Stale bookkeeping: our tabs Map still has this id but dockview's own
+    // panel for it is already gone — a removal whose onDidRemovePanel we
+    // never observed (or a close/reopen fast enough to race it). The old
+    // silent `activate(id)` here was a true no-op in this case (nothing to
+    // activate), which read as "reopen does nothing" with no error anywhere.
+    // Self-heal: drop the orphaned entry and fall through to build fresh.
+    const stale = tabs.get(id);
+    stale?.overlay?.dispose();
+    stale?.term.dispose();
+    stale?.el.remove();
+    tabs.delete(id);
+    console.warn("[openTab] stale tabs entry for", id, "— rebuilding");
   }
 
   // openTab is mechanical: it opens exactly the command it's handed. Resume is a
@@ -1494,7 +1520,10 @@ function onTermClosed(id: string) {
   tabs.delete(id);
   // Remember it for reopen (⌘⇧T), carrying the original command/cwd.
   const meta = store.get().openTabs.find((o) => o.name === name);
-  closedTabs.push({ name, command: meta?.command ?? null, cwd: meta?.cwd ?? null });
+  closedTabs.push({
+    tab: { name, command: meta?.command ?? null, cwd: meta?.cwd ?? null },
+    ts: Date.now(),
+  });
   forgetTab(id); // don't reattach a tab the user closed
   // Agent tab → kill the tmux session so claude/opencode isn't left burning RAM
   // (recording its id for --resume first, keyed by session name). Anything else →
