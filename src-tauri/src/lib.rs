@@ -754,6 +754,7 @@ pub fn run() {
             pty::close_pty,
             pty::kill_session,
             pty::scroll_session,
+            pty::rogue_agent_sessions,
             cdp::cdp_open,
             cdp::cdp_send,
             cdp::cdp_resize,

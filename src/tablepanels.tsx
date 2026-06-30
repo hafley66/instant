@@ -22,6 +22,16 @@ export interface TmuxRow {
   pinned: boolean;
 }
 
+// A claude/opencode process found outside any tmux session — display-ready
+// (cwd tildified). Rendered as a banner above the session table so it can't
+// be missed even though it's not a tmux row itself.
+export interface RogueRow {
+  pid: number;
+  tty: string;
+  command: string;
+  cwd: string; // tildified, or the raw args when no cwd was resolvable
+}
+
 export interface TmuxBridge {
   rows: () => TmuxRow[];
   onOpen: (name: string) => void;
@@ -32,6 +42,9 @@ export interface TmuxBridge {
   setSort: (s: SessionSort) => void;
   launch: (command: string) => void; // quick-launch an agent session
   newShell: (name: string) => void; // plain shell, no agent command
+  // rogue (off-tmux) agent sessions
+  rogue: () => RogueRow[];
+  onAdopt: (r: RogueRow) => void;
 }
 
 let tmuxBridge: TmuxBridge | null = null;
@@ -169,9 +182,31 @@ export function TmuxPanelV2() {
     tmuxBridge?.onShow?.();
   }, []);
   const rows = tmuxBridge?.rows() ?? [];
+  const rogue = tmuxBridge?.rogue() ?? [];
   return (
     <div className="v2-panel">
       <TmuxToolbar />
+      {rogue.length > 0 ? (
+        <div className="rogue-banner">
+          <div className="rogue-head">
+            ⚠ {rogue.length} agent{rogue.length > 1 ? "s" : ""} running outside tmux
+          </div>
+          {rogue.map((r) => (
+            <div className="rogue-row" key={r.pid}>
+              <span className="s-proc" title="foreground process">
+                {r.command}
+              </span>
+              <span className="s-meta">pid {r.pid}</span>
+              <span className="s-pwd" title={r.cwd}>
+                {r.cwd}
+              </span>
+              <button type="button" className="ql-btn" onClick={() => tmuxBridge?.onAdopt(r)}>
+                adopt
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="panel-scroll">
         {rows.length === 0 ? (
           <div className="session-empty">no live sessions — launch one above</div>

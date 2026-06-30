@@ -537,3 +537,86 @@ pub fn kill_session(store: State<PtyStore>, name: String) -> Result<(), String> 
     store.0.lock().unwrap().remove(&format!("s:{name}"));
     Ok(())
 }
+
+/// A claude/opencode process running directly on a real terminal, outside any
+/// tmux session — typed straight into Terminal.app/iTerm rather than opened
+/// through instant. The frontend flags these so an off-the-grid agent doesn't
+/// go unnoticed, and offers to adopt the cwd as a proper tracked tmux session.
+#[derive(Serialize, Clone)]
+pub struct RogueSession {
+    pid: i32,
+    tty: String,     // bare device name, e.g. "ttys023"
+    command: String, // "claude" | "opencode"
+    args: String,    // full command line, for display
+    cwd: Option<String>,
+}
+
+/// ttys already inside SOME tmux session: the default socket (the user's own
+/// ambient tmux, which a prod build's isolated `-L instant-prod` socket can't
+/// see) unioned with instant's own socket (so a prod build doesn't mistake its
+/// own isolated sessions for rogue ones). Bare device names, not "/dev/...".
+fn tmux_ttys() -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    let mut cmds = vec![std::process::Command::new("tmux")];
+    if !cfg!(debug_assertions) {
+        cmds.push(tmux_cmd());
+    }
+    for mut c in cmds {
+        let Ok(out) = c
+            .args(["list-panes", "-a", "-F", "#{pane_tty}"])
+            .env("PATH", path_env())
+            .output()
+        else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            if let Some(tty) = line.strip_prefix("/dev/") {
+                set.insert(tty.to_string());
+            }
+        }
+    }
+    set
+}
+
+/// cwd of a running pid via `lsof` (macOS has no /proc). Best-effort: None on
+/// any failure (permission, process exited mid-scan, lsof missing).
+fn process_cwd(pid: i32) -> Option<String> {
+    let out = std::process::Command::new("lsof")
+        .args(["-p", &pid.to_string(), "-a", "-d", "cwd", "-Fn"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix('n').map(|s| s.to_string()))
+}
+
+/// claude/opencode processes attached to a real terminal that isn't part of
+/// any tmux session. Lets the frontend surface "you're running an agent off
+/// the grid" and offer to adopt its cwd into a tracked tmux worktree session.
+#[tauri::command]
+pub fn rogue_agent_sessions() -> Vec<RogueSession> {
+    let known_ttys = tmux_ttys();
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-axo", "pid=,tty=,args="])
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut it = line.split_whitespace();
+            let pid: i32 = it.next()?.parse().ok()?;
+            let tty = it.next()?.to_string();
+            if tty == "??" || known_ttys.contains(&tty) {
+                return None;
+            }
+            let args = it.collect::<Vec<_>>().join(" ");
+            let bin = args.split_whitespace().next()?.rsplit('/').next()?;
+            if bin != "claude" && bin != "opencode" {
+                return None;
+            }
+            Some(RogueSession { pid, tty, command: bin.to_string(), args, cwd: process_cwd(pid) })
+        })
+        .collect()
+}

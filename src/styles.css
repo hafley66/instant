@@ -735,6 +735,34 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   opacity: 0.5;
 }
 
+/* ---- rogue (off-tmux) agent banner, atop the tmux v2 panel ---- */
+.rogue-banner {
+  border-bottom: var(--frame-w) solid var(--frame);
+  background: rgba(245, 166, 35, 0.12);
+}
+.rogue-head {
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #b97400;
+}
+.rogue-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+}
+.rogue-row .s-pwd {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rogue-row .ql-btn {
+  flex: none;
+  padding: 1px 8px;
+}
+
 /* History panel: one clickable row per visited page, host over path + time. */
 .nav-hist-row {
   display: flex;

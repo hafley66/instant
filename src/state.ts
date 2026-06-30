@@ -146,6 +146,18 @@ export interface Session {
   commands: string[]; // distinct foreground process per pane (#{pane_current_command}): claude, nvim, zsh…
 }
 
+// A claude/opencode process on a real terminal outside any tmux session (Rust
+// pty::RogueSession) — typed straight into Terminal.app/iTerm rather than
+// opened through instant. Surfaced so it can be "adopted" into a tracked tmux
+// worktree session instead of running off the grid.
+export interface RogueSession {
+  pid: number;
+  tty: string;
+  command: string; // "claude" | "opencode"
+  args: string;
+  cwd: string | null;
+}
+
 // A label + the shell command it launches, offered when opening a worktree
 // session. User-editable (persisted as wtAgents) so the picker isn't hardcoded.
 export interface WtAgent {
@@ -185,6 +197,7 @@ export interface AppState {
   tabTitles: Record<string, string>; // durable per-panel title overrides, keyed by full panel id (persisted)
   dockJSON: unknown; // serialized dockview layout (persisted); null until first save
   sessions: Session[]; // live tmux sessions (runtime)
+  rogueSessions: RogueSession[]; // claude/opencode running outside any tmux session (runtime, polled)
   sessionWorktrees: Record<string, string[]>; // session name -> worktree paths it has touched (persisted, accumulated)
   terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
@@ -357,6 +370,7 @@ function load(): AppState {
     tabTitles: loadKey<Record<string, string>>("tabTitles", {}),
     dockJSON: loadKey<unknown>("dockJSON", null),
     sessions: [],
+    rogueSessions: [],
     sessionWorktrees: loadKey<Record<string, string[]>>("sessionWorktrees", {}),
     terminalTabs: [],
     worktrees: [],

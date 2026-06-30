@@ -173,6 +173,20 @@ async function cdpProbe(): Promise<StatusReport> {
   return up ? { state: "up", detail: "engine attached" } : { state: "idle", detail: "not started" };
 }
 
+// claude/opencode running directly on a terminal, outside any tmux session —
+// "degraded" (not "down") because nothing's broken, it's just untracked.
+async function rogueProbe(): Promise<StatusReport> {
+  const rogue = await invoke<{ pid: number; command: string; cwd: string | null }[]>(
+    "rogue_agent_sessions",
+  );
+  if (!rogue.length) return { state: "idle", detail: "none" };
+  const detail = rogue
+    .slice(0, 3)
+    .map((r) => `${r.command} pid ${r.pid}${r.cwd ? ` ${r.cwd}` : ""}`)
+    .join(" · ");
+  return { state: "degraded", detail: `${rogue.length} off-tmux: ${detail}` };
+}
+
 let builtinDone = false;
 export function registerBuiltinStatus() {
   if (builtinDone) return;
@@ -181,4 +195,5 @@ export function registerBuiltinStatus() {
   registerStatus({ id: "sprefa", label: "sprefa daemon", check: sprefaProbe });
   registerStatus({ id: "tmux", label: "tmux sessions", check: tmuxProbe });
   registerStatus({ id: "cdp", label: "browser engine", check: cdpProbe });
+  registerStatus({ id: "rogue", label: "rogue agent shells", check: rogueProbe });
 }

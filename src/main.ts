@@ -33,6 +33,7 @@ import {
   type Fav,
   type FsEntry,
   type OpenTab,
+  type RogueSession,
   type Skin,
   type SprefaScopeItem,
   type SprefaScopeKind,
@@ -51,6 +52,7 @@ import {
   setActivityPanel,
   setFavoritesPanel,
   type TmuxRow,
+  type RogueRow,
   type WtTreeRow,
   type ActRow,
   type FavTreeRow,
@@ -1735,6 +1737,44 @@ async function refreshSessions() {
   renderSessionActive();
 }
 
+// claude/opencode running on a real terminal outside any tmux session — typed
+// straight into Terminal.app/iTerm instead of opened through instant. Polled
+// so the tmux panel can flag "you've gone rogue" without the user having to
+// notice on their own.
+async function refreshRogue() {
+  let rogue: RogueSession[] = [];
+  try {
+    rogue = await invoke<RogueSession[]>("rogue_agent_sessions");
+  } catch (e) {
+    console.error(e);
+  }
+  store.set({ rogueSessions: rogue });
+}
+
+// Pull a rogue process's cwd into a tracked tmux session: resolve it to the
+// worktree it sits in (if any), then open it like any other worktree launch.
+// If the harness has an on-disk conversation for that cwd already (the rogue
+// process's own history), resume it instead of starting blank. This doesn't
+// touch the rogue process itself — there's no portable way to reparent a tty
+// into tmux — so the old terminal window is left for the user to close.
+async function adoptRogue(r: RogueSession) {
+  const cwd = r.cwd;
+  if (!cwd) {
+    flashStatus("no cwd for this process");
+    return;
+  }
+  const rows = store.get().worktrees;
+  const matched = rows.find((w) => cwd === w.worktree || cwd.startsWith(w.worktree + "/"));
+  const wtPath = matched?.worktree ?? cwd;
+  const clone = matched?.clone ?? wtPath;
+  const branch = matched?.branch ?? "";
+  const tool = r.command as "claude" | "opencode";
+  const sid = await invoke<string | null>("harness_session", { tool, cwd: wtPath }).catch(() => null);
+  const cmd = sid ? resumeLaunch(tool, sid) : r.command;
+  await openWorktree(clone, branch, wtPath, cmd, true);
+  flashStatus(`adopted ${r.command} · pid ${r.pid} — close the old terminal window`);
+}
+
 // ---- worktrees table: discover existing worktrees across N repo clones ----
 const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 const tmuxName = (s: string) => s.replace(/[.:\s]/g, "-");
@@ -2157,6 +2197,15 @@ function tmuxRows(): TmuxRow[] {
   });
 }
 
+function rogueRows(): RogueRow[] {
+  return store.get().rogueSessions.map((r) => ({
+    pid: r.pid,
+    tty: r.tty,
+    command: r.command,
+    cwd: r.cwd ? tildify(r.cwd) : r.args,
+  }));
+}
+
 // Display-ready tree rows (org → clone → worktree-leaf) for the react-table
 // worktrees panel. Mirrors the v1 renderTree hierarchy via buildTree; the React
 // panel indents the name column + chevron (MUI-X tree-data style) and renders
@@ -2331,6 +2380,11 @@ function registerV2Bridges() {
     newShell: (name) => {
       openTab(name);
       refreshSessions();
+    },
+    rogue: rogueRows,
+    onAdopt: (r) => {
+      const found = store.get().rogueSessions.find((s) => s.pid === r.pid);
+      if (found) adoptRogue(found);
     },
   });
   setWorktreesPanel({
@@ -5084,6 +5138,11 @@ async function main() {
   // Scan worktrees in the background so session rows can show which worktrees
   // they've touched; re-relate sessions once the scan lands.
   scanWorktrees().then(refreshSessions).catch(() => {});
+  // Background poll for AI harnesses running outside tmux entirely (ps + lsof,
+  // cheap). Runs regardless of which panel is open so a rogue session gets
+  // flagged even if the user never opens the tmux panel to look for it.
+  refreshRogue();
+  setInterval(refreshRogue, 8000);
 
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
