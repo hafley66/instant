@@ -768,6 +768,7 @@ pub fn run() {
             worktrees::add_worktree,
             worktrees::git_diff,
             worktrees::remove_worktree,
+            worktrees::worktree_at,
             activity::activity_events,
             activity::activity_clear,
             activity::activity_log,

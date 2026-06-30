@@ -201,6 +201,11 @@ export interface AppState {
   sessionWorktrees: Record<string, string[]>; // session name -> worktree paths it has touched (persisted, accumulated)
   terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
+  // Worktrees resolved on demand for a live session's cwd that the scan walk
+  // never reached (outside scanRoot, or created after the last scan) — see
+  // autoTrackSessionPaths. Persisted so a manually-started agent session stays
+  // tracked across reloads; pruned once a real scan covers the same path.
+  autoWorktrees: WorktreeRow[];
   activity: Event[]; // unified activity timeline (runtime)
   aiFavs: Fav[]; // favorited AI turns, mirrored from favorites.db (runtime)
   frontmostApp: string; // owner name of the current frontmost app (runtime; drives overlay focus behavior)
@@ -283,6 +288,7 @@ const PERSIST: (keyof AppState)[] = [
   "tabTitles",
   "dockJSON",
   "sessionWorktrees",
+  "autoWorktrees",
   "activitySource",
   "activityType",
   "captureEnabled",
@@ -374,6 +380,7 @@ function load(): AppState {
     sessionWorktrees: loadKey<Record<string, string[]>>("sessionWorktrees", {}),
     terminalTabs: [],
     worktrees: [],
+    autoWorktrees: loadKey<WorktreeRow[]>("autoWorktrees", []),
     activity: [],
     aiFavs: [],
     frontmostApp: "",

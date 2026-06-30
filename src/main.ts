@@ -810,6 +810,20 @@ const settleClosures = () => closeChain;
 async function reopenLastTab() {
   const last = closedTabs.pop();
   if (!last) return;
+  // Wait for the close's teardown to finish before recreating this name. The
+  // close runs exitOrDetachTab on closeChain (async kill_session / close_pty); if
+  // we recreate first, either tmux -A reattaches the dying corpse (dropping the
+  // --resume command) or the still-queued kill lands AFTER our new session and
+  // tears IT down — the "double reopen" failure. Awaiting frees the name first.
+  //
+  // resumeTabs is READ after this await too, not before: exitOrDetachTab writes
+  // it from inside that same closeChain (the async on-disk session probe), so
+  // reading it before the await could see the pre-close value — last reopen's
+  // id, or nothing — and silently replay a stale/blank command instead of this
+  // close's resume. That's the "works once, breaks the second time" failure:
+  // the first close's record happened to already be in the store by the time
+  // you reopened, masking the race until a faster close/reopen cycle hit it.
+  await settleClosures();
   // ⌘⇧T is the "bring back what I just closed" gesture — so if we exited an agent
   // in this SESSION NAME, resume its conversation (name-keyed record) instead of
   // replaying the stale original command. The record is kept (not consumed) so the
@@ -820,12 +834,6 @@ async function reopenLastTab() {
     command = resumeLaunch(killed.editor, killed.sessionId);
     console.log("[resume] ⌘⇧T", last.name, "->", command);
   }
-  // Wait for the close's teardown to finish before recreating this name. The
-  // close runs exitOrDetachTab on closeChain (async kill_session / close_pty); if
-  // we recreate first, either tmux -A reattaches the dying corpse (dropping the
-  // --resume command) or the still-queued kill lands AFTER our new session and
-  // tears IT down — the "double reopen" failure. Awaiting frees the name first.
-  await settleClosures();
   openTab(last.name, { command, cwd: last.cwd });
 }
 
@@ -1600,6 +1608,50 @@ function worktreesForPaths(paths: string[], rows: WorktreeRow[]): string[] {
   return [...out];
 }
 
+// Scanned rows ++ rows auto-discovered for a live session's cwd (see
+// autoTrackSessionPaths) — every read site that maps a cwd to "its worktree"
+// (chips, the worktree tree, adopt) should see both, not just the last scan.
+// Scanned wins on a path collision (it's the fresher, full-walk copy).
+function allWorktreeRows(): WorktreeRow[] {
+  const scanned = store.get().worktrees;
+  const known = new Set(scanned.map((w) => w.worktree));
+  return [...scanned, ...store.get().autoWorktrees.filter((w) => !known.has(w.worktree))];
+}
+
+// cwds already probed via worktree_at this run (hit or miss) — git calls are
+// cheap but pointless to repeat every refreshSessions tick for a path that
+// already came back "not a git worktree" (a plain shell, /tmp, $HOME, …).
+const wtProbed = new Set<string>();
+
+// A live session sitting in a cwd that isn't in the scanned worktree list — a
+// shell opened bare and cd'd by hand, then an agent typed into it — has no
+// worktree row, so it gets no chip and no resume affordances in the worktree
+// tree. Resolve it directly via git (worktree_at) and fold it into
+// autoWorktrees so it slots into the tree like any scanned worktree. No-op
+// (and cached) once a path has been probed or is already known.
+async function autoTrackSessionPaths(paths: string[]) {
+  const rows = allWorktreeRows();
+  for (const cwd of paths) {
+    if (wtProbed.has(cwd) || worktreesForPaths([cwd], rows).length) continue;
+    wtProbed.add(cwd);
+    const found = await invoke<WorktreeRow | null>("worktree_at", { path: cwd }).catch(() => null);
+    if (found && !allWorktreeRows().some((w) => w.worktree === found.worktree)) {
+      store.set({ autoWorktrees: [...store.get().autoWorktrees, found] });
+    }
+  }
+}
+
+// Drop auto-discovered rows a real scan now covers, so a later rescan doesn't
+// leave a stale duplicate sitting in autoWorktrees once the path is properly
+// scanned (its branch/dirty would also go stale without this).
+function pruneAutoWorktrees(scanned: WorktreeRow[]) {
+  const found = new Set(scanned.map((w) => w.worktree));
+  const cur = store.get().autoWorktrees;
+  if (cur.some((w) => found.has(w.worktree))) {
+    store.set({ autoWorktrees: cur.filter((w) => !found.has(w.worktree)) });
+  }
+}
+
 // The sidebar SESSIONS list mirrors the live tmux sessions (the real running
 // shells/agents), not a creator. Click a row to attach/resume it into a tab;
 // launching new ones is the job of the quick-launch buttons + new-shell input.
@@ -1656,12 +1708,12 @@ async function refreshSessions() {
 
   // Relate sessions to worktrees and accumulate the touched set (persisted).
   // Pure data; runs even when the panel is closed.
-  const rows = store.get().worktrees;
+  const rows = allWorktreeRows();
   const sw = { ...store.get().sessionWorktrees };
   for (const s of live) {
     const matched = worktreesForPaths(s.paths ?? [], rows);
-    if (matched.length)
-      sw[s.name] = [...new Set([...(sw[s.name] ?? []), ...matched])];
+    if (matched.length) sw[s.name] = [...new Set([...(sw[s.name] ?? []), ...matched])];
+    else autoTrackSessionPaths(s.paths ?? []); // fire-and-forget; store update re-renders when it lands
   }
   store.set({ sessions: live, sessionWorktrees: sw });
 
@@ -1846,13 +1898,17 @@ function freshSessionName(clone: string, branch: string): string {
 // matters when the base session was killed.
 async function openWorktree(clone: string, branch: string, wtPath: string, command?: string, fresh = false) {
   const name = fresh ? freshSessionName(clone, branch) : baseSessionName(clone, branch);
+  // Wait for any in-flight close teardown on this name BEFORE reading
+  // resumeTabs or recreating the session: exitOrDetachTab writes the resume
+  // record (its on-disk session probe) and kills the tmux session both async,
+  // on closeChain. Reading resumeTabs first (the old order) could see the
+  // pre-close value and silently fall through to newAgentLaunch — a brand new
+  // conversation, the previous one lost outright — on a close/reopen fast
+  // enough to race it. Not needed for a fresh name (no prior session to race).
+  if (!fresh) await settleClosures();
   const known = store.get().resumeTabs[name];
   const resuming = !fresh && !!known;
   const cmd = resuming ? resumeLaunch(known!.editor, known!.sessionId) : newAgentLaunch(name, command);
-  // Resuming a killed session recreates its tmux name — wait for any in-flight
-  // close teardown first (see settleClosures), else the just-closed kill races
-  // the recreate. Not needed for a fresh name (no prior session by that name).
-  if (resuming) await settleClosures();
   openTab(name, { cwd: wtPath, command: cmd });
   refreshSessions();
 }
@@ -2103,7 +2159,7 @@ function focusRows(rows: WorktreeRow[]): WorktreeRow[] {
 // is a known worktree; otherwise the path renders as a bare leaf. Live sessions
 // nest underneath, same as the tree.
 function favRows(): WtTreeRow[] {
-  const wts = store.get().worktrees;
+  const wts = allWorktreeRows();
   const spaces = new Set(store.get().spaces);
   return store.get().wtFavorites.map((path) => {
     const wt = wts.find((w) => w.worktree === path || w.clone === path);
@@ -2175,7 +2231,7 @@ function leafGestures(clone: string, branch: string, wtPath: string, dirty: bool
 // Registering these bridges once is enough: rows() reads the store on each call,
 // and useApp() in the panels triggers the re-render that re-invokes rows().
 function tmuxRows(): TmuxRow[] {
-  const rows = store.get().worktrees;
+  const rows = allWorktreeRows();
   const sw = store.get().sessionWorktrees;
   return sortSessions(store.get().sessions).map((s) => {
     const current = new Set(worktreesForPaths(s.paths ?? [], rows));
@@ -2324,7 +2380,7 @@ function spaceTreeRows(): WtTreeRow[] {
 function wtTreeRows(): WtTreeRow[] {
   // Focus mode flattens to the favorites list (full paths), bypassing the tree.
   if (store.get().wtFocus) return favRows();
-  const rows = store.get().worktrees;
+  const rows = allWorktreeRows();
   const adding = store.get().wtAddingClone;
   return spaceTreeRows().concat(buildTree(rows).map((org) => ({
     id: `o:${org.origin}`,
@@ -2953,6 +3009,7 @@ async function scanWorktrees() {
       if (!res.ok) throw new Error(`ghcache ${res.status}`);
       const rows = (await res.json()) as WorktreeRow[];
       store.set({ worktrees: rows });
+      pruneAutoWorktrees(rows);
       subscribeWorktrees();
       wtScanned = true;
       return;
@@ -2966,6 +3023,7 @@ async function scanWorktrees() {
       maxDepth: null,
     });
     store.set({ worktrees: rows });
+    pruneAutoWorktrees(rows);
     wtScanned = true;
   } catch (e) {
     console.error("scan_worktrees:", e);
