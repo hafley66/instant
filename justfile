@@ -36,6 +36,17 @@ install-cli:
 signing-setup:
     ./scripts/setup-signing.sh
 
+# one-time: local push-to-talk dictation (Handy, https://handy.computer — open
+# source, fully on-device, no audio leaves the machine). Alternative to Claude
+# Code's /voice, which streams audio to Anthropic. After install: grant Handy
+# Microphone + Accessibility when prompted, pick the Parakeet V3 model in its
+# settings (~2 GB, best on Apple Silicon), set a push-to-talk shortcut that
+# doesn't collide with instant/tmux/claude keys, then hold-to-dictate into any
+# focused input — including claude tabs here.
+voice-setup:
+    brew list --cask handy >/dev/null 2>&1 || brew install --cask handy
+    open -a Handy
+
 # frontend only in a browser (no backend; invoke() calls fail)
 web:
     npm run dev
