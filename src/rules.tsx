@@ -10,35 +10,23 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
-
-type RuleMode = "textnodes" | "selector" | "netcapture";
-
-interface Rule {
-  id: string;
-  host: string;
-  url?: string;
-  mode: RuleMode;
-  selector?: string;
-  regex?: string;
-  captures?: Record<string, string>;
-  schedule?: { intervalMin: number } | "passive";
-  action: "report" | "notify";
-  enabled?: boolean;
-}
-
-// rule-match payload (Rust RuleMatch, serialized with ruleId).
-interface RuleMatch {
-  ruleId: string;
-  url: string;
-  ts: number;
-  matches: Record<string, string>[];
-}
+import { flashStatus, showError } from "./core";
+import {
+  type Rule,
+  type RuleMatch,
+  RULE_MODES,
+  RULE_ACTIONS,
+  scheduleLabel,
+  formatSchedule,
+  applyCellEdit,
+  nextRuleId,
+} from "./rulesModel";
 
 const FEED_CAP = 100;
 
-function template(n: number): Rule {
+function template(id: string): Rule {
   return {
-    id: `rule-${n}`,
+    id,
     host: "example\\.com",
     mode: "textnodes",
     regex: "(\\d+)",
@@ -47,12 +35,6 @@ function template(n: number): Rule {
     action: "report",
     enabled: true,
   };
-}
-
-function scheduleLabel(s: Rule["schedule"]): string {
-  if (s == null) return "";
-  if (s === "passive") return "passive";
-  return `${s.intervalMin}m`;
 }
 
 function matchFields(fields: Record<string, string>): string {
@@ -163,11 +145,13 @@ export function RulesPanelV2() {
   }, []);
 
   // Persist and adopt the server's echoed list (the extension picks it up on its
-  // next /config tick, <= 1 min).
+  // next /config tick, <= 1 min). Surface failures — a swallowed rules_set
+  // rejection is exactly the "edit isn't working" symptom (nothing changes, no
+  // feedback).
   function save(next: Rule[]) {
     invoke<Rule[]>("rules_set", { rules: next })
       .then(setRules)
-      .catch((e) => console.error(e));
+      .catch((e) => showError("rules", e));
   }
 
   function toggle(id: string) {
@@ -182,10 +166,20 @@ export function RulesPanelV2() {
     setSelected((s) => (s === id ? null : s));
   }
   function add() {
-    save([...rules, template(rules.length + 1)]);
+    save([...rules, template(nextRuleId(rules))]);
   }
   function edit(id: string) {
     setSelected(id);
+  }
+  // Inline grid edit: map the (columnId, string) back to a Rule field, validate,
+  // persist. Bad regex / non-integer schedule flashes and never persists.
+  function onCellEdit(row: Rule, columnId: string, value: string) {
+    const res = applyCellEdit(row, columnId, value);
+    if (!res.ok) {
+      flashStatus(res.error);
+      return;
+    }
+    save(rules.map((r) => (r.id === row.id ? res.rule : r)));
   }
   function cancelEdit() {
     if (selected) {
@@ -197,10 +191,13 @@ export function RulesPanelV2() {
     setSelected(null);
   }
 
-  // Raw-JSON edit for the selected rule. Parse on Apply; a bad body shows
-  // inline and leaves the stored rule untouched.
+  // Raw-JSON edit for the selected rule (escape hatch for `captures`). Parse on
+  // Apply; a bad body shows inline and leaves the stored rule untouched. Falls
+  // back to the current rule's JSON so Apply works even with no keystroke (the
+  // shown default isn't seeded into `drafts`).
   function applyDraft(id: string) {
-    const body = drafts[id];
+    const current = rules.find((r) => r.id === id);
+    const body = drafts[id] ?? (current ? JSON.stringify(current, null, 2) : undefined);
     if (body == null) return;
     let parsed: Rule;
     try {
@@ -220,6 +217,9 @@ export function RulesPanelV2() {
     });
   }
 
+  // Double-click (or Enter on a focused row) edits inline; id is read-only,
+  // enabled is the toggle, captures live in the raw-JSON pane. The schedule cell
+  // reads "5m"/"passive" but edits as bare minutes/"passive" (getEditValue).
   const RULES_COLUMNS: TreeColumn<Rule>[] = [
     { id: "id", header: "id", sortValue: (r) => r.id, cell: (r) => r.id },
     {
@@ -231,13 +231,56 @@ export function RulesPanelV2() {
           {r.host}
         </span>
       ),
+      edit: { kind: "text" },
+      getEditValue: (r) => r.host,
     },
-    { id: "mode", header: "mode", sortValue: (r) => r.mode, cell: (r) => r.mode },
+    {
+      id: "url",
+      header: "url",
+      sortValue: (r) => r.url ?? "",
+      cell: (r) => (r.url ? <span className="rule-host" title={r.url}>{r.url}</span> : ""),
+      edit: { kind: "text" },
+      getEditValue: (r) => r.url ?? "",
+    },
+    {
+      id: "mode",
+      header: "mode",
+      sortValue: (r) => r.mode,
+      cell: (r) => r.mode,
+      edit: { kind: "select", options: RULE_MODES },
+      getEditValue: (r) => r.mode,
+    },
+    {
+      id: "selector",
+      header: "selector",
+      sortValue: (r) => r.selector ?? "",
+      cell: (r) => r.selector ?? "",
+      edit: { kind: "text" },
+      getEditValue: (r) => r.selector ?? "",
+    },
+    {
+      id: "regex",
+      header: "regex",
+      sortValue: (r) => r.regex ?? "",
+      cell: (r) => r.regex ?? "",
+      edit: { kind: "text" },
+      getEditValue: (r) => r.regex ?? "",
+    },
     {
       id: "schedule",
       header: "schedule",
       sortValue: (r) => scheduleLabel(r.schedule),
       cell: (r) => scheduleLabel(r.schedule),
+      edit: { kind: "text" },
+      getEditValue: (r) => formatSchedule(r.schedule),
+    },
+    {
+      id: "action",
+      header: "action",
+      sortValue: (r) => r.action,
+      cell: (r) => r.action,
+      edit: { kind: "select", options: RULE_ACTIONS },
+      getEditValue: (r) => r.action,
     },
     {
       id: "enabled",
@@ -276,6 +319,7 @@ export function RulesPanelV2() {
             getRowId={(r) => r.id}
             rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
             onRowClick={(r) => edit(r.id)}
+            onCellEdit={onCellEdit}
           />
         )}
 
