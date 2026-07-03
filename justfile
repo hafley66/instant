@@ -45,6 +45,10 @@ bundle:
 check:
     npx tsc --noEmit
 
+# run the frontend (vitest) unit tests
+test:
+    npx vitest run
+
 # compile-check the Rust backend
 cargo-check:
     cargo check --manifest-path src-tauri/Cargo.toml
@@ -59,5 +63,5 @@ cargo-test:
 audit:
     cd src-tauri && cargo audit
 
-# full preflight before a commit: tsc + vite build + cargo check
-verify: check build cargo-check
+# full preflight before a commit: tsc + vite build + cargo check + tests
+verify: check build cargo-check test
