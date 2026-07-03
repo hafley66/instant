@@ -12,6 +12,7 @@ import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
 import {
+  type NotifyConfig,
   type Rule,
   type RuleMatch,
   RULE_MODES,
@@ -91,6 +92,33 @@ function EnabledCell({ row, onToggle }: { row: Rule; onToggle: (id: string) => v
   );
 }
 
+// action:"notify" settings row: the ntfy publish URL (full URL incl. topic,
+// e.g. https://ntfy.sh/my-secret-topic). Read/write via notify_config_get/set;
+// empty = notify rules fire but publish nothing (Rust logs one stderr line the
+// first time that happens, rather than failing ingest).
+function NtfySettingsRow({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const on = value.trim() !== "";
+  const dirty = draft.trim() !== value.trim();
+  return (
+    <div className="act-bar rules-ntfy-row">
+      <span className="spy-title">notify</span>
+      <span className="wt-count">{on ? "→ ntfy on" : "→ ntfy off (no URL)"}</span>
+      <span className="spy-spacer" />
+      <input
+        className="rules-ntfy-input"
+        placeholder="https://ntfy.sh/my-secret-topic"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <button type="button" disabled={!dirty} onClick={() => onSave(draft.trim())}>
+        Save
+      </button>
+    </div>
+  );
+}
+
 const MATCH_COLUMNS: TreeColumn<RuleMatch & { key: string }>[] = [
   {
     id: "ts",
@@ -130,9 +158,16 @@ export function RulesPanelV2() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [feed, setFeed] = useState<RuleMatch[]>([]);
+  const [ntfyUrl, setNtfyUrl] = useState("");
 
   useEffect(() => {
     invoke<Rule[]>("rules_get").then(setRules).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    invoke<NotifyConfig>("notify_config_get")
+      .then((c) => setNtfyUrl(c.ntfy_url))
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -143,6 +178,13 @@ export function RulesPanelV2() {
       un.then((f) => f());
     };
   }, []);
+
+  // Persist the ntfy target action:"notify" rules publish to.
+  function saveNtfyUrl(value: string) {
+    invoke<NotifyConfig>("notify_config_set", { ntfyUrl: value })
+      .then((c) => setNtfyUrl(c.ntfy_url))
+      .catch((e) => showError("notify", e));
+  }
 
   // Persist and adopt the server's echoed list (the extension picks it up on its
   // next /config tick, <= 1 min). Surface failures — a swallowed rules_set
@@ -310,6 +352,7 @@ export function RulesPanelV2() {
         </button>
       </div>
       <div className="panel-scroll">
+        <NtfySettingsRow value={ntfyUrl} onSave={saveNtfyUrl} />
         {rules.length === 0 ? (
           <div className="session-empty">no rules — served at GET /config</div>
         ) : (

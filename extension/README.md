@@ -41,7 +41,7 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
   "regex": "(\\d+)% used",        // capture groups feed `captures`
   "captures": { "1": "percent" }, // group (name or 1-based index) -> field
   "schedule": { "intervalMin": 5 }, // or "passive" / omit
-  "action": "report",             // report | notify (notify == report for now)
+  "action": "report",             // report | notify (notify posts to the configured ntfy_url)
   "enabled": true
 }
 ```

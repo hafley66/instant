@@ -21,6 +21,12 @@ export interface Rule {
   enabled?: boolean;
 }
 
+// ntfy publish target (Rust NotifyConfig, notify_config_get/set commands).
+// Empty ntfy_url = action:"notify" rules are a silent no-op.
+export interface NotifyConfig {
+  ntfy_url: string;
+}
+
 // rule-match payload (Rust RuleMatch, serialized with ruleId).
 export interface RuleMatch {
   ruleId: string;
