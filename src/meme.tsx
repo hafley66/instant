@@ -189,17 +189,17 @@ function MemePanel() {
 
   const startLayersDrag = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
-    const startY = e.clientY;
-    const startH = layersRef.current?.offsetHeight ?? ui.layersHeight ?? 180;
+    // Bottom-docked panel, sash on its top edge: height = bottom - pointerY (not
+    // startH + dy), so dragging down shrinks it. Anchored to the fixed bottom edge.
+    const bottom = layersRef.current?.getBoundingClientRect().bottom ?? e.clientY + (ui.layersHeight ?? 180);
     const onMove = (ev: PointerEvent) => {
-      const h = clamp(startH + (ev.clientY - startY), 80, 400);
+      const h = clamp(bottom - ev.clientY, 80, 400);
       setUi((prev) => ({ ...prev, layersHeight: h }));
     };
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      const h = layersRef.current?.offsetHeight ?? startH;
-      saveMemeUi({ layersHeight: clamp(h, 80, 400) });
+      saveMemeUi({ layersHeight: clamp(bottom - ev.clientY, 80, 400) });
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
