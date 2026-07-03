@@ -67,3 +67,11 @@ export function deriveOutputPath(
 export async function writeMemePng(path: string, dataUrl: string): Promise<void> {
   await invoke("save_meme", { path, dataUrl });
 }
+
+// Copy a PNG data URL to the system clipboard via Rust. WKWebView blocks
+// navigator.clipboard.write() for images (NotAllowedError) regardless of
+// user gesture, so image copy has to go through a native command instead of
+// the web Clipboard API.
+export async function copyMemePng(dataUrl: string): Promise<void> {
+  await invoke("copy_meme_image", { dataUrl });
+}

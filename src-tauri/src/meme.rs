@@ -206,3 +206,57 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         .decode(input)
         .map_err(|e| e.to_string())
 }
+
+/// Copy a PNG data URL to the system clipboard as an image.
+///
+/// WKWebView (Tauri's macOS webview) rejects
+/// `navigator.clipboard.write([new ClipboardItem({"image/png": blob})])` with
+/// a `NotAllowedError` regardless of user gesture — image writes to the
+/// platform clipboard are simply not permitted from web content there.
+/// `writeText` still works from JS, but image bytes have to go through a
+/// native command instead, hence this decode-and-set-clipboard round trip.
+#[tauri::command]
+pub fn copy_meme_image(data_url: String) -> Result<(), String> {
+    let prefix = "data:image/png;base64,";
+    let b64 = data_url
+        .strip_prefix(prefix)
+        .ok_or_else(|| "expected image/png data URL".to_string())?;
+    let bytes = base64_decode(b64)?;
+    let (width, height, rgba) = decode_png_rgba(&bytes)?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width,
+            height,
+            bytes: std::borrow::Cow::from(rgba),
+        })
+        .map_err(|e| format!("clipboard write failed: {e}"))
+}
+
+/// Decode a PNG into (width, height, RGBA8 bytes) for arboard::ImageData.
+/// Canvas.toDataURL always emits 8-bit-per-channel PNGs, so only that depth
+/// is handled; anything else is a clear error rather than a garbled copy.
+fn decode_png_rgba(bytes: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+    buf.truncate(info.buffer_size());
+    if info.bit_depth != png::BitDepth::Eight {
+        return Err(format!("unsupported PNG bit depth: {:?}", info.bit_depth));
+    }
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => {
+            let mut out = Vec::with_capacity(buf.len() / 3 * 4);
+            for c in buf.chunks_exact(3) {
+                out.extend_from_slice(c);
+                out.push(255);
+            }
+            out
+        }
+        other => return Err(format!("unsupported PNG color type: {other:?}")),
+    };
+    Ok((info.width as usize, info.height as usize, rgba))
+}

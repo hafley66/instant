@@ -829,6 +829,7 @@ pub fn run() {
             ledger::latest_ai_message,
             meme::make_slack_emoji,
             meme::save_meme,
+            meme::copy_meme_image,
             favorites::fav_add,
             favorites::fav_remove,
             favorites::fav_list,

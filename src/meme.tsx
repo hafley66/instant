@@ -12,7 +12,7 @@ import { MemeLayers } from "./memeLayers";
 import type { DirListing, FsEntry } from "./state";
 import { readPluginState, savePluginState } from "./pluginState";
 import { flashStatus, getHomeDir, showError, tildify } from "./core";
-import { defaultExportPath, deriveOutputPath, writeMemePng } from "./memeExport";
+import { defaultExportPath, deriveOutputPath, writeMemePng, copyMemePng } from "./memeExport";
 
 const STORAGE_KEY = "meme:lastFolder";
 const MEME_STATE_KEY = "meme:state";
@@ -889,13 +889,11 @@ async function copyMeme() {
   const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
   try {
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/png"),
-    );
-    if (!blob) throw new Error("canvas empty");
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    const dataUrl = canvas.toDataURL("image/png");
+    await copyMemePng(dataUrl);
     setStatus("copied to clipboard");
   } catch (e) {
+    showError("meme-copy", e);
     setStatus(`copy failed: ${e}`);
   }
 }
