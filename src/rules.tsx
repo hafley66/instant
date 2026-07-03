@@ -1,12 +1,15 @@
 // Rules panel: the control center for the extension's config-driven core.
 // instant is the source of truth (rules.json, served at GET /config); this panel
 // reads/writes it via the rules_get / rules_set commands. Raw-JSON editing per
-// rule is the milestone-1 editor. A live feed tails `rule-match` events emitted
-// by the ingest server so you can see rules firing as you browse.
+// rule is the milestone-1 editor, selected via the grid. A live feed tails
+// `rule-match` events emitted by the ingest server so you can see rules firing
+// as you browse. Both lists are flat one-level TreeTables (AGENTS.md: no
+// bespoke row markup — reuse the grid stack).
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { registerPlugin } from "./plugin";
+import { TreeTable, type TreeColumn } from "./treetable";
 
 type RuleMode = "textnodes" | "selector" | "netcapture";
 
@@ -46,8 +49,102 @@ function template(n: number): Rule {
   };
 }
 
+function scheduleLabel(s: Rule["schedule"]): string {
+  if (s == null) return "";
+  if (s === "passive") return "passive";
+  return `${s.intervalMin}m`;
+}
+
+function matchFields(fields: Record<string, string>): string {
+  return Object.entries(fields)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" · ");
+}
+
+// Trailing actions: edit (selects the rule for the JSON editor below) + delete.
+function RuleActionsCell({
+  row,
+  onEdit,
+  onDelete,
+}: {
+  row: Rule;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <span className="wt-actions">
+      <button
+        className="wt-act"
+        title="edit raw JSON"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit(row.id);
+        }}
+      >
+        edit
+      </button>
+      <button
+        className="wt-act"
+        title="delete rule"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(row.id);
+        }}
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+function EnabledCell({ row, onToggle }: { row: Rule; onToggle: (id: string) => void }) {
+  return (
+    <input
+      type="checkbox"
+      checked={row.enabled !== false}
+      title="enabled"
+      onClick={(e) => e.stopPropagation()}
+      onChange={() => onToggle(row.id)}
+    />
+  );
+}
+
+const MATCH_COLUMNS: TreeColumn<RuleMatch & { key: string }>[] = [
+  {
+    id: "ts",
+    header: "time",
+    sortValue: (m) => m.ts,
+    cell: (m) => new Date(m.ts).toLocaleTimeString(),
+  },
+  { id: "ruleId", header: "rule", sortValue: (m) => m.ruleId, cell: (m) => m.ruleId },
+  {
+    id: "url",
+    header: "url",
+    sortValue: (m) => m.url,
+    cell: (m) => (
+      <span className="rm-url" title={m.url}>
+        {m.url}
+      </span>
+    ),
+  },
+  {
+    id: "matches",
+    header: "matches",
+    cell: (m) => (
+      <span className="rm-fields">
+        {m.matches.map((fields, j) => (
+          <span className="rm-rec" key={j}>
+            {matchFields(fields)}
+          </span>
+        ))}
+      </span>
+    ),
+  },
+];
+
 export function RulesPanelV2() {
   const [rules, setRules] = useState<Rule[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [feed, setFeed] = useState<RuleMatch[]>([]);
@@ -82,13 +179,26 @@ export function RulesPanelV2() {
       const { [id]: _drop, ...rest } = d;
       return rest;
     });
+    setSelected((s) => (s === id ? null : s));
   }
   function add() {
     save([...rules, template(rules.length + 1)]);
   }
+  function edit(id: string) {
+    setSelected(id);
+  }
+  function cancelEdit() {
+    if (selected) {
+      setDrafts((d) => {
+        const { [selected]: _drop, ...rest } = d;
+        return rest;
+      });
+    }
+    setSelected(null);
+  }
 
-  // Raw-JSON edit for one rule. Parse on Apply; a bad body shows inline and
-  // leaves the stored rule untouched.
+  // Raw-JSON edit for the selected rule. Parse on Apply; a bad body shows
+  // inline and leaves the stored rule untouched.
   function applyDraft(id: string) {
     const body = drafts[id];
     if (body == null) return;
@@ -110,6 +220,42 @@ export function RulesPanelV2() {
     });
   }
 
+  const RULES_COLUMNS: TreeColumn<Rule>[] = [
+    { id: "id", header: "id", sortValue: (r) => r.id, cell: (r) => r.id },
+    {
+      id: "host",
+      header: "host",
+      sortValue: (r) => r.host,
+      cell: (r) => (
+        <span className="rule-host" title={r.host}>
+          {r.host}
+        </span>
+      ),
+    },
+    { id: "mode", header: "mode", sortValue: (r) => r.mode, cell: (r) => r.mode },
+    {
+      id: "schedule",
+      header: "schedule",
+      sortValue: (r) => scheduleLabel(r.schedule),
+      cell: (r) => scheduleLabel(r.schedule),
+    },
+    {
+      id: "enabled",
+      header: "on",
+      noRowClick: true,
+      cell: (r) => <EnabledCell row={r} onToggle={toggle} />,
+    },
+    {
+      id: "actions",
+      header: "",
+      noRowClick: true,
+      cell: (r) => <RuleActionsCell row={r} onEdit={edit} onDelete={remove} />,
+    },
+  ];
+
+  const selectedRule = selected ? rules.find((r) => r.id === selected) : undefined;
+  const draft = selectedRule ? (drafts[selectedRule.id] ?? JSON.stringify(selectedRule, null, 2)) : "";
+
   return (
     <div className="v2-panel rules-panel">
       <div className="act-bar">
@@ -124,57 +270,38 @@ export function RulesPanelV2() {
         {rules.length === 0 ? (
           <div className="session-empty">no rules — served at GET /config</div>
         ) : (
-          rules.map((r) => {
-            const draft = drafts[r.id] ?? JSON.stringify(r, null, 2);
-            const editing = drafts[r.id] != null;
-            return (
-              <div className="rule-row" key={r.id}>
-                <div className="rule-head">
-                  <input
-                    type="checkbox"
-                    checked={r.enabled !== false}
-                    onChange={() => toggle(r.id)}
-                    title="enabled"
-                  />
-                  <span className="rule-id">{r.id}</span>
-                  <span className="rule-mode">{r.mode}</span>
-                  <span className="rule-host" title={r.host}>
-                    {r.host}
-                  </span>
-                  <span className="spy-spacer" />
-                  <button type="button" onClick={() => remove(r.id)} title="delete">
-                    ✕
-                  </button>
-                </div>
-                <textarea
-                  className="rule-json"
-                  spellCheck={false}
-                  value={draft}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [r.id]: e.target.value }))}
-                />
-                {errors[r.id] ? <div className="rule-error">{errors[r.id]}</div> : null}
-                {editing ? (
-                  <div className="rule-actions">
-                    <button type="button" onClick={() => applyDraft(r.id)}>
-                      Apply
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDrafts((d) => {
-                          const { [r.id]: _drop, ...rest } = d;
-                          return rest;
-                        })
-                      }
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })
+          <TreeTable<Rule>
+            columns={RULES_COLUMNS}
+            data={rules}
+            getRowId={(r) => r.id}
+            rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
+            onRowClick={(r) => edit(r.id)}
+          />
         )}
+
+        {selectedRule ? (
+          <div className="rule-editor">
+            <textarea
+              className="rule-json"
+              spellCheck={false}
+              value={draft}
+              onChange={(e) =>
+                setDrafts((d) => ({ ...d, [selectedRule.id]: e.target.value }))
+              }
+            />
+            {errors[selectedRule.id] ? (
+              <div className="rule-error">{errors[selectedRule.id]}</div>
+            ) : null}
+            <div className="rule-actions">
+              <button type="button" onClick={() => applyDraft(selectedRule.id)}>
+                Apply
+              </button>
+              <button type="button" onClick={cancelEdit}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="act-bar rules-feed-head">
           <span className="spy-title">matches</span>
@@ -189,25 +316,13 @@ export function RulesPanelV2() {
         {feed.length === 0 ? (
           <div className="session-empty">no matches yet</div>
         ) : (
-          feed.map((m, i) => (
-            <div className="rule-match" key={`${m.ts}-${i}`}>
-              <div className="rm-head">
-                <span className="rm-id">{m.ruleId}</span>
-                <span className="rm-url" title={m.url}>
-                  {m.url}
-                </span>
-              </div>
-              <div className="rm-fields">
-                {m.matches.map((fields, j) => (
-                  <span className="rm-rec" key={j}>
-                    {Object.entries(fields)
-                      .map(([k, v]) => `${k}=${v}`)
-                      .join(" · ")}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))
+          <TreeTable<RuleMatch & { key: string }>
+            columns={MATCH_COLUMNS}
+            data={feed.map((m, i) => ({ ...m, key: `${m.ts}-${i}` }))}
+            getRowId={(m) => m.key}
+            defaultSorting={[{ id: "ts", desc: true }]}
+            rowTitle={(m) => m.url}
+          />
         )}
       </div>
     </div>
