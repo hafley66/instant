@@ -588,6 +588,11 @@ fn screenshot() -> Result<String, String> {
 pub fn run() {
     // Cmd+Alt+Space
     let summon = Shortcut::new(Some(Modifiers::SUPER | Modifiers::ALT), Code::Space);
+    // Opt out of the process-wide singletons (tray icon, global Cmd+Alt+Space
+    // shortcut, and the double-right-click/double-right-⌘ summon gesture's
+    // CGEventTap) so a second instance — launched for dev/verification — doesn't
+    // fight the owner's always-running one over the same OS-level resources.
+    let no_globals = std::env::var("INSTANT_NO_GLOBALS").is_ok();
 
     tauri::Builder::default()
         .manage(pty::PtyStore::default())
@@ -607,7 +612,9 @@ pub fn run() {
         )
         .setup(move |app| {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
-            app.global_shortcut().register(summon)?;
+            if !no_globals {
+                app.global_shortcut().register(summon)?;
+            }
 
             // Capture flag, shared with the tap thread. Default OFF; the front
             // re-enables it on boot if the user had recording on.
@@ -615,7 +622,15 @@ pub fn run() {
             app.manage(activity::CaptureEnabled(enabled.clone()));
             let tap_active = Arc::new(AtomicBool::new(false));
             app.manage(capture::TapActive(tap_active.clone()));
-            spawn_input_taps(app.handle().clone(), enabled, tap_active);
+            if no_globals {
+                eprintln!(
+                    "INSTANT_NO_GLOBALS set: skipping tray icon, global shortcut, and \
+                     the double-click/double-cmd summon gesture (so this instance doesn't \
+                     fight the owner's live one) — showing the main window on launch instead"
+                );
+            } else {
+                spawn_input_taps(app.handle().clone(), enabled, tap_active);
+            }
 
             // Track focus on our own window so the capture worker can skip
             // gestures made inside instant (clicking rows/chips shouldn't record).
@@ -681,6 +696,16 @@ pub fn run() {
 
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            if no_globals {
+                // No tray, no shortcut, no summon gesture to show the window with —
+                // so show it directly instead of leaving the instance unreachable.
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+                return Ok(());
+            }
 
             let toggle_i = MenuItem::with_id(app, "toggle", "Summon / Hide", true, None::<&str>)?;
             let record_i =

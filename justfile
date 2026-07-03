@@ -17,6 +17,13 @@ default:
 dev:
     CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
 
+# same as `dev`, but with INSTANT_NO_GLOBALS=1: skips the tray icon, the global
+# Cmd+Alt+Space shortcut, and the double-click/double-cmd summon gesture, so
+# this instance doesn't fight the owner's always-running one. Use this for
+# agent/verification runs.
+dev-safe:
+    INSTANT_NO_GLOBALS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
+
 # one-time: install the Tauri CLI machine-global (~/.cargo/bin, on PATH across
 # all checkouts and nvm node versions) so any repo can run `cargo tauri …` /
 # `tauri …` without the per-checkout node_modules devDep.
