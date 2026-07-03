@@ -155,17 +155,40 @@ export function logLine(line: string): void {
 
 // Surface any boot/runtime error as a visible banner — the webview console
 // isn't reachable from the terminal, so this is how errors get seen.
+// Dismissable (× button or Escape); every occurrence still lands in the
+// on-disk log via logLine regardless of whether the banner is up.
+function onBannerEscape(e: KeyboardEvent) {
+  if (e.key === "Escape") hideError();
+}
+
+export function hideError() {
+  document.getElementById("boot-error")?.remove();
+  window.removeEventListener("keydown", onBannerEscape, true);
+}
+
 export function showError(label: string, err: unknown) {
   const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
   logLine(`[${label}] ${msg}`);
   let el = document.getElementById("boot-error");
   if (!el) {
-    el = document.createElement("pre");
+    el = document.createElement("div");
     el.id = "boot-error";
     el.style.cssText =
-      "position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;max-height:40%;overflow:auto;margin:0;padding:8px;background:#a00;color:#fff;font:11px/1.4 Menlo,monospace;white-space:pre-wrap;border:2px solid #fff;";
+      "position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;max-height:40%;display:flex;gap:8px;padding:8px;background:#a00;color:#fff;font:11px/1.4 Menlo,monospace;border:2px solid #fff;";
+    const pre = document.createElement("pre");
+    pre.style.cssText = "flex:1;margin:0;overflow:auto;white-space:pre-wrap;font:inherit;";
+    const close = document.createElement("button");
+    close.textContent = "×";
+    close.title = "dismiss (Esc)";
+    close.style.cssText =
+      "align-self:flex-start;background:none;border:1px solid #fff;color:#fff;font:inherit;cursor:pointer;padding:0 6px;";
+    close.addEventListener("click", hideError);
+    el.append(pre, close);
     document.body.appendChild(el);
+    // Capture phase so Escape dismisses even when focus sits in a terminal or
+    // form field whose own handler stops propagation.
+    window.addEventListener("keydown", onBannerEscape, true);
   }
-  el.textContent = `[${label}] ${msg}`;
+  el.querySelector("pre")!.textContent = `[${label}] ${msg}`;
   console.error(label, err);
 }
