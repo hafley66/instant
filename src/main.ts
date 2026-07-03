@@ -63,7 +63,6 @@ import {
 } from "./worktrees";
 import {
   favoriteCurrentTurn,
-  registerFavoritesBridge,
   refreshFavorites,
   updateFavBadge,
 } from "./favorites";
@@ -208,7 +207,6 @@ async function main() {
   registerMeme();
   registerV2Bridges();
   registerActivityBridge();
-  registerFavoritesBridge();
   refreshFavorites();
   injectPanelHtml();
   buildActivityRail();
