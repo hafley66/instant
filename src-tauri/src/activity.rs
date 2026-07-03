@@ -13,8 +13,9 @@
 // no native-messaging host). The server runs on its own thread and reaches the
 // shared connection through managed state.
 
+use std::collections::HashMap;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -59,6 +60,78 @@ struct Ingest {
     title: String,
     #[serde(default)]
     text: String,
+}
+
+// A config-driven extraction rule. instant is the source of truth: the
+// extension fetches these from GET /config and reports matches back. The shape
+// is stored verbatim (rules.json) and served verbatim; the extension interprets
+// mode/schedule, so Rust keeps `schedule` as opaque JSON rather than modeling it.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Rule {
+    pub id: String,
+    pub host: String, // regex, tested against location.host
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub mode: String, // "textnodes" | "selector" | "netcapture"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regex: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub captures: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub schedule: serde_json::Value, // {intervalMin} | "passive" | null
+    #[serde(default = "default_action")]
+    pub action: String, // "report" | "notify"
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_action() -> String {
+    "report".into()
+}
+fn default_true() -> bool {
+    true
+}
+
+/// Process-lifetime rule set, mirrored to rules.json under the app data dir.
+/// The ingest server reads it to serve /config; the commands below edit it.
+pub struct RulesState {
+    pub rules: Mutex<Vec<Rule>>,
+    pub path: PathBuf,
+}
+
+/// Read rules.json, writing an empty list if absent. A parse error yields an
+/// empty list (the extension then falls back to its chrome.storage cache).
+pub fn read_rules(path: &Path) -> Vec<Rule> {
+    if !path.exists() {
+        let _ = std::fs::write(path, "[]");
+        return Vec::new();
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<Rule>>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_rules(path: &Path, rules: &[Rule]) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(rules).unwrap_or_else(|_| "[]".into());
+    std::fs::write(path, json)
+}
+
+// One rule hit reported by the extension: {type:"rulematch", ruleId, url, ts,
+// matches:[{field: value}]}. Stored as a source='browser' kind='rulematch' row
+// (text = JSON of matches) and emitted on `rule-match` for the Rules panel feed.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct RuleMatch {
+    #[serde(rename = "ruleId")]
+    pub rule_id: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub ts: i64,
+    #[serde(default)]
+    pub matches: Vec<HashMap<String, String>>,
 }
 
 pub fn now_ms() -> i64 {
@@ -164,7 +237,7 @@ fn header(name: &[u8], value: &[u8]) -> Header {
 // Permissive CORS so the extension's background fetch() succeeds.
 fn with_cors<R: Read>(resp: Response<R>) -> Response<R> {
     resp.with_header(header(b"Access-Control-Allow-Origin", b"*"))
-        .with_header(header(b"Access-Control-Allow-Methods", b"POST, OPTIONS"))
+        .with_header(header(b"Access-Control-Allow-Methods", b"GET, POST, OPTIONS"))
         .with_header(header(b"Access-Control-Allow-Headers", b"Content-Type"))
 }
 
@@ -188,9 +261,60 @@ pub fn spawn_server(app: AppHandle) {
                 (Method::Options, _) => {
                     let _ = req.respond(with_cors(Response::empty(204)));
                 }
+                // Rules the extension fetches each tick; instant is the source of
+                // truth. `{ "rules": [...] }` (matches the extension's ServerConfig).
+                (Method::Get, "/config") => {
+                    let rules = app.state::<RulesState>();
+                    let list = rules.rules.lock().unwrap();
+                    let body = serde_json::json!({ "rules": &*list }).to_string();
+                    let resp = Response::from_string(body).with_header(header(
+                        b"Content-Type",
+                        b"application/json",
+                    ));
+                    let _ = req.respond(with_cors(resp));
+                }
                 (Method::Post, "/ingest") => {
                     let mut body = String::new();
                     let _ = req.as_reader().read_to_string(&mut body);
+                    // Two event families share /ingest: rule matches carry
+                    // type:"rulematch"; everything else is an activity-spy event.
+                    let is_match = serde_json::from_str::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s == "rulematch"))
+                        .unwrap_or(false);
+                    if is_match {
+                        match serde_json::from_str::<RuleMatch>(&body) {
+                            Ok(m) => {
+                                let cfg = app.state::<crate::config::ConfigState>();
+                                if cfg.config.lock().unwrap().site_excluded(&m.url) {
+                                    crate::config::note_excluded(&cfg);
+                                    respond(req, 200, "filtered");
+                                    continue;
+                                }
+                                let text = serde_json::to_string(&m.matches).unwrap_or_default();
+                                let db = app.state::<ActivityDb>();
+                                let row = {
+                                    let conn = db.0.lock().unwrap();
+                                    insert_row(
+                                        &conn, now_ms(), "browser", "rulematch", "", &m.url,
+                                        &m.rule_id, &text, "",
+                                    )
+                                };
+                                match row {
+                                    Ok(event) => {
+                                        // The unified timeline row + a dedicated
+                                        // event for the Rules panel's live feed.
+                                        let _ = app.emit("activity-added", &event);
+                                        let _ = app.emit("rule-match", &m);
+                                        respond(req, 200, "ok");
+                                    }
+                                    Err(e) => respond(req, 500, &e.to_string()),
+                                }
+                            }
+                            Err(_) => respond(req, 400, "bad json"),
+                        }
+                        continue;
+                    }
                     match serde_json::from_str::<Ingest>(&body) {
                         Ok(ev) => {
                             // Observation filter: drop excluded sites before recording.
@@ -326,6 +450,21 @@ pub fn activity_log(
     .map_err(|e| e.to_string())?;
     let _ = app.emit("activity-added", &row);
     Ok(())
+}
+
+/// The rule set the front end edits (Rules panel) and the extension fetches.
+#[tauri::command]
+pub fn rules_get(state: State<RulesState>) -> Vec<Rule> {
+    state.rules.lock().unwrap().clone()
+}
+
+/// Replace the rule set, persist to rules.json, return the stored list. The
+/// extension picks the change up on its next /config tick (<= 1 min).
+#[tauri::command]
+pub fn rules_set(state: State<RulesState>, rules: Vec<Rule>) -> Result<Vec<Rule>, String> {
+    write_rules(&state.path, &rules).map_err(|e| e.to_string())?;
+    *state.rules.lock().unwrap() = rules.clone();
+    Ok(rules)
 }
 
 #[tauri::command]

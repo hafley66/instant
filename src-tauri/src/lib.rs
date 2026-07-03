@@ -666,6 +666,15 @@ pub fn run() {
                 excluded_count: std::sync::atomic::AtomicU64::new(0),
             });
 
+            // Config-driven extension rules (rules.json, created empty if absent).
+            // Served at GET /config; edited via the Rules panel.
+            let rules_path = data_dir.join("rules.json");
+            let rules = activity::read_rules(&rules_path);
+            app.manage(activity::RulesState {
+                rules: Mutex::new(rules),
+                path: rules_path,
+            });
+
             activity::spawn_server(app.handle().clone());
             pty::reap_orphan_graphics(); // clean awrit orphans from a prior crash/restart
             cdp::reap_orphans(); // clean headless-Chrome orphans from a prior SIGTERM
@@ -775,6 +784,8 @@ pub fn run() {
             activity::activity_log,
             activity::capture_set_enabled,
             activity::capture_enabled,
+            activity::rules_get,
+            activity::rules_set,
             capture::capture_permissions,
             capture::capture_request_screen,
             config::config_get,

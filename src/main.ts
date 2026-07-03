@@ -58,6 +58,7 @@ import {
   type FavTreeRow,
 } from "./tablepanels";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
+import { registerRulesPlugin } from "./rules";
 import { registerMeme, handleMemeDrop } from "./meme";
 import { isFilePickerOpen } from "./overlayGuard";
 import { renderTable, type SortState } from "./table";
@@ -5237,6 +5238,7 @@ async function main() {
 
   applyZoom(); // restore persisted webview zoom
   registerBuiltin();
+  registerRulesPlugin();
   registerSprefa();
   registerNav();
   registerMeme();
