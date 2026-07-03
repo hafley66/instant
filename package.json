@@ -29,6 +29,7 @@
     "marked": "^18.0.5",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-resizable-panels": "^3.0.6",
     "shiki": "^4.2.0",
     "tinykeys": "^4.0.0",
     "xp.css": "^0.2.6"

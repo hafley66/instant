@@ -3034,15 +3034,14 @@ body.xp-pixel .xterm canvas {
   flex-wrap: wrap;
 }
 
-#meme-workspace {
+/* Layout root for the react-resizable-panels split (see AGENTS.md "Split
+   panes" and src/memeSplit.tsx). PanelGroup fills this via its own
+   display:flex/height:100%/width:100%, so this wrapper only needs to claim
+   the remaining vertical space in .meme-panel's flex column. */
+.meme-split-root {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: 100%;
   display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 0;
-  padding: 0;
   overflow: hidden;
 }
 
@@ -3054,12 +3053,10 @@ body.xp-pixel .xterm canvas {
   height: 100%;
 }
 
-#meme-workspace .meme-thumbs {
-  flex: 0 0 auto;
-  align-self: stretch;
-  width: var(--meme-sidebar-width, 180px);
-  height: 100%;
-  max-height: 100%;
+/* .meme-thumbs-panel is the sidebar Panel element itself (react-resizable-panels
+   applies className directly, no wrapper div); its width comes from the
+   Panel's own flex-grow, driven by the PanelGroup layout. */
+.meme-thumbs-panel {
   box-sizing: border-box;
   border: var(--frame-w) solid var(--frame);
   border-top: none;
@@ -3068,17 +3065,23 @@ body.xp-pixel .xterm canvas {
   background: var(--panel-bg);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   padding: 4px;
   user-select: none;
   -webkit-user-select: none;
 }
-#meme-workspace .meme-thumbs .dtable-row td {
+.meme-thumbs-panel .meme-thumbs {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.meme-thumbs-panel .dtable-row td {
   user-select: none;
   -webkit-user-select: none;
 }
-#meme-workspace .meme-thumbs .tt-host,
-#meme-workspace .meme-thumbs .tt-wrap {
+.meme-thumbs-panel .tt-host,
+.meme-thumbs-panel .tt-wrap {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -3095,14 +3098,28 @@ body.xp-pixel .xterm canvas {
   background: var(--row-active-bg);
   color: var(--row-active-fg);
 }
+/* .meme-stage-panel is the stage Panel element itself; .meme-stage is the
+   plain div rendered inside it and needs to be a flex item to grow into the
+   Panel's flex-computed height. */
+.meme-stage-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
 .meme-stage {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   overflow: hidden;
   padding: 8px;
 }
+/* PanelResizeHandle: react-resizable-panels sets state via
+   data-resize-handle-state ("inactive" | "hover" | "drag"), which drives the
+   hover/active affordance here alongside the plain :hover fallback. */
 .meme-sash {
   flex: none;
   display: flex;
@@ -3111,7 +3128,9 @@ body.xp-pixel .xterm canvas {
   background: transparent;
   transition: background 0.1s;
 }
-.meme-sash:hover {
+.meme-sash:hover,
+.meme-sash[data-resize-handle-state="hover"],
+.meme-sash[data-resize-handle-state="drag"] {
   background: var(--row-active-bg);
 }
 .meme-sash::after {
@@ -3119,6 +3138,9 @@ body.xp-pixel .xterm canvas {
   background: var(--frame);
   border-radius: 1px;
   opacity: 0.7;
+}
+.meme-sash[data-resize-handle-state="drag"]::after {
+  opacity: 1;
 }
 .meme-sash-vertical {
   width: 8px;
@@ -3137,8 +3159,7 @@ body.xp-pixel .xterm canvas {
   height: 2px;
 }
 #meme-layers {
-  flex: none;
-  height: var(--meme-layers-height, 180px);
+  height: 100%;
   min-height: 0;
   border-top: var(--frame-w) solid var(--frame);
   background: var(--panel-bg);
@@ -3211,14 +3232,6 @@ body.xp-pixel .xterm canvas {
 
 .meme-thumb-name {
   pointer-events: none;
-}
-
-.meme-stage {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  overflow: hidden;
 }
 
 .meme-canvas-wrap {

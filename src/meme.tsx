@@ -9,6 +9,7 @@ import { registerPlugin } from "./plugin";
 import { setFilePickerOpen } from "./overlayGuard";
 import { MemeTree } from "./memeTree";
 import { MemeLayers } from "./memeLayers";
+import { MemeSplit, type MemeSplitUi } from "./memeSplit";
 import type { DirListing, FsEntry } from "./state";
 import { readPluginState, savePluginState } from "./pluginState";
 import { flashStatus, getHomeDir, showError, tildify } from "./core";
@@ -144,10 +145,11 @@ export function registerMeme() {
   });
 }
 
-interface MemeUi {
-  sidebarWidth?: number;
-  layersHeight?: number;
-}
+// Legacy sidebarWidth/layersHeight (px, from the old hand-rolled sashes) plus
+// the outerLayout/innerLayout percentages persisted by MemeSplit's onLayout
+// callbacks. See src/memeSplit.tsx and src/memeSplitLayout.ts for the split
+// itself and the one-time px -> percentage migration.
+type MemeUi = MemeSplitUi;
 
 function readMemeUi(): MemeUi {
   return readPluginState<MemeUi>(PLUGIN_ID, {});
@@ -158,52 +160,18 @@ function saveMemeUi(patch: Partial<MemeUi>) {
 }
 
 function MemePanel() {
-  const workspaceRef = useRef<HTMLDivElement>(null);
   const thumbsRef = useRef<HTMLDivElement>(null);
   const layersRef = useRef<HTMLDivElement>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
-  const [ui, setUi] = useState<MemeUi>(() => readMemeUi());
+  const [initialUi] = useState<MemeUi>(() => readMemeUi());
 
   useEffect(() => {
     const cleanup = wireMemePanel();
     return cleanup;
   }, []);
 
-  const startSidebarDrag = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = thumbsRef.current?.offsetWidth ?? ui.sidebarWidth ?? 180;
-    const onMove = (ev: PointerEvent) => {
-      const w = clamp(startW + (ev.clientX - startX), 120, 400);
-      setUi((prev) => ({ ...prev, sidebarWidth: w }));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      const w = thumbsRef.current?.offsetWidth ?? startW;
-      saveMemeUi({ sidebarWidth: clamp(w, 120, 400) });
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  }, [ui.sidebarWidth]);
-
-  const startLayersDrag = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    // Bottom-docked panel, sash on its top edge: height = bottom - pointerY (not
-    // startH + dy), so dragging down shrinks it. Anchored to the fixed bottom edge.
-    const bottom = layersRef.current?.getBoundingClientRect().bottom ?? e.clientY + (ui.layersHeight ?? 180);
-    const onMove = (ev: PointerEvent) => {
-      const h = clamp(bottom - ev.clientY, 80, 400);
-      setUi((prev) => ({ ...prev, layersHeight: h }));
-    };
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      saveMemeUi({ layersHeight: clamp(bottom - ev.clientY, 80, 400) });
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  }, [ui.layersHeight]);
+  const onOuterLayout = useCallback((layout: number[]) => saveMemeUi({ outerLayout: layout }), []);
+  const onInnerLayout = useCallback((layout: number[]) => saveMemeUi({ innerLayout: layout }), []);
 
   return (
     <div className="panel meme-panel" style={{ overflow: "hidden" }}>
@@ -231,37 +199,22 @@ function MemePanel() {
         <input id="meme-folder-input" type="file" {...{ webkitdirectory: true }} multiple hidden />
         <span className="meme-hint">drop a folder or image here</span>
       </form>
-      <div
-        id="meme-workspace"
-        ref={workspaceRef}
-        className="meme-workspace"
-        style={{ "--meme-sidebar-width": `${ui.sidebarWidth ?? 180}px` } as React.CSSProperties}
-      >
-        <div id="meme-thumbs" ref={thumbsRef} className="meme-thumbs panel-scroll"></div>
-        <div
-          className="meme-sash meme-sash-vertical"
-          title="drag to resize"
-          onPointerDown={startSidebarDrag}
-        ></div>
-        <div className="meme-stage">
-        <div id="meme-canvas-wrap" ref={canvasWrapRef} className="meme-canvas-wrap">
-          <canvas id="meme-canvas"></canvas>
-          <canvas id="meme-overlay"></canvas>
-        </div>
-          <div className="meme-hint">drag text to move · click a layer below to edit</div>
-        </div>
-      </div>
-      <div
-        className="meme-sash meme-sash-horizontal"
-        title="drag to resize"
-        onPointerDown={startLayersDrag}
-      ></div>
-      <div
-        id="meme-layers"
-        ref={layersRef}
-        className="meme-layers"
-        style={{ "--meme-layers-height": `${ui.layersHeight ?? 180}px` } as React.CSSProperties}
-      ></div>
+      <MemeSplit
+        initialUi={initialUi}
+        onOuterLayout={onOuterLayout}
+        onInnerLayout={onInnerLayout}
+        sidebar={<div id="meme-thumbs" ref={thumbsRef} className="meme-thumbs panel-scroll"></div>}
+        stage={
+          <div className="meme-stage">
+            <div id="meme-canvas-wrap" ref={canvasWrapRef} className="meme-canvas-wrap">
+              <canvas id="meme-canvas"></canvas>
+              <canvas id="meme-overlay"></canvas>
+            </div>
+            <div className="meme-hint">drag text to move · click a layer below to edit</div>
+          </div>
+        }
+        layersPanel={<div id="meme-layers" ref={layersRef} className="meme-layers"></div>}
+      />
       <dialog id="meme-save-dialog" className="meme-dialog">
         <form method="dialog">
           <div className="meme-dialog-title">Save meme</div>
