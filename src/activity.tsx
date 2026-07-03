@@ -11,8 +11,10 @@ import {
 } from "./state";
 import { setActivityPanel, type ActRow } from "./tablepanels";
 import { fuzzyFilter } from "./fuzzy";
-import { configOptions } from "./plugin";
-import { escapeHtml, fmtTime } from "./core";
+import { configOptions, type ConfigOption } from "./plugin";
+import { fmtTime } from "./core";
+import { useEffect } from "react";
+import { useApp } from "./useStore";
 import { openPreviewPanel } from "./preview";
 import { pasteToActive } from "./terminal";
 import { toggleRecording } from "./capture";
@@ -162,6 +164,17 @@ export async function refreshConfig() {
   }
 }
 
+// The panel's "Reload" button: forces a fresh re-read from disk (config_reload),
+// distinct from refreshConfig's config_get (cached view, used for the initial
+// mount fetch). Mirrors the wireChrome() handler this replaced.
+async function reloadConfig() {
+  try {
+    store.set({ config: await invoke<ConfigView>("config_reload") });
+  } catch (e) {
+    console.error("config_reload:", e);
+  }
+}
+
 // Persist a full set of rule lists and refresh the view from the backend.
 async function applyConfig(sites: string[], files: string[], apps: string[]) {
   try {
@@ -177,140 +190,149 @@ async function applyConfig(sites: string[], files: string[], apps: string[]) {
 }
 
 // Options section for the Config panel: every config toggle declared by a
-// plugin (see plugin.tsx configOptions). Returns null when none are declared.
-// Reuses .cfg-group chrome so it sits with the rest.
-function optionsGroup(): HTMLElement | null {
+// plugin (see plugin.tsx configOptions). Renders nothing when none are
+// declared. Reuses .cfg-group chrome so it sits with the rest.
+function OptionsGroup() {
   const opts = configOptions();
   if (!opts.length) return null;
-  const sec = document.createElement("div");
-  sec.className = "cfg-group";
-  const h = document.createElement("div");
-  h.className = "cfg-group-head";
-  h.innerHTML = `<b>Options</b> <span class="muted">appearance &amp; behavior</span>`;
-  sec.appendChild(h);
+  return (
+    <div className="cfg-group">
+      <div className="cfg-group-head">
+        <b>Options</b> <span className="muted">appearance &amp; behavior</span>
+      </div>
+      {opts.map((o) => (
+        <OptionToggle key={o.id} option={o} />
+      ))}
+    </div>
+  );
+}
 
-  // xp.css draws its pixel checkbox only for the `input + label[for]` sibling
-  // pattern (it sets the raw input to opacity:0/position:fixed). So emit that
-  // exact structure, not a wrapping label, or the box never renders.
-  for (const o of opts) {
-    const row = document.createElement("div");
-    row.className = "cfg-toggle";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.id = `cfgopt-${o.id}`;
-    cb.checked = o.get();
-    cb.addEventListener("change", () => o.set(cb.checked));
-    const lab = document.createElement("label");
-    lab.htmlFor = cb.id;
-    lab.innerHTML = `${escapeHtml(o.label)} <span class="muted">${escapeHtml(o.hint ?? "")}</span>`;
-    row.append(cb, lab);
-    sec.appendChild(row);
-  }
-  return sec;
+// xp.css draws its pixel checkbox only for the `input + label[for]` sibling
+// pattern (it sets the raw input to opacity:0/position:fixed). So emit that
+// exact structure, not a wrapping label, or the box never renders.
+function OptionToggle({ option }: { option: ConfigOption }) {
+  const id = `cfgopt-${option.id}`;
+  return (
+    <div className="cfg-toggle">
+      <input
+        type="checkbox"
+        id={id}
+        checked={option.get()}
+        onChange={(e) => option.set(e.currentTarget.checked)}
+      />
+      <label htmlFor={id}>
+        {option.label} <span className="muted">{option.hint ?? ""}</span>
+      </label>
+    </div>
+  );
 }
 
 // One editable rule group: removable chips + an add input. onChange gets the
 // full next list for this group.
-function cfgGroup(
-  title: string,
-  hint: string,
-  items: string[],
-  onChange: (next: string[]) => void,
-): HTMLElement {
-  const sec = document.createElement("div");
-  sec.className = "cfg-group";
-  const h = document.createElement("div");
-  h.className = "cfg-group-head";
-  h.innerHTML = `<b>${title}</b> <span class="muted">${hint}</span>`;
-  sec.appendChild(h);
-
-  const list = document.createElement("div");
-  list.className = "cfg-chips";
-  items.forEach((pat, i) => {
-    const chip = document.createElement("span");
-    chip.className = "cfg-chip";
-    chip.textContent = pat;
-    const x = document.createElement("span");
-    x.className = "cfg-x";
-    x.textContent = "×";
-    x.onclick = () => onChange(items.filter((_, j) => j !== i));
-    chip.appendChild(x);
-    list.appendChild(chip);
-  });
-  sec.appendChild(list);
-
-  const form = document.createElement("form");
-  form.className = "cfg-add";
-  const input = document.createElement("input");
-  input.placeholder = "add pattern…";
-  input.autocomplete = "off";
-  const add = document.createElement("button");
-  add.type = "submit";
-  add.textContent = "+";
-  form.appendChild(input);
-  form.appendChild(add);
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    const v = input.value.trim();
-    if (v && !items.includes(v)) onChange([...items, v]);
-    input.value = "";
-  };
-  sec.appendChild(form);
-  return sec;
+function CfgGroup({
+  title,
+  hint,
+  items,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  items: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <div className="cfg-group">
+      <div className="cfg-group-head">
+        <b>{title}</b> <span className="muted">{hint}</span>
+      </div>
+      <div className="cfg-chips">
+        {items.map((pat, i) => (
+          <span className="cfg-chip" key={pat}>
+            {pat}
+            <span className="cfg-x" onClick={() => onChange(items.filter((_, j) => j !== i))}>
+              ×
+            </span>
+          </span>
+        ))}
+      </div>
+      <form
+        className="cfg-add"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const input = e.currentTarget.elements.namedItem("pattern") as HTMLInputElement;
+          const v = input.value.trim();
+          if (v && !items.includes(v)) onChange([...items, v]);
+          input.value = "";
+        }}
+      >
+        <input name="pattern" placeholder="add pattern…" autoComplete="off" />
+        <button type="submit">+</button>
+      </form>
+    </div>
+  );
 }
 
-export function renderConfigPanel() {
-  const meta = document.querySelector<HTMLElement>("#config-meta");
-  const body = document.querySelector<HTMLElement>("#config-body");
-  if (!meta || !body) return; // panel detached; a later show re-renders
+export function ConfigPanelV2() {
+  useApp();
   const cfg = store.get().config;
-  if (!cfg) {
-    meta.textContent = "";
-    body.innerHTML = `<div class="empty-help">loading…</div>`;
-    return;
-  }
-  meta.textContent =
-    `${cfg.source}` + (cfg.excluded_count ? ` · ${cfg.excluded_count} blocked` : "");
-  body.innerHTML = "";
+  useEffect(() => {
+    if (!store.get().config) refreshConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const head = document.createElement("div");
-  head.className = "cfg-status";
-  const errLine = cfg.error
-    ? `<div class="cfg-err">⚠ ${escapeHtml(cfg.error)} — using defaults</div>`
-    : "";
-  head.innerHTML = `
-    <div>loaded from <b>${escapeHtml(cfg.source)}</b></div>
-    <code>${escapeHtml(cfg.path)}</code>
-    ${errLine}
-    <div class="muted">${cfg.excluded_count} events blocked since launch ·
-      patterns are case-insensitive; <code>*</code> is a wildcard</div>`;
-
-  const opts = optionsGroup(); // plugin-declared toggles, up top
-  if (opts) body.appendChild(opts);
-  body.appendChild(head);
-
-  body.appendChild(
-    cfgGroup(
-      "Sites",
-      "browser URLs to ignore (e.g. mail.google.com, *.bank.com)",
-      cfg.exclude_sites,
-      (next) => applyConfig(next, cfg.exclude_files, cfg.exclude_apps),
-    ),
-  );
-  body.appendChild(
-    cfgGroup(
-      "Files",
-      "file paths to ignore (e.g. /secret/, *.env)",
-      cfg.exclude_files,
-      (next) => applyConfig(cfg.exclude_sites, next, cfg.exclude_apps),
-    ),
-  );
-  body.appendChild(
-    cfgGroup(
-      "Apps",
-      "never screenshot while these apps are frontmost (e.g. 1Password)",
-      cfg.exclude_apps,
-      (next) => applyConfig(cfg.exclude_sites, cfg.exclude_files, next),
-    ),
+  return (
+    <>
+      <div className="act-bar">
+        <span className="spy-title">config</span>
+        <span className="wt-count">
+          {cfg ? `${cfg.source}` + (cfg.excluded_count ? ` · ${cfg.excluded_count} blocked` : "") : ""}
+        </span>
+        <span className="spy-spacer" />
+        <button type="button" onClick={() => reloadConfig()}>
+          Reload
+        </button>
+        <button type="button" onClick={() => invoke("config_open").catch(console.error)}>
+          Open file
+        </button>
+      </div>
+      <div className="cfg-body">
+        {!cfg ? (
+          <div className="empty-help">loading…</div>
+        ) : (
+          <>
+            <OptionsGroup />
+            <div className="cfg-status">
+              <div>
+                loaded from <b>{cfg.source}</b>
+              </div>
+              <code>{cfg.path}</code>
+              {cfg.error ? <div className="cfg-err">⚠ {cfg.error} — using defaults</div> : null}
+              <div className="muted">
+                {cfg.excluded_count} events blocked since launch · patterns are case-insensitive;{" "}
+                <code>*</code> is a wildcard
+              </div>
+            </div>
+            <CfgGroup
+              title="Sites"
+              hint="browser URLs to ignore (e.g. mail.google.com, *.bank.com)"
+              items={cfg.exclude_sites}
+              onChange={(next) => applyConfig(next, cfg.exclude_files, cfg.exclude_apps)}
+            />
+            <CfgGroup
+              title="Files"
+              hint="file paths to ignore (e.g. /secret/, *.env)"
+              items={cfg.exclude_files}
+              onChange={(next) => applyConfig(cfg.exclude_sites, next, cfg.exclude_apps)}
+            />
+            <CfgGroup
+              title="Apps"
+              hint="never screenshot while these apps are frontmost (e.g. 1Password)"
+              items={cfg.exclude_apps}
+              onChange={(next) => applyConfig(cfg.exclude_sites, cfg.exclude_files, next)}
+            />
+          </>
+        )}
+      </div>
+    </>
   );
 }

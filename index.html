@@ -45,9 +45,9 @@
         <div class="dock" id="dock"></div>
       </div>
 
-      <!-- Panel pool: holds terminal host el parking. Panel DOM is injected
-           by plugin.tsx injectPanelHtml(). Terminals park here between
-           dockview mounts. -->
+      <!-- Panel pool: parks terminal/browser/preview host elements between
+           dockview mounts (see reactdock.tsx, terminal.ts, browser.ts). Every
+           panel is a React `component` now; nothing is injected here. -->
       <div id="panel-pool" hidden></div>
 
       <div class="rz" data-dir="North"></div>

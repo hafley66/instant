@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
-import { store, type AppState, type ConfigView, type SprefaScopeKind } from "./state";
+import { store, type AppState, type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
@@ -394,12 +394,6 @@ export function wireChrome() {
   }
   $("#actbar-toggle").onclick = () =>
     store.set({ sidebar: store.get().sidebar === "big" ? "compact" : "big" });
-
-  $("#config-reload").onclick = () =>
-    invoke<ConfigView>("config_reload")
-      .then((view) => store.set({ config: view }))
-      .catch(console.error);
-  $("#config-open").onclick = () => invoke("config_open").catch(console.error);
 
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();

@@ -1,4 +1,11 @@
-import { createElement, useEffect, useRef, type ComponentType } from "react";
+import {
+  Component,
+  createElement,
+  Fragment,
+  type ComponentType,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import type { IDockviewPanelProps } from "dockview";
 
 export interface PanelDef {
@@ -7,8 +14,12 @@ export interface PanelDef {
   icon: string; // fallback glyph when iconUrl is absent
   iconUrl?: string; // XP-style raster icon (public/icons/*.png); wins over `icon`
   iconLabel: string;
-  html: string;
-  component?: ComponentType<IDockviewPanelProps>;
+  // Vestigial: two untouchable panel registrations (meme, rules) still pass
+  // `html: ""` from before their React conversion. Kept optional (rather than
+  // deleted) so those literals keep compiling; unused otherwise -- every panel
+  // renders through `component` now.
+  html?: string;
+  component: ComponentType<IDockviewPanelProps>;
   onShow?: () => void;
 }
 
@@ -101,48 +112,84 @@ export function allPanels(): PanelDef[] {
   return [...panelMap.values()];
 }
 
-function panelComponent(id: string): ComponentType<IDockviewPanelProps> {
-  const def = panelMap.get(id);
-  return function Panel() {
-    const ref = useRef<HTMLDivElement>(null);
+interface PanelErrorBoundaryProps {
+  title: string;
+  children: ReactNode;
+}
+interface PanelErrorBoundaryState {
+  error: Error | null;
+  attempt: number; // bumped on retry so the remounted subtree gets a fresh key
+}
 
-    useEffect(() => {
-      const node = document.getElementById(`panel-${id}`);
-      if (node && ref.current) {
-        ref.current.appendChild(node);
-        def?.onShow?.();
-      }
-      return () => {
-        const pool = document.getElementById("panel-pool");
-        if (pool && node) pool.appendChild(node);
-      };
-    }, []);
+// Per-panel crash containment: a panel that throws during render used to
+// white-screen the whole app (a treetable sort crash did exactly that). This
+// wraps every panel at dockComponents() -- the single place PanelDef entries
+// become dockview's component registry -- so every panel, html-backed or
+// React `component`-backed, gets a boundary for free. Must be a class:
+// getDerivedStateFromError/componentDidCatch have no hook equivalent.
+class PanelErrorBoundary extends Component<PanelErrorBoundaryProps, PanelErrorBoundaryState> {
+  state: PanelErrorBoundaryState = { error: null, attempt: 0 };
 
-    return createElement("div", { className: "dv-host", ref });
+  static getDerivedStateFromError(error: Error): Partial<PanelErrorBoundaryState> {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[panel:${this.props.title}]`, error, info.componentStack);
+  }
+
+  retry = () => {
+    this.setState((s) => ({ error: null, attempt: s.attempt + 1 }));
   };
+
+  render() {
+    const { error } = this.state;
+    if (!error) {
+      // Key on attempt: retry must remount the subtree (fresh component state),
+      // not just re-render the same crashed instance.
+      return createElement(Fragment, { key: this.state.attempt }, this.props.children);
+    }
+    // Inline styles, not new stylesheet rules: styles.css is already past the
+    // 500-line cap other files are held to, so it must not grow.
+    return createElement(
+      "div",
+      { className: "panel-error", style: { padding: 12, overflow: "auto", height: "100%", boxSizing: "border-box" } },
+      createElement("div", { className: "panel-error-title", style: { fontWeight: "bold", marginBottom: 4 } }, `${this.props.title}: crashed`),
+      createElement("div", { className: "panel-error-message", style: { marginBottom: 8 } }, error.message),
+      createElement(
+        "pre",
+        {
+          className: "panel-error-stack",
+          style: {
+            maxHeight: 240,
+            overflow: "auto",
+            fontFamily: "Menlo, Consolas, monospace",
+            fontSize: 11,
+            whiteSpace: "pre-wrap",
+            padding: 8,
+            border: "1px solid currentColor",
+          },
+        },
+        error.stack ?? "",
+      ),
+      createElement(
+        "button",
+        { type: "button", className: "panel-error-retry", style: { marginTop: 8 }, onClick: this.retry },
+        "Retry",
+      ),
+    );
+  }
 }
 
 export function dockComponents(): Record<string, ComponentType<IDockviewPanelProps>> {
   const out: Record<string, ComponentType<IDockviewPanelProps>> = {};
   for (const [id, p] of panelMap) {
-    out[id] = p.component ?? panelComponent(id);
+    const Inner = p.component;
+    out[id] = function BoundedPanel(props: IDockviewPanelProps) {
+      return createElement(PanelErrorBoundary, { title: p.title, children: createElement(Inner, props) });
+    };
   }
   return out;
-}
-
-export function injectPanelHtml() {
-  const pool = document.getElementById("panel-pool");
-  if (!pool) return;
-  for (const p of panelMap.values()) {
-    if (document.getElementById(`panel-${p.id}`)) continue;
-    const s = document.createElement("section");
-    s.className = "panel";
-    s.id = `panel-${p.id}`;
-    s.dataset.panel = p.id;
-    s.dataset.label = p.title;
-    s.innerHTML = p.html;
-    pool.appendChild(s);
-  }
 }
 
 export function buildActivityRail() {

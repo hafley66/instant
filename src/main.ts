@@ -13,7 +13,7 @@ import { homeDir } from "@tauri-apps/api/path";
 // menus can be authored in native CSS. No-ops where the browser supports it.
 import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import { store, type CaptureStatus, type Event, type Fav } from "./state";
-import { injectPanelHtml, buildActivityRail, allPanels } from "./plugin";
+import { buildActivityRail, allPanels } from "./plugin";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMeme } from "./meme";
@@ -66,7 +66,7 @@ import {
   refreshFavorites,
   updateFavBadge,
 } from "./favorites";
-import { ACTIVITY_CAP, registerActivityBridge, renderConfigPanel } from "./activity";
+import { ACTIVITY_CAP, registerActivityBridge } from "./activity";
 import { isCapturing, cancelHide, scheduleHide, captureToPrompt, toggleRecording } from "./capture";
 import {
   ZOOM_STEP,
@@ -187,7 +187,6 @@ async function main() {
     "wtFavorites",
     "wtAgents",
   ]);
-  store.subscribe(renderConfigPanel, ["config", "xpPixel", "showToolbar"]);
   syncSkin(store.get());
   syncXpPixel(store.get());
   syncMode(store.get());
@@ -208,7 +207,6 @@ async function main() {
   registerV2Bridges();
   registerActivityBridge();
   refreshFavorites();
-  injectPanelHtml();
   buildActivityRail();
   store.subscribe(updateFavBadge, ["aiFavs"]);
   updateFavBadge();

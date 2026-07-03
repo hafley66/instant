@@ -9,7 +9,7 @@ import { store } from "./state";
 import { cdpPerf } from "./cdp";
 import { setBrowserPerf } from "./browser";
 import { refreshSessions, scanWorktreesIfNeeded } from "./worktrees";
-import { refreshConfig } from "./activity";
+import { ConfigPanelV2 } from "./activity";
 import { registerFavoritesPlugin } from "./favorites";
 
 export function registerBuiltin() {
@@ -83,15 +83,8 @@ export function registerBuiltin() {
         icon: "⚙",
         iconUrl: "/icons/Controls3000_32x32_4.png",
         iconLabel: "Config",
-        html: `<div class="act-bar">
-          <span class="spy-title">config</span>
-          <span id="config-meta" class="wt-count"></span>
-          <span class="spy-spacer"></span>
-          <button id="config-reload" type="button">Reload</button>
-          <button id="config-open" type="button">Open file</button>
-        </div>
-        <div id="config-body" class="cfg-body"></div>`,
-        onShow: () => { if (!store.get().config) refreshConfig(); },
+        html: "",
+        component: ConfigPanelV2,
       },
       {
         id: "status",
