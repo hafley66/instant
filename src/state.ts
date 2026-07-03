@@ -248,6 +248,10 @@ export interface AppState {
   pinnedTabs: string[]; // terminal tab session names pinned (persisted)
   sprefaScope: SprefaScopeItem[]; // selected files/repos/revs (persisted)
   sprefaScopeActive: boolean; // when on, scope contributes sel_* facts to queries
+  // Namespaced plugin UI/persistence surface, keyed by plugin id (e.g. "meme").
+  // Plugins should read/write their slice here instead of touching localStorage
+  // directly — see src/pluginState.ts (persisted).
+  pluginState: Record<string, unknown>;
 }
 
 // Seeded into wtAgents on first run; thereafter the user's edited list wins.
@@ -318,6 +322,7 @@ const PERSIST: (keyof AppState)[] = [
   "pinnedTabs",
   "sprefaScope",
   "sprefaScopeActive",
+  "pluginState",
 ];
 
 // JSON so arrays/numbers round-trip. Falls back to the raw string for values
@@ -365,6 +370,20 @@ function load(): AppState {
   if (localStorage.getItem("clickRulesV3") !== "1") {
     localStorage.removeItem("clickRules");
     localStorage.setItem("clickRulesV3", "1");
+  }
+  const pluginState = loadKey<Record<string, unknown>>("pluginState", {});
+  // One-time migration: the meme plugin used to persist its UI state (sidebar
+  // width, layers panel height) directly under "meme:ui". Seed pluginState.meme
+  // from it once; the old key is left in place (no destructive delete).
+  if (!SAFE_BOOT && pluginState.meme === undefined) {
+    const oldMemeUi = localStorage.getItem("meme:ui");
+    if (oldMemeUi !== null) {
+      try {
+        pluginState.meme = JSON.parse(oldMemeUi);
+      } catch {
+        // ignore malformed old value
+      }
+    }
   }
   return {
     skin: loadKey<Skin>("skin", "xp"),
@@ -419,6 +438,7 @@ function load(): AppState {
     pinnedTabs: loadKey<string[]>("pinnedTabs", []),
     sprefaScope: loadKey<SprefaScopeItem[]>("sprefaScope", []),
     sprefaScopeActive: loadKey<boolean>("sprefaScopeActive", false),
+    pluginState,
   };
 }
 

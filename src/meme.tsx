@@ -10,10 +10,11 @@ import { setFilePickerOpen } from "./overlayGuard";
 import { MemeTree } from "./memeTree";
 import { MemeLayers } from "./memeLayers";
 import type { DirListing, FsEntry } from "./state";
+import { readPluginState, savePluginState } from "./pluginState";
 
 const STORAGE_KEY = "meme:lastFolder";
 const MEME_STATE_KEY = "meme:state";
-const MEME_UI_KEY = "meme:ui";
+const PLUGIN_ID = "meme";
 const IMAGE_EXTS = new Set([
   "png",
   "jpg",
@@ -144,21 +145,11 @@ interface MemeUi {
 }
 
 function readMemeUi(): MemeUi {
-  try {
-    const raw = localStorage.getItem(MEME_UI_KEY);
-    return raw ? (JSON.parse(raw) as MemeUi) : {};
-  } catch {
-    return {};
-  }
+  return readPluginState<MemeUi>(PLUGIN_ID, {});
 }
 
 function saveMemeUi(patch: Partial<MemeUi>) {
-  try {
-    const next = { ...readMemeUi(), ...patch };
-    localStorage.setItem(MEME_UI_KEY, JSON.stringify(next));
-  } catch {
-    // ignore localStorage failures
-  }
+  savePluginState<MemeUi>(PLUGIN_ID, patch);
 }
 
 function MemePanel() {

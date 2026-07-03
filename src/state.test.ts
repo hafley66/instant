@@ -117,4 +117,49 @@ describe("state.ts boot / persistence", () => {
     expect(mod.SAFE_BOOT).toBe(false);
     expect(mod.store.get().skin).toBe("p5");
   });
+
+  it("defaults pluginState to {} on empty storage", async () => {
+    freshGlobals();
+    const { store } = await import("./state");
+    expect(store.get().pluginState).toEqual({});
+  });
+
+  it("migrates the legacy meme:ui key into pluginState.meme once", async () => {
+    const { localStore } = freshGlobals();
+    localStore.setItem("meme:ui", JSON.stringify({ sidebarWidth: 222, layersHeight: 99 }));
+    const { store } = await import("./state");
+    expect(store.get().pluginState.meme).toEqual({ sidebarWidth: 222, layersHeight: 99 });
+    // Old key is left in place (no destructive delete).
+    expect(localStore.getItem("meme:ui")).toBe(JSON.stringify({ sidebarWidth: 222, layersHeight: 99 }));
+  });
+
+  it("does not re-migrate meme:ui once pluginState.meme is already set", async () => {
+    const { localStore } = freshGlobals();
+    localStore.setItem("meme:ui", JSON.stringify({ sidebarWidth: 222 }));
+    localStore.setItem("pluginState", JSON.stringify({ meme: { sidebarWidth: 10 } }));
+    const { store } = await import("./state");
+    expect(store.get().pluginState.meme).toEqual({ sidebarWidth: 10 });
+  });
+
+  it("ignores a malformed legacy meme:ui value", async () => {
+    const { localStore } = freshGlobals();
+    localStore.setItem("meme:ui", "{not json");
+    const { store } = await import("./state");
+    expect(store.get().pluginState.meme).toBeUndefined();
+  });
+
+  it("SAFE_BOOT skips the meme:ui migration too", async () => {
+    const { localStore, sessionStore } = freshGlobals();
+    localStore.setItem("meme:ui", JSON.stringify({ sidebarWidth: 222 }));
+    sessionStore.setItem("SAFE_BOOT", "1");
+    const { store } = await import("./state");
+    expect(store.get().pluginState).toEqual({});
+  });
+
+  it("store.set() persists pluginState under its own key", async () => {
+    const { localStore } = freshGlobals();
+    const { store } = await import("./state");
+    store.set({ pluginState: { meme: { sidebarWidth: 5 } } });
+    expect(localStore.getItem("pluginState")).toBe(JSON.stringify({ meme: { sidebarWidth: 5 } }));
+  });
 });
