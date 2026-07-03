@@ -15,10 +15,12 @@ import { probeMagickAvailable } from "./memeExport";
 export const BREW_INSTALL_CMD = "brew install imagemagick";
 
 const HINT_ID = "meme-magick-hint";
-// Anchor: the hint is inserted directly above the workspace, inside the
+// Anchor: the hint is inserted directly above the split layout, inside the
 // panel that's already rendered by meme.tsx's JSX — no new DOM nodes need to
-// come from that file.
-const ANCHOR_SELECTOR = "#meme-workspace";
+// come from that file. Must target .meme-split-root, not the #meme-workspace
+// PanelGroup inside it: that root is a horizontal flex row, so a sibling of
+// the PanelGroup renders as a column beside it instead of a banner above.
+const ANCHOR_SELECTOR = ".meme-split-root";
 
 // Guards a double-click from firing invoke() twice; Rust also guards this
 // server-side with an AtomicBool (install_imagemagick) in case this flag and
