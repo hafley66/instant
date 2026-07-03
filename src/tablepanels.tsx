@@ -58,7 +58,12 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
     header: "",
     cell: (r) => <span className={"dot" + (r.attached ? " on" : "")} />,
   },
-  { id: "name", header: "session", cell: (r) => <span className="s-name">{r.name}</span> },
+  {
+    id: "name",
+    header: "session",
+    cell: (r) => <span className="s-name">{r.name}</span>,
+    sortValue: (r) => r.name,
+  },
   {
     id: "proc",
     header: "proc",
@@ -68,6 +73,7 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
           {r.proc}
         </span>
       ) : null,
+    sortValue: (r) => r.proc,
   },
   {
     id: "meta",
@@ -77,6 +83,7 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
         {r.windows}w{r.open ? " · open" : ""}
       </span>
     ),
+    sortValue: (r) => r.windows,
   },
   {
     id: "pwd",
@@ -87,6 +94,7 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
           {r.pwd}
         </span>
       ) : null,
+    sortValue: (r) => r.pwd,
   },
   {
     id: "chips",
@@ -105,6 +113,7 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
           ))}
         </span>
       ) : null,
+    sortValue: (r) => r.chips.length,
   },
   {
     id: "pin",
@@ -173,6 +182,30 @@ function TmuxToolbar() {
   );
 }
 
+// Bridge the store's SessionSort <-> react-table SortingState so the toolbar
+// <select> and the clickable headers share one source of truth. "activity" has
+// no column (it's the implicit order from sortSessions), so it maps to an empty
+// SortingState; name/windows map to their column ids.
+const SORT_COL: Record<Exclude<SessionSortKey, "activity">, string> = {
+  name: "name",
+  windows: "meta",
+  proc: "proc",
+  pwd: "pwd",
+  chips: "chips",
+};
+function sortFromStore(s: SessionSort): SortingState {
+  if (s.key === "activity") return [];
+  return [{ id: SORT_COL[s.key], desc: s.dir === "desc" }];
+}
+function sortToStore(ss: SortingState): SessionSort {
+  if (!ss.length) return { key: "activity", dir: "desc" };
+  const { id, desc } = ss[0];
+  const key = (Object.keys(SORT_COL) as (keyof typeof SORT_COL)[]).find(
+    (k) => SORT_COL[k] === id,
+  );
+  return key ? { key, dir: desc ? "desc" : "asc" } : { key: "activity", dir: "desc" };
+}
+
 export function TmuxPanelV2() {
   useApp(); // re-render on store change
   // Block body: onShow returns a Promise (refreshSessions); returning it from the
@@ -215,6 +248,20 @@ export function TmuxPanelV2() {
             columns={TMUX_COLUMNS}
             data={rows}
             getRowId={(r) => r.name}
+            serverSort
+            sorting={sortFromStore(tmuxBridge?.sort() ?? { key: "activity", dir: "desc" })}
+            onSortingChange={(s) => tmuxBridge?.setSort(sortToStore(s))}
+            controls
+            filter={(r, q) => {
+              const s = q.toLowerCase();
+              return (
+                r.name.toLowerCase().includes(s) ||
+                r.proc.toLowerCase().includes(s) ||
+                r.pwd.toLowerCase().includes(s) ||
+                r.chips.some((c) => c.label.toLowerCase().includes(s))
+              );
+            }}
+            searchPlaceholder="filter sessions…"
             onRowClick={(r) => tmuxBridge?.onOpen(r.name)}
             rowClass={(r) => (r.pinned ? "pinned" : undefined)}
           />
@@ -431,9 +478,25 @@ function WtActionsCell({ row }: { row: WtTreeRow }) {
 }
 
 const WT_COLUMNS: TreeColumn<WtTreeRow>[] = [
-  { id: "name", header: "worktree", tree: true, cell: (r) => <WtNameCell row={r} /> },
-  { id: "branch", header: "branch", cell: (r) => (r.kind === "leaf" ? r.branch : "") },
-  { id: "head", header: "head", cell: (r) => (r.kind === "leaf" ? r.head : "") },
+  {
+    id: "name",
+    header: "worktree",
+    tree: true,
+    cell: (r) => <WtNameCell row={r} />,
+    sortValue: (r) => r.label,
+  },
+  {
+    id: "branch",
+    header: "branch",
+    cell: (r) => (r.kind === "leaf" ? r.branch : ""),
+    sortValue: (r) => r.branch ?? "",
+  },
+  {
+    id: "head",
+    header: "head",
+    cell: (r) => (r.kind === "leaf" ? r.head : ""),
+    sortValue: (r) => r.head ?? "",
+  },
   {
     id: "path",
     header: "path",
@@ -445,12 +508,14 @@ const WT_COLUMNS: TreeColumn<WtTreeRow>[] = [
       ) : (
         ""
       ),
+    sortValue: (r) => r.pathDisplay ?? "",
   },
   {
     id: "dirty",
     header: "",
     cellClass: (r) => (r.kind === "leaf" && r.dirty ? "wt-dirty" : undefined),
     cell: (r) => (r.kind === "leaf" && r.dirty ? "●" : ""),
+    sortValue: (r) => (r.kind === "leaf" && r.dirty ? 1 : 0),
   },
   { id: "actions", header: "", noRowClick: true, cell: (r) => <WtActionsCell row={r} /> },
 ];

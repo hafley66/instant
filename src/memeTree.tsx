@@ -121,6 +121,7 @@ export function MemeTree({
           {r.label}
         </span>
       ),
+      sortValue: (r) => r.label,
     },
   ];
 
@@ -136,6 +137,17 @@ export function MemeTree({
       }}
       expanded={expanded}
       onExpandedChange={setExpanded}
+      // controls wraps the table in .tt-host > .tt-wrap, whose base CSS
+      // (flex:1; min-height:0; overflow:auto) is the same scroll pattern the
+      // worktrees/activity panels use. With .meme-panel now height:100% the
+      // percentage chain is definite, so the column scrolls. (No `virtual`:
+      // it threw a ResizeObserver loop while the chain was unbounded.)
+      controls
+      filter={(r, q) => {
+        const s = q.toLowerCase();
+        return r.label.toLowerCase().includes(s) || r.path.toLowerCase().includes(s);
+      }}
+      searchPlaceholder="filter files…"
       onRowClick={(r) => {
         if (r.kind === "file") onSelect(r.path);
       }}

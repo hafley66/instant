@@ -1703,6 +1703,13 @@ function sortSessions(live: Session[]): Session[] {
     let c = 0;
     if (key === "name") c = a.name.localeCompare(b.name, undefined, { numeric: true });
     else if (key === "windows") c = a.windows - b.windows;
+    else if (key === "proc")
+      c = foregroundProc(a.commands ?? []).localeCompare(foregroundProc(b.commands ?? []));
+    else if (key === "pwd") c = (a.paths?.[0] ?? "").localeCompare(b.paths?.[0] ?? "");
+    else if (key === "chips")
+      c =
+        (store.get().sessionWorktrees[a.name]?.length ?? 0) -
+        (store.get().sessionWorktrees[b.name]?.length ?? 0);
     else c = a.activity - b.activity;
     return c !== 0 ? c * sign : a.name.localeCompare(b.name, undefined, { numeric: true });
   });

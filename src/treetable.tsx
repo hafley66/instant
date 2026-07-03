@@ -41,6 +41,11 @@ export interface TreeTableProps<T> {
   sorting?: SortingState;
   onSortingChange?: (s: SortingState) => void;
   defaultSorting?: SortingState;
+  // Rows arrive pre-sorted by the host (e.g. tmux floats pinned sessions first
+  // via sortSessions). react-table then only mirrors the sort state for header
+  // marks + clicks — it never reorders (sortingFn is a no-op), so the host's
+  // order — including pinning — is final.
+  serverSort?: boolean;
   defaultExpandedAll?: boolean;
   // Controlled expansion (persist in the store). Omit to let the table own it.
   expanded?: ExpandedState;
@@ -116,6 +121,8 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     enableSorting: !!c.sortValue,
     // null/undefined sink last regardless of direction.
     sortUndefined: "last",
+    // serverSort: the host already ordered these rows; don't reorder on click.
+    sortingFn: props.serverSort ? () => 0 : undefined,
     meta: c,
   }));
 
@@ -181,6 +188,10 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     requestAnimationFrame(() => rowAt(idx)?.scrollIntoView({ block: "nearest" }));
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // Don't hijack typing in form fields rendered inside cells (meme layer text,
+    // color/range/number inputs): let Space/Enter/arrows reach the field.
+    if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]"))
+      return;
     if (!modelRows.length) return;
     const i = cur < 0 ? 0 : cur;
     const row = modelRows[i];

@@ -2954,6 +2954,14 @@ body.xp-pixel .xterm canvas {
   overflow: hidden;
 }
 
+/* .panel relies on flex:1 in its parent; dockview's content host doesn't always
+   establish a flex context, so the meme panel collapsed to content height and
+   the file-tree's percentage height chain resolved to auto (no scroll, and a
+   ResizeObserver loop under the virtualizer). Pin it like .v2-panel. */
+.meme-panel {
+  height: 100%;
+}
+
 #meme-workspace .meme-thumbs {
   flex: 0 0 auto;
   align-self: stretch;

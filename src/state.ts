@@ -7,7 +7,7 @@ import type { SortState } from "./table";
 export type { SortState };
 
 // How the sessions launcher orders its rows. "activity" = tmux last-activity.
-export type SessionSortKey = "name" | "activity" | "windows";
+export type SessionSortKey = "name" | "activity" | "windows" | "proc" | "pwd" | "chips";
 export interface SessionSort {
   key: SessionSortKey;
   dir: "asc" | "desc";
