@@ -192,7 +192,10 @@ export function dockComponents(): Record<string, ComponentType<IDockviewPanelPro
   return out;
 }
 
-export function buildActivityRail() {
+// `order` lets a caller (src/rail.ts) render a user-chosen subset/ordering of
+// panels instead of raw registration order; omit it for the full registry in
+// registration order (unchanged default behavior).
+export function buildActivityRail(order?: PanelDef[]) {
   const actbar = document.getElementById("actbar");
   if (!actbar) return;
   const existing = actbar.querySelector("#actbar-panels");
@@ -203,7 +206,7 @@ export function buildActivityRail() {
   // not inline styles, so anchor-name/position-anchor must live in a real <style>
   // (one rule per item) for the polyfill to wire each tip to its rail button.
   const anchorRules: string[] = [];
-  for (const p of panelMap.values()) {
+  for (const p of order ?? panelMap.values()) {
     const btn = document.createElement("button");
     btn.className = "actbar-item";
     btn.id = `${p.id}-toggle`;

@@ -13,7 +13,8 @@ import { homeDir } from "@tauri-apps/api/path";
 // menus can be authored in native CSS. No-ops where the browser supports it.
 import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import { store, type CaptureStatus, type Event, type Fav } from "./state";
-import { buildActivityRail, allPanels } from "./plugin";
+import { allPanels } from "./plugin";
+import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMeme } from "./meme";
@@ -207,7 +208,7 @@ async function main() {
   registerV2Bridges();
   registerActivityBridge();
   refreshFavorites();
-  buildActivityRail();
+  initRail(); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
   store.subscribe(updateFavBadge, ["aiFavs"]);
   updateFavBadge();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail

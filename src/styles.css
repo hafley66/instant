@@ -342,6 +342,12 @@ body[data-skin="ac3"] .mode-toggle {
   text-align: left;
   cursor: pointer;
 }
+/* Drag-reorder feedback (rail.ts wireDragReorder) once the pointer clears the
+   move threshold; a plain click never reaches this class. */
+.actbar-item.actbar-dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
 .actbar[data-mode="compact"] .actbar-item {
   justify-content: center;
   padding: 2px 0;
