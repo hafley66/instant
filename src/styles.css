@@ -3130,6 +3130,7 @@ body.xp-pixel .xterm canvas {
 }
 
 .meme-canvas-wrap {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -3138,6 +3139,17 @@ body.xp-pixel .xterm canvas {
   overflow: hidden;
   border: var(--frame-w) solid var(--frame);
   background: repeating-conic-gradient(#808080 0 25%, #a0a0a0 0 50%) 0 0 / 20px 20px;
+}
+
+/* Selection overlay for the active text layer: dashed outline + corner handles.
+   Stacked exactly over #meme-canvas (inset:0 + margin:auto centers it the same
+   way the flex parent centers the canvas). pointer-events:none so hit-testing
+   stays on the main canvas; handles are visual only, tested by coordinates. */
+#meme-overlay {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  pointer-events: none;
 }
 
 body[data-skin="p5"] .meme-canvas-wrap {

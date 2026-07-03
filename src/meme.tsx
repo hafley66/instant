@@ -56,6 +56,8 @@ interface MemeState {
   layers: TextLayer[];
   activeLayerId: string;
   dragLayerId: string | null;
+  dragMode: "move" | "resize" | null;
+  resizeStart: { size: number; dist: number; cx: number; cy: number } | null;
   textBoxes: ({ id: string } & TextBox)[] | null;
 }
 
@@ -95,6 +97,8 @@ const state: MemeState = {
   layers: DEFAULT_LAYERS.map((l) => ({ ...l })),
   activeLayerId: DEFAULT_LAYERS[0].id,
   dragLayerId: null,
+  dragMode: null,
+  resizeStart: null,
   textBoxes: null,
 };
 
@@ -243,9 +247,10 @@ function MemePanel() {
           onPointerDown={startSidebarDrag}
         ></div>
         <div className="meme-stage">
-          <div id="meme-canvas-wrap" ref={canvasWrapRef} className="meme-canvas-wrap">
-            <canvas id="meme-canvas"></canvas>
-          </div>
+        <div id="meme-canvas-wrap" ref={canvasWrapRef} className="meme-canvas-wrap">
+          <canvas id="meme-canvas"></canvas>
+          <canvas id="meme-overlay"></canvas>
+        </div>
           <div className="meme-hint">drag text to move · click a layer below to edit</div>
         </div>
       </div>
@@ -618,6 +623,58 @@ function renderCanvas() {
 
   state.textBoxes = boxes;
   fitCanvas(canvas, wrapW, wrapH);
+  renderOverlay();
+}
+
+// Selection overlay for the active text layer: dashed outline + 4 corner handles.
+// Drawn on a separate canvas (#meme-overlay) stacked over #meme-canvas so Copy /
+// Save exports never include it. Handles are visual only — hit-testing uses the
+// same box coordinates on the main canvas's pointer events.
+function handleSize(canvas: HTMLCanvasElement) {
+  return Math.max(10, canvas.width / 90);
+}
+function boxCorners(box: TextBox) {
+  return [
+    [box.x, box.y],
+    [box.x + box.width, box.y],
+    [box.x, box.y + box.height],
+    [box.x + box.width, box.y + box.height],
+  ] as const;
+}
+function handleAt(
+  pt: { x: number; y: number },
+  box: TextBox,
+  h: number,
+): boolean {
+  return boxCorners(box).some(
+    ([hx, hy]) => Math.abs(pt.x - hx) <= h && Math.abs(pt.y - hy) <= h,
+  );
+}
+function renderOverlay() {
+  const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
+  const overlay = $("#meme-overlay") as HTMLCanvasElement | null;
+  if (!canvas || !overlay) return;
+  // Mirror the canvas exactly: backing store (drawing coords) + CSS box (layout).
+  overlay.width = canvas.width;
+  overlay.height = canvas.height;
+  overlay.style.width = canvas.style.width;
+  overlay.style.height = canvas.style.height;
+  const ctx = overlay.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const box = state.textBoxes?.find((b) => b.id === state.activeLayerId);
+  if (!box) return;
+  const h = handleSize(canvas);
+  ctx.lineWidth = Math.max(1, canvas.width / 700);
+  ctx.strokeStyle = "rgba(90,165,255,0.95)";
+  ctx.fillStyle = "#fff";
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(box.x, box.y, box.width, box.height);
+  ctx.setLineDash([]);
+  for (const [hx, hy] of boxCorners(box)) {
+    ctx.fillRect(hx - h / 2, hy - h / 2, h, h);
+    ctx.strokeRect(hx - h / 2, hy - h / 2, h, h);
+  }
 }
 
 function fitCanvas(canvas: HTMLCanvasElement, wrapW: number, wrapH: number) {
@@ -643,15 +700,41 @@ function onCanvasPointerDown(e: PointerEvent) {
   const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
   if (!canvas || !state.textBoxes) return;
   const pt = canvasPoint(canvas, e.clientX, e.clientY);
+  const h = handleSize(canvas);
+  // Resize handles on the active box take priority over a new move grab.
+  const active = state.textBoxes.find((b) => b.id === state.activeLayerId);
+  if (active && handleAt(pt, active, h)) {
+    const layer = state.layers.find((l) => l.id === active.id);
+    const cx = active.x + active.width / 2;
+    const cy = active.y + active.height / 2;
+    state.dragLayerId = active.id;
+    state.dragMode = "resize";
+    state.resizeStart = {
+      size: layer?.size ?? 48,
+      dist: Math.max(1, Math.hypot(pt.x - cx, pt.y - cy)),
+      cx,
+      cy,
+    };
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
   for (const box of state.textBoxes) {
     if (hitTextBox(pt, box)) {
       state.dragLayerId = box.id;
       state.activeLayerId = box.id;
+      state.dragMode = "move";
       renderLayers();
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
       return;
     }
+  }
+  // Empty space: deselect, hiding the outline + handles.
+  if (state.activeLayerId) {
+    state.activeLayerId = "";
+    renderLayers();
+    renderOverlay();
   }
 }
 
@@ -659,6 +742,17 @@ function onCanvasPointerMove(e: PointerEvent) {
   const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
   const pt = canvasPoint(canvas, e.clientX, e.clientY);
+  if (state.dragLayerId && state.dragMode === "resize" && state.resizeStart) {
+    const layer = state.layers.find((l) => l.id === state.dragLayerId);
+    if (layer) {
+      const { size, dist, cx, cy } = state.resizeStart;
+      const ratio = Math.hypot(pt.x - cx, pt.y - cy) / dist;
+      layer.size = Math.round(clamp(size * ratio, 12, 256));
+    }
+    scheduleRender();
+    renderLayers();
+    return;
+  }
   if (state.dragLayerId) {
     const layer = state.layers.find((l) => l.id === state.dragLayerId);
     if (layer) {
@@ -669,8 +763,12 @@ function onCanvasPointerMove(e: PointerEvent) {
     renderLayers();
     return;
   }
-  const hovering = state.textBoxes?.some((box) => hitTextBox(pt, box)) ?? false;
-  canvas.style.cursor = hovering ? "move" : "";
+  // Hover cursor: resize handle > move > default.
+  const h = handleSize(canvas);
+  const active = state.textBoxes?.find((b) => b.id === state.activeLayerId);
+  if (active && handleAt(pt, active, h)) canvas.style.cursor = "nwse-resize";
+  else if (state.textBoxes?.some((box) => hitTextBox(pt, box))) canvas.style.cursor = "move";
+  else canvas.style.cursor = "";
 }
 
 function onCanvasPointerUp(e: PointerEvent) {
@@ -684,6 +782,8 @@ function onCanvasPointerUp(e: PointerEvent) {
     saveMemeState();
   }
   state.dragLayerId = null;
+  state.dragMode = null;
+  state.resizeStart = null;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -962,6 +1062,7 @@ function renderLayers() {
       onActivate: (id) => {
         state.activeLayerId = id;
         renderLayers();
+        renderOverlay();
       },
     }),
   );
