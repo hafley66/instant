@@ -14,11 +14,13 @@ import {
   type SortingState,
   type ExpandedState,
   type ColumnDef,
+  type ColumnSizingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef, useState, type ReactNode, type MouseEvent } from "react";
 import type { CellEdit } from "./treetableEdit";
 import { TableRow } from "./treetableRow";
+import { hasWidthSignal, anyWidthSignal } from "./treetableSize";
 
 export type { CellEdit } from "./treetableEdit";
 
@@ -39,6 +41,14 @@ export interface TreeColumn<T> {
   // display-only (unchanged for every existing consumer).
   edit?: CellEdit;
   getEditValue?: (row: T) => string;
+  // Column resizing (all columns resizable by default). `size` authors a start
+  // width in px; the user can drag any column's right edge to override it.
+  // min/maxSize clamp the drag. A column with no `size` and never dragged stays
+  // auto-sized — the table only switches to fixed layout once some column has a
+  // width signal, so untouched tables render identically to before.
+  size?: number;
+  minSize?: number;
+  maxSize?: number;
 }
 
 export interface TreeTableProps<T> {
@@ -50,6 +60,11 @@ export interface TreeTableProps<T> {
   sorting?: SortingState;
   onSortingChange?: (s: SortingState) => void;
   defaultSorting?: SortingState;
+  // Controlled column widths (persist in the store). Omit to let the table own
+  // local sizing state. Keys are column ids; values are px. Mirrors the
+  // controlled-sorting pattern above.
+  columnSizing?: ColumnSizingState;
+  onColumnSizingChange?: (s: ColumnSizingState) => void;
   // Rows arrive pre-sorted by the host (e.g. tmux floats pinned sessions first
   // via sortSessions). react-table then only mirrors the sort state for header
   // marks + clicks — it never reorders (sortingFn is a no-op), so the host's
@@ -116,6 +131,12 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
   };
   const [ownExpanded, setOwnExpanded] = useState<ExpandedState>(defaultExpandedAll ? true : {});
   const expanded = props.expanded ?? ownExpanded;
+  const [ownSizing, setOwnSizing] = useState<ColumnSizingState>({});
+  const columnSizing = props.columnSizing ?? ownSizing;
+  const setColumnSizing = (s: ColumnSizingState) => {
+    props.onColumnSizingChange?.(s);
+    if (props.columnSizing === undefined) setOwnSizing(s);
+  };
   // Search query for the controls bar. A non-empty query forces every branch
   // open so matches buried under collapsed ancestors are visible.
   const [query, setQuery] = useState("");
@@ -138,6 +159,12 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     // react-table's 'auto' default in the spread-merge, getSortingFn() then
     // returns undefined and the first active sort crashes sortData.
     sortingFn: props.serverSort ? () => 0 : "auto",
+    // Column resizing: pass authored sizes through so getSize() returns them.
+    // Leaving size undefined keeps react-table's 150 default, but that default
+    // is never painted — width styles are gated on hasWidthSignal below.
+    size: c.size,
+    minSize: c.minSize,
+    maxSize: c.maxSize,
     meta: c,
   }));
 
@@ -154,10 +181,15 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     data,
     columns: colDefs,
     // Active search forces all branches open so deep matches surface.
-    state: { sorting, expanded: q ? true : expanded, globalFilter: q },
+    state: { sorting, expanded: q ? true : expanded, globalFilter: q, columnSizing },
     onSortingChange: (updater) =>
       setSorting(typeof updater === "function" ? updater(sorting) : updater),
     onExpandedChange: setExpanded,
+    // All columns resizable by default; live-update widths while dragging.
+    enableColumnResizing: true,
+    columnResizeMode: "onChange",
+    onColumnSizingChange: (updater) =>
+      setColumnSizing(typeof updater === "function" ? updater(columnSizing) : updater),
     onGlobalFilterChange: (v) => setQuery(typeof v === "function" ? v(query) : (v ?? "")),
     globalFilterFn: (row, _col, value) =>
       props.filter ? props.filter(row.original, String(value)) : true,
@@ -333,11 +365,33 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     body = modelRows.map(renderRow);
   }
 
+  // Width plumbing: a <colgroup> carries each column's width so header and body
+  // (and the virtual spacer colSpan rows) stay aligned with one style per column
+  // instead of per-cell props. A col gets a width ONLY when its column has a
+  // signal (dragged or authored); the rest stay auto. When any column is sized
+  // the table flips to fixed layout so those px widths are authoritative —
+  // otherwise it stays auto and renders identically to before.
+  const sizeById: Record<string, number | undefined> = {};
+  for (const c of columns) sizeById[c.id] = c.size;
+  const sized = anyWidthSignal(
+    columns.map((c) => c.id),
+    columnSizing,
+    sizeById,
+  );
+  const cols = table.getHeaderGroups()[0].headers;
   const tableEl = (
-    <table className="dtable">
+    <table className={"dtable" + (sized ? " dtable-sized" : "")}>
+      <colgroup>
+        {cols.map((h) => {
+          const w = hasWidthSignal(h.column.id, columnSizing, sizeById[h.column.id])
+            ? h.column.getSize()
+            : undefined;
+          return <col key={h.id} style={w !== undefined ? { width: w } : undefined} />;
+        })}
+      </colgroup>
       <thead>
         <tr>
-          {table.getHeaderGroups()[0].headers.map((h) => {
+          {cols.map((h) => {
             const sortable = h.column.getCanSort();
             const dir = h.column.getIsSorted(); // false | "asc" | "desc"
             return (
@@ -351,6 +405,23 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
                 {flexRender(h.column.columnDef.header, h.getContext())}
                 {dir ? (
                   <span className="dtable-sort-mark">{dir === "asc" ? " ▲" : " ▼"}</span>
+                ) : null}
+                {h.column.getCanResize() ? (
+                  <div
+                    className={
+                      "dtable-resizer" + (h.column.getIsResizing() ? " is-resizing" : "")
+                    }
+                    // getResizeHandler drives the drag; stop click/dblclick from
+                    // reaching the <th> so a grab never toggles the sort. Double-
+                    // click resets the column to its authored/default width.
+                    onMouseDown={h.getResizeHandler()}
+                    onTouchStart={h.getResizeHandler()}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      h.column.resetSize();
+                    }}
+                  />
                 ) : null}
               </th>
             );
