@@ -75,3 +75,24 @@ export async function writeMemePng(path: string, dataUrl: string): Promise<void>
 export async function copyMemePng(dataUrl: string): Promise<void> {
   await invoke("copy_meme_image", { dataUrl });
 }
+
+// True when an error from make_slack_emoji/magick_run (src-tauri/src/meme.rs)
+// means magick/convert simply isn't on PATH, as opposed to some other
+// ImageMagick failure. Both of that file's "binary missing" format strings
+// ("cannot run '{bin}': {e}. Is ImageMagick installed?" and "'{bin}'
+// -version failed. Is ImageMagick installed?") end with this phrase, so it's
+// a stable classifier without depending on the exact os-error wording.
+export function isMagickMissingErrorMessage(msg: string): boolean {
+  return /is imagemagick installed\??/i.test(msg);
+}
+
+// Probe the Rust side for magick/convert on PATH (magick_available in
+// src-tauri/src/meme.rs, which reuses pty::path_env so a GUI-launched
+// instant sees the same PATH a login shell/`brew install` would).
+export async function probeMagickAvailable(): Promise<boolean> {
+  try {
+    return await invoke<boolean>("magick_available");
+  } catch {
+    return false;
+  }
+}

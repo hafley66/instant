@@ -12,7 +12,14 @@ import { MemeLayers } from "./memeLayers";
 import type { DirListing, FsEntry } from "./state";
 import { readPluginState, savePluginState } from "./pluginState";
 import { flashStatus, getHomeDir, showError, tildify } from "./core";
-import { defaultExportPath, deriveOutputPath, writeMemePng, copyMemePng } from "./memeExport";
+import {
+  defaultExportPath,
+  deriveOutputPath,
+  writeMemePng,
+  copyMemePng,
+  isMagickMissingErrorMessage,
+} from "./memeExport";
+import { recheckMagick, hideMagickInstallHint, showMagickInstallHint } from "./memeInstallHint";
 
 const STORAGE_KEY = "meme:lastFolder";
 const MEME_STATE_KEY = "meme:state";
@@ -369,6 +376,7 @@ function wireMemePanel(): () => void {
 
   renderLayers();
   renderThumbs();
+  void recheckMagick(); // show the install hint up front if magick/convert is missing
 
   return () => {
     for (const { el, type, fn } of listeners) {
@@ -379,6 +387,7 @@ function wireMemePanel(): () => void {
     layersRoot?.unmount();
     treeRoot = null;
     layersRoot = null;
+    hideMagickInstallHint();
   };
 }
 
@@ -945,12 +954,15 @@ async function makeSlackEmoji() {
     });
     if (res.ok) {
       setStatus(`slack emoji ${outPath}`);
+      hideMagickInstallHint();
     } else {
       setStatus(`emoji failed: ${res.stderr || res.command}`);
+      if (isMagickMissingErrorMessage(res.stderr || res.command)) showMagickInstallHint();
     }
   } catch (e) {
     showError("meme-emoji", e);
     setStatus(`emoji failed: ${e}`);
+    if (isMagickMissingErrorMessage(String(e))) showMagickInstallHint();
   }
 }
 
