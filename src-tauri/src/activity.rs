@@ -1,7 +1,9 @@
-// Unified activity store: one SQLite table fed by three sources —
+// Unified activity store: one SQLite table fed by four sources —
 //   'browser' : the extension POSTs DOM/tab events to the localhost ingest server
 //   'os'      : the capture worker writes a screenshot row per mouse/key gesture
 //   'files'   : the Files panel logs an 'open' row when you reference a file
+//   'editor'  : the VS Code extension POSTs focus/cursor/save events (path +
+//               line + language id only, never buffer contents)
 // fzf search + the Activity timeline read this one table, so everything you touch
 // lands in a single searchable history.
 //
@@ -50,9 +52,13 @@ pub struct Event {
     pub shot: String,  // screenshot path (os captures)
 }
 
-// What the extension sends. Everything but `kind` is optional.
+// What the extension(s) send. The Chrome extension sends `kind` (+ url/title/
+// text); the VS Code extension sends `type:"editor"` + `event` (+ path/line/
+// languageId/workspace — never file contents). All fields default so either
+// shape deserializes with the other's fields empty.
 #[derive(Deserialize)]
 struct Ingest {
+    #[serde(default)]
     kind: String,
     #[serde(default)]
     url: String,
@@ -60,6 +66,18 @@ struct Ingest {
     title: String,
     #[serde(default)]
     text: String,
+    #[serde(default, rename = "type")]
+    source_type: String,
+    #[serde(default)]
+    event: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    line: Option<i64>,
+    #[serde(default, rename = "languageId")]
+    language_id: String,
+    #[serde(default)]
+    workspace: String,
 }
 
 // A config-driven extraction rule. instant is the source of truth: the
@@ -223,7 +241,7 @@ fn prune(conn: &Connection, source: &str, ts: i64) -> rusqlite::Result<()> {
     } else {
         let cutoff = ts - RETAIN_DAYS * 24 * 3600 * 1000;
         conn.execute(
-            "DELETE FROM events WHERE source IN ('browser','files') AND ts < ?1",
+            "DELETE FROM events WHERE source IN ('browser','files','editor') AND ts < ?1",
             params![cutoff],
         )?;
     }
@@ -316,6 +334,42 @@ pub fn spawn_server(app: AppHandle) {
                         continue;
                     }
                     match serde_json::from_str::<Ingest>(&body) {
+                        Ok(ev) if ev.source_type == "editor" => {
+                            // VS Code extension: focus/cursor/save. Path + line
+                            // + language id only, filtered like Files-panel rows.
+                            let cfg = app.state::<crate::config::ConfigState>();
+                            if cfg.config.lock().unwrap().file_excluded(&ev.path) {
+                                crate::config::note_excluded(&cfg);
+                                respond(req, 200, "filtered");
+                                continue;
+                            }
+                            let db = app.state::<ActivityDb>();
+                            let text = match ev.line {
+                                Some(line) => line.to_string(),
+                                None => ev.language_id.clone(),
+                            };
+                            let row = {
+                                let conn = db.0.lock().unwrap();
+                                insert_row(
+                                    &conn,
+                                    now_ms(),
+                                    "editor",
+                                    &ev.event,
+                                    "",
+                                    &ev.path,
+                                    &ev.workspace,
+                                    &text,
+                                    "",
+                                )
+                            };
+                            match row {
+                                Ok(event) => {
+                                    let _ = app.emit("activity-added", &event);
+                                    respond(req, 200, "ok");
+                                }
+                                Err(e) => respond(req, 500, &e.to_string()),
+                            }
+                        }
                         Ok(ev) => {
                             // Observation filter: drop excluded sites before recording.
                             let cfg = app.state::<crate::config::ConfigState>();
@@ -476,4 +530,77 @@ pub fn capture_set_enabled(app: AppHandle, state: State<CaptureEnabled>, on: boo
 #[tauri::command]
 pub fn capture_enabled(state: State<CaptureEnabled>) -> bool {
     state.0.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The VS Code extension's three payload shapes (see vscode-ext/src/extension.ts)
+    // must deserialize into `Ingest` with `source_type == "editor"` and never touch
+    // the browser-only fields.
+    #[test]
+    fn parses_editor_focus_payload() {
+        let ev: Ingest = serde_json::from_str(
+            r#"{"type":"editor","event":"focus","path":"/tmp/a.ts","languageId":"typescript","workspace":"instant","ts":1}"#,
+        )
+        .unwrap();
+        assert_eq!(ev.source_type, "editor");
+        assert_eq!(ev.event, "focus");
+        assert_eq!(ev.path, "/tmp/a.ts");
+        assert_eq!(ev.language_id, "typescript");
+        assert_eq!(ev.workspace, "instant");
+        assert_eq!(ev.kind, ""); // browser-only field stays default
+    }
+
+    #[test]
+    fn parses_editor_cursor_payload() {
+        let ev: Ingest =
+            serde_json::from_str(r#"{"type":"editor","event":"cursor","path":"/tmp/a.ts","line":42,"ts":2}"#)
+                .unwrap();
+        assert_eq!(ev.source_type, "editor");
+        assert_eq!(ev.line, Some(42));
+    }
+
+    #[test]
+    fn parses_editor_save_payload() {
+        let ev: Ingest =
+            serde_json::from_str(r#"{"type":"editor","event":"save","path":"/tmp/a.ts","ts":3}"#).unwrap();
+        assert_eq!(ev.source_type, "editor");
+        assert_eq!(ev.event, "save");
+    }
+
+    // The Chrome extension's existing shape must still parse unchanged.
+    #[test]
+    fn parses_browser_payload() {
+        let ev: Ingest = serde_json::from_str(
+            r#"{"kind":"nav","url":"https://example.com","title":"Example","text":""}"#,
+        )
+        .unwrap();
+        assert_eq!(ev.source_type, ""); // absent => not routed to the editor branch
+        assert_eq!(ev.kind, "nav");
+        assert_eq!(ev.url, "https://example.com");
+    }
+
+    // Editor rows must round-trip through insert + the 7-day prune query
+    // ('editor' has to be in the retained-source list or rows never expire).
+    #[test]
+    fn editor_rows_insert_and_prune() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE events(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
+               source TEXT NOT NULL, kind TEXT NOT NULL, app TEXT NOT NULL,
+               url TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL, shot TEXT NOT NULL)",
+        )
+        .unwrap();
+        let row = insert_row(&conn, 1_000, "editor", "save", "", "/tmp/a.ts", "instant", "", "").unwrap();
+        assert_eq!(row.source, "editor");
+        assert_eq!(row.kind, "save");
+        assert_eq!(row.url, "/tmp/a.ts");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM events WHERE source='editor'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
 }

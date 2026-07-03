@@ -78,3 +78,16 @@ audit:
 
 # full preflight before a commit: tsc + vite build + cargo check + tests
 verify: check build cargo-check test
+
+# build the VS Code extension (npm install + tsc -> vscode-ext/out)
+vscode-build:
+    cd vscode-ext && npm install && npx tsc -p ./
+
+# package + install the VS Code extension for local dev use. Packaging with
+# vsce works without a publisher account (the marketplace id in package.json
+# is a placeholder, only needed to actually publish). If `code`/`vsce` aren't
+# on PATH, symlink vscode-ext/ into ~/.vscode/extensions instead — see
+# vscode-ext/README.md.
+vscode-install: vscode-build
+    cd vscode-ext && npx @vscode/vsce package --allow-missing-repository -o instant-activity.vsix
+    code --install-extension vscode-ext/instant-activity.vsix

@@ -1,0 +1,33 @@
+{
+  "name": "instant-activity",
+  "displayName": "instant activity",
+  "publisher": "instant",
+  "version": "0.1.0",
+  "description": "Reports active-file focus, cursor line, and saves to the local instant app (127.0.0.1:8787).",
+  "engines": {
+    "vscode": ">=1.82.0"
+  },
+  "categories": ["Other"],
+  "main": "./out/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "configuration": {
+      "title": "instant activity",
+      "properties": {
+        "instantActivity.endpoint": {
+          "type": "string",
+          "default": "http://127.0.0.1:8787/ingest",
+          "description": "Localhost ingest endpoint the instant app listens on."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.82.0",
+    "typescript": "^5.5.0"
+  }
+}
