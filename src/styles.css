@@ -2945,8 +2945,10 @@ body.xp-pixel .xterm canvas {
 #meme-workspace {
   flex: 1 1 auto;
   min-height: 0;
+  max-height: 100%;
   display: flex;
   flex-direction: row;
+  align-items: stretch;
   gap: 0;
   padding: 0;
   overflow: hidden;
@@ -2954,7 +2956,11 @@ body.xp-pixel .xterm canvas {
 
 #meme-workspace .meme-thumbs {
   flex: 0 0 auto;
+  align-self: stretch;
   width: var(--meme-sidebar-width, 180px);
+  height: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
   border: var(--frame-w) solid var(--frame);
   border-top: none;
   border-bottom: none;
@@ -2993,6 +2999,7 @@ body.xp-pixel .xterm canvas {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
   padding: 8px;
 }
