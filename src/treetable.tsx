@@ -122,7 +122,10 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     // null/undefined sink last regardless of direction.
     sortUndefined: "last",
     // serverSort: the host already ordered these rows; don't reorder on click.
-    sortingFn: props.serverSort ? () => 0 : undefined,
+    // "auto" must be spelled out: an explicit `sortingFn: undefined` clobbers
+    // react-table's 'auto' default in the spread-merge, getSortingFn() then
+    // returns undefined and the first active sort crashes sortData.
+    sortingFn: props.serverSort ? () => 0 : "auto",
     meta: c,
   }));
 
