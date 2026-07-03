@@ -26,8 +26,10 @@ pub struct DirListing {
     entries: Vec<Entry>,
 }
 
-// Expand a leading ~ and fall back to HOME for empty/None input.
-fn resolve(input: Option<String>) -> PathBuf {
+// Expand a leading ~ and fall back to HOME for empty/None input. Shared with
+// meme::save_meme so a user-typed `~/...` path in the Save dialog resolves the
+// same way a typed folder path does here.
+pub(crate) fn resolve(input: Option<String>) -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let raw = input.unwrap_or_default();
     let raw = raw.trim();

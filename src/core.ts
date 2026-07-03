@@ -21,6 +21,9 @@ let homeDirCached = "";
 export function setHomeDir(h: string) {
   homeDirCached = h;
 }
+export function getHomeDir(): string {
+  return homeDirCached;
+}
 export function tildify(p: string): string {
   const h = homeDirCached.replace(/\/$/, "");
   return h && p.startsWith(h + "/") ? "~" + p.slice(h.length) : p;

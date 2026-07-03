@@ -179,7 +179,10 @@ fn file_size(path: &Path) -> Result<u64, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Save a PNG data URL to disk.
+/// Save a PNG data URL to disk. Resolves a leading `~` the same way the Files
+/// panel does (the Save dialog takes a raw typed path, and a shell-style `~`
+/// is otherwise not expanded by the OS) and creates any missing parent
+/// directories, so saving into a folder that doesn't exist yet just works.
 #[tauri::command]
 pub fn save_meme(path: String, data_url: String) -> Result<(), String> {
     let prefix = "data:image/png;base64,";
@@ -187,7 +190,14 @@ pub fn save_meme(path: String, data_url: String) -> Result<(), String> {
         .strip_prefix(prefix)
         .ok_or_else(|| "expected image/png data URL".to_string())?;
     let bytes = base64_decode(b64)?;
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())
+    let resolved = crate::fs::resolve(Some(path));
+    if let Some(parent) = resolved.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+    }
+    std::fs::write(&resolved, bytes).map_err(|e| format!("{}: {e}", resolved.display()))
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {

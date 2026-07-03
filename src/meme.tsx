@@ -11,6 +11,8 @@ import { MemeTree } from "./memeTree";
 import { MemeLayers } from "./memeLayers";
 import type { DirListing, FsEntry } from "./state";
 import { readPluginState, savePluginState } from "./pluginState";
+import { flashStatus, getHomeDir, showError, tildify } from "./core";
+import { defaultExportPath, deriveOutputPath, writeMemePng } from "./memeExport";
 
 const STORAGE_KEY = "meme:lastFolder";
 const MEME_STATE_KEY = "meme:state";
@@ -111,17 +113,13 @@ const uploadObjectUrls = new Map<string, string>();
 const MAX_CANVAS_DIM = 1920;
 
 let renderPending = false;
-let homeDirResolved = "";
 let folderPollTimer: number | undefined;
 let pollInProgress = false;
 let treeRoot: Root | null = null;
 let layersRoot: Root | null = null;
-let lastFolderPromise: Promise<string> = homeDir()
-  .catch(() => "")
-  .then((h) => {
-    homeDirResolved = h;
-    return h;
-  });
+// Used only to restore the last-opened folder on mount; the Export/Save
+// defaults use core.ts's app-wide getHomeDir() instead (set once at boot).
+let lastFolderPromise: Promise<string> = homeDir().catch(() => "");
 
 export function registerMeme() {
   registerPlugin({
@@ -206,6 +204,7 @@ function MemePanel() {
         <span className="spy-title">meme generator & slack emoji</span>
         <span id="meme-status" className="wt-count"></span>
         <span className="spy-spacer"></span>
+        <button id="meme-export" type="button" title="Save to ~/Desktop, no path needed">Export PNG</button>
         <button id="meme-copy" type="button">Copy</button>
         <button id="meme-save" type="button">Save…</button>
         <button id="meme-emoji" type="button">Slack Emoji</button>
@@ -307,6 +306,7 @@ function wireMemePanel(): () => void {
     if (path) await loadFolder(path);
   });
 
+  on($("#meme-export"), "click", () => exportMemeOneClick());
   on($("#meme-copy"), "click", () => copyMeme());
   on($("#meme-save"), "click", () => showSaveDialog());
   on($("#meme-emoji"), "click", () => makeSlackEmoji());
@@ -864,6 +864,27 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): s
   return out;
 }
 
+// One-click export: no dialog, no path to type. Writes straight to
+// ~/Desktop/meme-<timestamp>.png (parent dir + `~` handled on the Rust side
+// too, but this is already an absolute path) and flashes the written path.
+async function exportMemeOneClick() {
+  const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
+  if (!canvas || !state.image) {
+    setStatus("load or create an image first");
+    return;
+  }
+  const path = defaultExportPath(getHomeDir());
+  try {
+    const dataUrl = canvas.toDataURL("image/png");
+    await writeMemePng(path, dataUrl);
+    flashStatus(`saved ${tildify(path)}`);
+    setStatus(`saved ${tildify(path)}`);
+  } catch (e) {
+    showError("meme-export", e);
+    setStatus(`export failed: ${e}`);
+  }
+}
+
 async function copyMeme() {
   const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
@@ -883,37 +904,10 @@ function showSaveDialog() {
   const dialog = $("#meme-save-dialog") as HTMLDialogElement | null;
   const pathInput = $("#meme-save-path") as HTMLInputElement | null;
   if (!dialog || !pathInput) return;
-
-  let base: string;
-  if (state.currentPath.startsWith("upload://")) {
-    const name = state.currentPath.slice(9).replace(/\.[^.]+$/, "-meme.png");
-    base = state.folder ? `${state.folder}/${name}` : `${homeDirFallback()}/${name}`;
-  } else if (state.currentPath) {
-    base = state.currentPath.replace(/\.[^.]+$/, "-meme.png");
-  } else if (state.folder) {
-    base = `${state.folder}/meme.png`;
-  } else {
-    base = `${homeDirFallback()}/meme.png`;
-  }
-  pathInput.value = base;
+  // Prefill with the same default the one-click Export button writes to, so
+  // this dialog is only ever needed to pick a *different* path.
+  pathInput.value = defaultExportPath(getHomeDir());
   dialog.showModal();
-}
-
-function homeDirFallback(): string {
-  // Best-effort; the save dialog lets the user edit the path anyway.
-  return state.folder || homeDirResolved || "/Users";
-}
-
-function deriveOutputPath(suffix: string): string {
-  const name = state.currentPath.startsWith("upload://")
-    ? state.currentPath.slice(9).replace(/\.[^.]+$/, "")
-    : state.currentPath.replace(/\.[^.]+$/, "");
-  const file = `${basename(name)}${suffix}`;
-  if (state.currentPath.startsWith("upload://")) {
-    return state.folder ? `${state.folder}/${file}` : `${homeDirFallback()}/${file}`;
-  }
-  const dir = state.currentPath.split("/").slice(0, -1).join("/");
-  return dir ? `${dir}/${file}` : file;
 }
 
 async function doSave() {
@@ -924,9 +918,11 @@ async function doSave() {
   if (!path) return;
   try {
     const dataUrl = canvas.toDataURL("image/png");
-    await invoke("save_meme", { path, dataUrl });
+    await writeMemePng(path, dataUrl);
+    flashStatus(`saved ${tildify(path)}`);
     setStatus(`saved ${path}`);
   } catch (e) {
+    showError("meme-save", e);
     setStatus(`save failed: ${e}`);
   }
 }
@@ -941,20 +937,21 @@ async function makeSlackEmoji() {
 
   // Export the current canvas to a temp file, then ask ImageMagick to make it
   // Slack-compatible. We use the source folder as the output parent.
-  const outPath = deriveOutputPath("-slack-emoji.png");
+  const outPath = deriveOutputPath(state.currentPath, state.folder, getHomeDir(), "-slack-emoji.png");
   try {
     const dataUrl = canvas.toDataURL("image/png");
-    await invoke("save_meme", { path: outPath, dataUrl });
+    await writeMemePng(outPath, dataUrl);
     const res = await invoke<{ ok: boolean; stderr: string; command: string }>("make_slack_emoji", {
       input: outPath,
       output: outPath,
     });
-    if ((res as any).ok) {
+    if (res.ok) {
       setStatus(`slack emoji ${outPath}`);
     } else {
-      setStatus(`emoji failed: ${(res as any).stderr || (res as any).command}`);
+      setStatus(`emoji failed: ${res.stderr || res.command}`);
     }
   } catch (e) {
+    showError("meme-emoji", e);
     setStatus(`emoji failed: ${e}`);
   }
 }
