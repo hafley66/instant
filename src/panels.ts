@@ -3,19 +3,14 @@
 // bodies are React components (tablepanels.tsx / status.tsx); onShow wires each
 // to its lazy data refresh.
 import { registerPlugin } from "./plugin";
-import {
-  TmuxPanelV2,
-  WorktreesPanelV2,
-  ActivityPanelV2,
-  FavoritesPanelV2,
-} from "./tablepanels";
+import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { store } from "./state";
 import { cdpPerf } from "./cdp";
 import { setBrowserPerf } from "./browser";
 import { refreshSessions, scanWorktreesIfNeeded } from "./worktrees";
 import { refreshConfig } from "./activity";
-import { refreshFavorites } from "./favorites";
+import { registerFavoritesPlugin } from "./favorites";
 
 export function registerBuiltin() {
   registerPlugin({
@@ -76,15 +71,12 @@ export function registerBuiltin() {
         html: "",
         component: ActivityPanelV2,
       },
-      {
-        id: "favorites",
-        title: "Favorites",
-        icon: "★",
-        iconLabel: "Favorites",
-        html: "",
-        component: FavoritesPanelV2,
-        onShow: () => refreshFavorites(),
-      },
+    ],
+  });
+  registerFavoritesPlugin(); // between activity/config: keeps rail order
+  registerPlugin({
+    id: "builtin",
+    panels: [
       {
         id: "config",
         title: "Config",

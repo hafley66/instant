@@ -5,7 +5,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { store, type AiMessage, type Fav } from "./state";
 import { addPreviewPanel } from "./reactdock";
-import { setFavoritesPanel, type FavTreeRow } from "./tablepanels";
+import { registerPlugin } from "./plugin";
+import { FavoritesPanelV2, setFavoritesPanel, type FavTreeRow } from "./tablepanels";
 import { escapeHtml, baseName, flashStatus } from "./core";
 import { previewInsts } from "./preview";
 import { tabs, tabMetaById, tabCwds } from "./terminal";
@@ -350,7 +351,25 @@ function resumeFavSession(r: FavTreeRow) {
   openWorktree(r.cwd, "", r.cwd, resumeLaunch(r.editor, r.sessionId), true);
 }
 
-export function registerFavoritesBridge() {
+// Panel def + data bridge in one place, so the "favorites" plugin's whole
+// registration is a single call from main()'s init list. Called from inside
+// registerBuiltin() (panels.ts) at the exact point the panel def used to sit
+// in that plugin's array, so rail order is unchanged.
+export function registerFavoritesPlugin() {
+  registerPlugin({
+    id: "favorites",
+    panels: [
+      {
+        id: "favorites",
+        title: "Favorites",
+        icon: "★",
+        iconLabel: "Favorites",
+        html: "",
+        component: FavoritesPanelV2,
+        onShow: () => refreshFavorites(),
+      },
+    ],
+  });
   setFavoritesPanel({
     rows: favTreeRows,
     onShow: () => refreshFavorites(),
