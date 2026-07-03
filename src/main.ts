@@ -58,6 +58,8 @@ import {
   type FavTreeRow,
 } from "./tablepanels";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
+import { registerMeme, handleMemeDrop } from "./meme";
+import { isFilePickerOpen } from "./overlayGuard";
 import { renderTable, type SortState } from "./table";
 import { fuzzyFilter } from "./fuzzy";
 import { wireContextMenu, showContextMenu, type CtxItem } from "./ctxmenu";
@@ -4252,6 +4254,10 @@ async function wireOsDrop() {
         for (const path of paths) addScope({ kind: "file", value: path });
         return;
       }
+      if (over?.closest("#meme-workspace")) {
+        handleMemeDrop(paths).catch((e) => showError("meme-drop", e));
+        return;
+      }
       const id = activeId();
       if (!id) return;
       pasteToActive(paths.map(pathArg).join(" ") + " ");
@@ -5226,6 +5232,7 @@ async function main() {
   registerBuiltin();
   registerSprefa();
   registerNav();
+  registerMeme();
   registerV2Bridges();
   registerActivityBridge();
   registerFavoritesBridge();
@@ -5419,7 +5426,7 @@ async function main() {
       cancelHide();
       return;
     }
-    if (everFocused && !capturing && !draggingIn) {
+    if (everFocused && !capturing && !draggingIn && !isFilePickerOpen()) {
       // Defer so a drag-in (which blurs us) can land; a drag-enter cancels it.
       // Kept short so tab-away/click-out dismiss feels instant.
       cancelHide();

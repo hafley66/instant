@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:meme": "VITE_DEV_PORT=1422 vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

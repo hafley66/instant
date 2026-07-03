@@ -7,6 +7,7 @@ mod fs;
 mod harness;
 mod kitty;
 mod ledger;
+mod meme;
 mod pty;
 mod sprefa_plugin;
 mod workspace;
@@ -781,6 +782,8 @@ pub fn run() {
             config::config_reload,
             config::config_open,
             fs::list_dir,
+            fs::list_dir_meme,
+            fs::list_dir_recursive,
             fs::read_image,
             fs::read_text,
             harness::harness_session,
@@ -788,6 +791,8 @@ pub fn run() {
             ledger::list_ai_sessions,
             ledger::read_ai_messages,
             ledger::latest_ai_message,
+            meme::make_slack_emoji,
+            meme::save_meme,
             favorites::fav_add,
             favorites::fav_remove,
             favorites::fav_list,
