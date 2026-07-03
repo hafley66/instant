@@ -17,6 +17,10 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef, useState, type ReactNode, type MouseEvent } from "react";
+import type { CellEdit } from "./treetableEdit";
+import { TableRow } from "./treetableRow";
+
+export type { CellEdit } from "./treetableEdit";
 
 export interface TreeColumn<T> {
   id: string;
@@ -30,6 +34,11 @@ export interface TreeColumn<T> {
   tree?: boolean;
   // Action cells (pin, star): clicks here must NOT trigger the row's onClick.
   noRowClick?: boolean;
+  // Inline editing: opt a column in with an editor kind + a string projection of
+  // the field. Requires the table's onCellEdit prop. Columns without both stay
+  // display-only (unchanged for every existing consumer).
+  edit?: CellEdit;
+  getEditValue?: (row: T) => string;
 }
 
 export interface TreeTableProps<T> {
@@ -53,6 +62,9 @@ export interface TreeTableProps<T> {
   onRowClick?: (row: T, e: MouseEvent) => void;
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
+  // Inline cell edit committed (Enter/blur/select). Fired with the row, the
+  // column id, and the editor's string value; the host maps it back to a field.
+  onCellEdit?: (row: T, columnId: string, value: string) => void;
   rowClass?: (row: T) => string | undefined;
   rowTitle?: (row: T) => string;
   // draggable entity payload (mirrors table.ts rowEntity; main.ts dragstart reads
@@ -175,6 +187,12 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     overscan: 12,
   });
 
+  // Single-cell-at-a-time inline edit, keyed by row id + column id. Local to the
+  // table; the editor commits through props.onCellEdit.
+  const [editing, setEditing] = useState<{ row: string; col: string } | null>(null);
+  const firstEditableCol = (): string | undefined =>
+    props.onCellEdit ? columns.find((c) => c.edit && c.getEditValue)?.id : undefined;
+
   // Keyboard cursor: the focused row index in the flattened (visible) model.
   // Arrows move it, ←/→ collapse/expand (or step out/in), Enter activates the
   // row (reuses onRowClick at the row's rect so menus anchor sensibly).
@@ -226,7 +244,22 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
         }
         break;
       }
-      case "Enter":
+      case "Enter": {
+        e.preventDefault();
+        // Editable tables: Enter edits the row's first editable cell (nav is
+        // row-level, so there's no focused-column concept to honor). Otherwise
+        // fall back to activating the row.
+        const col = firstEditableCol();
+        if (col) {
+          setEditing({ row: row.id, col });
+          break;
+        }
+        if (onRowClick) {
+          const r = rowAt(i)?.getBoundingClientRect();
+          onRowClick(row.original, { clientX: (r?.left ?? 0) + 8, clientY: r?.bottom ?? 0 } as MouseEvent);
+        }
+        break;
+      }
       case " ":
         e.preventDefault();
         if (onRowClick) {
@@ -261,6 +294,17 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       rowClass={rowClass}
       rowTitle={rowTitle}
       rowEntity={rowEntity}
+      editingCol={editing && editing.row === row.id ? editing.col : null}
+      onStartEdit={props.onCellEdit ? (col) => setEditing({ row: row.id, col }) : undefined}
+      onCommitEdit={
+        props.onCellEdit
+          ? (col, value) => {
+              props.onCellEdit!(row.original, col, value);
+              setEditing(null);
+            }
+          : undefined
+      }
+      onCancelEdit={() => setEditing(null)}
     />
   );
 
@@ -379,102 +423,5 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       </div>
       {host}
     </div>
-  );
-}
-
-function TableRow<T>(props: {
-  row: Row<T>;
-  index: number;
-  active: boolean;
-  onFocusRow: (index: number) => void;
-  columns: TreeColumn<T>[];
-  onRowClick?: (row: T, e: MouseEvent) => void;
-  onRowDoubleClick?: (row: T, e: MouseEvent) => void;
-  onRowContextMenu?: (row: T, e: MouseEvent) => void;
-  onToggleExpand?: (row: T, willExpand: boolean) => void;
-  toggleOnDoubleClick?: (row: T) => boolean;
-  rowClass?: (row: T) => string | undefined;
-  rowTitle?: (row: T) => string;
-  rowEntity?: (row: T) => { kind: string; value: string } | undefined;
-}) {
-  const { row, columns } = props;
-  const data = row.original;
-  const ent = props.rowEntity?.(data);
-  const cls = ["dtable-row", props.active ? "kbd-active" : "", props.rowClass?.(data)]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <tr
-      className={cls}
-      data-row-index={props.index}
-      title={props.rowTitle?.(data)}
-      draggable={ent ? true : undefined}
-      data-entity-kind={ent?.kind}
-      data-entity-value={ent?.value}
-      onMouseDown={() => props.onFocusRow(props.index)}
-      onClick={
-        props.onRowClick
-          ? (e) => {
-              // Bail if the click landed in an action cell (pin/star). A belt to
-              // stopPropagation's braces: survives any synthetic-event quirk.
-              if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
-              props.onRowClick!(data, e);
-            }
-          : undefined
-      }
-      onDoubleClick={
-        props.toggleOnDoubleClick?.(data) && row.getCanExpand()
-          ? (e) => {
-              if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
-              props.onToggleExpand?.(data, !row.getIsExpanded());
-              row.toggleExpanded();
-            }
-          : props.onRowDoubleClick
-            ? (e) => props.onRowDoubleClick!(data, e)
-            : undefined
-      }
-      onContextMenu={
-        props.onRowContextMenu
-          ? (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              props.onRowContextMenu!(data, e);
-            }
-          : undefined
-      }
-    >
-      {columns.map((c) => (
-        <td
-          key={c.id}
-          className={c.cellClass?.(data)}
-          data-no-row-click={c.noRowClick ? "" : undefined}
-        >
-          {c.tree ? (
-            <span
-              className="tt-tree"
-              style={{ paddingLeft: `${row.depth * 12}px` }}
-            >
-              {row.getCanExpand() ? (
-                <span
-                  className="tt-twisty"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    props.onToggleExpand?.(data, !row.getIsExpanded());
-                    row.toggleExpanded();
-                  }}
-                >
-                  {row.getIsExpanded() ? "▾" : "▸"}
-                </span>
-              ) : (
-                <span className="tt-twisty tt-leaf" />
-              )}
-              {c.cell(data)}
-            </span>
-          ) : (
-            c.cell(data)
-          )}
-        </td>
-      ))}
-    </tr>
   );
 }

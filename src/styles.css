@@ -1868,6 +1868,22 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   outline: none;
   height: 100%;
 }
+/* In-cell inline editor (TreeTable edit columns): fill the cell, inherit the
+   grid's type so the input doesn't reflow the row. */
+.tt-edit {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 11px;
+  padding: 0 2px;
+  margin: 0;
+  border: 1px solid var(--row-active-bg, #4a90d9);
+  background: var(--panel-bg, #fff);
+  color: var(--panel-fg, #000);
+}
+.tt-edit:focus {
+  outline: none;
+}
 .dtable-row.kbd-active > td {
   background: color-mix(in srgb, var(--row-active-bg) 22%, transparent);
 }
