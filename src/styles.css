@@ -2992,6 +2992,7 @@ body.xp-pixel .xterm canvas {
 .meme-stage {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   padding: 8px;
 }
@@ -3115,6 +3116,7 @@ body.xp-pixel .xterm canvas {
 
 .meme-canvas-wrap {
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;

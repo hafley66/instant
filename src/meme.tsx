@@ -165,7 +165,8 @@ function MemePanel() {
   const [ui, setUi] = useState<MemeUi>(() => readMemeUi());
 
   useEffect(() => {
-    wireMemePanel();
+    const cleanup = wireMemePanel();
+    return cleanup;
   }, []);
 
   const startSidebarDrag = useCallback((e: React.PointerEvent) => {
@@ -277,33 +278,42 @@ function $(sel: string) {
   return document.querySelector(sel) as HTMLElement | null;
 }
 
-function wireMemePanel() {
+function wireMemePanel(): () => void {
   const form = $("#meme-folder-form");
   const folderInput = $("#meme-folder") as HTMLInputElement | null;
   const canvasWrap = $("#meme-canvas-wrap");
+  const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
+  const dialog = $("#meme-save-dialog") as HTMLDialogElement | null;
 
-  if (!form || form.dataset.wired) return;
-  form.dataset.wired = "1";
+  // Re-mount React roots on every mount so they always point to the current DOM nodes
+  // (the panel can be unmounted/remounted by dockview or React StrictMode).
+  treeRoot?.unmount();
+  layersRoot?.unmount();
+  treeRoot = null;
+  layersRoot = null;
 
-  // Restore last folder.
-  lastFolderPromise.then(async (home) => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const initial = saved || home || "";
-    if (folderInput) folderInput.value = initial;
-    if (initial) await loadFolder(initial);
-  });
+  const thumbsEl = $("#meme-thumbs");
+  const layersEl = $("#meme-layers");
+  if (thumbsEl) treeRoot = createRoot(thumbsEl);
+  if (layersEl) layersRoot = createRoot(layersEl);
 
-  form.addEventListener("submit", async (e) => {
+  const listeners: { el: EventTarget; type: string; fn: EventListener }[] = [];
+  function on<T extends Event>(el: EventTarget | null, type: string, fn: (e: T) => void) {
+    if (!el) return;
+    const listener = (e: Event) => fn(e as T);
+    el.addEventListener(type, listener);
+    listeners.push({ el, type, fn: listener });
+  }
+
+  on(form, "submit", async (e: Event) => {
     e.preventDefault();
     const path = folderInput?.value.trim();
     if (path) await loadFolder(path);
   });
 
-  loadMemeState();
-
-  $("#meme-copy")?.addEventListener("click", copyMeme);
-  $("#meme-save")?.addEventListener("click", showSaveDialog);
-  $("#meme-emoji")?.addEventListener("click", makeSlackEmoji);
+  on($("#meme-copy"), "click", () => copyMeme());
+  on($("#meme-save"), "click", () => showSaveDialog());
+  on($("#meme-emoji"), "click", () => makeSlackEmoji());
 
   const fileInput = $("#meme-file-input") as HTMLInputElement | null;
   const folderFileInput = $("#meme-folder-input") as HTMLInputElement | null;
@@ -316,53 +326,64 @@ function wireMemePanel() {
     setFilePickerOpen(false);
   }
 
-  $("#meme-upload-files")?.addEventListener("click", () => fileInput && openFilePicker(fileInput));
-  $("#meme-upload-folder")?.addEventListener("click", () => folderFileInput && openFilePicker(folderFileInput));
-  fileInput?.addEventListener("change", () => {
+  on($("#meme-upload-files"), "click", () => fileInput && openFilePicker(fileInput));
+  on($("#meme-upload-folder"), "click", () => folderFileInput && openFilePicker(folderFileInput));
+  on(fileInput, "change", () => {
+    if (!fileInput) return;
     endFilePicker();
     if (fileInput.files) handleUploadedFiles(fileInput.files);
     fileInput.value = "";
   });
-  folderFileInput?.addEventListener("change", () => {
+  on(folderFileInput, "change", () => {
+    if (!folderFileInput) return;
     endFilePicker();
     if (folderFileInput.files) handleUploadedFiles(folderFileInput.files, true);
     folderFileInput.value = "";
   });
   // Safety net: if the user cancels the picker, the change event may not fire,
   // but the window regaining focus means the dialog is gone.
-  window.addEventListener("focus", endFilePicker);
+  on(window, "focus", endFilePicker);
 
-  const dialog = $("#meme-save-dialog") as HTMLDialogElement | null;
-  $("#meme-save-confirm")?.addEventListener("click", (e) => {
+  on($("#meme-save-confirm"), "click", (e: Event) => {
     e.preventDefault();
     dialog?.close("save");
     doSave();
   });
 
-  // Resize canvas wrapper on panel resize (best-effort).
-  new ResizeObserver(() => scheduleRender()).observe(canvasWrap || document.body);
-
   // Drag text around on the canvas.
-  const canvas = $("#meme-canvas") as HTMLCanvasElement | null;
-  canvas?.addEventListener("pointerdown", onCanvasPointerDown);
-  canvas?.addEventListener("pointermove", onCanvasPointerMove);
-  canvas?.addEventListener("pointerup", onCanvasPointerUp);
-  canvas?.addEventListener("pointercancel", onCanvasPointerUp);
-  canvas?.addEventListener("pointerleave", onCanvasPointerUp);
+  on(canvas, "pointerdown", onCanvasPointerDown);
+  on(canvas, "pointermove", onCanvasPointerMove);
+  on(canvas, "pointerup", onCanvasPointerUp);
+  on(canvas, "pointercancel", onCanvasPointerUp);
+  on(canvas, "pointerleave", onCanvasPointerUp);
 
-  // Mount the React file tree into the thumbs pane.
-  const thumbsEl = $("#meme-thumbs");
-  if (thumbsEl && !treeRoot) {
-    treeRoot = createRoot(thumbsEl);
-  }
+  // Resize canvas wrapper on panel resize (best-effort).
+  const ro = new ResizeObserver(() => scheduleRender());
+  ro.observe(canvasWrap || document.body);
 
-  // Mount the React layer table below the canvas.
-  const layersEl = $("#meme-layers");
-  if (layersEl && !layersRoot) {
-    layersRoot = createRoot(layersEl);
-  }
+  loadMemeState();
+
+  // Restore last folder.
+  lastFolderPromise.then(async (home) => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const initial = saved || home || "";
+    if (folderInput) folderInput.value = initial;
+    if (initial) await loadFolder(initial);
+  });
+
   renderLayers();
   renderThumbs();
+
+  return () => {
+    for (const { el, type, fn } of listeners) {
+      el.removeEventListener(type, fn);
+    }
+    ro.disconnect();
+    treeRoot?.unmount();
+    layersRoot?.unmount();
+    treeRoot = null;
+    layersRoot = null;
+  };
 }
 
 async function loadFolder(raw: string) {
