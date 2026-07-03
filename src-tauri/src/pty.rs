@@ -620,3 +620,76 @@ pub fn rogue_agent_sessions() -> Vec<RogueSession> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // path_env() reads the real process PATH, so this test owns mutating it and
+    // restores the original value afterward (single test, no interleaving with
+    // itself — the only other thing in this crate that could race on PATH).
+    #[test]
+    fn path_env_prepends_extra_dirs_to_existing_path() {
+        let saved = std::env::var("PATH").ok();
+
+        std::env::set_var("PATH", "/custom/bin:/another/bin");
+        assert_eq!(path_env(), format!("{EXTRA_PATH}:/custom/bin:/another/bin"));
+
+        std::env::remove_var("PATH");
+        assert_eq!(path_env(), EXTRA_PATH);
+
+        match saved {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    #[test]
+    fn pixel_dims_multiplies_cell_size_by_grid() {
+        assert_eq!(pixel_dims(80, 24, Some(8), Some(16)), (640, 384));
+    }
+
+    #[test]
+    fn pixel_dims_defaults_to_zero_when_cell_size_unknown() {
+        assert_eq!(pixel_dims(80, 24, None, None), (0, 0));
+        // Height falls back to 0 independently of a known width, and vice versa.
+        assert_eq!(pixel_dims(80, 24, Some(8), None), (640, 0));
+        assert_eq!(pixel_dims(80, 24, None, Some(16)), (0, 384));
+    }
+
+    #[test]
+    fn pixel_dims_saturates_instead_of_overflowing() {
+        assert_eq!(pixel_dims(u16::MAX, 1, Some(2), Some(1)), (u16::MAX, 1));
+    }
+
+    #[test]
+    fn drain_utf8_decodes_a_complete_buffer() {
+        let mut pending = b"hello".to_vec();
+        assert_eq!(drain_utf8(&mut pending), "hello");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn drain_utf8_holds_back_a_split_multibyte_char() {
+        // "a\u{20ac}b" ('a', euro sign (3 bytes: E2 82 AC), 'b'). Feed 'a' plus
+        // just the first byte of the euro sign, as a read boundary would.
+        let full = "a\u{20ac}b".as_bytes().to_vec();
+        let mut pending = full[..2].to_vec();
+
+        let first = drain_utf8(&mut pending);
+        assert_eq!(first, "a");
+        assert_eq!(pending, vec![full[1]]); // incomplete lead byte retained
+
+        pending.extend_from_slice(&full[2..]);
+        let second = drain_utf8(&mut pending);
+        assert_eq!(second, "\u{20ac}b");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn drain_utf8_replaces_invalid_byte_and_keeps_decoding() {
+        let mut pending = vec![b'a', 0xFF, b'b'];
+        assert_eq!(drain_utf8(&mut pending), "a\u{FFFD}b");
+        assert!(pending.is_empty());
+    }
+}
