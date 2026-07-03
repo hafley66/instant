@@ -2,8 +2,6 @@ import {
   Component,
   createElement,
   Fragment,
-  useEffect,
-  useRef,
   type ComponentType,
   type ErrorInfo,
   type ReactNode,
@@ -16,8 +14,12 @@ export interface PanelDef {
   icon: string; // fallback glyph when iconUrl is absent
   iconUrl?: string; // XP-style raster icon (public/icons/*.png); wins over `icon`
   iconLabel: string;
-  html: string;
-  component?: ComponentType<IDockviewPanelProps>;
+  // Vestigial: two untouchable panel registrations (meme, rules) still pass
+  // `html: ""` from before their React conversion. Kept optional (rather than
+  // deleted) so those literals keep compiling; unused otherwise -- every panel
+  // renders through `component` now.
+  html?: string;
+  component: ComponentType<IDockviewPanelProps>;
   onShow?: () => void;
 }
 
@@ -110,27 +112,6 @@ export function allPanels(): PanelDef[] {
   return [...panelMap.values()];
 }
 
-function panelComponent(id: string): ComponentType<IDockviewPanelProps> {
-  const def = panelMap.get(id);
-  return function Panel() {
-    const ref = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-      const node = document.getElementById(`panel-${id}`);
-      if (node && ref.current) {
-        ref.current.appendChild(node);
-        def?.onShow?.();
-      }
-      return () => {
-        const pool = document.getElementById("panel-pool");
-        if (pool && node) pool.appendChild(node);
-      };
-    }, []);
-
-    return createElement("div", { className: "dv-host", ref });
-  };
-}
-
 interface PanelErrorBoundaryProps {
   title: string;
   children: ReactNode;
@@ -203,27 +184,12 @@ class PanelErrorBoundary extends Component<PanelErrorBoundaryProps, PanelErrorBo
 export function dockComponents(): Record<string, ComponentType<IDockviewPanelProps>> {
   const out: Record<string, ComponentType<IDockviewPanelProps>> = {};
   for (const [id, p] of panelMap) {
-    const Inner = p.component ?? panelComponent(id);
+    const Inner = p.component;
     out[id] = function BoundedPanel(props: IDockviewPanelProps) {
       return createElement(PanelErrorBoundary, { title: p.title, children: createElement(Inner, props) });
     };
   }
   return out;
-}
-
-export function injectPanelHtml() {
-  const pool = document.getElementById("panel-pool");
-  if (!pool) return;
-  for (const p of panelMap.values()) {
-    if (document.getElementById(`panel-${p.id}`)) continue;
-    const s = document.createElement("section");
-    s.className = "panel";
-    s.id = `panel-${p.id}`;
-    s.dataset.panel = p.id;
-    s.dataset.label = p.title;
-    s.innerHTML = p.html;
-    pool.appendChild(s);
-  }
 }
 
 export function buildActivityRail() {

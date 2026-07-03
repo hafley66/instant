@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { store, type SprefaScopeItem, type SprefaScopeKind } from "./state";
 import { registerPlugin } from "./plugin";
 import { openPreviewPanel } from "./preview";
+import { SprefaPanelV2 } from "./sprefaPanel";
 
 type SprefaCol = { name: string; ty: string };
 type SprefaRel = { name: string; columns: SprefaCol[]; builtin?: boolean };
@@ -110,7 +111,7 @@ function renderSprefaSchema(rels: SprefaRel[]) {
   }
 }
 
-async function loadSprefaSchema() {
+export async function loadSprefaSchema() {
   const status = document.querySelector<HTMLElement>("#sprefa-status");
   const tree = document.querySelector<HTMLElement>("#sprefa-schema");
   if (!tree || !status) return;
@@ -372,7 +373,7 @@ function refreshSprefaScopeUI() {
 }
 
 let sprefaWired = false;
-function wireSprefa() {
+export function wireSprefa() {
   const input = document.querySelector<HTMLInputElement>("#sprefa-root");
   if (input) input.value = sprefaRoot;
   const scratchSrc = document.querySelector<HTMLTextAreaElement>("#sprefa-scratch-src");
@@ -451,28 +452,8 @@ export function registerSprefa() {
         icon: "∿",
         iconUrl: "/icons/ComputerFind_32x32_4.png",
         iconLabel: "Sprefa",
-        html: `<form id="sprefa-bar" class="wt-scan">
-          <input id="sprefa-root" autocomplete="off" spellcheck="false" />
-          <button type="submit">Load</button>
-          <button id="sprefa-tab-schema" type="button" class="sprefa-tab on">Schema</button>
-          <button id="sprefa-tab-scratch" type="button" class="sprefa-tab">Scratch</button>
-          <span id="sprefa-status" class="wt-count"></span>
-        </form>
-        <div id="sprefa-schema" class="wt-tree"></div>
-        <div id="sprefa-scratch" hidden>
-          <div id="sprefa-scope" class="sprefa-scope"></div>
-          <textarea id="sprefa-scratch-src" class="sprefa-scratch-src" spellcheck="false"
-            placeholder="scratch datalog — runtime-only, nothing saved.&#10;&#10;rel hot(name: text, line: int).&#10;hot(name, line) &lt;-&#10;  scan(&quot;WORK&quot;, &quot;**/*.rs&quot;, p, rev),&#10;  match(p, rev, /fn\\s+(?&lt;name&gt;[a-z_]+)/, line).&#10;? hot(name, line)."></textarea>
-          <div class="sprefa-scratch-bar">
-            <button id="sprefa-run" type="button">Run ⌘↵</button>
-            <span id="sprefa-scratch-status" class="wt-count"></span>
-          </div>
-          <div id="sprefa-scratch-out" class="sprefa-scratch-out"></div>
-        </div>`,
-        onShow: () => {
-          wireSprefa();
-          loadSprefaSchema();
-        },
+        html: "",
+        component: SprefaPanelV2,
       },
     ],
   });
