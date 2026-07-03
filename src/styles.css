@@ -1815,6 +1815,40 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   font-size: 9px;
   opacity: 0.85;
 }
+/* Column resizing: a table only switches to fixed layout once some column has a
+   width signal (dragged or authored). Untouched tables keep auto layout and
+   render identically. The <colgroup> carries the per-column widths. */
+.dtable-sized {
+  table-layout: fixed;
+}
+/* Under fixed layout a narrowed column must clip its header (body <td>s already
+   ellipsize). Scoped to sized tables so auto-layout tables are untouched. The
+   resizer is absolutely positioned, so it escapes this clip. */
+.dtable-sized th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Grab zone on a header's right edge. position:sticky on the <th> establishes
+   the containing block, so this anchors to the header cell. Invisible until
+   hover/drag; then a thin accent line marks the seam. */
+.dtable-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 6px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  /* Sit above neighbouring header padding so the last few px of the cell are
+     always grabbable. */
+  z-index: 1;
+}
+.dtable-resizer:hover,
+.dtable-resizer.is-resizing {
+  background: var(--frame);
+}
 
 /* Quiet section label, not a banner — most repos are a single worktree, so a
    loud header per repo is the cram. Only true multi-clone repos get the accent. */
