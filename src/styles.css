@@ -573,14 +573,14 @@ body[data-skin="xp"][data-mode="dark"] #dock .dv-groupview:not(.dv-active-group)
    light face with no dark variant, so they glare white on the dark surface
    (search box, filter chips, path/scan inputs). Repaint with panel tokens. */
 body[data-skin="xp"][data-mode="dark"] :is(
-    .act-search, .fs-bar input, .wt-scan input, .new-session input
+    .act-search, .fs-bar input, .wt-scan input, .new-session input, .tt-search
   ) {
   background: #1b1b1d;
   color: var(--panel-fg);
   border: 1px solid var(--frame);
 }
 body[data-skin="xp"][data-mode="dark"] :is(
-    .act-search, .fs-bar input, .wt-scan input, .new-session input
+    .act-search, .fs-bar input, .wt-scan input, .new-session input, .tt-search
   )::placeholder {
   color: #8a8a8a;
 }
@@ -1775,6 +1775,17 @@ body[data-skin] .cmdp-input::placeholder {
 .dtable th {
   position: sticky;
   top: 0;
+  /* Explicit stacking order, not just `position: sticky` with the implicit
+     z-index:auto. Row content that sets `opacity` (.tt-twisty, .dtable-group td,
+     .meme-tree-glyph) forms its OWN stacking context; per the CSS painting-order
+     spec, sticky's auto-z-index context and those opacity contexts land in the
+     same bucket and are then ordered by tree position — tbody comes after thead,
+     so those icons painted on top of the "sticky" header while scrolled. A real
+     z-index here moves the header into the later positive-z-index bucket, above
+     every z-index:auto stacking context in the body regardless of DOM order.
+     Global fix: every TreeTable consumer (files, worktrees, tmux, activity,
+     favorites, rules) shares this rule. */
+  z-index: 1;
   text-align: left;
   padding: 4px 8px;
   font-weight: bold;
