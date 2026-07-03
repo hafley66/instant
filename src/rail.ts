@@ -20,7 +20,11 @@ import {
 const RAIL_ID = "rail";
 
 export function readRailState(): RailState {
-  return readPluginState<RailState>(RAIL_ID, DEFAULT_RAIL_STATE);
+  // savePluginState patches are partial: the slice on disk may hold only the
+  // key that was ever written ({hidden} after a first hide, no order), so the
+  // whole-slice fallback never fires. Normalize per key.
+  const s = readPluginState<Partial<RailState>>(RAIL_ID, DEFAULT_RAIL_STATE);
+  return { order: s.order ?? [], hidden: s.hidden ?? [] };
 }
 
 export function saveRailState(patch: Partial<RailState>): void {

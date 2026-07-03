@@ -22,6 +22,13 @@ describe("railOrder.ts pure functions", () => {
     it("handles an empty registry", () => {
       expect(mergeOrder(["a", "b"], [])).toEqual([]);
     });
+
+    // Regression: a rail slice written by a partial savePluginState patch
+    // (first hide before any drag) stores {hidden} only; order reads back
+    // undefined and crashed mergeOrder ("undefined is not an object").
+    it("tolerates an undefined saved order", () => {
+      expect(mergeOrder(undefined, ["a", "b"])).toEqual(["a", "b"]);
+    });
   });
 
   describe("visibleIds", () => {

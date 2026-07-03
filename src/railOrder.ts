@@ -16,17 +16,20 @@ export const DEFAULT_RAIL_STATE: RailState = { order: [], hidden: [] };
 // registered are dropped; newly-registered ids (never seen before) append at
 // the end in registration order — VS Code's "new extension's icon lands at
 // the bottom" behavior.
-export function mergeOrder(order: string[], registeredIds: string[]): string[] {
+// `order`/`hidden` params tolerate undefined: a persisted rail slice written by
+// a partial savePluginState patch (e.g. the user's first hide, before any drag)
+// stores only the patched key, so the other one reads back undefined.
+export function mergeOrder(order: string[] | undefined, registeredIds: string[]): string[] {
   const known = new Set(registeredIds);
-  const kept = order.filter((id) => known.has(id));
+  const kept = (order ?? []).filter((id) => known.has(id));
   const seen = new Set(kept);
   const appended = registeredIds.filter((id) => !seen.has(id));
   return [...kept, ...appended];
 }
 
 // Drop hidden ids from an (already-merged) order, in order.
-export function visibleIds(order: string[], hidden: string[]): string[] {
-  const hiddenSet = new Set(hidden);
+export function visibleIds(order: string[], hidden: string[] | undefined): string[] {
+  const hiddenSet = new Set(hidden ?? []);
   return order.filter((id) => !hiddenSet.has(id));
 }
 
@@ -52,6 +55,7 @@ export function moveBefore(order: string[], dragId: string, overId: string): str
 }
 
 // Flip one id's membership in a hidden-id list.
-export function toggleHidden(hidden: string[], id: string): string[] {
-  return hidden.includes(id) ? hidden.filter((h) => h !== id) : [...hidden, id];
+export function toggleHidden(hidden: string[] | undefined, id: string): string[] {
+  const h = hidden ?? [];
+  return h.includes(id) ? h.filter((x) => x !== id) : [...h, id];
 }
