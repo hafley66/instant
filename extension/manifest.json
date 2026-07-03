@@ -1,15 +1,21 @@
 {
   "manifest_version": 3,
   "name": "instant activity",
-  "version": "0.2.0",
-  "description": "Streams tab navigation, DOM interactions (click/drag/ctrl-click), tab-open sources, selections, and copies to the local instant app (127.0.0.1:8787).",
-  "permissions": ["tabs", "webNavigation"],
+  "version": "0.3.0",
+  "description": "Config-driven core: streams tab/DOM activity to the local instant app (127.0.0.1:8787) and runs server-defined rules (textnodes / selector / netcapture) that report matches back.",
+  "permissions": ["tabs", "webNavigation", "alarms", "storage"],
   "host_permissions": ["http://127.0.0.1:8787/*"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "dist/background.js" },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["dist/inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"],
       "run_at": "document_idle"
     }
   ]

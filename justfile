@@ -45,6 +45,19 @@ bundle:
 check:
     npx tsc --noEmit
 
+# build the Chrome extension (extension/src/*.ts -> extension/dist/*.js). Load
+# extension/ unpacked in chrome://extensions after this. `ext-watch` rebuilds
+# on save while iterating.
+ext-build:
+    npm run ext:build
+
+ext-watch:
+    npm run ext:watch
+
+# typecheck the extension (its own tsconfig + @types/chrome)
+ext-check:
+    npm run ext:check
+
 # compile-check the Rust backend
 cargo-check:
     cargo check --manifest-path src-tauri/Cargo.toml
