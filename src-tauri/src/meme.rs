@@ -23,14 +23,29 @@ fn magick_bin() -> &'static str {
 fn is_on_path(name: &str) -> bool {
     std::process::Command::new(name)
         .arg("-version")
+        // GUI apps don't inherit the login shell PATH (no /opt/homebrew/bin),
+        // so a plain lookup misses a brew-installed magick/convert. Reuse the
+        // same PATH-prepend logic the pty module uses rather than duplicating it.
+        .env("PATH", crate::pty::path_env())
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
+/// Probe whether ImageMagick (either binary name) is reachable, for the
+/// frontend to show an "install ImageMagick" affordance before the user hits
+/// the error from `make_slack_emoji`. Re-probes fresh each call (cheap: one
+/// short-lived child process) rather than trusting the cached `magick_bin()`
+/// OnceLock, so a mid-session `brew install` is picked up without a restart.
+#[tauri::command]
+pub fn magick_available() -> bool {
+    is_on_path("magick") || is_on_path("convert")
+}
+
 fn build_magick(args: &[String]) -> std::process::Command {
     let mut cmd = std::process::Command::new(magick_bin());
     cmd.args(args);
+    cmd.env("PATH", crate::pty::path_env());
     cmd
 }
 
@@ -65,6 +80,7 @@ pub fn magick_run(args: Vec<String>) -> Result<MagickResult, String> {
     let bin = magick_bin();
     let probe = std::process::Command::new(bin)
         .arg("-version")
+        .env("PATH", crate::pty::path_env())
         .output()
         .map_err(|e| format!("cannot run '{bin}': {e}. Is ImageMagick installed?"))?;
     if !probe.status.success() {

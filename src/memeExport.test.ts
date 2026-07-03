@@ -5,6 +5,7 @@ import {
   defaultExportPath,
   isRealFolder,
   deriveOutputPath,
+  isMagickMissingErrorMessage,
 } from "./memeExport";
 
 describe("memeExport.ts", () => {
@@ -92,6 +93,39 @@ describe("memeExport.ts", () => {
 
     it("returns a bare filename when the real path has no directory component", () => {
       expect(deriveOutputPath("cat.png", "", "/home", "-meme.png")).toBe("cat-meme.png");
+    });
+  });
+
+  describe("isMagickMissingErrorMessage", () => {
+    it("matches the exact os-error message reported by users", () => {
+      expect(
+        isMagickMissingErrorMessage(
+          "[meme-emoji] cannot run 'magick': No such file or directory (os error 2). Is ImageMagick installed?",
+        ),
+      ).toBe(true);
+    });
+
+    it("matches the raw invoke-rejection string without the [meme-emoji] label", () => {
+      expect(
+        isMagickMissingErrorMessage(
+          "cannot run 'convert': No such file or directory (os error 2). Is ImageMagick installed?",
+        ),
+      ).toBe(true);
+    });
+
+    it("matches the -version probe failure message", () => {
+      expect(isMagickMissingErrorMessage("'magick' -version failed. Is ImageMagick installed?")).toBe(
+        true,
+      );
+    });
+
+    it("is case-insensitive", () => {
+      expect(isMagickMissingErrorMessage("...is imagemagick installed?")).toBe(true);
+    });
+
+    it("rejects unrelated ImageMagick failures", () => {
+      expect(isMagickMissingErrorMessage("input not found: /a/b/cat.png")).toBe(false);
+      expect(isMagickMissingErrorMessage("")).toBe(false);
     });
   });
 });
