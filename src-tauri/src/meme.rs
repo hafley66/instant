@@ -2,6 +2,7 @@
 // Requires ImageMagick 6 (convert) or 7 (magick) on the user's PATH.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static MAGICK_BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -40,6 +41,80 @@ fn is_on_path(name: &str) -> bool {
 #[tauri::command]
 pub fn magick_available() -> bool {
     is_on_path("magick") || is_on_path("convert")
+}
+
+/// Only the last this-many lines of a `brew install` run are surfaced to the
+/// frontend — the full log can be hundreds of lines of dependency builds and
+/// nobody reads that in a toast, just the part that says what broke.
+const INSTALL_TAIL_LINES: usize = 20;
+
+/// Set for the duration of a running `brew install imagemagick`, so a second
+/// click (or a second tab) can't kick off a concurrent brew process. The
+/// frontend already disables its button while installing; this is the
+/// server-side backstop for that same rule.
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+
+fn brew_available() -> bool {
+    std::process::Command::new("brew")
+        .arg("--version")
+        .env("PATH", crate::pty::path_env())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Keep only the last `n` lines of `text`. Used to trim a `brew install`
+/// log down to the part worth showing the user.
+fn tail_lines(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
+}
+
+/// Blocking body of `install_imagemagick`, run off the async command's own
+/// task (see below) since `brew install` can take minutes.
+fn run_brew_install() -> Result<String, String> {
+    if !brew_available() {
+        return Err(
+            "Homebrew not found on PATH. Install Homebrew first (https://brew.sh), then click Install again."
+                .to_string(),
+        );
+    }
+    let out = std::process::Command::new("brew")
+        .args(["install", "imagemagick"])
+        .env("PATH", crate::pty::path_env())
+        .output()
+        .map_err(|e| format!("failed to run brew: {e}"))?;
+    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    if out.status.success() {
+        Ok("ImageMagick installed.".to_string())
+    } else {
+        Err(tail_lines(&combined, INSTALL_TAIL_LINES))
+    }
+}
+
+/// Run `brew install imagemagick` server-side. The frontend's "Install"
+/// button click is the user's consent — no terminal tab, no typed-not-run
+/// command; the frontend asks, the backend runs.
+///
+/// This is an `async fn` command so the actual (multi-minute, blocking)
+/// `Command::output()` call runs on tauri's dedicated blocking-thread pool
+/// via `async_runtime::spawn_blocking` rather than on the thread servicing
+/// this invoke — other commands (magick_available, tmux, etc. — see
+/// cdp.rs/activity.rs for the plain `std::thread::spawn` version of this same
+/// "don't block other invokes" rule) keep working while this one runs.
+#[tauri::command]
+pub async fn install_imagemagick(app: tauri::AppHandle) -> Result<String, String> {
+    let _ = &app; // no progress events today; kept for signature parity/future use
+    if INSTALLING.swap(true, Ordering::SeqCst) {
+        return Err("already installing".to_string());
+    }
+    let outcome = tauri::async_runtime::spawn_blocking(run_brew_install)
+        .await
+        .map_err(|e| format!("internal error: {e}"));
+    INSTALLING.store(false, Ordering::SeqCst);
+    outcome?
 }
 
 fn build_magick(args: &[String]) -> std::process::Command {
@@ -275,4 +350,33 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
         other => return Err(format!("unsupported PNG color type: {other:?}")),
     };
     Ok((info.width as usize, info.height as usize, rgba))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tail_lines_returns_everything_when_under_the_limit() {
+        let text = "a\nb\nc";
+        assert_eq!(tail_lines(text, 20), "a\nb\nc");
+    }
+
+    #[test]
+    fn tail_lines_keeps_only_the_last_n_lines() {
+        let text = (1..=25)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tail = tail_lines(&text, 20);
+        let lines: Vec<&str> = tail.lines().collect();
+        assert_eq!(lines.len(), 20);
+        assert_eq!(lines.first(), Some(&"6"));
+        assert_eq!(lines.last(), Some(&"25"));
+    }
+
+    #[test]
+    fn tail_lines_handles_empty_input() {
+        assert_eq!(tail_lines("", 20), "");
+    }
 }

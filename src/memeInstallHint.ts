@@ -3,8 +3,13 @@
 // src-tauri/src/meme.rs make_slack_emoji) or the magick_available() probe
 // says it's missing. Split out of meme.tsx (already over AGENTS.md's 500-line
 // cap) so wiring this in doesn't grow that file.
-import { sessionId, baseName, tmuxName } from "./core";
-import { openTab, sendTextToTab, tabs } from "./terminal";
+//
+// The "Install" button's click is the user's consent to run
+// `brew install imagemagick` server-side (install_imagemagick in
+// src-tauri/src/meme.rs) — frontend asks, backend runs. No terminal tab, no
+// typed-not-executed command.
+import { invoke } from "@tauri-apps/api/core";
+import { flashStatus, showError } from "./core";
 import { probeMagickAvailable } from "./memeExport";
 
 export const BREW_INSTALL_CMD = "brew install imagemagick";
@@ -14,6 +19,11 @@ const HINT_ID = "meme-magick-hint";
 // panel that's already rendered by meme.tsx's JSX — no new DOM nodes need to
 // come from that file.
 const ANCHOR_SELECTOR = "#meme-workspace";
+
+// Guards a double-click from firing invoke() twice; Rust also guards this
+// server-side with an AtomicBool (install_imagemagick) in case this flag and
+// the button's disabled state ever disagree.
+let installing = false;
 
 export function showMagickInstallHint() {
   if (document.getElementById(HINT_ID)) return;
@@ -25,10 +35,10 @@ export function showMagickInstallHint() {
   el.innerHTML =
     `<span>Slack emoji export needs ImageMagick &mdash; </span>` +
     `<code>${BREW_INSTALL_CMD}</code>` +
-    `<button type="button" data-act="install">Install in terminal</button>` +
+    `<button type="button" data-act="install">Install</button>` +
     `<button type="button" data-act="copy">Copy</button>` +
     `<button type="button" data-act="recheck">Check again</button>`;
-  el.querySelector('[data-act="install"]')?.addEventListener("click", installInNewTerminalTab);
+  el.querySelector('[data-act="install"]')?.addEventListener("click", () => void installMagick());
   el.querySelector('[data-act="copy"]')?.addEventListener("click", () => {
     void navigator.clipboard.writeText(BREW_INSTALL_CMD);
   });
@@ -50,19 +60,33 @@ export async function recheckMagick(): Promise<boolean> {
   return ok;
 }
 
-// Open a fresh terminal tab and type (not run) the brew install command, so
-// the user reviews it and hits Enter themselves rather than a package install
-// firing unattended. Naming mirrors openTabAtPwd's collision-free scheme
-// (src/tabs.ts).
-function installInNewTerminalTab() {
-  const taken = new Set([...tabs.values()].map((t) => t.name));
-  const base = tmuxName(baseName("imagemagick-install"));
-  let name = base;
-  let n = 2;
-  while (taken.has(name)) name = `${base}-${n++}`;
-  openTab(name);
-  // openTab's pty spawn (src/terminal.ts) is fire-and-forget over
-  // invoke("open_session") with no "ready" signal to await, so give the new
-  // session a beat before writing into it.
-  setTimeout(() => void sendTextToTab(sessionId(name), BREW_INSTALL_CMD), 400);
+function installButton(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>(`#${HINT_ID} [data-act="install"]`);
+}
+
+function setInstallButtonBusy(busy: boolean) {
+  const btn = installButton();
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.textContent = busy ? "Installing…" : "Install";
+}
+
+// Run the install server-side (invoke install_imagemagick, src-tauri/src/meme.rs).
+// This can take minutes, so the hint stays visible with the button disabled
+// and relabeled rather than the hint disappearing mid-install.
+async function installMagick(): Promise<void> {
+  if (installing) return;
+  installing = true;
+  setInstallButtonBusy(true);
+  try {
+    const result = await invoke<string>("install_imagemagick");
+    flashStatus(result);
+    const ok = await recheckMagick(); // hides the hint on success
+    if (!ok) setInstallButtonBusy(false); // still missing somehow; let the user retry
+  } catch (e) {
+    setInstallButtonBusy(false);
+    showError("meme-install", e);
+  } finally {
+    installing = false;
+  }
 }
