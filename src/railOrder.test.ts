@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { mergeOrder, visibleIds, resolveRailIds, moveBefore, toggleHidden } from "./railOrder";
+import {
+  mergeOrder,
+  visibleIds,
+  resolveRailIds,
+  moveBefore,
+  toggleHidden,
+  toggleExpanded,
+} from "./railOrder";
 
 describe("railOrder.ts pure functions", () => {
   describe("mergeOrder", () => {
@@ -51,17 +58,17 @@ describe("railOrder.ts pure functions", () => {
 
   describe("resolveRailIds", () => {
     it("merges then filters hidden, new panels included unless hidden", () => {
-      const state = { order: ["b", "a"], hidden: ["a"] };
+      const state = { order: ["b", "a"], hidden: ["a"], expanded: [] };
       expect(resolveRailIds(["a", "b", "c"], state)).toEqual(["b", "c"]);
     });
 
     it("a stale hidden id (no longer registered) has no effect", () => {
-      const state = { order: ["a"], hidden: ["gone"] };
+      const state = { order: ["a"], hidden: ["gone"], expanded: [] };
       expect(resolveRailIds(["a", "b"], state)).toEqual(["a", "b"]);
     });
 
     it("default empty state falls back to plain registration order", () => {
-      expect(resolveRailIds(["a", "b"], { order: [], hidden: [] })).toEqual(["a", "b"]);
+      expect(resolveRailIds(["a", "b"], { order: [], hidden: [], expanded: [] })).toEqual(["a", "b"]);
     });
   });
 
@@ -98,6 +105,22 @@ describe("railOrder.ts pure functions", () => {
 
     it("starting from empty hides the id", () => {
       expect(toggleHidden([], "a")).toEqual(["a"]);
+    });
+  });
+
+  describe("toggleExpanded", () => {
+    it("adds an id that isn't expanded yet", () => {
+      expect(toggleExpanded(["a"], "b")).toEqual(["a", "b"]);
+    });
+
+    it("removes an id that's already expanded", () => {
+      expect(toggleExpanded(["a", "b"], "a")).toEqual(["b"]);
+    });
+
+    // Same partial-patch tolerance as mergeOrder: a rail slice saved before any
+    // expand stores no `expanded` key, so it reads back undefined.
+    it("tolerates an undefined expanded list", () => {
+      expect(toggleExpanded(undefined, "a")).toEqual(["a"]);
     });
   });
 });

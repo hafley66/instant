@@ -7,9 +7,10 @@
 export interface RailState {
   order: string[]; // panel ids, user order (may include ids no longer registered)
   hidden: string[]; // panel ids hidden from the rail (registration/palette untouched)
+  expanded: string[]; // panel ids whose rail children (railChildren rows) are shown
 }
 
-export const DEFAULT_RAIL_STATE: RailState = { order: [], hidden: [] };
+export const DEFAULT_RAIL_STATE: RailState = { order: [], hidden: [], expanded: [] };
 
 // Merge a persisted order against the panels actually registered right now:
 // ids still registered keep their saved relative order; ids no longer
@@ -58,4 +59,10 @@ export function moveBefore(order: string[], dragId: string, overId: string): str
 export function toggleHidden(hidden: string[] | undefined, id: string): string[] {
   const h = hidden ?? [];
   return h.includes(id) ? h.filter((x) => x !== id) : [...h, id];
+}
+
+// Flip one id's membership in an expanded-id list (rail child rows shown).
+export function toggleExpanded(expanded: string[] | undefined, id: string): string[] {
+  const e = expanded ?? [];
+  return e.includes(id) ? e.filter((x) => x !== id) : [...e, id];
 }

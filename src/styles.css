@@ -403,6 +403,33 @@ body[data-skin] .actbar-item.active {
   pointer-events: none;
 }
 
+/* Rail child rows (rail.ts refreshChildren): the ▸/▾ chevron sits inside the
+   panel button; expanded children render as smaller indented buttons below. */
+.actbar-exp {
+  flex: none;
+  margin-left: auto;
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+}
+/* Like #actbar-panels: dissolve the wrapper so child buttons are direct flex
+   children of .actbar and stack vertically under their panel button. */
+.actbar-children {
+  display: contents;
+}
+.actbar-child {
+  display: block;
+  min-height: 20px;
+  min-width: 0;
+  padding: 1px 8px 1px 26px;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* dockview fills the rest; each panel host is absolutely-filled. */
 #dock {
   flex: 1;

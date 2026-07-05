@@ -2,7 +2,7 @@
 // activity-bar style. Persisted via pluginState under id "rail". The pure
 // merge/reorder/filter functions live in ./railOrder.ts (covered by
 // railOrder.test.ts without any DOM); this file is the DOM/store wiring.
-import { buildActivityRail, getPanel, panelIds, type PanelDef } from "./plugin";
+import { buildActivityRail, getPanel, panelIds, type PanelDef, type RailChild } from "./plugin";
 import { readPluginState, savePluginState } from "./pluginState";
 import { store } from "./state";
 import { togglePanel } from "./reactdock";
@@ -13,6 +13,7 @@ import {
   mergeOrder,
   moveBefore,
   resolveRailIds,
+  toggleExpanded,
   toggleHidden,
   type RailState,
 } from "./railOrder";
@@ -24,7 +25,7 @@ export function readRailState(): RailState {
   // key that was ever written ({hidden} after a first hide, no order), so the
   // whole-slice fallback never fires. Normalize per key.
   const s = readPluginState<Partial<RailState>>(RAIL_ID, DEFAULT_RAIL_STATE);
-  return { order: s.order ?? [], hidden: s.hidden ?? [] };
+  return { order: s.order ?? [], hidden: s.hidden ?? [], expanded: s.expanded ?? [] };
 }
 
 export function saveRailState(patch: Partial<RailState>): void {
@@ -35,6 +36,11 @@ const DRAG_THRESHOLD = 4; // px of pointer travel before a press becomes a drag
 
 let lastKey = "";
 const railKey = (s: RailState) => JSON.stringify(s);
+
+// Stale-async guard for refreshChildren: each rebuild bumps the sequence, and
+// an in-flight children fetch that resolves after a newer rebuild must not
+// decorate the (freshly replaced) buttons with outdated chevrons/rows.
+let rebuildSeq = 0;
 
 function rebuild(): void {
   const state = readRailState();
@@ -49,6 +55,59 @@ function rebuild(): void {
     if (btn) btn.onclick = () => togglePanel(id);
   }
   syncToggles();
+  rebuildSeq++;
+  void refreshChildren(rebuildSeq);
+}
+
+// Async pass over the freshly-built rail: any visible panel whose railChildren
+// provider returns rows gets a ▸/▾ chevron inside its button; expanded panels
+// also get their child rows rendered. Panels without a provider (or with an
+// empty/failing one) keep a plain button — no dead affordance.
+async function refreshChildren(seq: number): Promise<void> {
+  const state = readRailState();
+  const ids = resolveRailIds(panelIds(), state);
+  for (const id of ids) {
+    const p = getPanel(id);
+    if (!p?.railChildren) continue;
+    const kids = await p.railChildren().catch(() => [] as RailChild[]);
+    if (seq !== rebuildSeq) return; // a newer rebuild replaced the buttons
+    if (kids.length === 0) continue;
+    const btn = document.getElementById(`${id}-toggle`);
+    if (!btn) continue;
+    const expanded = state.expanded.includes(id);
+    const exp = document.createElement("span");
+    exp.className = "actbar-exp";
+    exp.textContent = expanded ? "▾" : "▸";
+    // stopPropagation: the chevron lives inside the panel button, and a click
+    // must toggle expansion without also toggling the panel itself.
+    exp.addEventListener("click", (e) => {
+      e.stopPropagation();
+      saveRailState({ expanded: toggleExpanded(readRailState().expanded, id) });
+      rebuild();
+    });
+    btn.appendChild(exp);
+    if (expanded) renderChildren(id, kids);
+  }
+}
+
+// Child rows sit after the panel's rail-tip element; like #actbar-panels the
+// wrapper is display:contents, so each row is a direct flex child of .actbar.
+// No data-panel attribute: wireDragReorder, panelButtonAt, and railMenuItems
+// all key on `[data-panel]`, so child buttons stay invisible to reorder/hide.
+function renderChildren(id: string, kids: RailChild[]): void {
+  const tip = document.getElementById(`rail-tip-${id}`);
+  if (!tip) return;
+  const host = document.createElement("span");
+  host.className = "actbar-children";
+  for (const kid of kids) {
+    const b = document.createElement("button");
+    b.className = "actbar-child";
+    b.textContent = kid.label;
+    if (kid.hint) b.title = kid.hint;
+    b.onclick = kid.run;
+    host.appendChild(b);
+  }
+  tip.after(host);
 }
 
 // pluginState is one shared bag (src/pluginState.ts); any plugin saving its

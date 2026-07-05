@@ -3,8 +3,10 @@
 // that gets prepended to scratch queries as sel_* facts).
 import { invoke } from "@tauri-apps/api/core";
 import { store, type SprefaScopeItem, type SprefaScopeKind } from "./state";
-import { registerPlugin } from "./plugin";
+import { registerPlugin, type RailChild } from "./plugin";
 import { openPreviewPanel } from "./preview";
+import { showContextMenu } from "./ctxmenu";
+import { baseName, getHomeDir } from "./core";
 import { SprefaPanelV2 } from "./sprefaPanel";
 
 type SprefaCol = { name: string; ty: string };
@@ -12,6 +14,10 @@ type SprefaRel = { name: string; columns: SprefaCol[]; builtin?: boolean };
 
 const SPREFA_ROOT_KEY = "sprefa.root";
 let sprefaRoot = localStorage.getItem(SPREFA_ROOT_KEY) ?? "~/projects/sprefa/v5";
+
+// The one relation pinned under the sprefa rail button (right-click a rel row
+// in the schema tree to pin/unpin). Raw localStorage like root/scratch above.
+const SPREFA_RAIL_REL_KEY = "sprefa.railRel";
 
 function node(cls: string, ...kids: HTMLElement[]): HTMLDivElement {
   const d = document.createElement("div");
@@ -105,6 +111,23 @@ function renderSprefaSchema(rels: SprefaRel[]) {
         sourced = true;
         loadSprefaSites(r.name, src);
       }
+    });
+    // Right-click pins/unpins this relation under the sprefa rail button (see
+    // sprefaRailChildren). stopPropagation keeps main.ts's global
+    // wireContextMenu dispatcher from also firing, like rail.ts's menu.
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pinned = localStorage.getItem(SPREFA_RAIL_REL_KEY) === r.name;
+      showContextMenu(e.clientX, e.clientY, [
+        {
+          label: pinned ? "unpin from rail" : "pin to rail",
+          action: () => {
+            if (pinned) localStorage.removeItem(SPREFA_RAIL_REL_KEY);
+            else localStorage.setItem(SPREFA_RAIL_REL_KEY, r.name);
+          },
+        },
+      ]);
     });
     tree.appendChild(row);
     tree.appendChild(detail);
@@ -442,6 +465,64 @@ export function wireSprefa() {
   });
 }
 
+// ---- rail children (pinned relation) --------------------------------------
+
+// Schema memo for the rail provider, keyed by root: rail rebuilds happen far
+// more often than the schema changes, so one invoke per root is plenty.
+let railSchemaMemo: { root: string; schema: Promise<{ relations: SprefaRel[] }> } | null = null;
+function railSchema(root: string): Promise<{ relations: SprefaRel[] }> {
+  if (!railSchemaMemo || railSchemaMemo.root !== root) {
+    railSchemaMemo = { root, schema: invoke<{ relations: SprefaRel[] }>("sprefa_schema", { root }) };
+  }
+  return railSchemaMemo.schema;
+}
+
+// Row values in file-typed columns are repo-relative; the daemon root anchors
+// them. `~` expansion mirrors the Rust side's expand() (see commands.rs).
+function resolveAbs(root: string, value: string): string {
+  if (value.startsWith("/")) return value;
+  const base = root.startsWith("~") ? getHomeDir().replace(/\/$/, "") + root.slice(1) : root;
+  return `${base.replace(/\/$/, "")}/${value}`;
+}
+
+// railChildren provider (see PanelDef in plugin.tsx): rows of the pinned
+// relation, one child per distinct file(:line), clicking opens the preview.
+// Every early-out returns [] so the rail shows no chevron when there's nothing
+// to expand (no pin, unknown rel, no file column, empty relation).
+async function sprefaRailChildren(): Promise<RailChild[]> {
+  const rel = localStorage.getItem(SPREFA_RAIL_REL_KEY);
+  if (!rel) return [];
+  const schema = await railSchema(sprefaRoot);
+  const r = schema.relations.find((x) => x.name === rel);
+  if (!r) return [];
+  const fileIdx = r.columns.findIndex((c) => c.ty === "file");
+  if (fileIdx === -1) return [];
+  const lineIdx = r.columns.findIndex((c) => c.name === "line" && c.ty === "int");
+  const res = await invoke<{ rows: unknown[][] }>("sprefa_query_sql", {
+    root: sprefaRoot,
+    sql: `SELECT * FROM rel_${rel} LIMIT 32`,
+    params: [],
+  });
+  const out: RailChild[] = [];
+  const seen = new Set<string>();
+  for (const row of res.rows) {
+    const file = row[fileIdx] == null ? "" : String(row[fileIdx]);
+    if (!file) continue;
+    const line = lineIdx === -1 ? 0 : Number(row[lineIdx] ?? 0);
+    const abs = resolveAbs(sprefaRoot, file);
+    const id = `${abs}:${line}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      label: baseName(abs) + (line ? `:${line}` : ""),
+      hint: abs,
+      run: () => openPreviewPanel(abs, line || undefined),
+    });
+  }
+  return out;
+}
+
 export function registerSprefa() {
   registerPlugin({
     id: "sprefa",
@@ -454,6 +535,7 @@ export function registerSprefa() {
         iconLabel: "Sprefa",
         html: "",
         component: SprefaPanelV2,
+        railChildren: sprefaRailChildren,
       },
     ],
   });

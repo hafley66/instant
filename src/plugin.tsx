@@ -8,6 +8,16 @@ import {
 } from "react";
 import type { IDockviewPanelProps } from "dockview";
 
+// One row under a panel's rail button (rail.ts renders these when the panel is
+// expanded there). Providers fetch their own data; an empty list means no
+// expansion affordance at all.
+export interface RailChild {
+  id: string; // unique within the panel's children (dedup key)
+  label: string;
+  hint?: string; // title tooltip on the child button
+  run: () => void;
+}
+
 export interface PanelDef {
   id: string;
   title: string;
@@ -21,6 +31,7 @@ export interface PanelDef {
   html?: string;
   component: ComponentType<IDockviewPanelProps>;
   onShow?: () => void;
+  railChildren?: () => Promise<RailChild[]>; // child rows under the rail button (rail.ts refreshChildren)
 }
 
 // A declarative config toggle a plugin contributes to the Config panel's
