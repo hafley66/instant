@@ -7,11 +7,13 @@ import {
   queryWorktreeSnapshot,
 } from "./ghcacheSnapshot";
 import { paths } from "./generated/api";
+import { createHttpEndpoint } from "./reactive/httpTransport";
 import { runtimePorts } from "./reactive/ports";
 import type { WorktreeRow } from "./state";
 
 const row = { worktree: "/repo" } as WorktreeRow;
-const endpoint = (transport: EndpointTransport) => paths.worktrees.endpoint(transport);
+const endpoint = (transport: EndpointTransport) =>
+  createHttpEndpoint(paths.worktrees.endpoint, transport);
 const reply = (status: number, body: Serializable = null): EndpointTransport =>
   async () => ({ status, body });
 

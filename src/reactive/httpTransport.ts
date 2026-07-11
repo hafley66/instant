@@ -1,8 +1,10 @@
 import type {
+  EndpointConfig,
   EndpointResponse,
   EndpointTransport,
   Serializable,
 } from "@hafley66/signals";
+import { Endpoint } from "@hafley66/signals";
 import { runtimePorts } from "./ports";
 
 export const HTTP_TIMEOUT_MS = 2000;
@@ -21,5 +23,10 @@ export const httpTransport: EndpointTransport = async (request) => {
   if (text) body = JSON.parse(text) as Serializable;
   return { status: response.status, body } satisfies EndpointResponse;
 };
+
+export const createHttpEndpoint = <Input, Output>(
+  config: EndpointConfig<Input, Output>,
+  transport: EndpointTransport = httpTransport,
+) => new Endpoint(config, transport);
 // todo(http): support media-type-aware decoding instead of assuming JSON for every response
 // todo(test): verify abort, invalid JSON, empty body, and non-2xx transport behavior

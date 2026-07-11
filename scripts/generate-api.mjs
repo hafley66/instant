@@ -8,7 +8,19 @@ const spec = JSON.parse(await readFile(specPath, "utf8"));
 
 const typeFor = (schema) => {
   if (schema.$ref) return `components.schemas.${schema.$ref.split("/").at(-1)}`;
+  if (schema.oneOf) return schema.oneOf.map(typeFor).join(" | ");
   if (schema.type === "array") return `${typeFor(schema.items)}[]`;
+  if (schema.enum) return schema.enum.map(JSON.stringify).join(" | ");
+  if (schema.type === "object" && schema.additionalProperties) {
+    return `Record<string, ${typeFor(schema.additionalProperties)}>`;
+  }
+  if (schema.type === "object") {
+    const required = new Set(schema.required ?? []);
+    const fields = Object.entries(schema.properties ?? {}).map(([name, value]) =>
+      `${JSON.stringify(name)}${required.has(name) ? "" : "?"}: ${typeFor(value)}`
+    );
+    return `{ ${fields.join("; ")} }`;
+  }
   if (schema.type === "boolean") return "boolean";
   if (schema.type === "number" || schema.type === "integer") return "number";
   return "string";
@@ -16,6 +28,9 @@ const typeFor = (schema) => {
 
 const schemas = Object.entries(spec.components?.schemas ?? {}).map(([name, schema]) => {
   const required = new Set(schema.required ?? []);
+  if (schema.type !== "object" || schema.oneOf) {
+    return `    export type ${name} = ${typeFor(schema)};`;
+  }
   const fields = Object.entries(schema.properties ?? {})
     .map(([field, value]) => `      ${field}${required.has(field) ? "" : "?"}: ${typeFor(value)};`)
     .join("\n");
@@ -36,34 +51,36 @@ for (const [path, item] of Object.entries(spec.paths ?? {})) {
     const schema = content[mediaType]?.schema;
     if (!schema) throw new Error(`${name} needs a 200 response schema`);
     const output = typeFor(schema);
+    const requestSchema = operation.requestBody?.content?.["application/json"]?.schema;
+    const input = requestSchema ? typeFor(requestSchema) : "void";
+    const inputName = requestSchema ? "input" : "_input";
+    const operationBaseUrl = operation.servers?.[0]?.url ?? baseUrl;
+    const requestBody = requestSchema ? ", body: input as unknown as Serializable" : "";
     const sse = mediaType === "text/event-stream"
       ? `\n    export const connect = (EventSourceImpl: typeof EventSource = EventSource) =>\n      new EventSourceImpl(url);`
       : "";
     operations.push(`  export namespace ${name} {
     export const method = "${method.toUpperCase()}";
-    export const url = baseUrl + ${JSON.stringify(path)};
+    export const url = ${JSON.stringify(operationBaseUrl)} + ${JSON.stringify(path)};
+    export type Input = ${input};
     export type Output = ${output};
 ${sse}
-    export const endpoint = (transport: EndpointTransport) =>
-      new Endpoint<void, Output>(
-        {
-          request: () => ({ url, method }),
-          decode: (response) => {
-            if (response.status < 200 || response.status >= 300) {
-              throw new HttpStatusError(response.status);
-            }
-            return response.body as unknown as Output;
-          },
-        },
-        transport,
-      );
+    export const endpoint: EndpointConfig<Input, Output> = {
+      request: (${inputName}) => ({ url, method${requestBody} }),
+      decode: (response) => {
+        if (response.status < 200 || response.status >= 300) {
+          throw new HttpStatusError(response.status);
+        }
+        return response.body as unknown as Output;
+      },
+    };
   }`);
   }
 }
 
 const generated = `// Generated from openapi/instant-http.json by scripts/generate-api.mjs.
 // Do not edit by hand. Run: npm run api:generate
-import { Endpoint, type EndpointTransport } from "@hafley66/signals";
+import type { EndpointConfig, Serializable } from "@hafley66/signals";
 
 export const baseUrl = ${JSON.stringify(baseUrl)};
 
@@ -94,5 +111,4 @@ if (process.argv.includes("--check")) {
   await mkdir(resolve(root, "src/generated"), { recursive: true });
   await writeFile(outputPath, generated);
 }
-// todo(codegen): generate request bodies, parameters, error responses, and media-type decoders
-// todo(codegen): migrate the activity :8787 API and extension clients into this specification
+// todo(codegen): generate parameters, error responses, and media-type decoders

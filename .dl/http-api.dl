@@ -5,9 +5,15 @@ fetch_call(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "fetch($$$ARGS)
 fetch_call(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "$$$OBJ.fetch($$$ARGS)", l).
 fetch_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "fetch($$$ARGS)", l).
 fetch_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("extension/src/**/*.ts", p, rev), sg(p, rev, :ts, "fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("extension/src/**/*.ts", p, rev), sg(p, rev, :ts, "$$$OBJ.fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("vscode-ext/src/**/*.ts", p, rev), sg(p, rev, :ts, "fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("vscode-ext/src/**/*.ts", p, rev), sg(p, rev, :ts, "$$$OBJ.fetch($$$ARGS)", l).
 
 rel transport_edge(p: file).
 transport_edge("src/reactive/httpTransport.ts").
+transport_edge("extension/src/httpTransport.ts").
+transport_edge("vscode-ext/src/httpTransport.ts").
 
 rel forbidden_fetch(p: file, l: int).
 forbidden_fetch(p, l) <- fetch_call(p, l), !transport_edge(p).
@@ -18,6 +24,7 @@ endpoint_construct(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "new En
 endpoint_construct(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "new Endpoint($$$ARGS)", l).
 rel generated_api(p: file).
 generated_api("src/generated/api.ts").
+generated_api("src/reactive/httpTransport.ts").
 rel forbidden_endpoint(p: file, l: int).
 forbidden_endpoint(p, l) <- endpoint_construct(p, l), !generated_api(p).
 diag(path: p, line: l, severity: "error", code: "endpoint-outside-codegen", msg: "Endpoint contracts must be generated from OpenAPI into src/generated/api.ts") <- forbidden_endpoint(p, l).

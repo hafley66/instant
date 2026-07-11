@@ -28,6 +28,34 @@
           }
         }
       }
+    },
+    "/config": {
+      "get": {
+        "operationId": "activityConfig",
+        "servers": [{ "url": "http://127.0.0.1:8787" }],
+        "responses": {
+          "200": {
+            "description": "Authoritative browser extraction rules",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServerConfig" } } }
+          }
+        }
+      }
+    },
+    "/ingest": {
+      "post": {
+        "operationId": "activityIngest",
+        "servers": [{ "url": "http://127.0.0.1:8787" }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IngestEvent" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Event accepted or filtered",
+            "content": { "text/plain": { "schema": { "type": "string" } } }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -44,6 +72,73 @@
           "is_main": { "type": "boolean" },
           "dirty": { "type": "boolean" }
         }
+      },
+      "Rule": {
+        "type": "object",
+        "required": ["id", "host", "mode", "action"],
+        "properties": {
+          "id": { "type": "string" },
+          "host": { "type": "string" },
+          "url": { "type": "string" },
+          "mode": { "type": "string", "enum": ["textnodes", "selector", "netcapture"] },
+          "selector": { "type": "string" },
+          "regex": { "type": "string" },
+          "captures": { "type": "object", "additionalProperties": { "type": "string" } },
+          "schedule": {
+            "oneOf": [
+              { "type": "string", "enum": ["passive"] },
+              { "type": "object", "required": ["intervalMin"], "properties": { "intervalMin": { "type": "number" } } }
+            ]
+          },
+          "action": { "type": "string", "enum": ["report", "notify"] },
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "ServerConfig": {
+        "type": "object",
+        "required": ["rules"],
+        "properties": { "rules": { "type": "array", "items": { "$ref": "#/components/schemas/Rule" } } }
+      },
+      "ActivityEvent": {
+        "type": "object",
+        "required": ["kind", "url", "title", "text"],
+        "properties": {
+          "kind": { "type": "string" },
+          "url": { "type": "string" },
+          "title": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      },
+      "RuleMatchEvent": {
+        "type": "object",
+        "required": ["type", "ruleId", "url", "ts", "matches"],
+        "properties": {
+          "type": { "type": "string", "enum": ["rulematch"] },
+          "ruleId": { "type": "string" },
+          "url": { "type": "string" },
+          "ts": { "type": "integer" },
+          "matches": { "type": "array", "items": { "type": "object", "additionalProperties": { "type": "string" } } }
+        }
+      },
+      "EditorEvent": {
+        "type": "object",
+        "required": ["type", "event", "path", "ts"],
+        "properties": {
+          "type": { "type": "string", "enum": ["editor"] },
+          "event": { "type": "string", "enum": ["focus", "cursor", "save"] },
+          "path": { "type": "string" },
+          "languageId": { "type": "string" },
+          "workspace": { "type": "string" },
+          "line": { "type": "integer" },
+          "ts": { "type": "integer" }
+        }
+      },
+      "IngestEvent": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/ActivityEvent" },
+          { "$ref": "#/components/schemas/RuleMatchEvent" },
+          { "$ref": "#/components/schemas/EditorEvent" }
+        ]
       }
     }
   }

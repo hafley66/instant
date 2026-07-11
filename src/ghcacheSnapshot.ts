@@ -1,7 +1,7 @@
-import { Endpoint } from "@hafley66/signals";
+import type { Endpoint } from "@hafley66/signals";
 import { firstValueFrom } from "rxjs";
 import { HttpStatusError, paths } from "./generated/api";
-import { HTTP_TIMEOUT_MS, httpTransport } from "./reactive/httpTransport";
+import { HTTP_TIMEOUT_MS, createHttpEndpoint } from "./reactive/httpTransport";
 import type { WorktreeRow } from "./state";
 
 export const GHCACHE_TIMEOUT_MS = HTTP_TIMEOUT_MS;
@@ -21,7 +21,7 @@ export interface GhcacheSnapshot {
 
 // One application-wide endpoint contract. Status and Worktrees share this;
 // only Worktrees layers the expensive local Rust fallback around it.
-export const ghcacheWorktreesEndpoint = paths.worktrees.endpoint(httpTransport);
+export const ghcacheWorktreesEndpoint = createHttpEndpoint(paths.worktrees.endpoint);
 
 export async function queryGhcacheSnapshot(
   endpoint: Endpoint<void, WorktreeRow[]> = ghcacheWorktreesEndpoint,
