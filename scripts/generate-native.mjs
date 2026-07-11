@@ -41,3 +41,5 @@ if (process.argv.includes("--check")) {
   await mkdir(resolve(root, "src/generated"), { recursive: true });
   await writeFile(outputPath, generated);
 }
+// todo(codegen): derive command names from Rust registration instead of maintaining a parallel list
+// todo(codegen): generate command-specific input and output types from a native schema

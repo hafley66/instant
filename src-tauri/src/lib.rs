@@ -877,3 +877,5 @@ pub fn run() {
             }
         });
 }
+// todo(split): reduce the Tauri composition root to adapter registration and boot wiring
+// todo(codegen): verify ipc/commands.json against generate_handler registrations during build

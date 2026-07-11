@@ -4,6 +4,7 @@
 //   1. Activity spy — tab lifecycle + relayed DOM events -> POST /ingest.
 //   2. Config transport — GET /config each alarm tick; rules cached in storage.
 //   3. Driven scans — chrome.alarms per scheduled rule reload+scrape a bg tab.
+// todo(http): consume generated activity config and ingest contracts (depends: activity :8787 OpenAPI paths)
 import type { MatchFields, Rule, RuleMatchEvent, ServerConfig } from "./0_types";
 
 const BASE = "http://127.0.0.1:8787";

@@ -546,3 +546,5 @@ export function mountReactDock(el: HTMLElement) {
       );
   }, 1500);
 }
+// todo(state): make dock layout recovery a typed state transition instead of boot-order mutation
+// todo(test): cover corrupt layout recovery and panel remount behavior

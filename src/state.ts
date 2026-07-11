@@ -447,3 +447,5 @@ export const store = createStore<AppState>(load());
 store.subscribe((s) => {
   for (const k of PERSIST) localStorage.setItem(k, JSON.stringify(s[k]));
 }, PERSIST);
+// todo(state): split durable settings from runtime mirrors and ephemeral UI state
+// todo(migration): version persisted state migrations explicitly before adding more fields

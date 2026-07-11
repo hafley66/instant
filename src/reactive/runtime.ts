@@ -22,4 +22,5 @@ export function startReactiveRuntime(ports: RuntimePorts = runtimePorts): () => 
     if (runtime === owned) runtime = undefined;
   };
 }
-
+// todo(lifecycle): add per-stream error isolation and runtime diagnostics
+// todo(boundary): move remaining recurring application work into runtime-owned subscriptions

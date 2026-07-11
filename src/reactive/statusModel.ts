@@ -20,3 +20,4 @@ export function createSprefaRoot(storage: Storage = localStorage) {
 }
 
 export const sprefaRoot = createSprefaRoot();
+// todo(lifecycle): make StorageSignal external-listener teardown runtime-owned (depends: Signals storage disposal API)

@@ -514,3 +514,5 @@ fn list_opencode_sessions(cwd: Option<String>) -> Vec<AiSession> {
 pub fn editor_tag(editor: &Editor) -> &'static str {
     editor.tag()
 }
+// todo(split): separate Claude and OpenCode parsing from ledger query orchestration
+// todo(test): add fixture coverage for malformed and partially-written session logs

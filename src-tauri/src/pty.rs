@@ -693,3 +693,5 @@ mod tests {
         assert!(pending.is_empty());
     }
 }
+// todo(split): separate tmux commands, PTY ownership, and rogue-process discovery
+// todo(lifecycle): make child-process termination and reader-thread shutdown explicit

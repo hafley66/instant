@@ -2,6 +2,10 @@
 // the filesystem browser nested under worktree leaves. Owns the session list,
 // the worktree scan (ghcacher SSE or local git), the resume-id bookkeeping, the
 // v2 react-table panel bridges, and the legacy v1 tree/table renderers.
+// todo(split): extract tmux session discovery and worktree association into a sibling module
+// todo(split): extract filesystem tree loading and actions into a sibling module
+// todo(migration): remove legacy v1 worktree renderers (depends: TreeTable parity for every worktree action)
+// todo(test): cover Worktrees panel refresh plus SSE reconnect as an integration flow
 import { invoke } from "./generated/native";
 import {
   store,

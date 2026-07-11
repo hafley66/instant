@@ -2,6 +2,8 @@
 // listeners. Every concern lives in its own module (terminal, tabs, browser,
 // worktrees, favorites, activity, capture, overlay, chrome, dnd, sprefa,
 // history, preview, clickrules, panels); this file only wires them together.
+// todo(lifecycle): give every global event listener and interval runtime-owned teardown
+// todo(test): add a boot smoke test that asserts registration and teardown order
 import "xp.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";

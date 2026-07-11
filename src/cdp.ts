@@ -831,3 +831,5 @@ export class CdpView {
     this.el.remove();
   }
 }
+// todo(boundary): isolate CDP commands and events behind a browser-engine port
+// todo(split): separate screencast rendering, input translation, and navigation state

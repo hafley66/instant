@@ -772,3 +772,5 @@ export function recentTabs(): Tab[] {
   for (const [id, t] of tabs) if (!seen.has(id)) out.push(t);
   return out;
 }
+// todo(lifecycle): move PTY listener ownership and teardown into the reactive runtime
+// todo(test): exercise open, resize, close, reload, and tmux reattach as one lifecycle test

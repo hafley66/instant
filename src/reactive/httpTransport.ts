@@ -21,3 +21,5 @@ export const httpTransport: EndpointTransport = async (request) => {
   if (text) body = JSON.parse(text) as Serializable;
   return { status: response.status, body } satisfies EndpointResponse;
 };
+// todo(http): support media-type-aware decoding instead of assuming JSON for every response
+// todo(test): verify abort, invalid JSON, empty body, and non-2xx transport behavior

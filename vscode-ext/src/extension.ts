@@ -6,6 +6,7 @@
 // Hard rule: never send file contents, selection text, or terminal buffers.
 // Only paths, line numbers, language ids, and workspace (folder) names leave
 // this process.
+// todo(http): consume the generated activity ingest contract (depends: activity :8787 OpenAPI paths)
 import * as vscode from "vscode";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:8787/ingest";

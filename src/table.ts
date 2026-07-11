@@ -268,3 +268,4 @@ export function virtualTable<T>(host: HTMLElement, opts: VirtualOpts<T>): Virtua
     },
   };
 }
+// todo(migration): delete the legacy vanilla table after remaining consumers move to TreeTable

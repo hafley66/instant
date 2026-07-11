@@ -272,3 +272,5 @@ export function buildActivityRail(order?: PanelDef[]) {
   if (spacer) actbar.insertBefore(container, spacer);
   else actbar.appendChild(container);
 }
+// todo(lifecycle): add isolated plugin activation and epic teardown after Status proves the runtime
+// todo(test): verify one crashing plugin cannot interrupt sibling registration or rendering

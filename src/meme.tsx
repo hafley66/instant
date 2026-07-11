@@ -1101,3 +1101,5 @@ function extOf(path: string): string {
 function basename(path: string): string {
   return path.split(/[\/]/).pop() || path;
 }
+// todo(split): separate meme DOM orchestration, persistence, and asset loading
+// todo(migration): replace remaining imperative meme row rendering with TreeTable (depends: meme row model extraction)

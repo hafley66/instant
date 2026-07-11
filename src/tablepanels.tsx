@@ -1124,3 +1124,5 @@ export function WorktreesPanelV2() {
     </div>
   );
 }
+// todo(split): move each panel into its own file and leave shared row models here
+// todo(test): add keyboard-navigation integration coverage for every TreeTable panel

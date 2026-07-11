@@ -94,3 +94,5 @@ if (process.argv.includes("--check")) {
   await mkdir(resolve(root, "src/generated"), { recursive: true });
   await writeFile(outputPath, generated);
 }
+// todo(codegen): generate request bodies, parameters, error responses, and media-type decoders
+// todo(codegen): migrate the activity :8787 API and extension clients into this specification
