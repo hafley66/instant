@@ -3,10 +3,9 @@
 import { SignalReact } from "@hafley66/signals/react";
 import { registerStatus, type StatusReport } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
-import { queryWorktreeSnapshot, timeoutSignal } from "./ghcacheSnapshot";
+import { queryGhcacheSnapshot, timeoutSignal } from "./ghcacheSnapshot";
 import { runtimePorts } from "./reactive/ports";
 import { sprefaRoot, statusRows, type StatusRow } from "./reactive/statusModel";
-import { store, type WorktreeRow } from "./state";
 
 const STATUS_COLUMNS: TreeColumn<StatusRow>[] = [
   {
@@ -66,24 +65,21 @@ export const StatusPanelV2 = SignalReact(function StatusPanelV2() {
 const HOME = "/Users/chrishafley"; // for default-path links (opener wants absolute)
 
 async function ghcacheProbe(): Promise<StatusReport> {
-  const root = store.get().scanRoot.trim();
-  const snapshot = await queryWorktreeSnapshot({
+  // Status checks only the daemon transport. Local scan fallback belongs to
+  // the explicit Worktrees refresh path; doing it on this 4-second poll was
+  // the old git-status volley in a new disguise.
+  const snapshot = await queryGhcacheSnapshot({
     fetch: runtimePorts.fetch,
     timeoutSignal,
-    scanLocal: () =>
-      runtimePorts.invoke<WorktreeRow[]>("scan_worktrees", {
-        roots: root ? [root] : [],
-        maxDepth: null,
-      }),
   });
-  if (snapshot.ghcacheError === "http") {
+  if (snapshot.error === "http") {
     return {
       state: "degraded",
       detail: `:7748 · HTTP ${snapshot.httpStatus}`,
       links: ghcacheLinks(),
     };
   }
-  if (snapshot.ghcacheError) {
+  if (snapshot.error) {
     return { state: "down", detail: ":7748 unreachable", links: ghcacheLinks() };
   }
   return {

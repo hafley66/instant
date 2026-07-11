@@ -10,10 +10,19 @@ export interface WorktreeSnapshot {
   httpStatus?: number;
 }
 
-export interface WorktreeSnapshotPorts {
+export interface GhcacheSnapshotPorts {
   fetch(input: string, init?: RequestInit): Promise<Response>;
-  scanLocal(): Promise<WorktreeRow[]>;
   timeoutSignal(ms: number): AbortSignal;
+}
+
+export interface GhcacheSnapshot {
+  rows: WorktreeRow[];
+  error?: "http" | "unreachable";
+  httpStatus?: number;
+}
+
+export interface WorktreeSnapshotPorts extends GhcacheSnapshotPorts {
+  scanLocal(): Promise<WorktreeRow[]>;
 }
 
 export type WorktreeDelta = {
@@ -35,29 +44,35 @@ export function applyWorktreeDeltaRows(rows: WorktreeRow[], message: WorktreeDel
   return next;
 }
 
-export async function queryWorktreeSnapshot(
-  ports: WorktreeSnapshotPorts,
-): Promise<WorktreeSnapshot> {
+export async function queryGhcacheSnapshot(ports: GhcacheSnapshotPorts): Promise<GhcacheSnapshot> {
   try {
     const response = await ports.fetch(`${GHCACHE_BASE}/worktrees`, {
       signal: ports.timeoutSignal(GHCACHE_TIMEOUT_MS),
     });
     if (!response.ok) {
-      return {
-        rows: await ports.scanLocal(),
-        source: "local",
-        ghcacheError: "http",
-        httpStatus: response.status,
-      };
+      return { rows: [], error: "http", httpStatus: response.status };
     }
-    return { rows: (await response.json()) as WorktreeRow[], source: "ghcache" };
+    return { rows: (await response.json()) as WorktreeRow[] };
   } catch {
+    return { rows: [], error: "unreachable" };
+  }
+}
+
+export async function queryWorktreeSnapshot(
+  ports: WorktreeSnapshotPorts,
+): Promise<WorktreeSnapshot> {
+  const ghcache = await queryGhcacheSnapshot(ports);
+  if (!ghcache.error) return { rows: ghcache.rows, source: "ghcache" };
+  const rows = await ports.scanLocal();
+  if (ghcache.error === "http") {
     return {
-      rows: await ports.scanLocal(),
+      rows,
       source: "local",
-      ghcacheError: "unreachable",
+      ghcacheError: "http",
+      httpStatus: ghcache.httpStatus,
     };
   }
+  return { rows, source: "local", ghcacheError: "unreachable" };
 }
 
 export const timeoutSignal = (ms: number) => AbortSignal.timeout(ms);

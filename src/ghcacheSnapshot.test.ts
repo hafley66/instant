@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   GHCACHE_TIMEOUT_MS,
   applyWorktreeDeltaRows,
+  queryGhcacheSnapshot,
   queryWorktreeSnapshot,
 } from "./ghcacheSnapshot";
 import type { WorktreeRow } from "./state";
@@ -22,6 +23,14 @@ describe("ghcache worktree snapshot", () => {
     expect(result).toEqual({ rows: [row], source: "ghcache" });
     expect(timeoutSignal).toHaveBeenCalledWith(GHCACHE_TIMEOUT_MS);
     expect(scanLocal).not.toHaveBeenCalled();
+  });
+
+  it("lets Status probe the daemon without triggering any local scan fallback", async () => {
+    const result = await queryGhcacheSnapshot({
+      fetch: async () => { throw new DOMException("timed out", "TimeoutError"); },
+      timeoutSignal: () => new AbortController().signal,
+    });
+    expect(result).toEqual({ rows: [], error: "unreachable" });
   });
 
   it("falls back on HTTP failure", async () => {
