@@ -35,12 +35,11 @@ import {
 import { openDiffPanel, openPreviewPanel } from "./preview";
 import { tabs, openTab, closeTab, settleClosures, pasteToActive } from "./terminal";
 import {
-  GHCACHE_BASE,
   applyWorktreeDeltaRows,
   queryWorktreeSnapshot,
-  timeoutSignal,
   type WorktreeDelta,
 } from "./ghcacheSnapshot";
+import { paths as apiPaths } from "./generated/api";
 
 export type Session = {
   name: string;
@@ -1397,7 +1396,7 @@ function applyWorktreeDelta(msg: WorktreeDelta) {
 function subscribeWorktrees() {
   if (wtSse) return;
   try {
-    const es = new EventSource(`${GHCACHE_BASE}/events`);
+    const es = apiPaths.events.connect();
     wtSse = es;
     es.onmessage = (ev) => {
       let msg: { entity_type?: string; event: string; payload: WorktreeRow | { worktree: string } };
@@ -1423,15 +1422,12 @@ export async function scanWorktrees() {
   wtScanning = true;
   try {
     const root = store.get().scanRoot.trim();
-    const snapshot = await queryWorktreeSnapshot({
-      fetch: (input, init) => fetch(input, init),
-      timeoutSignal,
-      scanLocal: () =>
+    const snapshot = await queryWorktreeSnapshot(() =>
         invoke<WorktreeRow[]>("scan_worktrees", {
           roots: root ? [root] : [],
           maxDepth: null,
         }),
-    });
+    );
     store.set({ worktrees: snapshot.rows });
     pruneAutoWorktrees(snapshot.rows);
     if (snapshot.source === "ghcache") {

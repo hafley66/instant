@@ -3,7 +3,7 @@
 import { SignalReact } from "@hafley66/signals/react";
 import { registerStatus, type StatusReport } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
-import { queryGhcacheSnapshot, timeoutSignal } from "./ghcacheSnapshot";
+import { queryGhcacheSnapshot } from "./ghcacheSnapshot";
 import { runtimePorts } from "./reactive/ports";
 import { sprefaRoot, statusRows, type StatusRow } from "./reactive/statusModel";
 
@@ -68,10 +68,7 @@ async function ghcacheProbe(): Promise<StatusReport> {
   // Status checks only the daemon transport. Local scan fallback belongs to
   // the explicit Worktrees refresh path; doing it on this 4-second poll was
   // the old git-status volley in a new disguise.
-  const snapshot = await queryGhcacheSnapshot({
-    fetch: runtimePorts.fetch,
-    timeoutSignal,
-  });
+  const snapshot = await queryGhcacheSnapshot();
   if (snapshot.error === "http") {
     return {
       state: "degraded",

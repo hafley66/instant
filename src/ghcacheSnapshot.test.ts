@@ -1,3 +1,4 @@
+import type { EndpointTransport, Serializable } from "@hafley66/signals";
 import { describe, expect, it, vi } from "vitest";
 import {
   GHCACHE_TIMEOUT_MS,
@@ -5,58 +6,59 @@ import {
   queryGhcacheSnapshot,
   queryWorktreeSnapshot,
 } from "./ghcacheSnapshot";
+import { paths } from "./generated/api";
+import { runtimePorts } from "./reactive/ports";
 import type { WorktreeRow } from "./state";
 
 const row = { worktree: "/repo" } as WorktreeRow;
-const response = (ok: boolean, status: number, rows: WorktreeRow[] = []) =>
-  ({ ok, status, json: async () => rows }) as Response;
+const endpoint = (transport: EndpointTransport) => paths.worktrees.endpoint(transport);
+const reply = (status: number, body: Serializable = null): EndpointTransport =>
+  async () => ({ status, body });
 
 describe("ghcache worktree snapshot", () => {
   it("returns the daemon snapshot and preserves the two-second timeout", async () => {
     const scanLocal = vi.fn(async () => [] as WorktreeRow[]);
-    const timeoutSignal = vi.fn(() => new AbortController().signal);
-    const result = await queryWorktreeSnapshot({
-      fetch: async () => response(true, 200, [row]),
-      scanLocal,
-      timeoutSignal,
-    });
+    const abortSignal = vi.spyOn(runtimePorts, "abortSignal").mockReturnValue(
+      new AbortController().signal,
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      status: 200,
+      text: async () => JSON.stringify([row]),
+    })));
+    const result = await queryWorktreeSnapshot(scanLocal);
     expect(result).toEqual({ rows: [row], source: "ghcache" });
-    expect(timeoutSignal).toHaveBeenCalledWith(GHCACHE_TIMEOUT_MS);
+    expect(abortSignal).toHaveBeenCalledWith(GHCACHE_TIMEOUT_MS);
     expect(scanLocal).not.toHaveBeenCalled();
   });
 
   it("lets Status probe the daemon without triggering any local scan fallback", async () => {
-    const result = await queryGhcacheSnapshot({
-      fetch: async () => { throw new DOMException("timed out", "TimeoutError"); },
-      timeoutSignal: () => new AbortController().signal,
-    });
+    const result = await queryGhcacheSnapshot(endpoint(async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    }));
     expect(result).toEqual({ rows: [], error: "unreachable" });
   });
 
   it("falls back on HTTP failure", async () => {
-    const result = await queryWorktreeSnapshot({
-      fetch: async () => response(false, 503),
-      scanLocal: async () => [row],
-      timeoutSignal: () => new AbortController().signal,
-    });
+    const result = await queryWorktreeSnapshot(
+      async () => [row],
+      endpoint(reply(503)),
+    );
     expect(result).toEqual({ rows: [row], source: "local", ghcacheError: "http", httpStatus: 503 });
   });
 
   it("falls back on timeout or transport failure", async () => {
-    const result = await queryWorktreeSnapshot({
-      fetch: async () => { throw new DOMException("timed out", "TimeoutError"); },
-      scanLocal: async () => [row],
-      timeoutSignal: () => new AbortController().signal,
-    });
+    const result = await queryWorktreeSnapshot(
+      async () => [row],
+      endpoint(async () => { throw new DOMException("timed out", "TimeoutError"); }),
+    );
     expect(result).toEqual({ rows: [row], source: "local", ghcacheError: "unreachable" });
   });
 
   it("propagates a failed local fallback", async () => {
-    await expect(queryWorktreeSnapshot({
-      fetch: async () => response(false, 500),
-      scanLocal: async () => { throw new Error("scan failed"); },
-      timeoutSignal: () => new AbortController().signal,
-    })).rejects.toThrow("scan failed");
+    await expect(queryWorktreeSnapshot(
+      async () => { throw new Error("scan failed"); },
+      endpoint(reply(500)),
+    )).rejects.toThrow("scan failed");
   });
 
   it("keeps SSE upsert and delete behavior after the shared snapshot", () => {

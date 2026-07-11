@@ -66,6 +66,7 @@ bundle:
 
 # typecheck only
 check:
+    npm run api:check
     npx tsc --noEmit
 
 # build the Chrome extension (extension/src/*.ts -> extension/dist/*.js). Load

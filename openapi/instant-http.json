@@ -1,0 +1,50 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Instant HTTP APIs", "version": "1.0.0" },
+  "servers": [{ "url": "http://127.0.0.1:7748", "description": "local ghcache daemon" }],
+  "paths": {
+    "/worktrees": {
+      "get": {
+        "operationId": "worktrees",
+        "responses": {
+          "200": {
+            "description": "Current git worktree snapshot",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WorktreeRow" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "events",
+        "responses": {
+          "200": {
+            "description": "ghcache change stream",
+            "content": { "text/event-stream": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WorktreeRow": {
+        "type": "object",
+        "required": ["origin", "clone", "worktree", "branch", "head", "is_main", "dirty"],
+        "properties": {
+          "origin": { "type": "string" },
+          "clone": { "type": "string" },
+          "worktree": { "type": "string" },
+          "branch": { "type": "string" },
+          "head": { "type": "string" },
+          "is_main": { "type": "boolean" },
+          "dirty": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
