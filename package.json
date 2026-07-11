@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hafley66/signals": "0.0.2",
     "@oddbird/css-anchor-positioning": "^0.9.0",
     "@react95/icons": "^2.5.0",
     "@tanstack/react-table": "^8.21.3",

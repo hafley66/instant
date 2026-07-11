@@ -96,6 +96,7 @@ import { isDraggingIn, wireOsDrop } from "./dnd";
 import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
+import { startReactiveRuntime } from "./reactive/runtime";
 
 const TAB_COMMANDS: Command[] = [
   // The palette lists every command below that carries a `title`. ⌘⇧P, the
@@ -209,6 +210,8 @@ async function main() {
   registerActivityBridge();
   refreshFavorites();
   initRail(); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
+  const stopReactiveRuntime = startReactiveRuntime();
+  window.addEventListener("beforeunload", stopReactiveRuntime, { once: true });
   store.subscribe(updateFavBadge, ["aiFavs"]);
   updateFavBadge();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail

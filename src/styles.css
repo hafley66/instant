@@ -3013,7 +3013,7 @@ body.xp-pixel .xterm canvas {
   background: #b0b0b0;
 }
 
-/* Rail item glyph tints to the worst probe health (set by StatusPanelV2). */
+/* Rail item glyph tints to the worst probe health (set by the reactive runtime). */
 #status-toggle[data-health="up"] .ai {
   color: #34c759;
 }

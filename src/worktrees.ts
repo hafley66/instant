@@ -34,6 +34,13 @@ import {
 } from "./core";
 import { openDiffPanel, openPreviewPanel } from "./preview";
 import { tabs, openTab, closeTab, settleClosures, pasteToActive } from "./terminal";
+import {
+  GHCACHE_BASE,
+  applyWorktreeDeltaRows,
+  queryWorktreeSnapshot,
+  timeoutSignal,
+  type WorktreeDelta,
+} from "./ghcacheSnapshot";
 
 export type Session = {
   name: string;
@@ -1371,7 +1378,6 @@ export function renderWorktreesPanel() {
 // 127.0.0.1:7748) when it's running, else falls back to the local Rust git scan.
 // The daemon runs a bounded, debounced background sweep, so neither path forks
 // hundreds of `git status` on the UI's hot path.
-const GHCACHE_BASE = "http://127.0.0.1:7748";
 let wtScanning = false; // in-flight guard: stops overlapping scans stacking
 let wtScanned = false; // one scan has completed (any source) -> stop auto-refire
 let wtSse: EventSource | null = null;
@@ -1382,23 +1388,8 @@ export function scanWorktreesIfNeeded() {
 }
 
 // Apply one SSE change_log frame to the worktrees store, keyed by worktree path.
-function applyWorktreeDelta(msg: {
-  event: string;
-  payload: WorktreeRow | { worktree: string };
-}) {
-  const cur = store.get().worktrees;
-  if (msg.event === "deleted") {
-    const path = (msg.payload as { worktree: string }).worktree;
-    store.set({ worktrees: cur.filter((r) => r.worktree !== path) });
-    return;
-  }
-  const row = msg.payload as WorktreeRow;
-  if (!row?.worktree) return;
-  const next = cur.slice();
-  const i = next.findIndex((r) => r.worktree === row.worktree);
-  if (i >= 0) next[i] = row;
-  else next.push(row);
-  store.set({ worktrees: next });
+function applyWorktreeDelta(msg: WorktreeDelta) {
+  store.set({ worktrees: applyWorktreeDeltaRows(store.get().worktrees, msg) });
 }
 
 // Subscribe to ghcacher's SSE stream once; filter to worktree deltas. The browser
@@ -1431,30 +1422,21 @@ export async function scanWorktrees() {
   if (wtScanning) return; // never stack scans (the old volley)
   wtScanning = true;
   try {
-    // Preferred path: ghcacher snapshot + live SSE. Short timeout so a missing
-    // daemon falls through to the local scan quickly.
-    try {
-      const res = await fetch(`${GHCACHE_BASE}/worktrees`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!res.ok) throw new Error(`ghcache ${res.status}`);
-      const rows = (await res.json()) as WorktreeRow[];
-      store.set({ worktrees: rows });
-      pruneAutoWorktrees(rows);
-      subscribeWorktrees();
-      wtScanned = true;
-      return;
-    } catch {
-      // ghcacher down/unreachable -> local git scan below.
-    }
-
     const root = store.get().scanRoot.trim();
-    const rows = await invoke<WorktreeRow[]>("scan_worktrees", {
-      roots: root ? [root] : [],
-      maxDepth: null,
+    const snapshot = await queryWorktreeSnapshot({
+      fetch: (input, init) => fetch(input, init),
+      timeoutSignal,
+      scanLocal: () =>
+        invoke<WorktreeRow[]>("scan_worktrees", {
+          roots: root ? [root] : [],
+          maxDepth: null,
+        }),
     });
-    store.set({ worktrees: rows });
-    pruneAutoWorktrees(rows);
+    store.set({ worktrees: snapshot.rows });
+    pruneAutoWorktrees(snapshot.rows);
+    if (snapshot.source === "ghcache") {
+      subscribeWorktrees();
+    }
     wtScanned = true;
   } catch (e) {
     console.error("scan_worktrees:", e);

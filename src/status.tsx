@@ -1,72 +1,49 @@
-// Status panel (v2): one row per registered StatusProbe, polled on an interval.
-// Probes carry their own check() logic (fetch a port, invoke a command, stat a
-// file), so this file is purely presentational + the polling loop. Built-in
-// probes for the services instant talks to live at the bottom and self-register
-// via registerBuiltinStatus(), called once from main.ts.
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { statusProbes, registerStatus, type StatusReport, type StatusState } from "./plugin";
+// Status is the first Signals/RxJS vertical slice. The application runtime owns
+// polling; this component is only a SignalReact + canonical TreeTable renderer.
+import { SignalReact } from "@hafley66/signals/react";
+import { registerStatus, type StatusReport } from "./plugin";
+import { TreeTable, type TreeColumn } from "./treetable";
+import { queryWorktreeSnapshot, timeoutSignal } from "./ghcacheSnapshot";
+import { runtimePorts } from "./reactive/ports";
+import { sprefaRoot, statusRows, type StatusRow } from "./reactive/statusModel";
+import { store, type WorktreeRow } from "./state";
 
-const POLL_MS = 4000;
-const GHCACHE_BASE = "http://127.0.0.1:7748";
+const STATUS_COLUMNS: TreeColumn<StatusRow>[] = [
+  {
+    id: "service",
+    header: "service",
+    sortValue: (row) => row.label,
+    cell: (row) => (
+      <div className="status-row">
+        <div className="status-head">
+          <span className={`status-dot s-${row.report.state}`} />
+          <span className="status-label">{row.label}</span>
+          <span className="status-state">{row.report.state}</span>
+        </div>
+        {row.report.detail ? <div className="status-detail">{row.report.detail}</div> : null}
+        {row.report.links?.length ? (
+          <div className="status-links">
+            {row.report.links.map((link) => (
+              <button
+                type="button"
+                className="status-link"
+                key={link.label + link.path}
+                title={link.path}
+                onClick={() => runtimePorts.open(link).catch(console.error)}
+              >
+                {link.reveal ? "⊙ " : "↗ "}
+                {link.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    ),
+  },
+];
 
-// Worst-first ranking. The rail dot reflects the worst state across all probes,
-// so an unreachable daemon turns the rail item red even while others are green.
-const RANK: Record<StatusState, number> = {
-  down: 0,
-  degraded: 1,
-  unknown: 2,
-  idle: 3,
-  up: 4,
-};
-
-function worst(reports: StatusReport[]): StatusState {
-  let s: StatusState = "up";
-  for (const r of reports) if (RANK[r.state] < RANK[s]) s = r.state;
-  return reports.length ? s : "unknown";
-}
-
-// Push the aggregate health onto the rail button so CSS can tint its glyph.
-function paintRail(state: StatusState) {
-  const btn = document.getElementById("status-toggle");
-  if (btn) btn.dataset.health = state;
-}
-
-type Row = { id: string; label: string; report: StatusReport };
-
-export function StatusPanelV2() {
-  const [rows, setRows] = useState<Row[]>([]);
-
-  useEffect(() => {
-    let alive = true;
-    async function tick() {
-      const probes = statusProbes();
-      const reports = await Promise.all(
-        probes.map(async (p): Promise<Row> => {
-          try {
-            return { id: p.id, label: p.label, report: await p.check() };
-          } catch (e) {
-            return {
-              id: p.id,
-              label: p.label,
-              report: { state: "down", detail: String(e) },
-            };
-          }
-        }),
-      );
-      if (!alive) return;
-      setRows(reports);
-      paintRail(worst(reports.map((r) => r.report)));
-    }
-    tick();
-    const h = setInterval(tick, POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(h);
-    };
-  }, []);
-
+export const StatusPanelV2 = SignalReact(function StatusPanelV2() {
+  const rows = statusRows.$();
   return (
     <div className="v2-panel status-panel">
       <div className="act-bar">
@@ -74,64 +51,46 @@ export function StatusPanelV2() {
         <span className="spy-spacer" />
       </div>
       <div className="panel-scroll">
-        {rows.length === 0 ? (
+        {!rows.length ? (
           <div className="session-empty">no status probes</div>
         ) : (
-          rows.map((r) => (
-            <div className="status-row" key={r.id}>
-              <div className="status-head">
-                <span className={`status-dot s-${r.report.state}`} />
-                <span className="status-label">{r.label}</span>
-                <span className="status-state">{r.report.state}</span>
-              </div>
-              {r.report.detail ? <div className="status-detail">{r.report.detail}</div> : null}
-              {r.report.links?.length ? (
-                <div className="status-links">
-                  {r.report.links.map((l) => (
-                    <button
-                      type="button"
-                      className="status-link"
-                      key={l.label + l.path}
-                      title={l.path}
-                      onClick={() =>
-                        (l.reveal ? revealItemInDir(l.path) : openPath(l.path)).catch(
-                          console.error,
-                        )
-                      }
-                    >
-                      {l.reveal ? "⊙ " : "↗ "}
-                      {l.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ))
+          <TreeTable columns={STATUS_COLUMNS} data={rows} getRowId={(row) => row.id} />
         )}
       </div>
     </div>
   );
-}
+});
 
 // ---- built-in probes ----
 
 const HOME = "/Users/chrishafley"; // for default-path links (opener wants absolute)
 
 async function ghcacheProbe(): Promise<StatusReport> {
-  try {
-    const res = await fetch(`${GHCACHE_BASE}/worktrees`, { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) {
-      return { state: "degraded", detail: `:7748 · HTTP ${res.status}`, links: ghcacheLinks() };
-    }
-    const rows = (await res.json()) as unknown[];
+  const root = store.get().scanRoot.trim();
+  const snapshot = await queryWorktreeSnapshot({
+    fetch: runtimePorts.fetch,
+    timeoutSignal,
+    scanLocal: () =>
+      runtimePorts.invoke<WorktreeRow[]>("scan_worktrees", {
+        roots: root ? [root] : [],
+        maxDepth: null,
+      }),
+  });
+  if (snapshot.ghcacheError === "http") {
     return {
-      state: "up",
-      detail: `:7748 · ${rows.length} worktree${rows.length === 1 ? "" : "s"}`,
+      state: "degraded",
+      detail: `:7748 · HTTP ${snapshot.httpStatus}`,
       links: ghcacheLinks(),
     };
-  } catch {
+  }
+  if (snapshot.ghcacheError) {
     return { state: "down", detail: ":7748 unreachable", links: ghcacheLinks() };
   }
+  return {
+    state: "up",
+    detail: `:7748 · ${snapshot.rows.length} worktree${snapshot.rows.length === 1 ? "" : "s"}`,
+    links: ghcacheLinks(),
+  };
 }
 
 function ghcacheLinks() {
@@ -142,9 +101,9 @@ function ghcacheLinks() {
 }
 
 async function sprefaProbe(): Promise<StatusReport> {
-  const root = localStorage.getItem("sprefa.root") ?? "~/projects/sprefa/v5";
+  const root = sprefaRoot.$();
   try {
-    const ping = await invoke<{ program?: string; program_files?: string[] }>("sprefa_ping", {
+    const ping = await runtimePorts.invoke<{ program?: string; program_files?: string[] }>("sprefa_ping", {
       root,
     });
     const files = ping.program_files?.length
@@ -161,7 +120,7 @@ async function sprefaProbe(): Promise<StatusReport> {
 }
 
 async function tmuxProbe(): Promise<StatusReport> {
-  const sessions = await invoke<unknown[]>("list_sessions");
+  const sessions = await runtimePorts.invoke<unknown[]>("list_sessions");
   return {
     state: sessions.length ? "up" : "idle",
     detail: `${sessions.length} session${sessions.length === 1 ? "" : "s"}`,
@@ -169,14 +128,14 @@ async function tmuxProbe(): Promise<StatusReport> {
 }
 
 async function cdpProbe(): Promise<StatusReport> {
-  const up = await invoke<boolean>("cdp_status");
+  const up = await runtimePorts.invoke<boolean>("cdp_status");
   return up ? { state: "up", detail: "engine attached" } : { state: "idle", detail: "not started" };
 }
 
 // claude/opencode running directly on a terminal, outside any tmux session —
 // "degraded" (not "down") because nothing's broken, it's just untracked.
 async function rogueProbe(): Promise<StatusReport> {
-  const rogue = await invoke<{ pid: number; command: string; cwd: string | null }[]>(
+  const rogue = await runtimePorts.invoke<{ pid: number; command: string; cwd: string | null }[]>(
     "rogue_agent_sessions",
   );
   if (!rogue.length) return { state: "idle", detail: "none" };
