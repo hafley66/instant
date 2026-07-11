@@ -5,7 +5,7 @@
 // with browser tabs.
 import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { runMatchingCommand } from "./keymap";

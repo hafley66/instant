@@ -2,7 +2,7 @@
 // (or free text inside a preview / rg panel) runs the first clickRules rule whose
 // regex matches it. The token is shell-quoted into `$1`, the command runs in the
 // pane cwd via run_click, and any stdout opens a results panel on the right.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { escapeHtml, shQuote } from "./core";

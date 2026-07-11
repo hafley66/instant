@@ -2,7 +2,7 @@
 // turn identification that backs the terminal right-click "favorite this turn"
 // gesture. Also the per-tab ledger cache warmed on tab activation, the harness
 // session resolver, and the ★ rail badge.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, type AiMessage, type Fav } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { registerPlugin } from "./plugin";

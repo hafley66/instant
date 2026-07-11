@@ -2,7 +2,7 @@
 // activity-rail resize, the title bar drag/controls, the minimal async text
 // prompt, JS-driven window edge resize (macOS gives no native handles), and the
 // contextual right-click menu items.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import { store, type AppState, type SprefaScopeKind } from "./state";

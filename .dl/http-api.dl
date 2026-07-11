@@ -22,6 +22,17 @@ rel forbidden_endpoint(p: file, l: int).
 forbidden_endpoint(p, l) <- endpoint_construct(p, l), !generated_api(p).
 diag(path: p, line: l, severity: "error", code: "endpoint-outside-codegen", msg: "Endpoint contracts must be generated from OpenAPI into src/generated/api.ts") <- forbidden_endpoint(p, l).
 
+# Tauri IPC is also spec-first. Only the native adapter imports Tauri core;
+# application code imports the generated command contract.
+rel tauri_core_import(p: file, l: int).
+tauri_core_import(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "import { $$$NAMES } from \"@tauri-apps/api/core\"", l).
+tauri_core_import(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "import { $$$NAMES } from \"@tauri-apps/api/core\"", l).
+rel native_transport(p: file).
+native_transport("src/reactive/nativeTransport.ts").
+rel forbidden_tauri_import(p: file, l: int).
+forbidden_tauri_import(p, l) <- tauri_core_import(p, l), !native_transport(p).
+diag(path: p, line: l, severity: "error", code: "tauri-ipc-outside-adapter", msg: "Tauri IPC must use src/generated/native.ts; direct @tauri-apps/api/core imports are adapter-only") <- forbidden_tauri_import(p, l).
+
 rel event_source_construct(p: file, l: int).
 event_source_construct(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "new EventSource($$$ARGS)", l).
 event_source_construct(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "new EventSource($$$ARGS)", l).

@@ -2,7 +2,7 @@
 // (preview:<path>), like xterm sessions. This module owns each instance's content
 // node and renders into it; reactdock hosts the node. No untitled buffers: every
 // preview names a path.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { codeToHtml } from "shiki";

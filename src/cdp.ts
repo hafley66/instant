@@ -3,7 +3,7 @@
 // Input.dispatch* commands. Unlike the kitty overlay this canvas *captures*
 // pointer + keyboard and drives the page; resize is real (Emulation override).
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { runMatchingCommand } from "./keymap";
 import { history as navHistory } from "./nav";

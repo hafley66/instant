@@ -1,7 +1,7 @@
 // Meme generator + Slack emoji maker plugin.
 // Requires ImageMagick 6 (convert) or 7 (magick) on PATH for Slack emoji export.
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { dirname, homeDir } from "@tauri-apps/api/path";
 import { createElement, useEffect, useRef, useState, useCallback } from "react";
 import { createRoot, type Root } from "react-dom/client";

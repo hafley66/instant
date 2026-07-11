@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../generated/native";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { StatusLink, StatusState } from "../plugin";
 

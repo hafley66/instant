@@ -4,7 +4,7 @@
 // active-group lookup), so everything can import from here without cycles.
 import { store, type FsEntry, type Skin } from "./state";
 import { activeGroupEl } from "./reactdock";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 

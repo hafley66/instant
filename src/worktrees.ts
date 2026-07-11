@@ -2,7 +2,7 @@
 // the filesystem browser nested under worktree leaves. Owns the session list,
 // the worktree scan (ghcacher SSE or local git), the resume-id bookkeeping, the
 // v2 react-table panel bridges, and the legacy v1 tree/table renderers.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import {
   store,
   type WorktreeRow,

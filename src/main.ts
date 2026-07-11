@@ -4,7 +4,7 @@
 // history, preview, clickrules, panels); this file only wires them together.
 import "xp.css";
 import "@xterm/xterm/css/xterm.css";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";

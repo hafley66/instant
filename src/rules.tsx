@@ -6,7 +6,7 @@
 // as you browse. Both lists are flat one-level TreeTables (AGENTS.md: no
 // bespoke row markup — reuse the grid stack).
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
 import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";

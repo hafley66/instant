@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "api:generate": "node scripts/generate-api.mjs",
-    "api:check": "node scripts/generate-api.mjs --check",
+    "api:generate": "node scripts/generate-api.mjs && node scripts/generate-native.mjs",
+    "api:check": "node scripts/generate-api.mjs --check && node scripts/generate-native.mjs --check",
     "dev": "vite",
     "build": "npm run api:check && tsc && vite build",
     "preview": "vite preview",

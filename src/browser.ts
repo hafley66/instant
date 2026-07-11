@@ -3,7 +3,7 @@
 // back as CDP commands. They are NOT terminals — no xterm, no pty — but reuse the
 // dockview panel lifecycle (addTermPanel/onTermShown/onTermClosed) keyed by the
 // same id.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store } from "./state";
 import { CdpView, cdpQuality, setCdpQuality, QUALITY_STEPS, setCdpPerf } from "./cdp";
 import { addTermPanel } from "./reactdock";
