@@ -68,6 +68,10 @@ bundle:
 todos:
     dl --no-daemon --apply
 
+# regenerate the native-to-HTTP migration inventory from comment_node relations
+native-http:
+    dl --no-daemon --apply
+
 # lint rails + generated TODO.md drift (never writes)
 todos-check:
     dl --no-daemon --check

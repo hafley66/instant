@@ -1,0 +1,32 @@
+# Native-to-HTTP migration facts live beside Rust commands:
+# api(http GET /api/v1/config): config_get
+# api(sse GET /api/v1/activity/events): activity_events
+# api(websocket GET /api/v1/pty/sessions/{id}): open_session
+# api(shell): screenshot
+rel native_http_source(p: file, rev: text).
+native_http_source(p, rev) <- scan("src-tauri/src/**/*.rs", p, rev).
+
+rel native_http_node(p: file, l: int, text: text).
+native_http_node(p, l, text) <-
+    native_http_source(p, _),
+    comment_node(p, l, _, _, _, text, _),
+    text =~ /api\((http|sse|websocket)\s+[A-Z]+\s+\/[^)]*\):\s+[a-z][a-z0-9_]*/.
+
+rel native_shell_node(p: file, l: int, text: text).
+native_shell_node(p, l, text) <-
+    native_http_source(p, _),
+    comment_node(p, l, _, _, _, text, _),
+    text =~ /api\(shell\):\s+[a-z][a-z0-9_]*/.
+
+rel native_http_doc_zone(doc: file, l0: int, l1: int, name: text).
+native_http_doc_zone(doc, l0, l1, name) <-
+    scan("NATIVE_HTTP.md", doc, rev),
+    comment(doc, rev, /BEGIN: $name -->/, /END:/, l0, l1, name).
+
+gen(doc, l0, l1, "- [{text}]({p}#L{l})") <-
+    native_http_doc_zone(doc, l0, l1, "native-http"),
+    native_http_node(p, l, text).
+
+gen(doc, l0, l1, "- [{text}]({p}#L{l})") <-
+    native_http_doc_zone(doc, l0, l1, "native-shell"),
+    native_shell_node(p, l, text).
