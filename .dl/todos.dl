@@ -43,3 +43,17 @@ todo_security(p, l, text) <- todo_node(p, l, text), text =~ /todo\(security\):/.
 rel todo_migration(p: file, l: int, text: text).
 todo_migration(p, l, text) <- todo_node(p, l, text), text =~ /todo\(migration\):/.
 
+# TODO.md is a view over comment space. gen owns only the marked regions, so
+# prose around them remains hand-editable and every source link stays current.
+rel todo_doc_zone(doc: file, l0: int, l1: int, name: text).
+todo_doc_zone(doc, l0, l1, name) <-
+    scan("TODO.md", doc, rev),
+    comment(doc, rev, /BEGIN: $name -->/, /END:/, l0, l1, name).
+
+gen(doc, l0, l1, "- [{text}]({p}#L{l})") <-
+    todo_doc_zone(doc, l0, l1, "todo-ready"),
+    todo_ready(p, l, text).
+
+gen(doc, l0, l1, "- [{text}]({p}#L{l})") <-
+    todo_doc_zone(doc, l0, l1, "todo-blocked"),
+    todo_blocked(p, l, text).

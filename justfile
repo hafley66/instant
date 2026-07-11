@@ -64,8 +64,16 @@ build:
 bundle:
     npm run tauri build
 
+# regenerate the linked architectural backlog from comment_node relations
+todos:
+    dl --no-daemon --apply
+
+# lint rails + generated TODO.md drift (never writes)
+todos-check:
+    dl --no-daemon --check
+
 # typecheck only
-check:
+check: todos-check
     npm run api:check
     npx tsc --noEmit
 
