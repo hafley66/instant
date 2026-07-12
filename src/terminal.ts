@@ -25,7 +25,7 @@ import {
   removeTermPanel,
   hasTermPanel,
 } from "./reactdock";
-import { dispatchClick, quotedSpanAt, clickIntent } from "./clickrules";
+import { dispatchClick, quotedSpanAt, clickIntent, resolveReference } from "./clickrules";
 import { nudgeZoom, resetZoom } from "./overlay";
 import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
@@ -347,6 +347,7 @@ export function openTab(
   inspector.setAttribute("popover", "manual");
   document.body.appendChild(inspector);
   const hideInspector = () => { try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); } };
+  let inspectorRequest = 0;
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
   // it into the terminal's panel.
   document.getElementById("panel-pool")!.appendChild(el);
@@ -461,14 +462,23 @@ export function openTab(
   el.addEventListener(
     "mousemove",
     (e) => {
-      if (!e.metaKey) { hideInspector(); return; }
+      if (!e.metaKey) { inspectorRequest++; hideInspector(); return; }
       const token = wordAt(id, e.clientX, e.clientY);
       const cwd = tabMetaById(id)?.cwd ?? "";
       if (!token || !looksOpenable(token)) { hideInspector(); return; }
-      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(cwd || "home")}</small>`;
+      const ref = resolveReference(token, cwd);
+      const request = ++inspectorRequest;
+      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref?.path ?? (cwd || "home"))}</small>`;
       inspector.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 280)}px`;
       inspector.style.top = `${Math.min(e.clientY + 14, window.innerHeight - 90)}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
+      if (ref) {
+        void invoke<string>("read_text", { path: ref.path }).then((text) => {
+          if (request !== inspectorRequest) return;
+          const lines = text.split("\n").slice(0, 8).join("\n");
+          inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><pre>${escapeHtml(lines)}${text.split("\n").length > 8 ? "\n…" : ""}</pre>`;
+        }).catch(() => {});
+      }
     },
     { capture: true },
   );

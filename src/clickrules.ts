@@ -25,6 +25,18 @@ export function clickIntent(rawToken: string, cwd: string): string {
   return clickRuleFor(token) ? "run configured action from terminal cwd" : "search from terminal cwd";
 }
 
+export function resolveReference(rawToken: string, cwd: string): { path: string; line?: number } | null {
+  const token = rawToken.trim().replace(/^['"`]|['"`]$/g, "");
+  if (!token || /^(?:https?:\/\/|www\.)/i.test(token)) return null;
+  const match = token.match(/^(.*?):(\d+)(?::\d+)?$/);
+  const bare = match?.[1] ?? token;
+  const line = match ? Number(match[2]) : undefined;
+  const fileish = /^\/?(?:~\/|\.\.?\/|[^\s:]+\/)/.test(bare) || /\.[A-Za-z0-9]{1,16}$/.test(bare);
+  if (!fileish) return null;
+  if (bare.startsWith("/") || bare.startsWith("~/")) return { path: bare, line };
+  return { path: cwd ? `${cwd.replace(/\/$/, "")}/${bare}` : bare, line };
+}
+
 export async function dispatchClick(rawToken: string, cwd: string) {
   const token = rawToken.trim();
   if (!token) return;

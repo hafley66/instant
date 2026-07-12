@@ -224,6 +224,7 @@ body.show-toolbar .toolbar {
 .term-inspector strong, .term-inspector span, .term-inspector small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-inspector span { color: var(--accent); }
 .term-inspector small { opacity: .65; }
+.term-inspector pre { max-width: 300px; max-height: 130px; margin: 4px 0 0; overflow: hidden; white-space: pre-wrap; opacity: .82; }
 .send-picker-head {
   padding: 2px 6px 4px;
   font-size: 10px;

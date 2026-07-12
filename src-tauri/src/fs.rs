@@ -296,7 +296,7 @@ pub fn read_image(path: String) -> Result<String, String> {
 /// it can't render.
 #[tauri::command]
 pub fn read_text(path: String) -> Result<String, String> {
-    let p = PathBuf::from(&path);
+    let p = resolve(Some(path));
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     if meta.len() > 2 * 1024 * 1024 {
         return Err("file too large to preview".into());
