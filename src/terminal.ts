@@ -28,6 +28,7 @@ import {
 import { dispatchClick, quotedSpanAt, clickIntent, resolveReference } from "./clickrules";
 import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
+import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
@@ -349,6 +350,31 @@ export function openTab(
   document.body.appendChild(inspector);
   const hideInspector = () => { try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); } };
   let inspectorRequest = 0;
+  let commandHeld = false;
+  let inspectorToken = "";
+  let inspectorCwd = "";
+  let inspectorRef: { path: string; line?: number } | null = null;
+  inspector.addEventListener("mouseenter", () => { inspector.dataset.inside = "1"; });
+  inspector.addEventListener("mouseleave", () => {
+    delete inspector.dataset.inside;
+    if (!commandHeld) hideInspector();
+  });
+  inspector.addEventListener("click", (e) => {
+    const action = (e.target as HTMLElement).closest<HTMLElement>("[data-inspector-action]")?.dataset.inspectorAction;
+    if (!action || !inspectorRef) return;
+    if (action === "preview") openPreviewPanel(inspectorRef.path, inspectorRef.line);
+    if (action === "search") void dispatchClick(inspectorToken, inspectorCwd);
+    if (action === "copy") void navigator.clipboard.writeText(inspectorRef.path);
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Meta") commandHeld = true;
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "Meta") {
+      commandHeld = false;
+      if (!inspector.matches(":hover")) hideInspector();
+    }
+  });
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
   // it into the terminal's panel.
   document.getElementById("panel-pool")!.appendChild(el);
@@ -468,6 +494,9 @@ export function openTab(
       const cwd = tabMetaById(id)?.cwd ?? "";
       if (!token || !looksOpenable(token)) { hideInspector(); return; }
       const ref = resolveReference(token, cwd);
+      inspectorToken = token;
+      inspectorCwd = cwd;
+      inspectorRef = ref;
       const request = ++inspectorRequest;
       inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref?.path ?? (cwd || "home"))}</small>`;
       const inspectorW = Math.min(620, window.innerWidth - 16);
@@ -480,7 +509,7 @@ export function openTab(
           if (request !== inspectorRequest) return;
           void inlineSnippetHtml(ref.path, text, store.get().mode === "dark").then((html) => {
             if (request !== inspectorRequest) return;
-            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref.path)}</small>${html}`;
+            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button></div>`;
           });
         }).catch(() => {});
       }

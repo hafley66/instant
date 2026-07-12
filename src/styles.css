@@ -217,19 +217,24 @@ body.show-toolbar .toolbar {
   width: min(620px, calc(100vw - 16px));
   max-width: 620px;
   padding: 5px 7px;
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-  border: var(--frame-w) solid var(--frame);
-  box-shadow: 2px 2px 8px rgba(0,0,0,.35);
-  font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  pointer-events: none;
+  background: rgba(30, 30, 34, 0.97);
+  color: #f4f4f5;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 10px;
+  box-shadow: 0 16px 42px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.24);
+  font: 12px/1.4 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 8px;
+  pointer-events: auto;
 }
 .term-inspector strong, .term-inspector span, .term-inspector small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.term-inspector span { color: var(--accent); }
-.term-inspector small { opacity: .65; }
+.term-inspector span { color: #8bd5ff; }
+.term-inspector small { display: block; opacity: .62; font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .term-inspector pre, .term-inspector-code pre { max-width: 420px; max-height: 180px; margin: 4px 0 0; overflow: hidden; white-space: pre-wrap; opacity: .9; }
 .term-inspector-code .shiki { max-width: 420px; max-height: 180px; margin: 4px 0 0; overflow: hidden; padding: 6px; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .term-inspector-code .line { display: block; }
+.term-inspector-actions { display: flex; gap: 4px; margin-top: 5px; }
+.term-inspector-actions button { padding: 4px 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; background: rgba(255,255,255,.1); color: #f4f4f5; font: 11px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+.term-inspector-actions button:hover { background: rgba(139,213,255,.22); border-color: #8bd5ff; }
 .send-picker-head {
   padding: 2px 6px 4px;
   font-size: 10px;
