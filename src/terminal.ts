@@ -354,6 +354,7 @@ export function openTab(
   let inspectorToken = "";
   let inspectorCwd = "";
   let inspectorRef: { path: string; line?: number } | null = null;
+  let inspectorPinned = false;
   inspector.addEventListener("mouseenter", () => { inspector.dataset.inside = "1"; });
   inspector.addEventListener("mousemove", (e) => e.stopPropagation());
   inspector.addEventListener("mouseleave", () => {
@@ -362,7 +363,13 @@ export function openTab(
   });
   inspector.addEventListener("click", (e) => {
     const action = (e.target as HTMLElement).closest<HTMLElement>("[data-inspector-action]")?.dataset.inspectorAction;
-    if (!action || !inspectorRef) return;
+    if (!inspectorRef) return;
+    if (!action) {
+      openPreviewPanel(inspectorRef.path, inspectorRef.line);
+      inspectorPinned = true;
+      inspector.dataset.pinned = "1";
+      return;
+    }
     if (action === "preview") openPreviewPanel(inspectorRef.path, inspectorRef.line);
     if (action === "search") void dispatchClick(inspectorToken, inspectorCwd);
     if (action === "copy") void navigator.clipboard.writeText(inspectorRef.path);
@@ -373,7 +380,21 @@ export function openTab(
   window.addEventListener("keyup", (e) => {
     if (e.key === "Meta") {
       commandHeld = false;
-      if (!inspector.matches(":hover")) hideInspector();
+      if (!inspectorPinned && !inspector.matches(":hover")) hideInspector();
+    }
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && inspectorPinned) {
+      inspectorPinned = false;
+      delete inspector.dataset.pinned;
+      hideInspector();
+    }
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (inspectorPinned && !inspector.contains(e.target as Node)) {
+      inspectorPinned = false;
+      delete inspector.dataset.pinned;
+      hideInspector();
     }
   });
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
@@ -490,11 +511,12 @@ export function openTab(
   el.addEventListener(
     "mousemove",
     (e) => {
+      if (inspectorPinned) return;
       if (!e.metaKey) { inspectorRequest++; hideInspector(); return; }
       const token = wordAt(id, e.clientX, e.clientY);
       const cwd = tabMetaById(id)?.cwd ?? "";
       if (!token || !looksOpenable(token)) {
-        if (!commandHeld && !inspector.dataset.inside) hideInspector();
+        if (!inspectorPinned && !commandHeld && !inspector.dataset.inside) hideInspector();
         return;
       }
       // Once the card is open, keep its anchor stable while the pointer travels
