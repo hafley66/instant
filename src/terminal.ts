@@ -27,6 +27,7 @@ import {
 } from "./reactdock";
 import { dispatchClick, quotedSpanAt, clickIntent, resolveReference } from "./clickrules";
 import { nudgeZoom, resetZoom } from "./overlay";
+import { inlineSnippetHtml } from "./inlinePreview";
 import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
@@ -469,14 +470,18 @@ export function openTab(
       const ref = resolveReference(token, cwd);
       const request = ++inspectorRequest;
       inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref?.path ?? (cwd || "home"))}</small>`;
-      inspector.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 280)}px`;
-      inspector.style.top = `${Math.min(e.clientY + 14, window.innerHeight - 90)}px`;
+      const inspectorW = Math.min(620, window.innerWidth - 16);
+      const inspectorH = Math.min(260, window.innerHeight - 16);
+      inspector.style.left = `${Math.max(8, Math.min(e.clientX + 12, window.innerWidth - inspectorW - 8))}px`;
+      inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
       if (ref) {
         void invoke<string>("read_text", { path: ref.path }).then((text) => {
           if (request !== inspectorRequest) return;
-          const lines = text.split("\n").slice(0, 8).join("\n");
-          inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><pre>${escapeHtml(lines)}${text.split("\n").length > 8 ? "\n…" : ""}</pre>`;
+          void inlineSnippetHtml(ref.path, text, store.get().mode === "dark").then((html) => {
+            if (request !== inspectorRequest) return;
+            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref.path)}</small>${html}`;
+          });
         }).catch(() => {});
       }
     },
