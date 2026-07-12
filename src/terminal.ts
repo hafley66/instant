@@ -355,6 +355,7 @@ export function openTab(
   let inspectorCwd = "";
   let inspectorRef: { path: string; line?: number } | null = null;
   inspector.addEventListener("mouseenter", () => { inspector.dataset.inside = "1"; });
+  inspector.addEventListener("mousemove", (e) => e.stopPropagation());
   inspector.addEventListener("mouseleave", () => {
     delete inspector.dataset.inside;
     if (!commandHeld) hideInspector();
@@ -492,11 +493,18 @@ export function openTab(
       if (!e.metaKey) { inspectorRequest++; hideInspector(); return; }
       const token = wordAt(id, e.clientX, e.clientY);
       const cwd = tabMetaById(id)?.cwd ?? "";
-      if (!token || !looksOpenable(token)) { hideInspector(); return; }
+      if (!token || !looksOpenable(token)) {
+        if (!commandHeld && !inspector.dataset.inside) hideInspector();
+        return;
+      }
+      // Once the card is open, keep its anchor stable while the pointer travels
+      // from the terminal token into the card. Reposition only for a new token.
+      if (inspector.dataset.token === token) return;
       const ref = resolveReference(token, cwd);
       inspectorToken = token;
       inspectorCwd = cwd;
       inspectorRef = ref;
+      inspector.dataset.token = token;
       const request = ++inspectorRequest;
       inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref?.path ?? (cwd || "home"))}</small>`;
       const inspectorW = Math.min(620, window.innerWidth - 16);
