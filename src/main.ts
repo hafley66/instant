@@ -45,6 +45,7 @@ import {
   zoomResetGesture,
   sendTextToTab,
   setReplaying,
+  observeTerminalOutput,
 } from "./terminal";
 import { browserTabs, spawnBrowserTab, openBrowserTab, cycleBrowserQuality, setBrowserPerf } from "./browser";
 import {
@@ -253,6 +254,7 @@ async function main() {
   setInterval(refreshRogue, 8000);
 
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
+    observeTerminalOutput(e.payload.id, e.payload.chunk);
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
   });
 

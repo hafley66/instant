@@ -29,6 +29,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
+import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import {
   renderSessionActive,
   refreshSessions,
@@ -45,11 +46,26 @@ export type Tab = {
   el: HTMLElement;
   graphics?: boolean;
   overlay?: GraphicsOverlay;
+  harness: HarnessObservation;
+  outputTail: string;
 };
 
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 export const tabs = new Map<string, Tab>();
+
+export function observeTerminalOutput(id: string, chunk: string) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.outputTail = trimOutputTail(tab.outputTail, chunk);
+  const meta = tabMetaById(id);
+  const live = store.get().sessions.find((s) => s.name === tab.name);
+  tab.harness = detectHarness(meta?.command, live?.commands?.[0], tab.outputTail);
+}
+
+export function terminalHarness(id: string): HarnessObservation | null {
+  return tabs.get(id)?.harness ?? null;
+}
 
 // Device pixels per terminal cell, for the pty's TIOCGWINSZ pixel size. Graphics
 // apps (awrit) read ws_xpixel/ws_ypixel to size their framebuffer; without real
@@ -351,7 +367,9 @@ export function openTab(
   const cmd = opts.command ?? QUICK_CMD[name] ?? null;
   const graphics = opts.graphics ?? /^\s*awrit\b/.test(cmd ?? "");
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
-  tabs.set(id, { id, name, term, fit, el, graphics, overlay });
+  const live = store.get().sessions.find((s) => s.name === name);
+  const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
+  tabs.set(id, { id, name, term, fit, el, graphics, overlay, harness, outputTail: "" });
 
   // OSC 52 -> macOS clipboard. tmux (set-clipboard on) emits this when a mouse
   // drag selects text in copy-mode, and TUIs (opencode) emit it on their own
