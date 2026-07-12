@@ -348,7 +348,17 @@ export function openTab(
   inspector.className = "term-inspector";
   inspector.setAttribute("popover", "manual");
   document.body.appendChild(inspector);
-  const hideInspector = () => { try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); } };
+  const hideInspector = () => {
+    inspectorRequest++;
+    inspectorPinned = false;
+    inspectorToken = "";
+    inspectorCwd = "";
+    inspectorRef = null;
+    delete inspector.dataset.token;
+    delete inspector.dataset.pinned;
+    delete inspector.dataset.inside;
+    try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); }
+  };
   let inspectorRequest = 0;
   let commandHeld = false;
   let inspectorToken = "";
