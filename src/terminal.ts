@@ -56,6 +56,7 @@ export type Tab = {
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 export const tabs = new Map<string, Tab>();
+const inspectorTextCache = new Map<string, string>();
 
 export function observeTerminalOutput(id: string, chunk: string) {
   const tab = tabs.get(id);
@@ -545,7 +546,14 @@ export function openTab(
       inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
       if (ref) {
-        void invoke<string>("read_text", { path: ref.path }).then((text) => {
+        const read = inspectorTextCache.get(ref.path)
+          ? Promise.resolve(inspectorTextCache.get(ref.path)!)
+          : invoke<string>("read_text", { path: ref.path }).then((text) => {
+              if (inspectorTextCache.size > 100) inspectorTextCache.delete(inspectorTextCache.keys().next().value!);
+              inspectorTextCache.set(ref.path, text);
+              return text;
+            });
+        void read.then((text) => {
           if (request !== inspectorRequest) return;
           void inlineSnippetHtml(ref.path, text, store.get().mode === "dark").then((html) => {
             if (request !== inspectorRequest) return;

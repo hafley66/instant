@@ -1,7 +1,12 @@
 import { codeToHtml } from "shiki";
 import { escapeHtml, SHIKI_LANG } from "./core";
 
+const htmlCache = new Map<string, string>();
+
 export async function inlineSnippetHtml(path: string, text: string, dark: boolean): Promise<string> {
+  const key = `${path}:${dark ? "dark" : "light"}:${text.length}:${text.slice(0, 128)}`;
+  const cached = htmlCache.get(key);
+  if (cached) return cached;
   const lines = text.split("\n");
   const snippet = lines.slice(0, 10).join("\n");
   const name = path.split("/").pop() ?? path;
@@ -13,7 +18,9 @@ export async function inlineSnippetHtml(path: string, text: string, dark: boolea
       lang,
       theme: dark ? "github-dark" : "github-light",
     });
-    return `<div class="term-inspector-code">${html}</div>${tail ? `<small>${tail}</small>` : ""}`;
+    const result = `<div class="term-inspector-code">${html}</div>${tail ? `<small>${tail}</small>` : ""}`;
+    htmlCache.set(key, result);
+    return result;
   } catch {
     return `<pre>${escapeHtml(snippet)}${tail}</pre>`;
   }
