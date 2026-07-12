@@ -3,6 +3,8 @@
 Generated from structured comments beside Rust commands. Run `just native-http`
 after changing an `api(...)` declaration.
 
+The implementation and rollout plan is in `docs/PLAN-native-http.md`.
+
 Network operations enter OpenAPI before frontend migration. `shell` operations
 remain Tauri capabilities because they control the desktop shell itself.
 
