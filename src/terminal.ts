@@ -455,6 +455,23 @@ export function openTab(
   el.addEventListener(
     "mousedown",
     (e) => {
+      // tmux mouse mode reports button-2 into the PTY before the browser's
+      // contextmenu event can reach our global menu. Claim it at the host edge,
+      // then synthesize the normal event so favorites/terminal actions use the
+      // same context-menu path every time.
+      if (e.button === 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        el.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          screenX: e.screenX,
+          screenY: e.screenY,
+        }));
+        return;
+      }
       if (!e.metaKey || e.button !== 0) return;
       const sel = term.getSelection().trim();
       const word = sel || wordAt(id, e.clientX, e.clientY);
