@@ -222,18 +222,21 @@ body.show-toolbar .toolbar {
   border: 1px solid rgba(255,255,255,.18);
   border-radius: 10px;
   box-shadow: 0 16px 42px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.24);
-  font: 12px/1.4 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 12px;
+  line-height: 1.4;
   padding: 8px;
   pointer-events: auto;
 }
 .term-inspector strong, .term-inspector span, .term-inspector small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-inspector strong, .term-inspector span { font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif !important; }
 .term-inspector span { color: #8bd5ff; }
-.term-inspector small { display: block; opacity: .62; font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.term-inspector small { display: block; opacity: .62; font: 10px/1.35 "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace !important; }
 .term-inspector pre, .term-inspector-code pre { max-width: 420px; max-height: 180px; margin: 4px 0 0; overflow: hidden; white-space: pre-wrap; opacity: .9; }
-.term-inspector-code .shiki { max-width: 420px; max-height: 180px; margin: 4px 0 0; overflow: hidden; padding: 6px; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.term-inspector-code .shiki { max-width: 420px; max-height: 180px; margin: 4px 0 0; overflow: hidden; padding: 8px; border-radius: 6px; font: 11px/1.4 "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace !important; }
 .term-inspector-code .line { display: block; }
 .term-inspector-actions { display: flex; gap: 4px; margin-top: 5px; }
-.term-inspector-actions button { padding: 4px 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; background: rgba(255,255,255,.1); color: #f4f4f5; font: 11px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+.term-inspector-actions button { padding: 4px 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; background: rgba(255,255,255,.1); color: #f4f4f5; font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif !important; font-size: 11px; cursor: pointer; }
 .term-inspector-actions button:hover { background: rgba(139,213,255,.22); border-color: #8bd5ff; }
 .send-picker-head {
   padding: 2px 6px 4px;
