@@ -57,6 +57,20 @@ const adapters: HarnessAdapter[] = [
     latest: (sessionId, cwd) => invoke<AiMessage | null>("latest_ai_message", { editor: "opencode", sessionId, cwd }),
     resume: (sessionId) => `opencode --session ${sessionId}`,
   },
+  {
+    id: "codex", label: "Codex",
+    matchesCommand: (s) => /(?:^|[\\/\s])codex(?:\.exe)?(?:\s|$)/i.test(s),
+    matchesProcess: (s) => /^codex(?:\.exe)?$/.test(s),
+    isAgentProcess: (s) => /^(?:codex(?:\.exe)?|node|bun)$/.test(s),
+    resumeFlag: "resume",
+    hasExplicitSession: (s) => /\s+resume(?:\s|$)/.test(s),
+    sessions: (cwd) => invoke<string[]>("harness_sessions", { tool: "codex", cwd }),
+    resolve: (cwd) => invoke<string | null>("harness_session", { tool: "codex", cwd }),
+    read: (sessionId, cwd, afterSeq = 0) => invoke<AiMessage[]>("read_ai_messages", { editor: "codex", sessionId, cwd, afterSeq: afterSeq || null }),
+    latest: (sessionId, cwd) => invoke<AiMessage | null>("latest_ai_message", { editor: "codex", sessionId, cwd }),
+    resume: (sessionId) => `codex resume ${sessionId}`,
+    matchesOutput: (s) => /(?:^|\n)\s*(?:OpenAI Codex|╭─[^\n]*Codex)/.test(s),
+  },
 ];
 
 export const harnessAdapters = Object.fromEntries(adapters.map((a) => [a.id, a])) as Record<HarnessId, HarnessAdapter>;

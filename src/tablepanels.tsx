@@ -9,6 +9,7 @@ import { useApp } from "./useStore";
 import { TreeTable, type TreeColumn } from "./treetable";
 import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import type { SessionSort, SessionSortKey, Fav } from "./state";
+import type { HarnessId } from "./harnessTypes";
 
 // ---- tmux v2 ----
 export interface TmuxRow {
@@ -855,7 +856,7 @@ export function ActivityPanelV2() {
 export interface FavTreeRow {
   id: string;
   kind: "session" | "turn";
-  editor: "claude" | "opencode";
+  editor: HarnessId;
   label: string; // session: cwd basename / short id · turn: role
   starredAt: number; // session: max(created) · turn: this fav's `created`
   // session

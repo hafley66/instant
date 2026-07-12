@@ -259,6 +259,7 @@ export interface AppState {
 export const DEFAULT_WT_AGENTS: WtAgent[] = [
   { label: "claude", command: "claude", resume: "--resume" },
   { label: "opencode", command: "opencode", resume: "--session" },
+  { label: "codex", command: "codex", resume: "resume" },
 ];
 
 // What a ⌘-click on a terminal token does: the first rule whose `pattern` (a JS

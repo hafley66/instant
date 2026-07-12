@@ -50,6 +50,7 @@ describe("state.ts boot / persistence", () => {
     expect(s.wtAgents).toEqual([
       { label: "claude", command: "claude", resume: "--resume" },
       { label: "opencode", command: "opencode", resume: "--session" },
+      { label: "codex", command: "codex", resume: "resume" },
     ]);
   });
 

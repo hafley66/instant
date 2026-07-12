@@ -51,7 +51,7 @@ export async function tabSessions(cwds: string[], command: string | null): Promi
 export async function unclaimedSession(
   meta: { cwd: string; command: string | null },
   claimed: Set<string>,
-): Promise<{ editor: "claude" | "opencode"; sessionId: string } | null> {
+): Promise<{ editor: HarnessId; sessionId: string } | null> {
   const order: HarnessId[] = harnessesForCommand(meta.command);
   for (const editor of order) {
     const ids = await harnessAdapter(editor).sessions(meta.cwd).catch(() => [] as string[]);
