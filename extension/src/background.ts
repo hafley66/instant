@@ -4,21 +4,19 @@
 //   1. Activity spy — tab lifecycle + relayed DOM events -> POST /ingest.
 //   2. Config transport — GET /config each alarm tick; rules cached in storage.
 //   3. Driven scans — chrome.alarms per scheduled rule reload+scrape a bg tab.
-import type { MatchFields, Rule, RuleMatchEvent, ServerConfig } from "./0_types";
+import type { MatchFields, Rule, RuleMatchEvent } from "./0_types";
+import { paths } from "../../src/generated/api";
+import { executeHttp } from "./httpTransport";
 
-const BASE = "http://127.0.0.1:8787";
-const INGEST = BASE + "/ingest";
-const CONFIG = BASE + "/config";
 const CONFIG_ALARM = "config";
 const DRIVEN_PREFIX = "driven:";
 
 function send(ev: unknown) {
   // Fire-and-forget; the app may be closed (no server) and that's fine.
-  fetch(INGEST, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ev),
-  }).catch(() => {});
+  executeHttp(
+    paths.activityIngest.endpoint,
+    ev as paths.activityIngest.Input,
+  ).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -77,14 +75,11 @@ function postRuleMatch(ruleId: string, url: string, matches: MatchFields[]) {
 // ---------------------------------------------------------------------------
 async function refreshConfig(): Promise<Rule[]> {
   try {
-    const resp = await fetch(CONFIG, { cache: "no-store" });
-    if (resp.ok) {
-      const cfg = (await resp.json()) as ServerConfig;
-      const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
-      await chrome.storage.local.set({ rules });
-      await armDrivenAlarms(rules);
-      return rules;
-    }
+    const cfg = await executeHttp(paths.activityConfig.endpoint, undefined);
+    const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
+    await chrome.storage.local.set({ rules });
+    await armDrivenAlarms(rules);
+    return rules;
   } catch {
     /* server down -> keep the cached rules */
   }

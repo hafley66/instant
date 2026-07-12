@@ -71,8 +71,9 @@ export function showContextMenu(x: number, y: number, items: CtxItem[]): void {
 export function wireContextMenu(itemsFor: (target: HTMLElement) => CtxItem[]): void {
   document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
+    e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, itemsFor(e.target as HTMLElement));
-  });
+  }, true);
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") dismiss();
   });

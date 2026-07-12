@@ -24,6 +24,11 @@ dev:
 dev-safe:
     INSTANT_NO_GLOBALS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
 
+# isolated second instance: separate Vite port + summon shortcut, with no second
+# tray icon or process-wide summon gesture. Use Cmd+Shift+Space to summon it.
+dev-isolated:
+    INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev -- --config '{"build":{"beforeDevCommand":"npm run dev -- --port 1422","devUrl":"http://localhost:1422"}}'
+
 # one-time: install the Tauri CLI machine-global (~/.cargo/bin, on PATH across
 # all checkouts and nvm node versions) so any repo can run `cargo tauri …` /
 # `tauri …` without the per-checkout node_modules devDep.
@@ -59,8 +64,21 @@ build:
 bundle:
     npm run tauri build
 
+# regenerate the linked architectural backlog from comment_node relations
+todos:
+    dl --no-daemon --apply
+
+# regenerate the native-to-HTTP migration inventory from comment_node relations
+native-http:
+    dl --no-daemon --apply
+
+# lint rails + generated TODO.md drift (never writes)
+todos-check:
+    dl --no-daemon --check
+
 # typecheck only
-check:
+check: todos-check
+    npm run api:check
     npx tsc --noEmit
 
 # build the Chrome extension (extension/src/*.ts -> extension/dist/*.js). Load

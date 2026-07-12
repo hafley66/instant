@@ -1,0 +1,48 @@
+# HTTP APIs are OpenAPI-first. Application code consumes generated Endpoints;
+# only the transport edge may call the platform fetch implementation.
+rel fetch_call(p: file, l: int).
+fetch_call(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "$$$OBJ.fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("extension/src/**/*.ts", p, rev), sg(p, rev, :ts, "fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("extension/src/**/*.ts", p, rev), sg(p, rev, :ts, "$$$OBJ.fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("vscode-ext/src/**/*.ts", p, rev), sg(p, rev, :ts, "fetch($$$ARGS)", l).
+fetch_call(p, l) <- scan("vscode-ext/src/**/*.ts", p, rev), sg(p, rev, :ts, "$$$OBJ.fetch($$$ARGS)", l).
+
+rel transport_edge(p: file).
+transport_edge("src/reactive/httpTransport.ts").
+transport_edge("extension/src/httpTransport.ts").
+transport_edge("vscode-ext/src/httpTransport.ts").
+
+rel forbidden_fetch(p: file, l: int).
+forbidden_fetch(p, l) <- fetch_call(p, l), !transport_edge(p).
+diag(path: p, line: l, severity: "error", code: "http-fetch-outside-transport", msg: "HTTP must use an OpenAPI-generated Endpoint; direct fetch is allowed only in src/reactive/httpTransport.ts") <- forbidden_fetch(p, l).
+
+rel endpoint_construct(p: file, l: int).
+endpoint_construct(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "new Endpoint($$$ARGS)", l).
+endpoint_construct(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "new Endpoint($$$ARGS)", l).
+rel generated_api(p: file).
+generated_api("src/generated/api.ts").
+generated_api("src/reactive/httpTransport.ts").
+rel forbidden_endpoint(p: file, l: int).
+forbidden_endpoint(p, l) <- endpoint_construct(p, l), !generated_api(p).
+diag(path: p, line: l, severity: "error", code: "endpoint-outside-codegen", msg: "Endpoint contracts must be generated from OpenAPI into src/generated/api.ts") <- forbidden_endpoint(p, l).
+
+# Tauri IPC is also spec-first. Only the native adapter imports Tauri core;
+# application code imports the generated command contract.
+rel tauri_core_import(p: file, l: int).
+tauri_core_import(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "import { $$$NAMES } from \"@tauri-apps/api/core\"", l).
+tauri_core_import(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "import { $$$NAMES } from \"@tauri-apps/api/core\"", l).
+rel native_transport(p: file).
+native_transport("src/reactive/nativeTransport.ts").
+rel forbidden_tauri_import(p: file, l: int).
+forbidden_tauri_import(p, l) <- tauri_core_import(p, l), !native_transport(p).
+diag(path: p, line: l, severity: "error", code: "tauri-ipc-outside-adapter", msg: "Tauri IPC must use src/generated/native.ts; direct @tauri-apps/api/core imports are adapter-only") <- forbidden_tauri_import(p, l).
+
+rel event_source_construct(p: file, l: int).
+event_source_construct(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "new EventSource($$$ARGS)", l).
+event_source_construct(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "new EventSource($$$ARGS)", l).
+rel forbidden_event_source(p: file, l: int).
+forbidden_event_source(p, l) <- event_source_construct(p, l), !generated_api(p).
+diag(path: p, line: l, severity: "error", code: "sse-outside-codegen", msg: "SSE connections must be generated from an OpenAPI text/event-stream operation") <- forbidden_event_source(p, l).

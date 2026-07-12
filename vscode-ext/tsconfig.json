@@ -5,7 +5,7 @@
     "moduleResolution": "node",
     "lib": ["ES2021", "DOM"],
     "outDir": "out",
-    "rootDir": "src",
+    "rootDir": "..",
     "sourceMap": true,
     "skipLibCheck": true,
 
@@ -15,5 +15,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "../src/generated/api.ts"]
 }

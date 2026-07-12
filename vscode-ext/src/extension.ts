@@ -7,8 +7,10 @@
 // Only paths, line numbers, language ids, and workspace (folder) names leave
 // this process.
 import * as vscode from "vscode";
+import { paths } from "../../src/generated/api";
+import { executeHttp } from "./httpTransport";
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:8787/ingest";
+const DEFAULT_ENDPOINT = paths.activityIngest.url;
 const CURSOR_THROTTLE_MS = 1000;
 
 type EditorEvent =
@@ -21,11 +23,7 @@ let lastCursorSent = 0;
 
 function send(ev: EditorEvent): void {
   // Fire-and-forget; never surface a user-facing error for a missing/closed app.
-  fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ev),
-  }).catch(() => {
+  executeHttp(paths.activityIngest.endpoint, ev, endpoint).catch(() => {
     // swallowed: app not running, or endpoint unreachable
   });
 }

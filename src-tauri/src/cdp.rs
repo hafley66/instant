@@ -614,3 +614,5 @@ pub fn cdp_close(app: AppHandle, store: State<CdpStore>, id: String) {
         let _ = app; // engine stays up for other tabs
     }
 }
+// todo(boundary): isolate Chrome discovery HTTP and WebSocket traffic behind a CDP transport
+// todo(test): cover engine crash, reconnect, and orphan cleanup

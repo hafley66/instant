@@ -2,7 +2,7 @@
 // file stays under the AGENTS.md size cap. Path/filename math is pure and
 // unit-tested (memeExport.test.ts); the invoke() calls are the only impure
 // part and are thin wrappers around the Rust commands in src-tauri/src/meme.rs.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");

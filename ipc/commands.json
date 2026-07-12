@@ -1,0 +1,16 @@
+{
+  "pty": ["list_sessions", "open_session", "write_pty", "resize_pty", "close_pty", "kill_session", "scroll_session", "rogue_agent_sessions"],
+  "cdp": ["cdp_open", "cdp_send", "cdp_resize", "cdp_navigate", "cdp_close", "cdp_status"],
+  "workspace": ["list_workspaces", "create_workspace", "remove_workspace"],
+  "worktrees": ["scan_worktrees", "add_worktree", "git_diff", "remove_worktree", "worktree_at"],
+  "activity": ["activity_events", "activity_clear", "activity_log", "capture_set_enabled", "capture_enabled", "rules_get", "rules_set", "notify_config_get", "notify_config_set"],
+  "capture": ["capture_permissions", "capture_request_screen"],
+  "config": ["config_get", "config_set", "config_reload", "config_open"],
+  "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "read_image", "read_text"],
+  "harness": ["harness_session", "harness_sessions"],
+  "ledger": ["list_ai_sessions", "read_ai_messages", "latest_ai_message"],
+  "meme": ["make_slack_emoji", "magick_available", "install_imagemagick", "save_meme", "copy_meme_image"],
+  "favorites": ["fav_add", "fav_remove", "fav_list"],
+  "sprefa": ["sprefa_schema", "sprefa_ping", "sprefa_eval", "sprefa_query_sql", "sprefa_rel_source"],
+  "shell": ["screenshot", "open_target", "run_click", "log_append", "log_path", "log_reveal"]
+}

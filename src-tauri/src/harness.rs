@@ -7,8 +7,10 @@
 // Returns None when no session exists (fresh worktree) -> caller launches blank.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::time::SystemTime;
+use serde_json::Value;
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
@@ -85,6 +87,39 @@ fn opencode_sessions(cwd: &str) -> Vec<String> {
     ids
 }
 
+// Codex CLI stores rollout JSONL files under ~/.codex/sessions/<Y>/<M>/<D>.
+// The first session_meta record carries the authoritative cwd and id; scan only
+// metadata, keeping this probe cheap enough for tab/session discovery.
+fn codex_sessions(cwd: &str) -> Vec<String> {
+    let Some(root) = home().map(|h| h.join(".codex").join("sessions")) else { return vec![] };
+    let mut files = Vec::new();
+    collect_jsonl(&root, &mut files);
+    let mut items: Vec<(SystemTime, String)> = Vec::new();
+    for path in files {
+        let Ok(file) = fs::File::open(&path) else { continue };
+        let Some(Ok(line)) = BufReader::new(file).lines().next() else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let meta = if v.get("type").and_then(Value::as_str) == Some("session_meta") {
+            v.get("payload").unwrap_or(&v)
+        } else { continue };
+        if meta.get("cwd").and_then(Value::as_str) != Some(cwd) { continue; }
+        let Some(id) = meta.get("id").and_then(Value::as_str) else { continue };
+        let mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
+        items.push((mtime, id.to_string()));
+    }
+    items.sort_by(|a, b| b.0.cmp(&a.0));
+    items.into_iter().map(|(_, id)| id).collect()
+}
+
+fn collect_jsonl(dir: &PathBuf, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() { collect_jsonl(&path, out); }
+        else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") { out.push(path); }
+    }
+}
+
 // Newest-first list of resumable session ids for a cwd. Callers that just want the
 // single latest take the first element (harness_session below).
 #[tauri::command]
@@ -95,6 +130,7 @@ pub fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
     match bin {
         "claude" => claude_sessions(&cwd),
         "opencode" => opencode_sessions(&cwd),
+        "codex" => codex_sessions(&cwd),
         _ => vec![],
     }
 }

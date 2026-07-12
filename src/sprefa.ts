@@ -1,7 +1,7 @@
 // Sprefa plugin: a schema explorer + scratch datalog runner over the sprefa
 // daemon socket, plus the "scope tray" (a selection of file/repo/rev entities
 // that gets prepended to scratch queries as sel_* facts).
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, type SprefaScopeItem, type SprefaScopeKind } from "./state";
 import { registerPlugin, type RailChild } from "./plugin";
 import { openPreviewPanel } from "./preview";

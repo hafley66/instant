@@ -2,7 +2,7 @@
 // activity-rail resize, the title bar drag/controls, the minimal async text
 // prompt, JS-driven window edge resize (macOS gives no native handles), and the
 // contextual right-click menu items.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import { store, type AppState, type SprefaScopeKind } from "./state";
@@ -207,14 +207,24 @@ export function wireWindowResize() {
         if (dir.includes("North")) h = oh - dy;
         w = Math.max(w, MIN_W);
         h = Math.max(h, MIN_H);
-        win.setSize(new LogicalSize(w, h));
+        // Native window managers can reject an intermediate size while the
+        // pointer is still moving (especially North/NorthWest, which also
+        // repositions the window). These are best-effort frame updates; an
+        // unhandled rejection here used to surface as a resize error.
+        void win.setSize(new LogicalSize(w, h)).catch((err) => {
+          console.debug("window resize frame rejected", err);
+          stop(ev.pointerId);
+        });
         // West/North move the anchored (far) edge; keep it fixed by shifting the
         // origin so only the dragged edge tracks the cursor. Clamp-aware: derive
         // the shift from the clamped size, not the raw delta.
         if (dir.includes("West") || dir.includes("North")) {
           const nx = dir.includes("West") ? ox + (ow - w) : ox;
           const ny = dir.includes("North") ? oy + (oh - h) : oy;
-          win.setPosition(new LogicalPosition(nx, ny));
+          void win.setPosition(new LogicalPosition(nx, ny)).catch((err) => {
+            console.debug("window reposition frame rejected", err);
+            stop(ev.pointerId);
+          });
         }
       };
       // Single idempotent teardown, reachable from every end condition.

@@ -177,12 +177,14 @@ pub fn note_excluded(state: &ConfigState) {
     state.excluded_count.fetch_add(1, Ordering::Relaxed);
 }
 
+// api(http GET /api/v1/config): config_get
 #[tauri::command]
 pub fn config_get(state: State<ConfigState>) -> ConfigView {
     view(&state)
 }
 
 /// Replace the rule lists, persist to config.json, return the fresh view.
+// api(http PUT /api/v1/config): config_set
 #[tauri::command]
 pub fn config_set(
     state: State<ConfigState>,
@@ -205,6 +207,7 @@ pub fn config_set(
 }
 
 /// Re-read config.json from disk (for external edits).
+// api(http POST /api/v1/config/reload): config_reload
 #[tauri::command]
 pub fn config_reload(state: State<ConfigState>) -> ConfigView {
     let (cfg, status) = read_or_default(&state.path);
@@ -214,6 +217,7 @@ pub fn config_reload(state: State<ConfigState>) -> ConfigView {
 }
 
 /// Open config.json in the default editor.
+// api(shell): config_open
 #[tauri::command]
 pub fn config_open(state: State<ConfigState>) -> Result<(), String> {
     if !state.path.exists() {

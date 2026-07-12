@@ -4,8 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "api:generate": "node scripts/generate-api.mjs && node scripts/generate-native.mjs",
+    "api:check": "node scripts/generate-api.mjs --check && node scripts/generate-native.mjs --check",
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run api:check && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "ext:build": "node extension/build.mjs",
@@ -14,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hafley66/signals": "0.0.2",
     "@oddbird/css-anchor-positioning": "^0.9.0",
     "@react95/icons": "^2.5.0",
     "@tanstack/react-table": "^8.21.3",

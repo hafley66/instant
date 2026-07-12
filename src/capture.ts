@@ -1,7 +1,7 @@
 // Screen capture (region screenshot → active terminal), the recording toggle,
 // the "send to terminal" picker, and the deferred blur-to-hide timer (shared
 // with the OS-drop machinery, since showing a catcher/crosshair blurs us).
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { store } from "./state";
 import { activeId } from "./core";

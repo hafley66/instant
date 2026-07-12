@@ -8,7 +8,7 @@
     "vscode": ">=1.82.0"
   },
   "categories": ["Other"],
-  "main": "./out/extension.js",
+  "main": "./out/vscode-ext/src/extension.js",
   "activationEvents": ["onStartupFinished"],
   "contributes": {
     "configuration": {

@@ -8,7 +8,7 @@
 // `brew install imagemagick` server-side (install_imagemagick in
 // src-tauri/src/meme.rs) — frontend asks, backend runs. No terminal tab, no
 // typed-not-executed command.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { flashStatus, showError } from "./core";
 import { probeMagickAvailable } from "./memeExport";
 

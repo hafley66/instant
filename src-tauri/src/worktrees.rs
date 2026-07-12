@@ -59,6 +59,7 @@ fn basename(p: &str) -> String {
 /// already exists it is checked out; otherwise it is created off HEAD. The
 /// worktree dir is `<parent>/.worktrees/<repo-basename>-<branch>` (matching the
 /// Spaces convention). Returns the new worktree path; the caller rescans.
+// api(http POST /api/v1/worktrees): add_worktree
 #[tauri::command]
 pub fn add_worktree(repo: String, branch: String) -> Result<String, String> {
     let repo_path = Path::new(&repo);
@@ -82,6 +83,7 @@ pub fn add_worktree(repo: String, branch: String) -> Result<String, String> {
 /// Unified working-tree diff for a worktree (or any checkout): staged + unstaged
 /// changes against HEAD, plus a list of untracked files appended as a note. The
 /// frontend renders it with shiki's `diff` grammar. Read-only.
+// api(http GET /api/v1/worktrees/diff): git_diff
 #[tauri::command]
 pub fn git_diff(path: String) -> Result<String, String> {
     let p = Path::new(&path);
@@ -108,6 +110,7 @@ pub fn git_diff(path: String) -> Result<String, String> {
 /// worktree is removable even when the cwd is elsewhere. `force` passes
 /// `--force` (drops uncommitted changes); without it git refuses a dirty tree.
 /// The main worktree cannot be removed. Caller rescans on success.
+// api(http DELETE /api/v1/worktrees): remove_worktree
 #[tauri::command]
 pub fn remove_worktree(repo: String, worktree: String, force: bool) -> Result<(), String> {
     let repo_path = Path::new(&repo);
@@ -160,6 +163,7 @@ fn walk(dir: &Path, depth: usize, max: usize, out: &mut Vec<PathBuf>) {
 }
 
 /// Scan `roots` (default ["~/projects"]) for git worktrees, one row each.
+// api(http GET /api/v1/worktrees): scan_worktrees
 #[tauri::command]
 pub fn scan_worktrees(roots: Vec<String>, max_depth: Option<usize>) -> Vec<WorktreeRow> {
     let max = max_depth.unwrap_or(4);

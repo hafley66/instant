@@ -2,7 +2,11 @@
 // the filesystem browser nested under worktree leaves. Owns the session list,
 // the worktree scan (ghcacher SSE or local git), the resume-id bookkeeping, the
 // v2 react-table panel bridges, and the legacy v1 tree/table renderers.
-import { invoke } from "@tauri-apps/api/core";
+// todo(split): extract tmux session discovery and worktree association into a sibling module
+// todo(split): extract filesystem tree loading and actions into a sibling module
+// todo(migration): remove legacy v1 worktree renderers (depends: TreeTable parity for every worktree action)
+// todo(test): cover Worktrees panel refresh plus SSE reconnect as an integration flow
+import { invoke } from "./generated/native";
 import {
   store,
   type WorktreeRow,
@@ -34,6 +38,13 @@ import {
 } from "./core";
 import { openDiffPanel, openPreviewPanel } from "./preview";
 import { tabs, openTab, closeTab, settleClosures, pasteToActive } from "./terminal";
+import {
+  applyWorktreeDeltaRows,
+  queryWorktreeSnapshot,
+  type WorktreeDelta,
+} from "./ghcacheSnapshot";
+import { paths as apiPaths } from "./generated/api";
+import { harnessAdapter, harnessForCommand, harnessIds, isHarnessProcess, type HarnessId } from "./harness";
 
 export type Session = {
   name: string;
@@ -148,13 +159,12 @@ export function foregroundProc(commands: string[]): string {
 // Foreground procs that mean "an agent is running here" (vs an idle shell), so
 // closing the tab exits it instead of leaving it resident. node/bun cover
 // claude/opencode launched through their JS shim.
-const AGENT_PROCS = new Set(["claude", "opencode", "node", "bun"]);
 // claude reports its VERSION ("2.1.193") as the process title, not "claude", so a
 // version-shaped foreground proc is an agent; opencode shows as "opencode.exe".
 // Without this, AGENT_PROCS never matches a live claude pane and close detaches
 // (leaving claude alive) instead of killing it.
 export const looksLikeAgentProc = (p: string) =>
-  AGENT_PROCS.has(p) || /^\d+\.\d+/.test(p) || p.includes("opencode");
+  isHarnessProcess(p);
 const isPinnedSession = (name: string) => store.get().pinnedSessions.includes(name);
 function togglePinSession(name: string) {
   const cur = store.get().pinnedSessions;
@@ -286,9 +296,9 @@ async function adoptRogue(r: RogueSession) {
   const wtPath = matched?.worktree ?? cwd;
   const clone = matched?.clone ?? wtPath;
   const branch = matched?.branch ?? "";
-  const tool = r.command as "claude" | "opencode";
-  const sid = await invoke<string | null>("harness_session", { tool, cwd: wtPath }).catch(() => null);
-  const cmd = sid ? resumeLaunch(tool, sid) : r.command;
+  const adapter = harnessForCommand(r.command);
+  const sid = adapter ? await adapter.resolve(wtPath).catch(() => null) : null;
+  const cmd = sid && adapter ? adapter.resume(sid) : r.command;
   await openWorktree(clone, branch, wtPath, cmd, true);
   flashStatus(`adopted ${r.command} · pid ${r.pid} — close the old terminal window`);
 }
@@ -389,27 +399,26 @@ export async function openWorktree(clone: string, branch: string, wtPath: string
 // launch, overwriting any prior record for this name (a genuine new conversation).
 function newAgentLaunch(name: string, command: string | undefined): string | undefined {
   if (!command) return command;
-  const bin = command.trim().split(/\s+/)[0]?.split("/").pop() ?? "";
-  if (bin === "claude" && !/\s--(resume|session-id|continue|from-pr)\b/.test(command)) {
+  const adapter = harnessForCommand(command);
+  if (adapter?.stableSessionIdFlag && !adapter.hasExplicitSession(command)) {
     const id = crypto.randomUUID();
-    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: "claude", sessionId: id } } });
-    console.log("[resume] launch", name, "-> claude --session-id", id.slice(0, 8));
-    return `${command} --session-id ${id}`;
+    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: adapter.id, sessionId: id } } });
+    console.log("[resume] launch", name, "->", adapter.id, adapter.stableSessionIdFlag, id.slice(0, 8));
+    return `${command} ${adapter.stableSessionIdFlag} ${id}`;
   }
   return command;
 }
 
 // Resume flag per known harness binary; auto-attached so the simple text editor
 // ("label:command") still gets resume support without extra syntax.
-export const KNOWN_RESUME: Record<string, string> = {
-  claude: "--resume",
-  opencode: "--session",
-};
+export const KNOWN_RESUME: Record<string, string> = Object.fromEntries(
+  harnessIds.map((id) => [id, harnessAdapter(id).resumeFlag]),
+);
 
 // Relaunch command for a previously-exited agent tab: "claude --resume <id>" /
 // "opencode --session <id>".
-export const resumeLaunch = (editor: "claude" | "opencode", sessionId: string) =>
-  `${editor} ${KNOWN_RESUME[editor]} ${sessionId}`;
+export const resumeLaunch = (editor: HarnessId, sessionId: string) =>
+  harnessAdapter(editor).resume(sessionId);
 
 // resumeTabs can hold a sessionId that no longer resolves to anything on disk
 // (before the close/reopen races elsewhere in this file were fixed, a wrong
@@ -426,11 +435,11 @@ export const resumeLaunch = (editor: "claude" | "opencode", sessionId: string) =
 // tab's session". It silently swapped in an unrelated conversation. An exact
 // id either matches or it doesn't; there is no safe guess in between.
 export async function resumeIdIsLive(
-  editor: "claude" | "opencode",
+  editor: HarnessId,
   cwd: string,
   sessionId: string,
 ): Promise<boolean> {
-  const ids = await invoke<string[]>("harness_sessions", { tool: editor, cwd }).catch(() => [] as string[]);
+  const ids = await harnessAdapter(editor).sessions(cwd).catch(() => [] as string[]);
   return ids.includes(sessionId);
 }
 
@@ -1371,7 +1380,6 @@ export function renderWorktreesPanel() {
 // 127.0.0.1:7748) when it's running, else falls back to the local Rust git scan.
 // The daemon runs a bounded, debounced background sweep, so neither path forks
 // hundreds of `git status` on the UI's hot path.
-const GHCACHE_BASE = "http://127.0.0.1:7748";
 let wtScanning = false; // in-flight guard: stops overlapping scans stacking
 let wtScanned = false; // one scan has completed (any source) -> stop auto-refire
 let wtSse: EventSource | null = null;
@@ -1382,23 +1390,8 @@ export function scanWorktreesIfNeeded() {
 }
 
 // Apply one SSE change_log frame to the worktrees store, keyed by worktree path.
-function applyWorktreeDelta(msg: {
-  event: string;
-  payload: WorktreeRow | { worktree: string };
-}) {
-  const cur = store.get().worktrees;
-  if (msg.event === "deleted") {
-    const path = (msg.payload as { worktree: string }).worktree;
-    store.set({ worktrees: cur.filter((r) => r.worktree !== path) });
-    return;
-  }
-  const row = msg.payload as WorktreeRow;
-  if (!row?.worktree) return;
-  const next = cur.slice();
-  const i = next.findIndex((r) => r.worktree === row.worktree);
-  if (i >= 0) next[i] = row;
-  else next.push(row);
-  store.set({ worktrees: next });
+function applyWorktreeDelta(msg: WorktreeDelta) {
+  store.set({ worktrees: applyWorktreeDeltaRows(store.get().worktrees, msg) });
 }
 
 // Subscribe to ghcacher's SSE stream once; filter to worktree deltas. The browser
@@ -1406,7 +1399,7 @@ function applyWorktreeDelta(msg: {
 function subscribeWorktrees() {
   if (wtSse) return;
   try {
-    const es = new EventSource(`${GHCACHE_BASE}/events`);
+    const es = apiPaths.events.connect();
     wtSse = es;
     es.onmessage = (ev) => {
       let msg: { entity_type?: string; event: string; payload: WorktreeRow | { worktree: string } };
@@ -1431,30 +1424,18 @@ export async function scanWorktrees() {
   if (wtScanning) return; // never stack scans (the old volley)
   wtScanning = true;
   try {
-    // Preferred path: ghcacher snapshot + live SSE. Short timeout so a missing
-    // daemon falls through to the local scan quickly.
-    try {
-      const res = await fetch(`${GHCACHE_BASE}/worktrees`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!res.ok) throw new Error(`ghcache ${res.status}`);
-      const rows = (await res.json()) as WorktreeRow[];
-      store.set({ worktrees: rows });
-      pruneAutoWorktrees(rows);
-      subscribeWorktrees();
-      wtScanned = true;
-      return;
-    } catch {
-      // ghcacher down/unreachable -> local git scan below.
-    }
-
     const root = store.get().scanRoot.trim();
-    const rows = await invoke<WorktreeRow[]>("scan_worktrees", {
-      roots: root ? [root] : [],
-      maxDepth: null,
-    });
-    store.set({ worktrees: rows });
-    pruneAutoWorktrees(rows);
+    const snapshot = await queryWorktreeSnapshot(() =>
+        invoke<WorktreeRow[]>("scan_worktrees", {
+          roots: root ? [root] : [],
+          maxDepth: null,
+        }),
+    );
+    store.set({ worktrees: snapshot.rows });
+    pruneAutoWorktrees(snapshot.rows);
+    if (snapshot.source === "ghcache") {
+      subscribeWorktrees();
+    }
     wtScanned = true;
   } catch (e) {
     console.error("scan_worktrees:", e);

@@ -5,7 +5,7 @@
 // with browser tabs.
 import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { runMatchingCommand } from "./keymap";
@@ -15,6 +15,7 @@ import {
   setActive,
   flashStatus,
   sanitizePaste,
+  escapeHtml,
   THEMES,
   termFontFamily,
 } from "./core";
@@ -24,11 +25,12 @@ import {
   removeTermPanel,
   hasTermPanel,
 } from "./reactdock";
-import { dispatchClick, quotedSpanAt } from "./clickrules";
+import { dispatchClick, quotedSpanAt, clickIntent } from "./clickrules";
 import { nudgeZoom, resetZoom } from "./overlay";
 import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
+import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import {
   renderSessionActive,
   refreshSessions,
@@ -45,11 +47,31 @@ export type Tab = {
   el: HTMLElement;
   graphics?: boolean;
   overlay?: GraphicsOverlay;
+  harness: HarnessObservation;
+  outputTail: string;
 };
 
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 export const tabs = new Map<string, Tab>();
+
+export function observeTerminalOutput(id: string, chunk: string) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.outputTail = trimOutputTail(tab.outputTail, chunk);
+  const meta = tabMetaById(id);
+  const live = store.get().sessions.find((s) => s.name === tab.name);
+  tab.harness = detectHarness(meta?.command, live?.commands?.[0], tab.outputTail);
+  tab.el.dataset.harness = tab.harness.id ?? "unknown";
+  tab.el.dataset.harnessConfidence = tab.harness.confidence;
+  tab.el.title = tab.harness.id
+    ? `${tab.harness.id} · ${tab.harness.confidence} detection`
+    : "terminal · harness not detected";
+}
+
+export function terminalHarness(id: string): HarnessObservation | null {
+  return tabs.get(id)?.harness ?? null;
+}
 
 // Device pixels per terminal cell, for the pty's TIOCGWINSZ pixel size. Graphics
 // apps (awrit) read ws_xpixel/ws_ypixel to size their framebuffer; without real
@@ -320,6 +342,11 @@ export function openTab(
 
   const el = document.createElement("div");
   el.className = "term-host";
+  const inspector = document.createElement("div");
+  inspector.className = "term-inspector";
+  inspector.setAttribute("popover", "manual");
+  document.body.appendChild(inspector);
+  const hideInspector = () => { try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); } };
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
   // it into the terminal's panel.
   document.getElementById("panel-pool")!.appendChild(el);
@@ -351,7 +378,11 @@ export function openTab(
   const cmd = opts.command ?? QUICK_CMD[name] ?? null;
   const graphics = opts.graphics ?? /^\s*awrit\b/.test(cmd ?? "");
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
-  tabs.set(id, { id, name, term, fit, el, graphics, overlay });
+  const live = store.get().sessions.find((s) => s.name === name);
+  const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
+  tabs.set(id, { id, name, term, fit, el, graphics, overlay, harness, outputTail: "" });
+  el.dataset.harness = harness.id ?? "unknown";
+  el.dataset.harnessConfidence = harness.confidence;
 
   // OSC 52 -> macOS clipboard. tmux (set-clipboard on) emits this when a mouse
   // drag selects text in copy-mode, and TUIs (opencode) emit it on their own
@@ -428,8 +459,40 @@ export function openTab(
   // before the TUI sees the click; openable hits fall through to the link
   // provider above (which the linkifier activates on mouseup).
   el.addEventListener(
+    "mousemove",
+    (e) => {
+      if (!e.metaKey) { hideInspector(); return; }
+      const token = wordAt(id, e.clientX, e.clientY);
+      const cwd = tabMetaById(id)?.cwd ?? "";
+      if (!token || !looksOpenable(token)) { hideInspector(); return; }
+      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(cwd || "home")}</small>`;
+      inspector.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 280)}px`;
+      inspector.style.top = `${Math.min(e.clientY + 14, window.innerHeight - 90)}px`;
+      try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
+    },
+    { capture: true },
+  );
+
+  el.addEventListener(
     "mousedown",
     (e) => {
+      // tmux mouse mode reports button-2 into the PTY before the browser's
+      // contextmenu event can reach our global menu. Claim it at the host edge,
+      // then synthesize the normal event so favorites/terminal actions use the
+      // same context-menu path every time.
+      if (e.button === 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        el.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          screenX: e.screenX,
+          screenY: e.screenY,
+        }));
+        return;
+      }
       if (!e.metaKey || e.button !== 0) return;
       const sel = term.getSelection().trim();
       const word = sel || wordAt(id, e.clientX, e.clientY);
@@ -445,23 +508,6 @@ export function openTab(
   // Click anywhere in the host (incl. padding around the xterm) focuses the
   // terminal, so keyboard + scroll work without hunting for the text area.
   el.addEventListener("mousedown", () => term.focus());
-
-  // Shift+wheel scrolls the tmux history even when a full-screen TUI
-  // (opencode/claude) has grabbed the mouse so a plain wheel goes to the app
-  // (the "scroll randomly doesn't work" case). xterm has no real scrollback here
-  // — tmux owns the history — so this drives tmux copy-mode in the backend.
-  // Capture phase + stop so the app never sees it; plain wheel is untouched.
-  el.addEventListener(
-    "wheel",
-    (e) => {
-      if (!e.shiftKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 24));
-      invoke("scroll_session", { name, up: e.deltaY < 0, lines }).catch(console.error);
-    },
-    { capture: true, passive: false },
-  );
 
   // Track which terminal owns keyboard focus so ⌘+/-/0 zoom the right one.
   term.textarea?.addEventListener("focus", () => {
@@ -772,3 +818,5 @@ export function recentTabs(): Tab[] {
   for (const [id, t] of tabs) if (!seen.has(id)) out.push(t);
   return out;
 }
+// todo(lifecycle): move PTY listener ownership and teardown into the reactive runtime
+// todo(test): exercise open, resize, close, reload, and tmux reattach as one lifecycle test

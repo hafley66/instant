@@ -2,7 +2,7 @@
 // (or free text inside a preview / rg panel) runs the first clickRules rule whose
 // regex matches it. The token is shell-quoted into `$1`, the command runs in the
 // pane cwd via run_click, and any stdout opens a results panel on the right.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { escapeHtml, shQuote } from "./core";
@@ -11,16 +11,24 @@ import { getFocusedTermId, tabMetaById } from "./terminal";
 
 const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
 
+export function clickRuleFor(rawToken: string): ClickRule | null {
+  const token = rawToken.trim();
+  return clickRules().find((r) => {
+    try { return new RegExp(r.pattern).test(token); } catch { return false; }
+  }) ?? null;
+}
+
+export function clickIntent(rawToken: string, cwd: string): string {
+  const token = rawToken.trim();
+  if (/^(?:https?:\/\/|www\.)/i.test(token)) return "open URL";
+  if (/^(?:\/|~\/|\.\.?\/)/.test(token) || (cwd && /\//.test(token))) return "open/preview file";
+  return clickRuleFor(token) ? "run configured action from terminal cwd" : "search from terminal cwd";
+}
+
 export async function dispatchClick(rawToken: string, cwd: string) {
   const token = rawToken.trim();
   if (!token) return;
-  const rule = clickRules().find((r) => {
-    try {
-      return new RegExp(r.pattern).test(token);
-    } catch {
-      return false;
-    }
-  });
+  const rule = clickRuleFor(token);
   if (!rule) return;
   const command = rule.command.replace(/\$1/g, () => shQuote(token));
   let out = "";

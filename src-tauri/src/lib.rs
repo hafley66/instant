@@ -586,13 +586,21 @@ fn screenshot() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Cmd+Alt+Space
-    let summon = Shortcut::new(Some(Modifiers::SUPER | Modifiers::ALT), Code::Space);
+    // The daily driver owns Cmd+Alt+Space. An isolated dev instance uses
+    // Cmd+Shift+Space and skips the other process-wide singleton surfaces.
+    let isolated = std::env::var("INSTANT_ISOLATED").is_ok();
+    let summon_modifiers = if isolated {
+        Modifiers::SUPER | Modifiers::SHIFT
+    } else {
+        Modifiers::SUPER | Modifiers::ALT
+    };
+    let summon = Shortcut::new(Some(summon_modifiers), Code::Space);
     // Opt out of the process-wide singletons (tray icon, global Cmd+Alt+Space
     // shortcut, and the double-right-click/double-right-⌘ summon gesture's
     // CGEventTap) so a second instance — launched for dev/verification — doesn't
     // fight the owner's always-running one over the same OS-level resources.
     let no_globals = std::env::var("INSTANT_NO_GLOBALS").is_ok();
+    let skip_shared_globals = no_globals || isolated;
 
     tauri::Builder::default()
         .manage(pty::PtyStore::default())
@@ -622,11 +630,10 @@ pub fn run() {
             app.manage(activity::CaptureEnabled(enabled.clone()));
             let tap_active = Arc::new(AtomicBool::new(false));
             app.manage(capture::TapActive(tap_active.clone()));
-            if no_globals {
+            if skip_shared_globals {
                 eprintln!(
-                    "INSTANT_NO_GLOBALS set: skipping tray icon, global shortcut, and \
-                     the double-click/double-cmd summon gesture (so this instance doesn't \
-                     fight the owner's live one) — showing the main window on launch instead"
+                    "isolated globals: skipping tray icon and double-click/double-cmd \
+                     summon gesture — showing the main window on launch instead"
                 );
             } else {
                 spawn_input_taps(app.handle().clone(), enabled, tap_active);
@@ -708,9 +715,9 @@ pub fn run() {
             // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            if no_globals {
-                // No tray, no shortcut, no summon gesture to show the window with —
-                // so show it directly instead of leaving the instance unreachable.
+            if skip_shared_globals {
+                // No tray or summon gesture, so show directly. INSTANT_ISOLATED
+                // still has its separate Cmd+Shift+Space global shortcut.
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
                     let _ = win.set_focus();
@@ -870,3 +877,5 @@ pub fn run() {
             }
         });
 }
+// todo(split): reduce the Tauri composition root to adapter registration and boot wiring
+// todo(codegen): verify ipc/commands.json against generate_handler registrations during build

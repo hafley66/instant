@@ -1,0 +1,59 @@
+# Structured architectural debt, extracted from real syntax comment nodes.
+# Format: todo(category): the what (optionally: depends: prerequisite)
+# Inspect with: dl daemon rows todo_node / todo_ready / todo_blocked / todo_split.
+
+rel todo_source(p: file, rev: text).
+todo_source(p, rev) <- scan("src/**/*.ts", p, rev).
+todo_source(p, rev) <- scan("src/**/*.tsx", p, rev).
+todo_source(p, rev) <- scan("src-tauri/src/**/*.rs", p, rev).
+todo_source(p, rev) <- scan("extension/src/**/*.ts", p, rev).
+todo_source(p, rev) <- scan("vscode-ext/src/**/*.ts", p, rev).
+todo_source(p, rev) <- scan("scripts/**/*.mjs", p, rev).
+
+rel todo_node(p: file, l: int, text: text).
+todo_node(p, l, text) <-
+    todo_source(p, _),
+    comment_node(p, l, _, _, _, text, _),
+    text =~ /todo\([a-z-]+\):\s+.+/.
+
+rel todo_blocked(p: file, l: int, text: text).
+todo_blocked(p, l, text) <- todo_node(p, l, text), text =~ /\(depends:\s*.+\)/.
+
+rel todo_ready(p: file, l: int, text: text).
+todo_ready(p, l, text) <- todo_node(p, l, text), !todo_blocked(p, l, text).
+
+rel todo_split(p: file, l: int, text: text).
+todo_split(p, l, text) <- todo_node(p, l, text), text =~ /todo\(split\):/.
+rel todo_boundary(p: file, l: int, text: text).
+todo_boundary(p, l, text) <- todo_node(p, l, text), text =~ /todo\(boundary\):/.
+rel todo_lifecycle(p: file, l: int, text: text).
+todo_lifecycle(p, l, text) <- todo_node(p, l, text), text =~ /todo\(lifecycle\):/.
+rel todo_codegen(p: file, l: int, text: text).
+todo_codegen(p, l, text) <- todo_node(p, l, text), text =~ /todo\(codegen\):/.
+rel todo_http(p: file, l: int, text: text).
+todo_http(p, l, text) <- todo_node(p, l, text), text =~ /todo\(http\):/.
+rel todo_state(p: file, l: int, text: text).
+todo_state(p, l, text) <- todo_node(p, l, text), text =~ /todo\(state\):/.
+rel todo_test(p: file, l: int, text: text).
+todo_test(p, l, text) <- todo_node(p, l, text), text =~ /todo\(test\):/.
+rel todo_perf(p: file, l: int, text: text).
+todo_perf(p, l, text) <- todo_node(p, l, text), text =~ /todo\(perf\):/.
+rel todo_security(p: file, l: int, text: text).
+todo_security(p, l, text) <- todo_node(p, l, text), text =~ /todo\(security\):/.
+rel todo_migration(p: file, l: int, text: text).
+todo_migration(p, l, text) <- todo_node(p, l, text), text =~ /todo\(migration\):/.
+
+# TODO.md is a view over comment space. gen owns only the marked regions, so
+# prose around them remains hand-editable and every source link stays current.
+rel todo_doc_zone(doc: file, l0: int, l1: int, name: text).
+todo_doc_zone(doc, l0, l1, name) <-
+    scan("TODO.md", doc, rev),
+    comment(doc, rev, /BEGIN: $name -->/, /END:/, l0, l1, name).
+
+gen(doc, l0, l1, "- [{text}]({p}#L{l})") <-
+    todo_doc_zone(doc, l0, l1, "todo-ready"),
+    todo_ready(p, l, text).
+
+gen(doc, l0, l1, "- [{text}]({p}#L{l})") <-
+    todo_doc_zone(doc, l0, l1, "todo-blocked"),
+    todo_blocked(p, l, text).

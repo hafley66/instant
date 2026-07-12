@@ -823,3 +823,5 @@ mod tests {
         assert_eq!(empty, "rule-3\nhttps://y.test");
     }
 }
+// todo(security): cap ingest request bodies and define localhost authentication policy
+// todo(boundary): replace curl-based ntfy publishing with a typed outbound notification port

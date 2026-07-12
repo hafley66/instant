@@ -2,9 +2,11 @@
 // listeners. Every concern lives in its own module (terminal, tabs, browser,
 // worktrees, favorites, activity, capture, overlay, chrome, dnd, sprefa,
 // history, preview, clickrules, panels); this file only wires them together.
+// todo(lifecycle): give every global event listener and interval runtime-owned teardown
+// todo(test): add a boot smoke test that asserts registration and teardown order
 import "xp.css";
 import "@xterm/xterm/css/xterm.css";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";
@@ -43,6 +45,7 @@ import {
   zoomResetGesture,
   sendTextToTab,
   setReplaying,
+  observeTerminalOutput,
 } from "./terminal";
 import { browserTabs, spawnBrowserTab, openBrowserTab, cycleBrowserQuality, setBrowserPerf } from "./browser";
 import {
@@ -96,6 +99,7 @@ import { isDraggingIn, wireOsDrop } from "./dnd";
 import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
+import { startReactiveRuntime } from "./reactive/runtime";
 
 const TAB_COMMANDS: Command[] = [
   // The palette lists every command below that carries a `title`. ⌘⇧P, the
@@ -209,6 +213,8 @@ async function main() {
   registerActivityBridge();
   refreshFavorites();
   initRail(); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
+  const stopReactiveRuntime = startReactiveRuntime();
+  window.addEventListener("beforeunload", stopReactiveRuntime, { once: true });
   store.subscribe(updateFavBadge, ["aiFavs"]);
   updateFavBadge();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail
@@ -248,6 +254,7 @@ async function main() {
   setInterval(refreshRogue, 8000);
 
   await listen<{ id: string; chunk: string }>("pty-data", (e) => {
+    observeTerminalOutput(e.payload.id, e.payload.chunk);
     tabs.get(e.payload.id)?.term.write(e.payload.chunk);
   });
 

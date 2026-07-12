@@ -32,6 +32,7 @@ pub(crate) fn path_env() -> String {
 type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
 struct PtyHandle {
+    name: String,
     writer: SharedWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
     /// Some only for direct-spawn graphics sessions (awrit). tmux sessions leave
@@ -40,6 +41,10 @@ struct PtyHandle {
     /// — we must kill it explicitly on close or it orphans and holds its
     /// single-instance profile lock.
     child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
+}
+
+fn direct_pty_mode() -> bool {
+    std::env::var("INSTANT_DIRECT_PTY").as_deref() == Ok("1")
 }
 
 #[derive(Default)]
@@ -309,7 +314,7 @@ pub fn open_session(
         let map = store.0.lock().unwrap();
         if map.contains_key(&id) {
             drop(map);
-            if !graphics {
+            if !graphics && !direct_pty_mode() {
                 enable_mouse(&name);
             }
             return resize_pty(store, id, cols, rows, cell_w, cell_h);
@@ -322,7 +327,7 @@ pub fn open_session(
         .map_err(|e| e.to_string())?;
 
     let start_dir = cwd.as_deref().filter(|s| !s.is_empty());
-    let cmd = if graphics {
+    let cmd = if graphics || direct_pty_mode() {
         // Direct spawn via the login shell so the command (e.g. "awrit <url>")
         // gets PATH and arg parsing, then the session ends when it exits.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
@@ -332,7 +337,7 @@ pub fn open_session(
             None => c.arg("-l"),
         }
         c.env("PATH", path_env());
-        c.env("TERM", "xterm-kitty");
+        c.env("TERM", if graphics { "xterm-kitty" } else { "xterm-256color" });
         c
     } else {
         // When creating, the trailing command runs inside; on reattach tmux
@@ -373,9 +378,9 @@ pub fn open_session(
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
-    // Keep the child only for graphics (direct spawn) so close_pty can kill it.
-    // tmux's child is a client we want to detach (drop), not kill.
-    let child = if graphics { Some(child) } else { None };
+    // Direct PTYs own their child; tmux mode owns only a client and deliberately
+    // leaves the tmux server/session alive across webview reloads.
+    let child = if graphics || direct_pty_mode() { Some(child) } else { None };
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: SharedWriter =
@@ -385,9 +390,9 @@ pub fn open_session(
         .0
         .lock()
         .unwrap()
-        .insert(id.clone(), PtyHandle { writer: writer.clone(), master: pair.master, child });
+        .insert(id.clone(), PtyHandle { name: name.clone(), writer: writer.clone(), master: pair.master, child });
 
-    if !graphics {
+    if !graphics && !direct_pty_mode() {
         enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
     }
 
@@ -512,6 +517,7 @@ pub fn close_pty(store: State<PtyStore>, id: String) {
 /// makes copy-mode auto-exit when scrolled back to the bottom (live view).
 #[tauri::command]
 pub fn scroll_session(name: String, up: bool, lines: u32) {
+    if direct_pty_mode() { return; }
     let n = lines.max(1).to_string();
     let dir = if up { "scroll-up" } else { "scroll-down" };
     let path = path_env();
@@ -529,6 +535,16 @@ pub fn scroll_session(name: String, up: bool, lines: u32) {
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
 #[tauri::command]
 pub fn kill_session(store: State<PtyStore>, name: String) -> Result<(), String> {
+    if direct_pty_mode() {
+        let mut map = store.0.lock().unwrap();
+        let id = map.iter().find(|(_, h)| h.name == name).map(|(id, _)| id.clone());
+        if let Some(id) = id {
+            if let Some(mut handle) = map.remove(&id) {
+                if let Some(mut child) = handle.child.take() { let _ = child.kill(); }
+            }
+        }
+        return Ok(());
+    }
     tmux_cmd()
         .args(["kill-session", "-t", &name])
         .env("PATH", path_env())
@@ -693,3 +709,5 @@ mod tests {
         assert!(pending.is_empty());
     }
 }
+// todo(split): separate tmux commands, PTY ownership, and rogue-process discovery
+// todo(lifecycle): make child-process termination and reader-thread shutdown explicit

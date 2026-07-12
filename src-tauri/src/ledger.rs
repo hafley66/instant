@@ -20,12 +20,14 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-// "claude" | "opencode" off the wire; anything else is rejected by the commands.
+// Harness ids are stable wire names; storage format differences stay below this
+// boundary.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Editor {
     Claude,
     Opencode,
+    Codex,
 }
 
 impl Editor {
@@ -33,6 +35,7 @@ impl Editor {
         match s {
             "claude" => Some(Editor::Claude),
             "opencode" => Some(Editor::Opencode),
+            "codex" => Some(Editor::Codex),
             _ => None,
         }
     }
@@ -40,6 +43,7 @@ impl Editor {
         match self {
             Editor::Claude => "claude",
             Editor::Opencode => "opencode",
+            Editor::Codex => "codex",
         }
     }
 }
@@ -74,6 +78,46 @@ fn claude_dir(cwd: &str) -> Option<PathBuf> {
             .join("projects")
             .join(cwd.replace('/', "-")),
     )
+}
+
+fn codex_session_path(session_id: &str) -> Option<PathBuf> {
+    fn walk(dir: &PathBuf, id: &str) -> Option<PathBuf> {
+        for entry in fs::read_dir(dir).ok()?.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = walk(&path, id) { return Some(found); }
+            } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                && path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(id))
+            { return Some(path); }
+        }
+        None
+    }
+    walk(&home()?.join(".codex").join("sessions"), session_id)
+}
+
+fn read_codex(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
+    let Some(path) = codex_session_path(session_id) else { return Vec::new() };
+    let Ok(file) = fs::File::open(&path) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (seq, line) in BufReader::new(file).lines().enumerate() {
+        let seq = seq as u64;
+        if after_seq.is_some_and(|n| seq <= n) { continue; }
+        let Ok(v) = line.ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).ok_or(()) else { continue };
+        let Some(payload) = v.get("payload") else { continue };
+        if payload.get("type").and_then(Value::as_str) != Some("message") { continue; }
+        let Some(role) = payload.get("role").and_then(Value::as_str) else { continue };
+        if role != "user" && role != "assistant" { continue; }
+        let text = payload.get("content").and_then(|c| c.as_array()).map(|parts| {
+            parts.iter().filter_map(|part| part.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n")
+        }).unwrap_or_default();
+        if text.trim().is_empty() { continue; }
+        let id = payload.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        let id = if id.is_empty() { format!("codex-{seq}") } else { id };
+        out.push(AiMessage { editor: Editor::Codex, session_id: session_id.to_string(), id,
+            seq, role: role.to_string(), ts: 0, preview: cap(&text, 180), text,
+            locator: format!("codex:{}#L{}", path.display(), seq + 1) });
+    }
+    out
 }
 
 // Cap a string to `max` chars with an ellipsis. Tool inputs/outputs and thinking
@@ -406,6 +450,7 @@ pub fn read_ai_messages(
             Ok(read_claude(&path, &session_id, after_seq))
         }
         Editor::Opencode => Ok(read_opencode(&session_id, after_seq)),
+        Editor::Codex => Ok(read_codex(&session_id, after_seq)),
     }
 }
 
@@ -427,6 +472,7 @@ pub fn list_ai_sessions(editor: String, cwd: Option<String>) -> Result<Vec<AiSes
     match Editor::parse(&editor).ok_or("unknown editor")? {
         Editor::Claude => Ok(list_claude_sessions(cwd)),
         Editor::Opencode => Ok(list_opencode_sessions(cwd)),
+        Editor::Codex => Ok(Vec::new()),
     }
 }
 
@@ -514,3 +560,5 @@ fn list_opencode_sessions(cwd: Option<String>) -> Vec<AiSession> {
 pub fn editor_tag(editor: &Editor) -> &'static str {
     editor.tag()
 }
+// todo(split): separate Claude and OpenCode parsing from ledger query orchestration
+// todo(test): add fixture coverage for malformed and partially-written session logs

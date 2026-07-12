@@ -2,7 +2,7 @@
 // turn identification that backs the terminal right-click "favorite this turn"
 // gesture. Also the per-tab ledger cache warmed on tab activation, the harness
 // session resolver, and the ★ rail badge.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { store, type AiMessage, type Fav } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { registerPlugin } from "./plugin";
@@ -11,12 +11,13 @@ import { escapeHtml, baseName, flashStatus } from "./core";
 import { previewInsts } from "./preview";
 import { tabs, tabMetaById, tabCwds } from "./terminal";
 import { openWorktree, resumeLaunch, sessionsForWorktree } from "./worktrees";
+import { harnessAdapter, harnessesForCommand, type HarnessId } from "./harness";
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
 // have a claude/opencode session even if the tab is a plain shell the user ran
 // the agent inside).
-export type ResolvedSession = { editor: "claude" | "opencode"; sessionId: string; cwd: string };
+export type ResolvedSession = { editor: HarnessId; sessionId: string; cwd: string };
 
 // Resolve harness sessions for a tab by probing BOTH editors' on-disk stores
 // (harness_session) across EVERY candidate cwd — claude keys its jsonl dir by the
@@ -26,16 +27,12 @@ export type ResolvedSession = { editor: "claude" | "opencode"; sessionId: string
 // command, when it names an agent, just orders the probe so the declared agent
 // wins ties.
 export async function tabSessions(cwds: string[], command: string | null): Promise<ResolvedSession[]> {
-  const bin = (command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
-  const order: ("claude" | "opencode")[] =
-    bin === "opencode" ? ["opencode", "claude"] : ["claude", "opencode"];
+  const order: HarnessId[] = harnessesForCommand(command);
   const out: ResolvedSession[] = [];
   const seen = new Set<string>();
   for (const cwd of cwds) {
     for (const editor of order) {
-      const sid = await invoke<string | null>("harness_session", { tool: editor, cwd }).catch(
-        () => null,
-      );
+      const sid = await harnessAdapter(editor).resolve(cwd).catch(() => null);
       const key = sid ? `${editor}:${sid}` : "";
       if (sid && !seen.has(key)) {
         seen.add(key);
@@ -54,14 +51,10 @@ export async function tabSessions(cwds: string[], command: string | null): Promi
 export async function unclaimedSession(
   meta: { cwd: string; command: string | null },
   claimed: Set<string>,
-): Promise<{ editor: "claude" | "opencode"; sessionId: string } | null> {
-  const bin = (meta.command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
-  const order: ("claude" | "opencode")[] =
-    bin === "opencode" ? ["opencode", "claude"] : ["claude", "opencode"];
+): Promise<{ editor: HarnessId; sessionId: string } | null> {
+  const order: HarnessId[] = harnessesForCommand(meta.command);
   for (const editor of order) {
-    const ids = await invoke<string[]>("harness_sessions", { tool: editor, cwd: meta.cwd }).catch(
-      () => [] as string[],
-    );
+    const ids = await harnessAdapter(editor).sessions(meta.cwd).catch(() => [] as string[]);
     for (const sid of ids) if (!claimed.has(sid)) return { editor, sessionId: sid };
   }
   return null;
@@ -77,19 +70,14 @@ export const tabTurns = new Map<string, AiMessage[]>();
 // folder — paths[0] (tabMetaById) can be a subdir the session wasn't keyed under.
 export const turnCwd = new Map<string, string>();
 async function turnsFor(
-  editor: "claude" | "opencode",
+  editor: HarnessId,
   sessionId: string,
   cwd: string,
 ): Promise<AiMessage[]> {
   const key = `${editor}:${sessionId}`;
   const hit = ledgerCache.get(key);
   if (hit) return hit;
-  const msgs = await invoke<AiMessage[]>("read_ai_messages", {
-    editor,
-    sessionId,
-    cwd,
-    afterSeq: null,
-  }).catch(() => [] as AiMessage[]);
+  const msgs = await harnessAdapter(editor).read(sessionId, cwd).catch(() => [] as AiMessage[]);
   ledgerCache.set(key, msgs);
   return msgs;
 }
@@ -285,11 +273,7 @@ export async function favoriteCurrentTurn() {
     return;
   }
   const s = sessions[0];
-  const msg = await invoke<AiMessage | null>("latest_ai_message", {
-    editor: s.editor,
-    sessionId: s.sessionId,
-    cwd: s.cwd,
-  }).catch(() => null);
+  const msg = await harnessAdapter(s.editor).latest(s.sessionId, s.cwd).catch(() => null);
   if (!msg) {
     flashStatus("no turn found yet");
     return;

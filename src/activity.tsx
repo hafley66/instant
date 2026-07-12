@@ -1,7 +1,7 @@
 // Unified activity timeline (browser + os-capture + file events) and the Config
 // panel (observation filters + plugin-declared option toggles). The React panels
 // are presentational; derivation + handlers live here and pull rows() lazily.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import {
   store,
   type ActivitySource,

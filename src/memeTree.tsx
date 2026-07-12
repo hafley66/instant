@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./generated/native";
 import { type ExpandedState } from "@tanstack/react-table";
 import { TreeTable, type TreeColumn } from "./treetable";
 import type { FsEntry } from "./state";
