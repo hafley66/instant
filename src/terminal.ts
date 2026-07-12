@@ -509,23 +509,6 @@ export function openTab(
   // terminal, so keyboard + scroll work without hunting for the text area.
   el.addEventListener("mousedown", () => term.focus());
 
-  // Full-screen harnesses own ordinary wheel events: Claude/OpenCode use them
-  // for their own transcript navigation. Only Shift+wheel asks tmux for history
-  // copy-mode, preventing an innocent scroll from producing the yellow tmux
-  // indicator. Plain shells retain the convenient history-wheel behavior.
-  el.addEventListener(
-    "wheel",
-    (e) => {
-      if (e.altKey) return; // Option is the explicit escape hatch for TUI mouse mode.
-      if (tabs.get(id)?.harness.id && !e.shiftKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 24));
-      invoke("scroll_session", { name, up: e.deltaY < 0, lines }).catch(console.error);
-    },
-    { capture: true, passive: false },
-  );
-
   // Track which terminal owns keyboard focus so ⌘+/-/0 zoom the right one.
   term.textarea?.addEventListener("focus", () => {
     focusedTermId = id;
