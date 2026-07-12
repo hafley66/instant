@@ -15,6 +15,7 @@ import {
   setActive,
   flashStatus,
   sanitizePaste,
+  escapeHtml,
   THEMES,
   termFontFamily,
 } from "./core";
@@ -24,7 +25,7 @@ import {
   removeTermPanel,
   hasTermPanel,
 } from "./reactdock";
-import { dispatchClick, quotedSpanAt } from "./clickrules";
+import { dispatchClick, quotedSpanAt, clickIntent } from "./clickrules";
 import { nudgeZoom, resetZoom } from "./overlay";
 import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
@@ -341,6 +342,11 @@ export function openTab(
 
   const el = document.createElement("div");
   el.className = "term-host";
+  const inspector = document.createElement("div");
+  inspector.className = "term-inspector";
+  inspector.setAttribute("popover", "manual");
+  document.body.appendChild(inspector);
+  const hideInspector = () => { try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); } };
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
   // it into the terminal's panel.
   document.getElementById("panel-pool")!.appendChild(el);
@@ -453,6 +459,21 @@ export function openTab(
   // before the TUI sees the click; openable hits fall through to the link
   // provider above (which the linkifier activates on mouseup).
   el.addEventListener(
+    "mousemove",
+    (e) => {
+      if (!e.metaKey) { hideInspector(); return; }
+      const token = wordAt(id, e.clientX, e.clientY);
+      const cwd = tabMetaById(id)?.cwd ?? "";
+      if (!token || !looksOpenable(token)) { hideInspector(); return; }
+      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(cwd || "home")}</small>`;
+      inspector.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 280)}px`;
+      inspector.style.top = `${Math.min(e.clientY + 14, window.innerHeight - 90)}px`;
+      try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
+    },
+    { capture: true },
+  );
+
+  el.addEventListener(
     "mousedown",
     (e) => {
       // tmux mouse mode reports button-2 into the PTY before the browser's
@@ -488,15 +509,15 @@ export function openTab(
   // terminal, so keyboard + scroll work without hunting for the text area.
   el.addEventListener("mousedown", () => term.focus());
 
-  // Shift+wheel scrolls the tmux history even when a full-screen TUI
+  // Wheel scrolls the tmux history even when a full-screen TUI
   // (opencode/claude) has grabbed the mouse so a plain wheel goes to the app
   // (the "scroll randomly doesn't work" case). xterm has no real scrollback here
   // — tmux owns the history — so this drives tmux copy-mode in the backend.
-  // Capture phase + stop so the app never sees it; plain wheel is untouched.
+  // Capture phase + stop so tmux's mouse mode never gets to reinterpret it.
   el.addEventListener(
     "wheel",
     (e) => {
-      if (!e.shiftKey) return;
+      if (e.altKey) return; // Option is the explicit escape hatch for TUI mouse mode.
       e.preventDefault();
       e.stopPropagation();
       const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 24));
