@@ -61,6 +61,11 @@ export function observeTerminalOutput(id: string, chunk: string) {
   const meta = tabMetaById(id);
   const live = store.get().sessions.find((s) => s.name === tab.name);
   tab.harness = detectHarness(meta?.command, live?.commands?.[0], tab.outputTail);
+  tab.el.dataset.harness = tab.harness.id ?? "unknown";
+  tab.el.dataset.harnessConfidence = tab.harness.confidence;
+  tab.el.title = tab.harness.id
+    ? `${tab.harness.id} · ${tab.harness.confidence} detection`
+    : "terminal · harness not detected";
 }
 
 export function terminalHarness(id: string): HarnessObservation | null {
@@ -370,6 +375,8 @@ export function openTab(
   const live = store.get().sessions.find((s) => s.name === name);
   const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
   tabs.set(id, { id, name, term, fit, el, graphics, overlay, harness, outputTail: "" });
+  el.dataset.harness = harness.id ?? "unknown";
+  el.dataset.harnessConfidence = harness.confidence;
 
   // OSC 52 -> macOS clipboard. tmux (set-clipboard on) emits this when a mouse
   // drag selects text in copy-mode, and TUIs (opencode) emit it on their own
