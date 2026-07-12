@@ -27,7 +27,7 @@ dev-safe:
 # isolated second instance: separate Vite port + summon shortcut, with no second
 # tray icon or process-wide summon gesture. Use Cmd+Shift+Space to summon it.
 dev-isolated:
-    INSTANT_ISOLATED=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev -- --config '{"build":{"beforeDevCommand":"npm run dev -- --port 1422","devUrl":"http://localhost:1422"}}'
+    INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev -- --config '{"build":{"beforeDevCommand":"npm run dev -- --port 1422","devUrl":"http://localhost:1422"}}'
 
 # one-time: install the Tauri CLI machine-global (~/.cargo/bin, on PATH across
 # all checkouts and nvm node versions) so any repo can run `cargo tauri …` /
