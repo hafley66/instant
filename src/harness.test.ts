@@ -10,9 +10,13 @@ describe("harness detection", () => {
   });
 
   it("uses visible output when the tab started as a shell", () => {
-    const found = detectHarness("zsh", "node", "Welcome to Claude Code\n⏺ answer");
+    const found = detectHarness("zsh", "node", "\n⏺ I'll inspect that now");
     expect(found.id).toBe("claude");
     expect(found.evidence).toContain("claude:output");
+  });
+
+  it("does not classify a shell because its output mentions opencode", () => {
+    expect(detectHarness("zsh", "zsh", "try running opencode --help").id).toBeNull();
   });
 
   it("does not claim an unknown shell", () => {

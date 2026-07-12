@@ -26,7 +26,10 @@ const adapters: HarnessAdapter[] = [
   {
     id: "claude", label: "Claude Code",
     matchesCommand: (s) => /(?:^|[\\/\s])claude(?:\s|$)/i.test(s),
-    matchesOutput: (s) => /Claude Code|╭─.*Claude|⏺/.test(s),
+    // Do not key on the product name alone: a shell command, chat response, or
+    // error can mention "Claude Code" while the pane is just zsh. These are
+    // visual chrome markers emitted by the full-screen client.
+    matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*Claude|(?:^|\n)\s*⏺\s+(?:I'll|I|Let|We)\b/.test(s),
     sessions: (cwd) => invoke<string[]>("harness_sessions", { tool: "claude", cwd }),
     resolve: (cwd) => invoke<string | null>("harness_session", { tool: "claude", cwd }),
     read: (sessionId, cwd, afterSeq = 0) => invoke<AiMessage[]>("read_ai_messages", { editor: "claude", sessionId, cwd, afterSeq: afterSeq || null }),
@@ -36,7 +39,9 @@ const adapters: HarnessAdapter[] = [
   {
     id: "opencode", label: "OpenCode",
     matchesCommand: (s) => /(?:^|[\\/\s])opencode(?:\.exe)?(?:\s|$)/i.test(s),
-    matchesOutput: (s) => /OpenCode|opencode|╭─.*Open/.test(s),
+    // A bare `opencode` token is common in logs and prompts; require the
+    // bordered TUI header instead.
+    matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*(?:OpenCode|Open Code)|(?:^|\n)\s*┃[^\n]*(?:OpenCode|Open Code)/.test(s),
     sessions: (cwd) => invoke<string[]>("harness_sessions", { tool: "opencode", cwd }),
     resolve: (cwd) => invoke<string | null>("harness_session", { tool: "opencode", cwd }),
     read: (sessionId, cwd, afterSeq = 0) => invoke<AiMessage[]>("read_ai_messages", { editor: "opencode", sessionId, cwd, afterSeq: afterSeq || null }),
