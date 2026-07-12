@@ -11,7 +11,7 @@ import { escapeHtml, baseName, flashStatus } from "./core";
 import { previewInsts } from "./preview";
 import { tabs, tabMetaById, tabCwds } from "./terminal";
 import { openWorktree, resumeLaunch, sessionsForWorktree } from "./worktrees";
-import { harnessAdapter, type HarnessId } from "./harness";
+import { harnessAdapter, harnessesForCommand, type HarnessId } from "./harness";
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
@@ -27,8 +27,7 @@ export type ResolvedSession = { editor: HarnessId; sessionId: string; cwd: strin
 // command, when it names an agent, just orders the probe so the declared agent
 // wins ties.
 export async function tabSessions(cwds: string[], command: string | null): Promise<ResolvedSession[]> {
-  const bin = (command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
-  const order: HarnessId[] = bin === "opencode" ? ["opencode", "claude"] : ["claude", "opencode"];
+  const order: HarnessId[] = harnessesForCommand(command);
   const out: ResolvedSession[] = [];
   const seen = new Set<string>();
   for (const cwd of cwds) {
@@ -53,9 +52,7 @@ export async function unclaimedSession(
   meta: { cwd: string; command: string | null },
   claimed: Set<string>,
 ): Promise<{ editor: "claude" | "opencode"; sessionId: string } | null> {
-  const bin = (meta.command ?? "").trim().split(/\s+/)[0]?.split("/").pop();
-  const order: ("claude" | "opencode")[] =
-    bin === "opencode" ? ["opencode", "claude"] : ["claude", "opencode"];
+  const order: HarnessId[] = harnessesForCommand(meta.command);
   for (const editor of order) {
     const ids = await harnessAdapter(editor).sessions(meta.cwd).catch(() => [] as string[]);
     for (const sid of ids) if (!claimed.has(sid)) return { editor, sessionId: sid };

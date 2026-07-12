@@ -3,6 +3,7 @@
 // (sessions, panels, layout) get added to AppState and listed in PERSIST.
 import { createStore } from "./store";
 import type { SortState } from "./table";
+import type { HarnessId } from "./harnessTypes";
 
 export type { SortState };
 
@@ -104,7 +105,7 @@ export interface ConfigView {
 // One AI-harness turn read off disk (Rust ledger::AiMessage). Identity is
 // (editor, session_id, id); `text` is the full extracted plain text.
 export interface AiMessage {
-  editor: "claude" | "opencode";
+  editor: HarnessId;
   session_id: string;
   id: string;
   seq: number;
@@ -153,7 +154,7 @@ export interface Session {
 export interface RogueSession {
   pid: number;
   tty: string;
-  command: string; // "claude" | "opencode"
+  command: string;
   args: string;
   cwd: string | null;
 }
@@ -233,7 +234,7 @@ export interface AppState {
   // Agent sessions killed on tab close (to free RAM); reopen relaunches with
   // --resume <id>. Keyed by CWD — the stable identity for "the agent in this
   // worktree" (a reopen mints a fresh tmux name, so name keys don't recur).
-  resumeTabs: Record<string, { editor: "claude" | "opencode"; sessionId: string }>;
+  resumeTabs: Record<string, { editor: HarnessId; sessionId: string }>;
   wtExpanded: string[]; // expanded tree node keys
   favExpanded: string[]; // expanded favorite-session node keys (persisted)
   wtFavorites: string[]; // starred worktree paths (persisted)

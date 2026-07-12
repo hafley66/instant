@@ -44,6 +44,7 @@ import {
   type WorktreeDelta,
 } from "./ghcacheSnapshot";
 import { paths as apiPaths } from "./generated/api";
+import { harnessAdapter, harnessForCommand, harnessIds, isHarnessProcess, type HarnessId } from "./harness";
 
 export type Session = {
   name: string;
@@ -158,13 +159,12 @@ export function foregroundProc(commands: string[]): string {
 // Foreground procs that mean "an agent is running here" (vs an idle shell), so
 // closing the tab exits it instead of leaving it resident. node/bun cover
 // claude/opencode launched through their JS shim.
-const AGENT_PROCS = new Set(["claude", "opencode", "node", "bun"]);
 // claude reports its VERSION ("2.1.193") as the process title, not "claude", so a
 // version-shaped foreground proc is an agent; opencode shows as "opencode.exe".
 // Without this, AGENT_PROCS never matches a live claude pane and close detaches
 // (leaving claude alive) instead of killing it.
 export const looksLikeAgentProc = (p: string) =>
-  AGENT_PROCS.has(p) || /^\d+\.\d+/.test(p) || p.includes("opencode");
+  isHarnessProcess(p);
 const isPinnedSession = (name: string) => store.get().pinnedSessions.includes(name);
 function togglePinSession(name: string) {
   const cur = store.get().pinnedSessions;
@@ -296,9 +296,9 @@ async function adoptRogue(r: RogueSession) {
   const wtPath = matched?.worktree ?? cwd;
   const clone = matched?.clone ?? wtPath;
   const branch = matched?.branch ?? "";
-  const tool = r.command as "claude" | "opencode";
-  const sid = await invoke<string | null>("harness_session", { tool, cwd: wtPath }).catch(() => null);
-  const cmd = sid ? resumeLaunch(tool, sid) : r.command;
+  const adapter = harnessForCommand(r.command);
+  const sid = adapter ? await adapter.resolve(wtPath).catch(() => null) : null;
+  const cmd = sid && adapter ? adapter.resume(sid) : r.command;
   await openWorktree(clone, branch, wtPath, cmd, true);
   flashStatus(`adopted ${r.command} · pid ${r.pid} — close the old terminal window`);
 }
@@ -399,27 +399,26 @@ export async function openWorktree(clone: string, branch: string, wtPath: string
 // launch, overwriting any prior record for this name (a genuine new conversation).
 function newAgentLaunch(name: string, command: string | undefined): string | undefined {
   if (!command) return command;
-  const bin = command.trim().split(/\s+/)[0]?.split("/").pop() ?? "";
-  if (bin === "claude" && !/\s--(resume|session-id|continue|from-pr)\b/.test(command)) {
+  const adapter = harnessForCommand(command);
+  if (adapter?.stableSessionIdFlag && !adapter.hasExplicitSession(command)) {
     const id = crypto.randomUUID();
-    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: "claude", sessionId: id } } });
-    console.log("[resume] launch", name, "-> claude --session-id", id.slice(0, 8));
-    return `${command} --session-id ${id}`;
+    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: adapter.id, sessionId: id } } });
+    console.log("[resume] launch", name, "->", adapter.id, adapter.stableSessionIdFlag, id.slice(0, 8));
+    return `${command} ${adapter.stableSessionIdFlag} ${id}`;
   }
   return command;
 }
 
 // Resume flag per known harness binary; auto-attached so the simple text editor
 // ("label:command") still gets resume support without extra syntax.
-export const KNOWN_RESUME: Record<string, string> = {
-  claude: "--resume",
-  opencode: "--session",
-};
+export const KNOWN_RESUME: Record<string, string> = Object.fromEntries(
+  harnessIds.map((id) => [id, harnessAdapter(id).resumeFlag]),
+);
 
 // Relaunch command for a previously-exited agent tab: "claude --resume <id>" /
 // "opencode --session <id>".
-export const resumeLaunch = (editor: "claude" | "opencode", sessionId: string) =>
-  `${editor} ${KNOWN_RESUME[editor]} ${sessionId}`;
+export const resumeLaunch = (editor: HarnessId, sessionId: string) =>
+  harnessAdapter(editor).resume(sessionId);
 
 // resumeTabs can hold a sessionId that no longer resolves to anything on disk
 // (before the close/reopen races elsewhere in this file were fixed, a wrong
@@ -436,11 +435,11 @@ export const resumeLaunch = (editor: "claude" | "opencode", sessionId: string) =
 // tab's session". It silently swapped in an unrelated conversation. An exact
 // id either matches or it doesn't; there is no safe guess in between.
 export async function resumeIdIsLive(
-  editor: "claude" | "opencode",
+  editor: HarnessId,
   cwd: string,
   sessionId: string,
 ): Promise<boolean> {
-  const ids = await invoke<string[]>("harness_sessions", { tool: editor, cwd }).catch(() => [] as string[]);
+  const ids = await harnessAdapter(editor).sessions(cwd).catch(() => [] as string[]);
   return ids.includes(sessionId);
 }
 
