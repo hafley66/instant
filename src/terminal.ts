@@ -509,15 +509,15 @@ export function openTab(
   // terminal, so keyboard + scroll work without hunting for the text area.
   el.addEventListener("mousedown", () => term.focus());
 
-  // Wheel scrolls the tmux history even when a full-screen TUI
-  // (opencode/claude) has grabbed the mouse so a plain wheel goes to the app
-  // (the "scroll randomly doesn't work" case). xterm has no real scrollback here
-  // — tmux owns the history — so this drives tmux copy-mode in the backend.
-  // Capture phase + stop so tmux's mouse mode never gets to reinterpret it.
+  // Full-screen harnesses own ordinary wheel events: Claude/OpenCode use them
+  // for their own transcript navigation. Only Shift+wheel asks tmux for history
+  // copy-mode, preventing an innocent scroll from producing the yellow tmux
+  // indicator. Plain shells retain the convenient history-wheel behavior.
   el.addEventListener(
     "wheel",
     (e) => {
       if (e.altKey) return; // Option is the explicit escape hatch for TUI mouse mode.
+      if (tabs.get(id)?.harness.id && !e.shiftKey) return;
       e.preventDefault();
       e.stopPropagation();
       const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 24));
