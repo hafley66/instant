@@ -1,0 +1,56 @@
+# Convention rails for instant, enforced by the sprefa `dl` engine.
+# Run: `dl --check --root .` (discovery) or `dl --lsp` (live squiggles).
+# Each rule below is grounded in a specific line of AGENTS.md / CLAUDE.md.
+
+# ---- react-resizable-panels must stay on the 3.x API (AGENTS.md "Split panes") ---
+# 4.x renamed PanelGroup->Group and PanelResizeHandle->Separator. Flag any import
+# of Group/Separator from that module so a bump to 4.x (or a copied snippet)
+# fails loudly. Structural: sg(:tsx) import declarations.
+rel rrp_4x_import(p: file, l: int, NAME: text).
+rrp_4x_import(p, l, NAME) <-
+    scan("src/**/*.tsx", p, rev),
+    sg(p, rev, :tsx, "import { $$$PRE, $NAME, $$$POST } from \"react-resizable-panels\"", l),
+    NAME =~ /^(Group|Separator)$/.
+rrp_4x_import(p, l, NAME) <-
+    scan("src/**/*.tsx", p, rev),
+    sg(p, rev, :tsx, "import { $NAME } from \"react-resizable-panels\"", l),
+    NAME =~ /^(Group|Separator)$/.
+diag(path: p, line: l, severity: "error", code: "rrp-4x-api", msg: "react-resizable-panels 3.x only — Group/Separator are 4.x names; use PanelGroup/PanelResizeHandle") <- rrp_4x_import(p, l, NAME).
+
+# ---- no new panels on the legacy vanilla table (AGENTS.md "No bespoke list/table UIs") -
+# src/table.ts is legacy; rows must use the grid stack (treetable.tsx /
+# tablepanels.tsx). Warn (not error) since two legacy call sites still exist
+# (worktrees.ts, state.ts) and are pending migration.
+rel legacy_table_import(p: file, l: int).
+legacy_table_import(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "import { $$$NAMES } from \"./table\"", l).
+legacy_table_import(p, l) <- scan("src/**/*.ts", p, rev), sg(p, rev, :ts, "import type { $$$NAMES } from \"./table\"", l).
+legacy_table_import(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "import { $$$NAMES } from \"./table\"", l).
+legacy_table_import(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "import type { $$$NAMES } from \"./table\"", l).
+diag(path: p, line: l, severity: "warn", code: "legacy-table-import", msg: "src/table.ts is legacy; use the grid stack (src/treetable.tsx, src/tablepanels.tsx)") <- legacy_table_import(p, l).
+
+# ---- banned identifiers/words (CLAUDE.md "Style prohibitions") ------------------
+# nuke, load-bearing / load-* (anything load-prefixed), bearing, substrate,
+# provenance, absolutely, regime. Bare-substring + case-insensitive on purpose
+# so concatenations catch (ProvenanceRecord, substrate_id, path-bearing). Two
+# refinements: \bload- (word boundary) so "upload-..." is not flagged, and
+# load-[\w-]* (not load-.*) so the diag capture is just the token, not the rest
+# of the line. Warn (not error) because the expanded list has existing hits
+# (absolutely-positioned CSS comments, path-bearing rows).
+rel banned_word(p: file, l: int, w: text).
+banned_word(p, l, w) <- scan("src/**/*.ts", p, rev), match(p, rev, /(?i)(?<w>nuke|provenance|substrate|regime|bearing|absolutely|\bload-[\w-]*)/, l).
+banned_word(p, l, w) <- scan("src/**/*.tsx", p, rev), match(p, rev, /(?i)(?<w>nuke|provenance|substrate|regime|bearing|absolutely|\bload-[\w-]*)/, l).
+diag(path: p, line: l, severity: "warn", code: "banned-word", msg: "banned word `${w}` — use the plain term") <- banned_word(p, l, w).
+
+# ---- file length cap (AGENTS.md "No massive files") -----------------------------
+# Keep source under ~500 lines; split by concern. Warn so existing over-cap
+# files surface as debt without blocking. Two-step: match() yields one row per
+# line (no tree-sitter representation of "a line"), then count() aggregates per
+# file (a source rule cannot also head an aggregate — same split as rails.dl).
+rel file_line(p: file, l: int).
+file_line(p, l) <- scan("src/**/*.ts", p, rev), match(p, rev, /$/, l).
+file_line(p, l) <- scan("src/**/*.tsx", p, rev), match(p, rev, /$/, l).
+rel line_count(p: file, n: int).
+line_count(p, count(l)) <- file_line(p, l).
+rel long_file(p: file, n: int).
+long_file(p, n) <- line_count(p, n), n > 500.
+diag(path: p, line: 1, severity: "warn", code: "file-too-long", msg: "${n} lines — AGENTS.md cap is ~500; split by concern") <- long_file(p, n).

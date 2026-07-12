@@ -1,0 +1,79 @@
+# Leaked-teardown-in-useEffect rail for instant (TSX), via the sprefa `dl` engine.
+# Run: `dl --check --root .` (discovery loads every .dl/*.dl here) or `dl --lsp`.
+#
+# Flags a useEffect whose line range contains a setup call but no matching
+# teardown: setInterval without clearInterval, addEventListener without
+# removeEventListener. This is the bug class behind the meme-panel folder-poll
+# leak (a 5s setInterval whose cleanup omitted clearInterval, left ticking after
+# the panel unmounted).
+#
+# METHOD: line-range containment, not structural cleanup-scoping. Each useEffect
+# block and each setup/teardown call are matched independently as ast-grep
+# (:tsx) call_expression nodes (so `const t = setInterval(...)` and bare
+# `setInterval(...)` and `window.setInterval(...)` all match), then joined by
+# line span. A teardown anywhere in the effect suppresses the warning — in
+# practice clear/remove calls only appear in the cleanup, so this is precise.
+#
+# LIMITATION: a timer started indirectly (e.g. meme.tsx's startFolderPoll, which
+# wraps setInterval in a separate function called from the effect) is NOT caught
+# textually — the setInterval site lives outside the effect's line range.
+# Catching the factory-wrapped form needs ast_yaml(:tsx) with a has/not rule,
+# which requires wiring tree-sitter-typescript into sprefa's ts_lang
+# (engine/mod.rs:5858 lists no TS/TSX grammar today). sg(:tsx) covers the
+# structural-but-not-relational path used here.
+
+rel effect(p: file, l0: int, l1: int).
+effect(p, l0, l1) <-
+    scan("src/**/*.tsx", p, rev),
+    sg(p, rev, :tsx, "useEffect(() => { $$$BODY }, $$$DEPS)", l0, _, l1, _).
+
+rel setInterval_call(p: file, l: int).
+setInterval_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "setInterval($$$ARGS)", l).
+setInterval_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.setInterval($$$ARGS)", l).
+rel clearInterval_call(p: file, l: int).
+clearInterval_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "clearInterval($$$ARGS)", l).
+clearInterval_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.clearInterval($$$ARGS)", l).
+rel addEventListener_call(p: file, l: int).
+addEventListener_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "addEventListener($$$ARGS)", l).
+addEventListener_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.addEventListener($$$ARGS)", l).
+rel removeEventListener_call(p: file, l: int).
+removeEventListener_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "removeEventListener($$$ARGS)", l).
+removeEventListener_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.removeEventListener($$$ARGS)", l).
+# RxJS 7 Subscription form: observable.subscribe(...) returns a Subscription;
+# teardown is subscription.unsubscribe(). Member-only: bare subscribe(...) is
+# too generic a word to match reliably.
+# NOTE this repo's own store.subscribe returns an unsubscribe FUNCTION
+# (store.ts:11; teardown is calling that returned function, not .unsubscribe())
+# — a different idiom this rule does NOT verify. That returned-unsubscribe-
+# function form needs const-handle dataflow (ast_yaml:tsx) to check; sg cannot
+# look up a call by a captured variable name. No false positives today since
+# the only store.subscribe call sites are module-scope (initRail /
+# initPreviewThemeSync), not inside any useEffect.
+rel subscribe_call(p: file, l: int).
+subscribe_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.subscribe($$$ARGS)", l).
+rel unsubscribe_call(p: file, l: int).
+unsubscribe_call(p, l) <- scan("src/**/*.tsx", p, rev), sg(p, rev, :tsx, "$$$OBJ.unsubscribe($$$ARGS)", l).
+
+rel effect_has_interval(p: file, l0: int).
+effect_has_interval(p, l0) <- effect(p, l0, l1), setInterval_call(p, li), li >= l0, li <= l1.
+rel effect_has_clear(p: file, l0: int).
+effect_has_clear(p, l0) <- effect(p, l0, l1), clearInterval_call(p, lc), lc >= l0, lc <= l1.
+rel effect_has_listener(p: file, l0: int).
+effect_has_listener(p, l0) <- effect(p, l0, l1), addEventListener_call(p, la), la >= l0, la <= l1.
+rel effect_has_remove(p: file, l0: int).
+effect_has_remove(p, l0) <- effect(p, l0, l1), removeEventListener_call(p, lr), lr >= l0, lr <= l1.
+rel effect_has_subscribe(p: file, l0: int).
+effect_has_subscribe(p, l0) <- effect(p, l0, l1), subscribe_call(p, ls), ls >= l0, ls <= l1.
+rel effect_has_unsubscribe(p: file, l0: int).
+effect_has_unsubscribe(p, l0) <- effect(p, l0, l1), unsubscribe_call(p, lu), lu >= l0, lu <= l1.
+
+rel interval_leak(p: file, l0: int).
+interval_leak(p, l0) <- effect_has_interval(p, l0), !effect_has_clear(p, l0).
+rel listener_leak(p: file, l0: int).
+listener_leak(p, l0) <- effect_has_listener(p, l0), !effect_has_remove(p, l0).
+rel subscribe_leak(p: file, l0: int).
+subscribe_leak(p, l0) <- effect_has_subscribe(p, l0), !effect_has_unsubscribe(p, l0).
+
+diag(path: p, line: l0, severity: "warn", code: "useEffect-interval-leak", msg: "useEffect sets an interval; verify its cleanup calls clearInterval") <- interval_leak(p, l0).
+diag(path: p, line: l0, severity: "warn", code: "useEffect-listener-leak", msg: "useEffect adds an event listener; verify its cleanup calls removeEventListener") <- listener_leak(p, l0).
+diag(path: p, line: l0, severity: "warn", code: "useEffect-subscribe-leak", msg: "useEffect subscribes; verify its cleanup calls .unsubscribe() on the Subscription (or, for store.subscribe, the returned unsubscribe function)") <- subscribe_leak(p, l0).

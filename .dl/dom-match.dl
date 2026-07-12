@@ -1,0 +1,50 @@
+# dom-match.dl — instant's captured rule matches, as a sprefa rel (path A).
+#
+# instant's ingest server exposes GET 127.0.0.1:8787/matches as a flat array
+#   [{rule_id, url, field, val, ts}, ...]   (newest first)
+# built by activity.rs::collect_matches. This program fetches it on a cadence
+# (same rate-cap trick as ghcacher — a clock bucket in the request digest), then
+# one brace pattern explodes the array into `dom_match`. The DOM is now a rel you
+# can join against ghcacher's `pull_request` / `change_log`.
+#
+# Run (in-process, drains effects):  dl --settle .dl/dom-match.dl
+# Live:                              DL_POLL_SECS=5 dl --daemon .dl/dom-match.dl
+
+# --- fetch on cadence -------------------------------------------------------
+# `clock(5, b)` advances the bucket once per 5s; it is the request-dedup key, so
+# between boundaries the same (matches, b) hashes to the same id and no second
+# curl leaves the machine. The bucket is a body-bound var, so it enters the
+# @async request digest even though matches() takes no template args.
+rel pull(bucket: int).
+pull(b) <- clock(5, b).
+
+sh matches() -> (body: text) =
+  `curl -fsS http://127.0.0.1:8787/matches`.
+
+rel matches_resp(b: int, body: text).
+matches_resp(b, body) <- @async pull(b), matches() -> (body).
+
+# --- latest response wins ---------------------------------------------------
+rel matches_latest(b: int).
+matches_latest(max(b)) <- matches_resp(b, _).
+rel matches_body(body: text).
+matches_body(body) <- matches_resp(b, body), matches_latest(b).
+
+# --- explode the array into one row per captured field ----------------------
+rel dom_match(rule_id: text, url: text, field: text, val: text).
+dom_match(rule_id, url, field, val) <-
+    matches_body(body),
+    json(body, q:[... { rule_id: $rule_id, url: $url,
+                        field: $field, val: $val } ]).
+
+? dom_match(rule_id, url, field, val).
+
+# --- the payoff: join a PR-number capture against ghcacher ------------------
+# Enable by loading gh-cache-full.dl alongside this file and adding a rule whose
+# `field` carries a PR number, e.g. a rule that captures `num` from a PR URL:
+#
+#   rel seen_pr(num: text, title: text, state: text, url: text).
+#   seen_pr(num, title, state, url) <-
+#       dom_match(_, url, "pr_num", num),
+#       pull_request(num, title, state, _).
+#   ? seen_pr(num, title, state, url).

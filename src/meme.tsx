@@ -336,6 +336,7 @@ function wireMemePanel(): () => void {
       el.removeEventListener(type, fn);
     }
     ro.disconnect();
+    stopFolderPoll();
     treeRoot?.unmount();
     layersRoot?.unmount();
     treeRoot = null;

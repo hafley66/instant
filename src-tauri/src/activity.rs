@@ -416,6 +416,20 @@ pub fn spawn_server(app: AppHandle) {
                     ));
                     let _ = req.respond(with_cors(resp));
                 }
+                // Recent rule matches, flattened for the sprefa `sh matches()`
+                // effect: `[{rule_id,url,field,val,ts}, …]`, newest first. sprefa
+                // jsonp-parses this into a `dom_match` rel, symmetric with how
+                // ghcacher pulls the GitHub API (path A of the DOM-as-rel plan).
+                (Method::Get, "/matches") => {
+                    let db = app.state::<ActivityDb>();
+                    let body = collect_matches(&db)
+                        .unwrap_or_else(|e| serde_json::json!({ "error": e }).to_string());
+                    let resp = Response::from_string(body).with_header(header(
+                        b"Content-Type",
+                        b"application/json",
+                    ));
+                    let _ = req.respond(with_cors(resp));
+                }
                 (Method::Post, "/ingest") => {
                     let mut body = String::new();
                     let _ = req.as_reader().read_to_string(&mut body);
@@ -534,6 +548,46 @@ pub fn spawn_server(app: AppHandle) {
             }
         }
     });
+}
+
+/// Flatten recent `rulematch` rows into one JSON object per captured field:
+/// `[{rule_id,url,field,val,ts}, …]`, newest first. The stored `text` column is
+/// the match's `Vec<HashMap<field,val>>` (see the /ingest rulematch arm); this
+/// explodes it so a fixed sprefa jsonp brace pattern can read it. Capped at 500.
+fn collect_matches(db: &ActivityDb) -> Result<String, String> {
+    let conn = db.0.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts,url,title,text FROM events WHERE kind='rulematch' \
+             ORDER BY ts DESC LIMIT 500",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for (ts, url, rule_id, text) in rows {
+        let matches: Vec<HashMap<String, String>> =
+            serde_json::from_str(&text).unwrap_or_default();
+        for m in matches {
+            for (field, val) in m {
+                out.push(serde_json::json!({
+                    "rule_id": rule_id, "url": url,
+                    "field": field, "val": val, "ts": ts,
+                }));
+            }
+        }
+    }
+    Ok(serde_json::Value::Array(out).to_string())
 }
 
 /// Most-recent events first, capped at `limit` (default 2000), optionally

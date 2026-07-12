@@ -123,7 +123,11 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
   );
 }
 
-const LAYOUT_VERSION = 8; // 8: per-path preview tabs; singleton preview panel removed
+// Bump this whenever the Dockview JSON shape or panel lifecycle changes. In
+// particular, an old layout can contain groups whose resources are disposed by
+// a newer Dockview restore; keeping that JSON around makes every later
+// addPanel() fail with the misleading "resource already disposed" error.
+const LAYOUT_VERSION = 9; // 9: invalidate layouts from the disposed-group era
 
 const TERM = "term:";
 const isTerm = (id: string) => id.startsWith(TERM);
@@ -239,8 +243,19 @@ function onReady(e: DockviewReadyEvent) {
           api!.fromJSON(saved.layout as never);
           stripDynamicHusks();
         });
-      } catch {
-        applyLayout(buildDefault);
+      } catch (err) {
+        // fromJSON can partially mutate Dockview before throwing. Do not keep
+        // trying to use that half-restored group tree: clear it first, then
+        // create one known-good panel and persist the clean layout.
+        console.error("dock restore; rebuilding default layout", err);
+        try {
+          applyLayout(buildDefault);
+        } catch (fallbackErr) {
+          console.error("dock default layout", fallbackErr);
+          // The API is still assigned so later diagnostics can identify the
+          // failure, but callers must not mistake this for a usable dock.
+          throw fallbackErr;
+        }
       }
     } else {
       applyLayout(buildDefault);
