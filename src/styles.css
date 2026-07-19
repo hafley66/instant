@@ -3186,18 +3186,6 @@ body.xp-pixel .xterm canvas {
   min-height: 0;
   overflow: auto;
 }
-.meme-tree-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.meme-tree-glyph {
-  opacity: 0.8;
-}
-.meme-tree-active td {
-  background: var(--row-active-bg);
-  color: var(--row-active-fg);
-}
 /* .meme-stage-panel is the stage Panel element itself; .meme-stage is the
    plain div rendered inside it and needs to be a flex item to grow into the
    Panel's flex-computed height. */

@@ -1,0 +1,15 @@
+/* Shared file-explorer tree (src/fileTree.tsx). These rules lived in
+   styles.css as .meme-tree-*; moved here so both consumers (meme thumbs,
+   mdview explorer) share them and styles.css stops growing. */
+.file-tree-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.file-tree-glyph {
+  opacity: 0.8;
+}
+.file-tree-active td {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+}

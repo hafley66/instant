@@ -1,7 +1,7 @@
-// The markdown viewer panel body: outline (TreeTable, per AGENTS "no bespoke
-// tree UIs") | rendered sections, split with react-resizable-panels (AGENTS
-// "Split panes"). All state lives in the signals module; signal reads happen
-// here at the top (SignalReact tracks them) and flow down as plain props.
+// The markdown viewer panel body: file explorer (shared FileTree on the
+// canonical TreeTable) | rendered sections, split with react-resizable-panels
+// (AGENTS "Split panes"). All state lives in the signals module; signal reads
+// happen here at the top (SignalReact tracks them) and flow down as props.
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,7 +10,6 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { codeToHtml } from "shiki";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { invoke } from "../generated/native";
-import { TreeTable, type TreeColumn } from "../treetable";
 import { useApp } from "../useStore";
 import { baseName } from "../core";
 import { expandChain, resolveMdLink, sliceOwn, type MdSection } from "./model";
@@ -18,14 +17,19 @@ import {
   collapsedFor,
   expandIds,
   initCollapsedForReadyDoc,
+  layoutFor,
   loadMdDoc,
   mdDocs,
   mdUi,
   setAllCollapsed,
+  setLayoutFor,
   setMdUi,
   toggleCollapsed,
+  toggleExplorer,
+  type StrSignal,
 } from "./signals";
-import { openMarkdownPanel, takePendingFrag } from "./open";
+import { setPendingFrag, takePendingFrag } from "./open";
+import { MdExplorer } from "./MdExplorer";
 import { MermaidBlock } from "./Mermaid";
 import "./mdview.css";
 
@@ -153,18 +157,18 @@ function SectionView({ sec, text, collapsed, onToggle, components }: SectionProp
   );
 }
 
-const OUTLINE_COLS: TreeColumn<MdSection>[] = [
-  {
-    id: "section",
-    header: "outline",
-    tree: true,
-    cell: (s) => <span className={`mdview-toc-title mdview-toc-d${s.depth}`}>{s.title}</span>,
-  },
-];
-
-export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) {
+export const MdPanel = SignalReact(function MdPanel({
+  pid,
+  pathSig,
+  onNavigate,
+}: {
+  pid: string;
+  pathSig: StrSignal;
+  onNavigate: (path: string) => void;
+}) {
   const app = useApp();
   const theme = app.mode === "dark" ? "github-dark" : "github-light";
+  const path = pathSig.$();
   const state = mdDocs.$()[path];
   const ui = mdUi.$();
   const collapsed = collapsedFor(path).$();
@@ -191,8 +195,8 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
     });
   };
 
-  // Consume a #frag requested with the open, once the doc is ready. jumpTo is
-  // intentionally not a dep: it reads the latest doc/collapsed via signals.
+  // Consume a #frag requested with the open/navigation, once the doc is ready.
+  // jumpTo is intentionally not a dep: it reads the latest doc via signals.
   useEffect(() => {
     if (state?.status !== "ready") return;
     const frag = takePendingFrag(path);
@@ -218,7 +222,10 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
           }
           const md = resolveMdLink(path, href);
           if (md) {
-            openMarkdownPanel(md.path, md.frag);
+            // In-place navigation (docs-browser style): the explorer follows
+            // the new doc's folder; external opens still get their own tabs.
+            setPendingFrag(md.path, md.frag);
+            onNavigate(md.path);
             return;
           }
           if (/^https?:\/\//i.test(href)) void openPath(href).catch(console.error);
@@ -234,12 +241,12 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
       },
     }),
     // jumpTo is stable enough for the memo's purpose (reads latest via signals).
-    [theme, path],
+    [theme, path, onNavigate],
   );
 
-  const layout = ui.layout ?? [28, 72];
+  const layout = layoutFor(pid);
   const latestLayout = useRef(layout);
-  const flushLayout = () => setMdUi({ layout: latestLayout.current });
+  const flushLayout = () => setLayoutFor(pid, latestLayout.current);
 
   let body: React.ReactNode;
   if (!state || state.status === "loading") {
@@ -273,23 +280,19 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
         ) : null}
       </div>
     );
-    body = state.doc.tree.length ? (
+    body = ui.explorerHidden ? (
+      content
+    ) : (
       <PanelGroup
+        key="with-explorer"
         direction="horizontal"
         className="mdview-split"
         onLayout={(l) => {
           latestLayout.current = l;
         }}
       >
-        <Panel defaultSize={layout[0]} minSize={12} maxSize={60} className="mdview-toc-panel">
-          <TreeTable
-            columns={OUTLINE_COLS}
-            data={state.doc.tree}
-            getSubRows={(s) => (s.children.length ? s.children : undefined)}
-            getRowId={(s) => s.id}
-            defaultExpandedAll
-            onRowClick={(s) => jumpTo(s.id)}
-          />
+        <Panel defaultSize={layout[0]} minSize={14} maxSize={60} className="mdview-explorer-panel">
+          <MdExplorer docPath={path} onNavigate={onNavigate} />
         </Panel>
         <PanelResizeHandle
           className="meme-sash meme-sash-vertical"
@@ -300,14 +303,35 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
         />
         <Panel defaultSize={layout[1]}>{content}</Panel>
       </PanelGroup>
-    ) : (
-      content
     );
   }
 
   return (
-    <div className="v2-panel mdview-root">
+    <div
+      className="v2-panel mdview-root"
+      onKeyDown={(e) => {
+        // Plain `b` toggles the explorer when the keystroke isn't headed for
+        // an editable target (the tree's filter box, buttons, …).
+        if (
+          e.key === "b" &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          !(e.target instanceof HTMLInputElement) &&
+          !(e.target instanceof HTMLTextAreaElement)
+        ) {
+          toggleExplorer();
+        }
+      }}
+    >
       <div className="act-bar">
+        <button
+          type="button"
+          onClick={toggleExplorer}
+          title="toggle file explorer (b)"
+        >
+          {ui.explorerHidden ? "▸ explorer" : "◂ explorer"}
+        </button>
         <span className="spy-title" title={path}>
           {baseName(path)}
         </span>

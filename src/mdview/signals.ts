@@ -12,10 +12,12 @@ const PLUGIN_ID = "md";
 
 export interface MdUi {
   startFolded: boolean; // open docs fully folded (TOC/outline first) — default ON
-  layout: number[] | null; // [outline, content] percentages (react-resizable-panels)
+  layout: number[] | null; // global default [explorer, content] percentages
+  layouts: Record<string, number[]>; // per-tab split overrides, keyed by panel id
+  explorerHidden: boolean; // explorer sidebar collapsed (global)
 }
 
-const DEFAULT_UI: MdUi = { startFolded: true, layout: null };
+const DEFAULT_UI: MdUi = { startFolded: true, layout: null, layouts: {}, explorerHidden: false };
 
 export const mdUi = Signal<MdUi>({
   ...DEFAULT_UI,
@@ -25,6 +27,37 @@ export const mdUi = Signal<MdUi>({
 export function setMdUi(patch: Partial<MdUi>): void {
   mdUi.$({ ...mdUi.$(), ...patch });
   savePluginState<MdUi>(PLUGIN_ID, patch);
+}
+
+const FALLBACK_LAYOUT = [26, 74];
+
+// Persist a drag result for this tab AND as the global default new tabs open
+// with ("remember globally/per panel/tab").
+export function setLayoutFor(pid: string, layout: number[]): void {
+  setMdUi({ layout, layouts: { ...mdUi.$().layouts, [pid]: layout } });
+}
+
+export function layoutFor(pid: string): number[] {
+  const ui = mdUi.$();
+  return ui.layouts[pid] ?? ui.layout ?? FALLBACK_LAYOUT;
+}
+
+export function toggleExplorer(): void {
+  setMdUi({ explorerHidden: !mdUi.$().explorerHidden });
+}
+
+// Per-panel current document path. Keyed by panel id so navigation survives a
+// dock remount (the React subtree remounts, the panel id doesn't change).
+export type StrSignal = { $: Signal$<string> };
+const panelPaths = new Map<string, StrSignal>();
+
+export function pathSignalFor(pid: string, initial: string): StrSignal {
+  let sig = panelPaths.get(pid);
+  if (!sig) {
+    sig = Signal(initial);
+    panelPaths.set(pid, sig);
+  }
+  return sig;
 }
 
 export type MdDocState =

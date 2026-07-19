@@ -138,6 +138,9 @@ const isPreview = (id: string) => id.startsWith(PREVIEW);
 // adopted content node — but treated as dynamic for layout-restore purposes.
 const MD = "md:";
 const isMd = (id: string) => id.startsWith(MD);
+// Full dock panel id for a markdown path (openMarkdownPanel steers live panels
+// via this — see mdview/open.ts).
+export const mdPanelId = (path: string) => MD + path;
 // Both terminals and previews adopt a content node owned by JS (not in the dock
 // JSON), keyed by full panel id.
 const dynamicNodes = new Map<string, HTMLElement>();
