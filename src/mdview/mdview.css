@@ -3,9 +3,8 @@
    MdPanel.tsx import. */
 
 .mdview-root {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+  /* background/color come from .v2-panel (var(--panel-bg)/var(--panel-fg)) —
+     required for dark mode, see the .v2-panel note in styles.css. */
   overflow: hidden;
 }
 
@@ -88,6 +87,38 @@
 .mdview-img-alt {
   opacity: 0.6;
   font-style: italic;
+}
+
+/* Links: --row-active-bg is a *background* token — too dark to read as text in
+   dark mode, so give viewer links a proper dark-mode foreground. */
+body[data-mode="dark"] .mdview-root .md-body a {
+  color: #58a6ff;
+}
+
+/* Mermaid diagram box: fixed-height canvas the svg-pan-zoom controls overlay. */
+.mdview-mmd {
+  height: 380px;
+  border: 1px solid var(--frame, #d4d0c8);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  background: var(--panel-bg, #fff);
+  margin: 0.4em 0;
+}
+
+.mdview-mmd svg {
+  cursor: grab;
+}
+
+.mdview-mmd-loading,
+.mdview-mmd-error-msg {
+  padding: 8px;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.mdview-mmd-error pre {
+  margin: 0;
 }
 
 /* Task-list items (GFM): the disabled checkbox still shows. */

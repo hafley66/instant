@@ -30,6 +30,7 @@
     "dockview-core": "^6.6.1",
     "dompurify": "^3.4.11",
     "marked": "^18.0.5",
+    "mermaid": "^11.16.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
@@ -37,6 +38,7 @@
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "shiki": "^4.2.0",
+    "svg-pan-zoom": "^3.6.2",
     "tinykeys": "^4.0.0",
     "unified": "^11.0.5",
     "xp.css": "^0.2.6"
@@ -47,6 +49,7 @@
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/svg-pan-zoom": "^3.3.0",
     "@vitejs/plugin-react": "^4.7.0",
     "esbuild": "^0.28.1",
     "typescript": "~5.6.2",

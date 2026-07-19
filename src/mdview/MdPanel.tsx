@@ -26,6 +26,7 @@ import {
   toggleCollapsed,
 } from "./signals";
 import { openMarkdownPanel, takePendingFrag } from "./open";
+import { MermaidBlock } from "./Mermaid";
 import "./mdview.css";
 
 // ---- fenced code: shiki (same highlighter + themes as preview.ts) ----
@@ -203,6 +204,7 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
       code({ className, children }) {
         const raw = String(children ?? "").replace(/\n$/, "");
         const lang = /language-(\S+)/.exec(className ?? "")?.[1];
+        if (lang === "mermaid") return <MermaidBlock code={raw} dark={theme === "github-dark"} />;
         if (!lang && !raw.includes("\n")) return <code>{raw}</code>;
         return <ShikiCode lang={lang ?? "text"} code={raw} theme={theme} />;
       },
@@ -304,7 +306,7 @@ export const MdPanel = SignalReact(function MdPanel({ path }: { path: string }) 
   }
 
   return (
-    <div className="mdview-root">
+    <div className="v2-panel mdview-root">
       <div className="act-bar">
         <span className="spy-title" title={path}>
           {baseName(path)}
