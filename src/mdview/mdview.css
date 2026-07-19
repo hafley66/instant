@@ -110,6 +110,43 @@
   font-style: italic;
 }
 
+/* List/item folding (VSCode-style). The twisty floats into the list gutter so
+   it sits on the first line regardless of tight/loose list rendering. */
+.md-twisty {
+  float: left;
+  margin-left: -1.15em;
+  width: 1em;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.55;
+  user-select: none;
+}
+
+.md-twisty:hover {
+  opacity: 1;
+}
+
+.md-fold-more {
+  list-style: none;
+  opacity: 0.55;
+  font-style: italic;
+  cursor: pointer;
+}
+
+.md-fold-more:hover {
+  opacity: 1;
+}
+
+/* A folded item keeps only its first block; inline it so the trailing … sits
+   on the same line (the span wrapper keeps the rule off the twisties). */
+.md-item-folded-body > :first-child {
+  display: inline;
+}
+
+.md-item-more {
+  opacity: 0.55;
+}
+
 /* Links: --row-active-bg is a *background* token — too dark to read as text in
    dark mode, so give viewer links a proper dark-mode foreground. */
 body[data-mode="dark"] .mdview-root .md-body a {

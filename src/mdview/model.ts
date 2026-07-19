@@ -23,6 +23,42 @@ export interface MdDoc {
   tree: MdSection[];
   preamble: string; // source before the first heading ("" when only whitespace)
   byId: Map<string, MdSection>;
+  folds: ListFolds; // foldable lists / multi-block list items (VSCode-style)
+}
+
+export interface ListFolds {
+  lists: Map<number, number>; // list start offset -> direct item count (≥2 items)
+  firstItemToList: Map<number, number>; // a list's first item start -> list start (twisty handle)
+  items: Set<number>; // multi-block listItem start offsets (foldable items)
+  all: number[]; // every foldable offset (for "fold all")
+}
+
+// VSCode's markdown folding lets a list collapse to its first line and folds
+// long (multi-block) list items. Offsets are the identity: stable across
+// renders, unique per occurrence (unlike text), and absolute in the source —
+// section slices re-base them by adding the slice's start offset.
+function computeListFolds(root: Root): ListFolds {
+  const lists = new Map<number, number>();
+  const firstItemToList = new Map<number, number>();
+  const items = new Set<number>();
+  const visit = (node: { type: string; position?: { start: { offset?: number } }; children?: unknown[] }) => {
+    if (node.type === "list") {
+      const kids = (node.children ?? []) as typeof node[];
+      const start = node.position?.start.offset;
+      if (kids.length >= 2 && start != null) {
+        lists.set(start, kids.length);
+        const firstStart = kids[0]?.position?.start.offset;
+        if (firstStart != null) firstItemToList.set(firstStart, start);
+      }
+    } else if (node.type === "listItem") {
+      const blocks = (node.children ?? []).length;
+      const start = node.position?.start.offset;
+      if (blocks >= 2 && start != null) items.add(start);
+    }
+    for (const c of (node.children ?? []) as typeof node[]) visit(c);
+  };
+  visit(root as unknown as Parameters<typeof visit>[0]);
+  return { lists, firstItemToList, items, all: [...lists.keys(), ...items] };
 }
 
 // GitHub-ish slug: lowercase, drop punctuation, whitespace/underscores -> "-".
@@ -93,7 +129,7 @@ export function parseMdSections(text: string): MdDoc {
 
   const pre =
     firstHeadingStart > 0 ? text.slice(0, firstHeadingStart) : firstHeadingStart < 0 ? text : "";
-  return { tree, preamble: pre.trim() ? pre : "", byId };
+  return { tree, preamble: pre.trim() ? pre : "", byId, folds: computeListFolds(root) };
 }
 
 // A section's own body (its subsections render separately, nested below it).

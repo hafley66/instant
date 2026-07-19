@@ -127,9 +127,37 @@ export function expandIds(path: string, ids: string[]): void {
   sig.$(next);
 }
 
+// Per-path list/item fold state (VSCode-style, offsets from MdDoc.folds as
+// keys). Default is empty: lists start unfolded even under startFolded (which
+// collapses sections only); "fold all" folds these too.
+type NumSetSignal = { $: Signal$<Set<number>> };
+const blockFoldSignals = new Map<string, NumSetSignal>();
+
+export function blockFoldsFor(path: string): NumSetSignal {
+  let sig = blockFoldSignals.get(path);
+  if (!sig) {
+    sig = Signal<Set<number>>(new Set<number>());
+    blockFoldSignals.set(path, sig);
+  }
+  return sig;
+}
+
+export function toggleBlockFold(path: string, offset: number): void {
+  const sig = blockFoldsFor(path);
+  const next = new Set(sig.$());
+  if (next.has(offset)) next.delete(offset);
+  else next.add(offset);
+  sig.$(next);
+}
+
 export function setAllCollapsed(path: string, collapsed: boolean): void {
   readyInited.add(path); // an explicit user gesture, not the auto-default
   collapsedFor(path).$(collapsed ? defaultCollapsedAll(path) : new Set());
+  // fold all also folds every list / long item; unfold all clears both kinds.
+  const state = mdDocs.$()[path];
+  blockFoldsFor(path).$(
+    collapsed && state?.status === "ready" ? new Set(state.doc.folds.all) : new Set(),
+  );
 }
 
 function defaultCollapsedAll(path: string): Set<string> {
@@ -139,6 +167,7 @@ function defaultCollapsedAll(path: string): Set<string> {
 
 export function closeMdDoc(path: string): void {
   collapsedSignals.delete(path);
+  blockFoldSignals.delete(path);
   readyInited.delete(path);
   const next = { ...mdDocs.$() };
   delete next[path];

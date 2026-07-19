@@ -2,7 +2,7 @@
 // canonical TreeTable) | rendered sections, split with react-resizable-panels
 // (AGENTS "Split panes"). All state lives in the signals module; signal reads
 // happen here at the top (SignalReact tracks them) and flow down as props.
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Children, createContext, useContext, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SignalReact } from "@hafley66/signals/react";
@@ -12,8 +12,9 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { invoke } from "../generated/native";
 import { useApp } from "../useStore";
 import { baseName } from "../core";
-import { expandChain, resolveMdLink, sliceOwn, type MdSection } from "./model";
+import { expandChain, resolveMdLink, sliceOwn, type ListFolds, type MdSection } from "./model";
 import {
+  blockFoldsFor,
   collapsedFor,
   expandIds,
   initCollapsedForReadyDoc,
@@ -24,6 +25,7 @@ import {
   setAllCollapsed,
   setLayoutFor,
   setMdUi,
+  toggleBlockFold,
   toggleCollapsed,
   toggleExplorer,
   type StrSignal,
@@ -102,6 +104,45 @@ function MdImg({ src, alt, base }: { src?: string; alt?: string; base: string })
 
 // ---- sections ----
 
+// Offsets inside a rendered section slice are relative to the slice start;
+// the fold model keys on absolute source offsets, so each section provides
+// its ownStart and the list/item renderers re-base. Sections render their
+// slices UNTRIMMED (leading newlines are harmless markdown) precisely so
+// these offsets stay aligned.
+const SliceBaseContext = createContext(0);
+
+function FoldTwisty({
+  folded,
+  title,
+  onToggle,
+}: {
+  folded: boolean;
+  title: string;
+  onToggle: () => void;
+}) {
+  return (
+    <span
+      className="md-twisty"
+      role="button"
+      tabIndex={0}
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggle();
+        }
+      }}
+    >
+      {folded ? "▸" : "▾"}
+    </span>
+  );
+}
+
 interface SectionProps {
   sec: MdSection;
   text: string;
@@ -112,7 +153,10 @@ interface SectionProps {
 
 function SectionView({ sec, text, collapsed, onToggle, components }: SectionProps) {
   const isCollapsed = collapsed.has(sec.id);
-  const own = isCollapsed ? "" : sliceOwn(text, sec).trim();
+  // Untrimmed for rendering (offset alignment, see SliceBaseContext); the trim
+  // is only the emptiness check.
+  const ownRaw = isCollapsed ? "" : sliceOwn(text, sec);
+  const hasOwn = ownRaw.trim().length > 0;
   return (
     <div className="mdview-sec">
       <div
@@ -134,11 +178,13 @@ function SectionView({ sec, text, collapsed, onToggle, components }: SectionProp
       </div>
       {!isCollapsed && (
         <div className="mdview-body">
-          {own ? (
+          {hasOwn ? (
             <div className="md-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-                {own}
-              </ReactMarkdown>
+              <SliceBaseContext.Provider value={sec.ownStart}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+                  {ownRaw}
+                </ReactMarkdown>
+              </SliceBaseContext.Provider>
             </div>
           ) : null}
           {sec.children.map((c) => (
@@ -182,6 +228,12 @@ export const MdPanel = SignalReact(function MdPanel({
   }, [path, state?.status]);
 
   const doc = state?.status === "ready" ? state.doc : null;
+  const blockFolds = blockFoldsFor(path).$();
+  const folds: ListFolds = useMemo(
+    () =>
+      doc?.folds ?? { lists: new Map(), firstItemToList: new Map(), items: new Set(), all: [] },
+    [doc],
+  );
 
   // Expand the chain to a section, then scroll it into view (the row exists
   // only after the expand re-render, hence the rAF defer).
@@ -239,9 +291,77 @@ export const MdPanel = SignalReact(function MdPanel({
       img({ src, alt }) {
         return <MdImg src={typeof src === "string" ? src : undefined} alt={alt ?? undefined} base={path} />;
       },
+      // VSCode-style list folding: a list collapses to its first item (plus a
+      // "… N more" row); a multi-block item collapses to its first block. The
+      // list's twisty lives at the start of its first item (folds.firstItemToList
+      // is the lookup); item twisties sit on the item itself. Node positions
+      // come from react-markdown's hast nodes and are re-based per section
+      // (SliceBaseContext).
+      ul({ node, children, ...rest }) {
+        const abs = (node?.position?.start.offset ?? -1) + useContext(SliceBaseContext);
+        const count = folds.lists.get(abs);
+        if (count == null) return <ul {...rest}>{children}</ul>;
+        const folded = blockFolds.has(abs);
+        const kids = Children.toArray(children);
+        return (
+          <ul {...rest} className={folded ? "md-folded-list" : undefined}>
+            {folded ? kids.slice(0, 1) : kids}
+            {folded ? (
+              <li className="md-fold-more" onClick={() => toggleBlockFold(path, abs)}>
+                … {count - 1} more item{count - 1 === 1 ? "" : "s"}
+              </li>
+            ) : null}
+          </ul>
+        );
+      },
+      ol({ node, children, ...rest }) {
+        const abs = (node?.position?.start.offset ?? -1) + useContext(SliceBaseContext);
+        const count = folds.lists.get(abs);
+        if (count == null) return <ol {...rest}>{children}</ol>;
+        const folded = blockFolds.has(abs);
+        const kids = Children.toArray(children);
+        return (
+          <ol {...rest} className={folded ? "md-folded-list" : undefined}>
+            {folded ? kids.slice(0, 1) : kids}
+            {folded ? (
+              <li className="md-fold-more" onClick={() => toggleBlockFold(path, abs)}>
+                … {count - 1} more item{count - 1 === 1 ? "" : "s"}
+              </li>
+            ) : null}
+          </ol>
+        );
+      },
+      li({ node, children, className, ...rest }) {
+        const abs = (node?.position?.start.offset ?? -1) + useContext(SliceBaseContext);
+        const listStart = folds.firstItemToList.get(abs);
+        const itemFoldable = folds.items.has(abs);
+        if (listStart == null && !itemFoldable) return <li {...rest} className={className}>{children}</li>;
+        const listFolded = listStart != null && blockFolds.has(listStart);
+        const itemFolded = itemFoldable && blockFolds.has(abs);
+        const kids = Children.toArray(children);
+        const cls = [className, itemFolded ? "md-folded-item" : ""].filter(Boolean).join(" ");
+        return (
+          <li {...rest} className={cls || undefined}>
+            {listStart != null ? (
+              <FoldTwisty folded={listFolded} title="fold list" onToggle={() => toggleBlockFold(path, listStart)} />
+            ) : null}
+            {itemFoldable ? (
+              <FoldTwisty folded={itemFolded} title="fold item" onToggle={() => toggleBlockFold(path, abs)} />
+            ) : null}
+            {itemFolded ? (
+              <span className="md-item-folded-body">
+                {kids.slice(0, 1)}
+                <span className="md-item-more">…</span>
+              </span>
+            ) : (
+              kids
+            )}
+          </li>
+        );
+      },
     }),
     // jumpTo is stable enough for the memo's purpose (reads latest via signals).
-    [theme, path, onNavigate],
+    [theme, path, onNavigate, folds, blockFolds],
   );
 
   const layout = layoutFor(pid);
@@ -260,9 +380,11 @@ export const MdPanel = SignalReact(function MdPanel({
       <div className="mdview-content" ref={rootRef}>
         {state.doc.preamble ? (
           <div className="md-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-              {state.doc.preamble}
-            </ReactMarkdown>
+            <SliceBaseContext.Provider value={0}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+                {state.doc.preamble}
+              </ReactMarkdown>
+            </SliceBaseContext.Provider>
           </div>
         ) : null}
         {state.doc.tree.map((s) => (

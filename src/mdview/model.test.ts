@@ -97,6 +97,57 @@ describe("expandChain", () => {
   });
 });
 
+describe("list folds", () => {
+  // NB: "break paragraph" is what splits the two top-level lists — a blank
+  // line alone does NOT end a markdown list.
+  const LIST_DOC = [
+    "# T",
+    "",
+    "- one",
+    "- two",
+    "  - nested-a",
+    "  - nested-b",
+    "- three",
+    "",
+    "break paragraph",
+    "",
+    "- multi block item",
+    "",
+    "  second paragraph",
+    "",
+    "- sibling",
+  ].join("\n");
+  const doc = parseMdSections(LIST_DOC);
+
+  it("marks lists with >=2 items, keyed by absolute offset", () => {
+    expect(doc.folds.lists.get(LIST_DOC.indexOf("- one"))).toBe(3);
+    expect(doc.folds.lists.get(LIST_DOC.indexOf("- multi block item"))).toBe(2);
+    expect([...doc.folds.lists.values()].sort()).toEqual([2, 2, 3]); // incl. the nested list
+  });
+
+  it("maps each list's first item to the list (twisty handle)", () => {
+    expect(doc.folds.firstItemToList.size).toBe(3);
+    for (const listStart of doc.folds.firstItemToList.values()) {
+      expect(doc.folds.lists.has(listStart)).toBe(true);
+    }
+  });
+
+  it("marks multi-block items but not single-block ones", () => {
+    expect(doc.folds.items.has(LIST_DOC.indexOf("- two"))).toBe(true); // text + nested list
+    expect(doc.folds.items.has(LIST_DOC.indexOf("- multi block item"))).toBe(true);
+    expect(doc.folds.items.has(LIST_DOC.indexOf("- sibling"))).toBe(false);
+    expect(doc.folds.items.size).toBe(2);
+  });
+
+  it("collects every foldable offset in `all`", () => {
+    expect(doc.folds.all.length).toBe(5);
+  });
+
+  it("ignores single-item lists", () => {
+    expect(parseMdSections("# A\n\n- just one").folds.lists.size).toBe(0);
+  });
+});
+
 describe("resolveMdLink", () => {
   const cur = "/repo/docs/guide/intro.md";
   it("resolves relative md links against the file's dir", () => {
