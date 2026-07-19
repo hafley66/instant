@@ -21,6 +21,7 @@ import "dockview/dist/styles/dockview.css";
 import { store } from "./state";
 import { dockComponents, getPanel } from "./plugin";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
+import { confirmClose, dropDirtyProbe } from "./dirtyGuard";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -60,7 +61,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
       { label: "Split left", action: () => split("left") },
       { label: "Split up", action: () => split("above") },
       { sep: true },
-      { label: "Close", action: () => api.close() },
+      { label: "Close", action: () => { if (confirmClose(api.id)) api.close(); } },
     ];
     showContextMenu(e.clientX, e.clientY, items);
   };
@@ -114,7 +115,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
-          api.close();
+          if (confirmClose(api.id)) api.close();
         }}
       >
         ✕
@@ -286,6 +287,7 @@ function onReady(e: DockviewReadyEvent) {
     });
     api.onDidRemovePanel((p) => {
       if (lastActivePanelId === p.id) lastActivePanelId = null;
+      dropDirtyProbe(p.id);
       if (isTerm(p.id)) {
         dynamicNodes.delete(p.id);
         hooks.onTermClose(termSid(p.id));
@@ -452,10 +454,11 @@ export function focusPanelById(pid: string) {
 // Close whatever panel is actually focused (dockview's active panel), not a
 // store-tracked guess — cmd+W must close the tab you're looking at. For terminal
 // panels this fires onDidRemovePanel -> onTermClosed (full teardown + closed-tab
-// capture); tool panels (tmux v2, …) just close.
+// capture); tool panels (tmux v2, …) just close. A dirty-guard probe (paint,
+// …) can veto the close.
 export function closeActivePanel() {
   const p = api?.activePanel;
-  if (p) api!.removePanel(p);
+  if (p && confirmClose(p.id)) api!.removePanel(p);
 }
 
 // Terminal tab ids (the sid, i.e. the "s:name") in visual left-to-right order,
@@ -563,7 +566,7 @@ export function togglePanel(id: string) {
   if (!api) return;
   const existing = api.getPanel(id);
   if (existing) {
-    api.removePanel(existing);
+    if (confirmClose(id)) api.removePanel(existing);
     return;
   }
   const ref = anchorPanel();
