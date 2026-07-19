@@ -31,6 +31,7 @@ import {
   type StrSignal,
 } from "./signals";
 import { setPendingFrag, takePendingFrag } from "./open";
+import { resetPanelZoom } from "../panelZoom";
 import { MdExplorer } from "./MdExplorer";
 import { MermaidBlock } from "./Mermaid";
 import "./mdview.css";
@@ -218,6 +219,10 @@ export const MdPanel = SignalReact(function MdPanel({
   const state = mdDocs.$()[path];
   const ui = mdUi.$();
   const collapsed = collapsedFor(path).$();
+  // Per-tab content zoom (generic panelZoom registry; ⌘+/-/0 when active).
+  // Applied to the reading pane only — the explorer is UI chrome, and a CSS
+  // zoom on the PanelGroup would skew its sash pointer math.
+  const zoom = app.panelZoom[pid] ?? 1;
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -377,7 +382,7 @@ export const MdPanel = SignalReact(function MdPanel({
     const text = state.text;
     const onToggle = (id: string) => toggleCollapsed(path, id);
     const content = (
-      <div className="mdview-content" ref={rootRef}>
+      <div className="mdview-content" ref={rootRef} style={{ zoom }}>
         {state.doc.preamble ? (
           <div className="md-body">
             <SliceBaseContext.Provider value={0}>
@@ -471,6 +476,11 @@ export const MdPanel = SignalReact(function MdPanel({
           />
           fold on open
         </label>
+        {zoom !== 1 ? (
+          <button type="button" onClick={() => resetPanelZoom(pid)} title="content zoom — reset (⌘0)">
+            {Math.round(zoom * 100)}%
+          </button>
+        ) : null}
         <span className="spy-spacer" />
         <button type="button" onClick={() => void openPath(path).catch(console.error)} title="open in the OS default app">
           ↗ external

@@ -24,9 +24,17 @@ import {
   focusTermPanel,
   removeTermPanel,
   hasTermPanel,
+  activePanelId,
+  termPanelId,
 } from "./reactdock";
 import { dispatchClick, quotedSpanAt, clickIntent, resolveReference } from "./clickrules";
-import { nudgeZoom, resetZoom } from "./overlay";
+import {
+  registerZoomKind,
+  setZoomTargetResolver,
+  panelZoomGesture,
+  panelZoomResetGesture,
+  zoomFactorFor,
+} from "./panelZoom";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
@@ -240,39 +248,41 @@ export function looksOpenable(tok: string): boolean {
 
 // ---- per-terminal zoom (font size, persisted per tab id) ----
 // The terminal that currently holds keyboard focus. ⌘+/-/0 zoom THAT terminal's
-// font when set; otherwise they fall back to the webview/chrome zoom above. Set
-// on the xterm textarea focus/blur in openTab.
+// font when set; otherwise the active dock panel's kind (md viewer, …) or, with
+// no zoomable target, the chrome zoom. Terminals are one kind in the generic
+// per-tab zoom registry — see src/panelZoom.ts. Set on the xterm textarea
+// focus/blur in openTab.
 let focusedTermId: string | null = null;
 export const getFocusedTermId = () => focusedTermId;
 const TERM_FONT_DEFAULT = 13;
 const TERM_FONT_MIN = 6;
 const TERM_FONT_MAX = 40;
-const termFontSize = (id: string) => store.get().tabZoom[id] ?? TERM_FONT_DEFAULT;
+const termPx = (factor: number) => Math.round(TERM_FONT_DEFAULT * factor);
+const termFontSize = (id: string) => termPx(zoomFactorFor(termPanelId(id)));
 function applyTermFontSize(id: string, px: number) {
   const t = tabs.get(id);
   if (!t) return;
   t.term.options.fontSize = px;
   t.fit.fit(); // reflow cols/rows + tell the pty via onResize
 }
-function setTermFontSize(id: string, px: number) {
-  const clamped = Math.min(TERM_FONT_MAX, Math.max(TERM_FONT_MIN, px));
-  store.set({ tabZoom: { ...store.get().tabZoom, [id]: clamped } });
-  applyTermFontSize(id, clamped);
-}
-// Route a zoom gesture: a focused terminal zooms its own font; else the chrome.
+registerZoomKind({
+  prefix: "term:",
+  min: TERM_FONT_MIN / TERM_FONT_DEFAULT,
+  max: TERM_FONT_MAX / TERM_FONT_DEFAULT,
+  step: 1 / TERM_FONT_DEFAULT, // one gesture tick ≈ 1px, matching the old px zoom
+  onZoom: (pid, factor) => applyTermFontSize(pid.slice("term:".length), termPx(factor)),
+});
+setZoomTargetResolver(() => {
+  if (focusedTermId && tabs.has(focusedTermId)) return termPanelId(focusedTermId);
+  return activePanelId(); // a registered kind zooms it; anything else → chrome
+});
+// Route a zoom gesture through the generic registry (kept names: main.ts's
+// keymap imports these).
 export function zoomGesture(delta: number) {
-  if (focusedTermId && tabs.has(focusedTermId)) {
-    setTermFontSize(focusedTermId, termFontSize(focusedTermId) + (delta > 0 ? 1 : -1));
-  } else {
-    nudgeZoom(delta);
-  }
+  panelZoomGesture(delta);
 }
 export function zoomResetGesture() {
-  if (focusedTermId && tabs.has(focusedTermId)) {
-    setTermFontSize(focusedTermId, TERM_FONT_DEFAULT);
-  } else {
-    resetZoom();
-  }
+  panelZoomResetGesture();
 }
 
 // The word/path token under the pointer, for a ⌘-click miss (no link hit). Uses

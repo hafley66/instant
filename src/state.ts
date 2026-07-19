@@ -230,7 +230,9 @@ export interface AppState {
   scanRoot: string; // worktrees scan path
   sidebarWidth: number; // px
   zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
-  tabZoom: Record<string, number>; // per-terminal font size (px), keyed by tab/session id (persisted)
+  // Per-tab zoom FACTOR, keyed by full dock panel id ("term:<sid>", "md:<path>",
+  // …). Generic successor of tabZoom — see src/panelZoom.ts (persisted).
+  panelZoom: Record<string, number>;
   // Agent sessions killed on tab close (to free RAM); reopen relaunches with
   // --resume <id>. Keyed by CWD — the stable identity for "the agent in this
   // worktree" (a reopen mints a fresh tmux name, so name keys don't recur).
@@ -304,7 +306,7 @@ const PERSIST: (keyof AppState)[] = [
   "scanRoot",
   "sidebarWidth",
   "zoom",
-  "tabZoom",
+  "panelZoom",
   "resumeTabs",
   "wtExpanded",
   "favExpanded",
@@ -374,6 +376,19 @@ function load(): AppState {
     localStorage.setItem("clickRulesV3", "1");
   }
   const pluginState = loadKey<Record<string, unknown>>("pluginState", {});
+  // One-time migration: per-terminal tabZoom (px font size keyed by session
+  // id) folds into the generic panelZoom factor map (keyed by full panel id;
+  // factor = px / the 13px terminal default). See src/panelZoom.ts.
+  if (localStorage.getItem("panelZoomV1") !== "1") {
+    const old = loadKey<Record<string, number>>("tabZoom", {});
+    if (Object.keys(old).length) {
+      const cur = loadKey<Record<string, number>>("panelZoom", {});
+      for (const [sid, px] of Object.entries(old)) cur[`term:${sid}`] = px / 13;
+      localStorage.setItem("panelZoom", JSON.stringify(cur));
+    }
+    localStorage.removeItem("tabZoom");
+    localStorage.setItem("panelZoomV1", "1");
+  }
   // One-time migration: the meme plugin used to persist its UI state (sidebar
   // width, layers panel height) directly under "meme:ui". Seed pluginState.meme
   // from it once; the old key is left in place (no destructive delete).
@@ -424,7 +439,7 @@ function load(): AppState {
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     zoom: loadKey<number>("zoom", 1),
-    tabZoom: loadKey<Record<string, number>>("tabZoom", {}),
+    panelZoom: loadKey<Record<string, number>>("panelZoom", {}),
     resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),
     wtExpanded: loadKey<string[]>("wtExpanded", []),
     favExpanded: loadKey<string[]>("favExpanded", []),

@@ -6,6 +6,7 @@ import { createElement, useCallback, useEffect } from "react";
 import type { IDockviewPanelProps } from "dockview";
 import { registerPlugin } from "../plugin";
 import { registerDockComponent } from "../reactdock";
+import { registerZoomKind } from "../panelZoom";
 import { baseName } from "../core";
 import { MdPanel } from "./MdPanel";
 import { mdUi, pathSignalFor, setMdUi } from "./signals";
@@ -45,4 +46,7 @@ export function registerMdview() {
     ],
   });
   registerDockComponent("mdview-instance", MdInstance);
+  // Per-tab content zoom (⌘+/-/0 while the panel is active). Declarative:
+  // MdPanel reads the factor from store.panelZoom and styles the content.
+  registerZoomKind({ prefix: "md:", min: 0.5, max: 2.5, step: 0.1 });
 }

@@ -132,6 +132,9 @@ const LAYOUT_VERSION = 9; // 9: invalidate layouts from the disposed-group era
 const TERM = "term:";
 const isTerm = (id: string) => id.startsWith(TERM);
 const termSid = (id: string) => id.slice(TERM.length);
+// Full dock panel id for a terminal session id (the zoom target resolver keys
+// on these — see panelZoom.ts).
+export const termPanelId = (sid: string) => TERM + sid;
 const PREVIEW = "preview:";
 const isPreview = (id: string) => id.startsWith(PREVIEW);
 // Markdown viewer panels (`md:<path>`): pure React (params carry the path), no
