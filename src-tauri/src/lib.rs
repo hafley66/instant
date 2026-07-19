@@ -873,6 +873,7 @@ pub fn run() {
             fs::list_dir_meme,
             fs::list_dir_recursive,
             fs::read_image,
+            fs::save_text,
             fs::read_text,
             harness::harness_session,
             harness::harness_sessions,

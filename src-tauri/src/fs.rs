@@ -291,6 +291,19 @@ pub fn read_image(path: String) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{}", base64(&bytes)))
 }
 
+/// Write UTF-8 text to a user-selected path, creating missing parent directories.
+#[tauri::command]
+pub fn save_text(path: String, contents: String) -> Result<(), String> {
+    let resolved = resolve(Some(path));
+    if let Some(parent) = resolved.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+    }
+    std::fs::write(&resolved, contents).map_err(|e| format!("{}: {e}", resolved.display()))
+}
+
 /// Read a UTF-8 text file for the preview pane. Caps size, rejects binary
 /// (any NUL in the first 8 KB) and non-UTF-8 so the webview never gets a blob
 /// it can't render.

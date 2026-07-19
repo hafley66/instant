@@ -64,20 +64,23 @@ export async function loadPaintFile(path: string): Promise<boolean> {
   }
 }
 
-// Flatten and write the painting as PNG to the current path (default:
-// ~/Desktop/paint-<timestamp>.png when nothing was opened/typed yet).
+// Write the painting as SVG when the path ends in .svg, otherwise flatten it
+// to PNG. The default path is ~/Desktop/paint-<timestamp>.png.
 export async function savePaint(): Promise<void> {
   const bridge = activePaintBridge();
-  const dataUrl = bridge?.compositePng();
-  if (!dataUrl) {
-    flashStatus("paint: nothing to save");
-    return;
-  }
   const path =
     paintCurrent.$().trim() ||
     `${getHomeDir() || "/Users"}/Desktop/paint-${formatTimestamp(new Date())}.png`;
+  const isSvg = /\.svg$/i.test(path);
+  const dataUrl = isSvg ? null : bridge?.compositePng();
+  const svg = isSvg ? bridge?.exportSvg() : null;
+  if (!dataUrl && !svg) {
+    flashStatus("paint: nothing to save");
+    return;
+  }
   try {
-    await invoke("save_meme", { path, dataUrl }); // PNG data URL -> disk, ~ ok
+    if (svg) await invoke("save_text", { path, contents: svg });
+    else await invoke("save_meme", { path, dataUrl });
     paintCurrent.$(path);
     paintEdits.$(0);
     record(path);

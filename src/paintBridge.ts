@@ -7,6 +7,7 @@
 // State.do_action (the undo entry point), so the bridge wraps it — open_file*
 // actions are clean points (a fresh load), selection actions don't count,
 // anything else is an unsaved edit.
+import { paintJsonToSvg } from "./0_paintSvg";
 
 interface MiniPaintAction {
   action_id?: string;
@@ -39,6 +40,7 @@ export interface PaintBridge {
   loadDataUrl(dataUrl: string): void;
   // Flatten all layers to a PNG data URL (same recipe as miniPaint's File>Save).
   compositePng(): string | null;
+  exportSvg(): string | null;
   // Session snapshot (miniPaint's quicksave/quickload mechanism): full layers
   // JSON in the shared localStorage slot "quicksave_data". Survives reloads;
   // capped at 5 MB like miniPaint's own F9 quicksave.
@@ -87,6 +89,10 @@ export function installPaintBridge(
       } catch {
         return null;
       }
+    },
+    exportSvg() {
+      const fileSave = w.FileSave;
+      return fileSave ? paintJsonToSvg(fileSave.export_as_json(), this.compositePng()) : null;
     },
     quicksave() {
       try {

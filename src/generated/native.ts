@@ -45,6 +45,7 @@ export type CommandName =
   | "list_dir_recursive"
   | "read_image"
   | "read_text"
+  | "save_text"
   | "harness_session"
   | "harness_sessions"
   | "list_ai_sessions"
@@ -142,6 +143,7 @@ export namespace commands {
     export const listDirRecursive = "list_dir_recursive";
     export const readImage = "read_image";
     export const readText = "read_text";
+    export const saveText = "save_text";
   }
 
   export namespace harness {
