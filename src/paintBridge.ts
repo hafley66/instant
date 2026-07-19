@@ -13,6 +13,8 @@ interface MiniPaintAction {
   action_id?: string;
 }
 
+const SVG_SOURCE_SLOT = "paint_svg_source";
+
 // The miniPaint globals, typed structurally (the vendored app ships no types).
 interface MiniPaintWindow {
   Layers?: {
@@ -38,9 +40,12 @@ interface MiniPaintWindow {
 export interface PaintBridge {
   // Open an image data URL as a new document (replaces the canvas contents).
   loadDataUrl(dataUrl: string): void;
+  // Open SVG through miniPaint while retaining the original XML for SVG export.
+  loadSvgText(svg: string): void;
   // Flatten all layers to a PNG data URL (same recipe as miniPaint's File>Save).
   compositePng(): string | null;
   exportSvg(): string | null;
+  clearSvgSource(): void;
   // Session snapshot (miniPaint's quicksave/quickload mechanism): full layers
   // JSON in the shared localStorage slot "quicksave_data". Survives reloads;
   // capped at 5 MB like miniPaint's own F9 quicksave.
@@ -65,17 +70,29 @@ export function installPaintBridge(
   const { Layers, AppConfig, State, FileOpen } = w as Required<MiniPaintWindow>;
 
   const origDoAction = State.do_action.bind(State);
+  let svgSource = localStorage.getItem(SVG_SOURCE_SLOT);
   State.do_action = (action: MiniPaintAction, ...rest: unknown[]) => {
     const id = String(action?.action_id ?? "");
     const result = origDoAction(action, ...rest);
-    if (id.startsWith("open_file") || id.startsWith("quickload")) hooks.onClean();
-    else if (!/select|selection/i.test(id)) hooks.onEdit();
+    if (id.startsWith("open_file") || id.startsWith("open_image") || id.startsWith("quickload")) hooks.onClean();
+    else if (!/select|selection/i.test(id)) {
+      svgSource = null;
+      localStorage.removeItem(SVG_SOURCE_SLOT);
+      hooks.onEdit();
+    }
     return result;
   };
 
   return {
     loadDataUrl(dataUrl) {
+      svgSource = null;
+      localStorage.removeItem(SVG_SOURCE_SLOT);
       FileOpen.file_open_data_url_handler(dataUrl);
+    },
+    loadSvgText(svg) {
+      svgSource = svg;
+      localStorage.setItem(SVG_SOURCE_SLOT, svg);
+      FileOpen.file_open_data_url_handler(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
     },
     compositePng() {
       try {
@@ -92,7 +109,12 @@ export function installPaintBridge(
     },
     exportSvg() {
       const fileSave = w.FileSave;
+      if (svgSource) return svgSource;
       return fileSave ? paintJsonToSvg(fileSave.export_as_json(), this.compositePng()) : null;
+    },
+    clearSvgSource() {
+      svgSource = null;
+      localStorage.removeItem(SVG_SOURCE_SLOT);
     },
     quicksave() {
       try {
@@ -117,6 +139,8 @@ export function installPaintBridge(
     },
     clearQuicksave() {
       localStorage.removeItem("quicksave_data");
+      localStorage.removeItem(SVG_SOURCE_SLOT);
+      svgSource = null;
     },
     destroy() {
       State.do_action = origDoAction;

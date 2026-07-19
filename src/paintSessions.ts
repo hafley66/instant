@@ -51,8 +51,13 @@ export async function loadPaintFile(path: string): Promise<boolean> {
   const bridge = activePaintBridge();
   if (!bridge) return false;
   try {
-    const dataUrl = await invoke<string>("read_image", { path });
-    bridge.loadDataUrl(dataUrl); // fires onClean via the open_file action
+    if (/\.svg$/i.test(path)) {
+      const svg = await invoke<string>("read_text", { path });
+      bridge.loadSvgText(svg);
+    } else {
+      const dataUrl = await invoke<string>("read_image", { path });
+      bridge.loadDataUrl(dataUrl);
+    }
     paintCurrent.$(path);
     paintEdits.$(0);
     record(path);
@@ -80,7 +85,10 @@ export async function savePaint(): Promise<void> {
   }
   try {
     if (svg) await invoke("save_text", { path, contents: svg });
-    else await invoke("save_meme", { path, dataUrl });
+    else {
+      await invoke("save_meme", { path, dataUrl });
+      bridge?.clearSvgSource();
+    }
     paintCurrent.$(path);
     paintEdits.$(0);
     record(path);
