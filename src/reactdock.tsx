@@ -5,7 +5,7 @@
 // Layout persists with a version stamp. Terminal panels are recreated fresh
 // on reload from openTabs.
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type ComponentType, type MouseEvent } from "react";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -134,9 +134,20 @@ const isTerm = (id: string) => id.startsWith(TERM);
 const termSid = (id: string) => id.slice(TERM.length);
 const PREVIEW = "preview:";
 const isPreview = (id: string) => id.startsWith(PREVIEW);
+// Markdown viewer panels (`md:<path>`): pure React (params carry the path), no
+// adopted content node — but treated as dynamic for layout-restore purposes.
+const MD = "md:";
+const isMd = (id: string) => id.startsWith(MD);
 // Both terminals and previews adopt a content node owned by JS (not in the dock
 // JSON), keyed by full panel id.
 const dynamicNodes = new Map<string, HTMLElement>();
+
+// Extra dock components registered by plugins at boot (before mountReactDock),
+// e.g. mdview's "mdview-instance". Keeps reactdock free of plugin imports.
+const extraComponents: Record<string, ComponentType<IDockviewPanelProps>> = {};
+export function registerDockComponent(name: string, comp: ComponentType<IDockviewPanelProps>) {
+  extraComponents[name] = comp;
+}
 
 let api: DockviewApi | null = null;
 let saving = false;
@@ -227,10 +238,12 @@ function buildDefault() {
 }
 
 // Terminals and previews don't survive a reload (their content nodes live in
-// JS, not the dock JSON), so drop any husks restored from the saved layout.
+// JS, not the dock JSON), so drop any husks restored from the saved layout. Md
+// viewer panels could re-read their file, but are stripped too so a stale path
+// in an old layout can never wedge a restore (same treatment as previews).
 function stripDynamicHusks() {
   if (!api) return;
-  for (const p of [...api.panels]) if (isTerm(p.id) || isPreview(p.id)) api.removePanel(p);
+  for (const p of [...api.panels]) if (isTerm(p.id) || isPreview(p.id) || isMd(p.id)) api.removePanel(p);
 }
 
 function onReady(e: DockviewReadyEvent) {
@@ -509,6 +522,37 @@ export function closePreviewPanel(path: string) {
   if (p) api!.removePanel(p);
 }
 
+// Open (or focus) the markdown viewer tab for `path`. Same placement logic as
+// addPreviewPanel: stack into the existing md group when one is open, else
+// split right of the anchor. The component ("mdview-instance") is registered
+// by the mdview plugin via registerDockComponent at boot.
+export function addMdPanel(path: string, title: string) {
+  if (!api) return;
+  const pid = MD + path;
+  const existing = api.getPanel(pid);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  const openMd = api.panels.find((p) => isMd(p.id));
+  let position:
+    | { referencePanel: string; direction: "within" | "right" }
+    | undefined;
+  if (openMd) {
+    position = { referencePanel: openMd.id, direction: "within" };
+  } else {
+    const anchor = anchorPanel();
+    if (anchor) position = { referencePanel: anchor, direction: "right" };
+  }
+  api.addPanel({
+    id: pid,
+    component: "mdview-instance",
+    params: { panelId: pid, path },
+    title: withOverride(pid, title),
+    ...(position ? { position } : {}),
+  });
+}
+
 export function togglePanel(id: string) {
   if (!api) return;
   const existing = api.getPanel(id);
@@ -542,7 +586,7 @@ export function onDockChange(fn: () => void) {
 function DockApp() {
   const comps = dockComponents();
   return createElement(DockviewReact, {
-    components: { ...comps, terminal: TerminalPanel, "preview-instance": PreviewPanel },
+    components: { ...comps, ...extraComponents, terminal: TerminalPanel, "preview-instance": PreviewPanel },
     defaultTabComponent: CustomTab,
     theme: themeLight,
     onReady,

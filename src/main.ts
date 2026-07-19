@@ -20,6 +20,8 @@ import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMeme } from "./meme";
+import { registerMdview } from "./mdview";
+import { registerPaint } from "./paintPanel";
 import { isFilePickerOpen } from "./overlayGuard";
 import { installKeymap, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
@@ -211,6 +213,8 @@ async function main() {
   // registerSprefa();
   registerNav();
   registerMeme();
+  registerMdview(); // md panels open via routing (preview/clickrules), no rail button
+  registerPaint();
   registerV2Bridges();
   registerActivityBridge();
   refreshFavorites();

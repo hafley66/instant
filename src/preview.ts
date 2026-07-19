@@ -9,6 +9,7 @@ import { codeToHtml } from "shiki";
 import { store } from "./state";
 import { addPreviewPanel, isPreviewOpen, activatePreviewPanel } from "./reactdock";
 import { baseName, escapeHtml, tildify, IMAGE_EXTS, MD_EXTS, SHIKI_LANG } from "./core";
+import { openMarkdownPanel } from "./mdview/open";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -28,12 +29,20 @@ export const previewOrigin = new Map<string, string>();
 
 // Open (or focus) the preview tab for `path`. A `line` (>0) selects the
 // line-numbered source view scrolled to that row; otherwise the rendered view
-// (image / markdown / syntax-highlighted code).
+// (image / syntax-highlighted code). Markdown files route to the dedicated
+// mdview panel (foldable GFM viewer) instead — every caller of this function
+// gets that routing for free.
 export function openPreviewPanel(
   path: string,
   line?: number,
   direction: "within" | "right" = "within",
 ) {
+  const name = path.split("/").pop() ?? path;
+  const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
+  if (!line && MD_EXTS.has(ext)) {
+    openMarkdownPanel(path);
+    return;
+  }
   let inst = previewInsts.get(path);
   if (!inst) {
     const el = document.createElement("div");

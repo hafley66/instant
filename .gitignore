@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Vendored third-party apps (rebuilt by scripts/vendor-*.sh)
+/public/vendor/
+
 # vscode-ext build output + packaged extension
 vscode-ext/out
 *.vsix

@@ -5,8 +5,9 @@
 import { invoke } from "./generated/native";
 import { store, DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
-import { escapeHtml, shQuote } from "./core";
+import { escapeHtml, shQuote, MD_EXTS } from "./core";
 import { openPreviewPanel, previewOrigin } from "./preview";
+import { openMarkdownPanel } from "./mdview/open";
 import { getFocusedTermId, tabMetaById } from "./terminal";
 
 const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
@@ -40,6 +41,19 @@ export function resolveReference(rawToken: string, cwd: string): { path: string;
 export async function dispatchClick(rawToken: string, cwd: string) {
   const token = rawToken.trim();
   if (!token) return;
+  // Markdown paths route to the mdview panel instead of the shell rule — the
+  // default catch-all would otherwise `code -g` them (shelling out to the OS
+  // editor is exactly what the viewer replaces).
+  const ref = resolveReference(token, cwd);
+  if (ref) {
+    const name = ref.path.split("/").pop() ?? ref.path;
+    const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
+    if (MD_EXTS.has(ext)) {
+      if (ref.line) openPreviewPanel(ref.path, ref.line);
+      else openMarkdownPanel(ref.path);
+      return;
+    }
+  }
   const rule = clickRuleFor(token);
   if (!rule) return;
   const command = rule.command.replace(/\$1/g, () => shQuote(token));
