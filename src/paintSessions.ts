@@ -29,6 +29,11 @@ export const paintSession = Signal<PaintSession>({
 export const paintCurrent = Signal("");
 export const paintEdits = Signal(0);
 
+export function discardPaintSession(): void {
+  activePaintBridge()?.clearQuicksave();
+  paintEdits.$(0);
+}
+
 // MRU insert: dedup + most-recent-first + cap. Pure, unit-tested.
 export function mruPush(list: string[], path: string, cap: number = RECENT_CAP): string[] {
   return [path, ...list.filter((p) => p !== path)].slice(0, cap);
@@ -76,6 +81,7 @@ export async function savePaint(): Promise<void> {
     paintCurrent.$(path);
     paintEdits.$(0);
     record(path);
+    bridge?.quicksave();
     flashStatus(`paint: saved ${baseName(path)}`);
   } catch (e) {
     flashStatus(`paint: ${String(e)}`);

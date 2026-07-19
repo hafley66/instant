@@ -30,6 +30,7 @@ export interface PanelDef {
   // renders through `component` now.
   html?: string;
   component: ComponentType<IDockviewPanelProps>;
+  keepAlive?: boolean;
   onShow?: () => void;
   railChildren?: () => Promise<RailChild[]>; // child rows under the rail button (rail.ts refreshChildren)
 }

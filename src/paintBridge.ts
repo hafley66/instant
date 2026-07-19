@@ -27,6 +27,10 @@ interface MiniPaintWindow {
   };
   FileOpen?: {
     file_open_data_url_handler(data: string): void;
+    load_json(data: string): Promise<unknown>;
+  };
+  FileSave?: {
+    export_as_json(): string;
   };
 }
 
@@ -35,6 +39,13 @@ export interface PaintBridge {
   loadDataUrl(dataUrl: string): void;
   // Flatten all layers to a PNG data URL (same recipe as miniPaint's File>Save).
   compositePng(): string | null;
+  // Session snapshot (miniPaint's quicksave/quickload mechanism): full layers
+  // JSON in the shared localStorage slot "quicksave_data". Survives reloads;
+  // capped at 5 MB like miniPaint's own F9 quicksave.
+  quicksave(): boolean;
+  quickload(): boolean;
+  hasQuicksave(): boolean;
+  clearQuicksave(): void;
   destroy(): void;
 }
 
@@ -76,6 +87,30 @@ export function installPaintBridge(
       } catch {
         return null;
       }
+    },
+    quicksave() {
+      try {
+        const fileSave = w.FileSave;
+        if (!fileSave) return false;
+        const data = fileSave.export_as_json();
+        if (data.length > 5_000_000) return false;
+        localStorage.setItem("quicksave_data", data);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    quickload() {
+      const data = localStorage.getItem("quicksave_data");
+      if (!data) return false;
+      void FileOpen.load_json(data);
+      return true;
+    },
+    hasQuicksave() {
+      return !!localStorage.getItem("quicksave_data");
+    },
+    clearQuicksave() {
+      localStorage.removeItem("quicksave_data");
     },
     destroy() {
       State.do_action = origDoAction;

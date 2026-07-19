@@ -22,6 +22,7 @@ import { store } from "./state";
 import { dockComponents, getPanel } from "./plugin";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dropDirtyProbe } from "./dirtyGuard";
+import { discardPaintSession } from "./paintSessions";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -288,6 +289,7 @@ function onReady(e: DockviewReadyEvent) {
     api.onDidRemovePanel((p) => {
       if (lastActivePanelId === p.id) lastActivePanelId = null;
       dropDirtyProbe(p.id);
+      if (p.id === "paint") discardPaintSession();
       if (isTerm(p.id)) {
         dynamicNodes.delete(p.id);
         hooks.onTermClose(termSid(p.id));
@@ -579,6 +581,7 @@ export function togglePanel(id: string) {
     component: id,
     params: { panelId: id },
     title: withOverride(id, def?.title ?? id),
+    ...(def?.keepAlive ? { renderer: "always" as const } : {}),
     ...(position ? { position } : {}),
   });
 }

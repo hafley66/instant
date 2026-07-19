@@ -30,6 +30,15 @@ const PANEL_ID = "paint";
 // A file asked for while the panel/iframe wasn't up yet — consumed once the
 // bridge installs (see the iframe load handler).
 let pendingOpen: string | null = null;
+let quicksaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleQuicksave(): void {
+  if (quicksaveTimer) clearTimeout(quicksaveTimer);
+  quicksaveTimer = setTimeout(() => {
+    quicksaveTimer = null;
+    activePaintBridge()?.quicksave();
+  }, 1_500);
+}
 
 // Open a file in the Paint panel from anywhere (rail children, future links):
 // raise the panel, then load — now if the bridge is live, else on iframe load
@@ -54,36 +63,34 @@ const PaintPanel = SignalReact(function PaintPanel() {
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
+    let bridgeForPanel: ReturnType<typeof installPaintBridge> = null;
     const onLoad = () => {
       const bridge = installPaintBridge(iframe, {
-        onEdit: () => paintEdits.$(paintEdits.$() + 1),
+        onEdit: () => {
+          paintEdits.$(paintEdits.$() + 1);
+          scheduleQuicksave();
+        },
         onClean: () => paintEdits.$(0),
       });
+      bridgeForPanel = bridge;
       setActivePaintBridge(bridge);
       // Session resume: an explicit request wins, else the last-opened file.
-      const target = pendingOpen ?? paintSession.$().lastPath;
+      const explicitTarget = pendingOpen;
+      const target = explicitTarget ?? paintSession.$().lastPath;
       pendingOpen = null;
-      if (target) void loadPaintFile(target);
+      if (explicitTarget) void loadPaintFile(explicitTarget);
+      else if (bridge?.hasQuicksave()) bridge.quickload();
+      else if (target) void loadPaintFile(target);
     };
     iframe.addEventListener("load", onLoad);
     return () => {
       iframe.removeEventListener("load", onLoad);
+      if (quicksaveTimer) clearTimeout(quicksaveTimer);
+      if (paintEdits.$() > 0) bridgeForPanel?.quicksave();
+      bridgeForPanel?.destroy();
       setActivePaintBridge(null);
     };
   }, []);
-
-  // The tab wrapper's dirty guard (close ✕ / ⌘W / rail toggle consults it).
-  useEffect(
-    () =>
-      setDirtyProbe(
-        PANEL_ID,
-        () =>
-          paintEdits.$() > 0
-            ? `“${baseName(paintCurrent.$()) || "untitled painting"}” has unsaved changes.`
-            : null,
-      ),
-    [],
-  );
 
   return (
     <div className="v2-panel paint-root">
@@ -157,6 +164,7 @@ export function registerPaint() {
         icon: "🎨",
         iconLabel: "Paint",
         component: PaintPanel,
+        keepAlive: true,
         // The paint "session history": recent files under the rail button.
         railChildren: async (): Promise<RailChild[]> =>
           paintSession.$().recent.map((p) => ({
@@ -168,4 +176,11 @@ export function registerPaint() {
       },
     ],
   });
+  setDirtyProbe(
+    PANEL_ID,
+    () =>
+      paintEdits.$() > 0
+        ? `“${baseName(paintCurrent.$()) || "untitled painting"}” has unsaved changes.`
+        : null,
+  );
 }
