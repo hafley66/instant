@@ -206,7 +206,9 @@ async function main() {
   applyZoom(); // restore persisted webview zoom
   registerBuiltin();
   registerRulesPlugin();
-  registerSprefa();
+  // sprefa integration disabled for now (2026-07-18); see status.tsx note.
+  void registerSprefa;
+  // registerSprefa();
   registerNav();
   registerMeme();
   registerV2Bridges();

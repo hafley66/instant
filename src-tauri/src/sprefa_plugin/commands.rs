@@ -43,56 +43,45 @@ fn socket_path(root: &str) -> PathBuf {
     expand(root).join(".dl").join("daemon.sock")
 }
 
-/// Write one Content-Length-framed message.
-fn write_frame(stream: &mut UnixStream, body: &str) -> Result<(), String> {
-    write!(stream, "Content-Length: {}\r\n\r\n{}", body.len(), body).map_err(|e| e.to_string())?;
-    stream.flush().map_err(|e| e.to_string())
-}
+/// One `POST /rpc` HTTP/1.1 round-trip over the daemon socket. The daemon
+/// serves plain HTTP on the UDS as of the axum arc (the old Content-Length
+/// framed wire is gone); `Connection: close` lets us read the response to
+/// EOF and split the body off after the header terminator — the same shape
+/// as sprefa's own `tests/it/util.rs::uds_rpc`.
+fn http_rpc(stream: &mut UnixStream, body: &str) -> Result<String, String> {
+    write!(
+        stream,
+        "POST /rpc HTTP/1.1\r\nHost: dl-daemon\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .map_err(|e| e.to_string())?;
+    stream.flush().map_err(|e| e.to_string())?;
 
-/// Read one Content-Length-framed message body.
-fn read_frame(stream: &mut UnixStream) -> Result<String, String> {
-    let mut content_length: Option<usize> = None;
-    let mut line = Vec::<u8>::new();
-    loop {
-        line.clear();
-        let mut byte = [0u8; 1];
-        loop {
-            let n = stream.read(&mut byte).map_err(|e| e.to_string())?;
-            if n == 0 {
-                if content_length.is_some() || !line.is_empty() {
-                    return Err("unexpected EOF mid-frame".into());
-                }
-                return Err("daemon closed connection".into());
-            }
-            line.push(byte[0]);
-            if byte[0] == b'\n' {
-                break;
-            }
-        }
-        let trimmed: &[u8] = {
-            let mut end = line.len();
-            while end > 0 && (line[end - 1] == b'\n' || line[end - 1] == b'\r') {
-                end -= 1;
-            }
-            &line[..end]
-        };
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some(rest) = trimmed.strip_prefix(b"Content-Length:") {
-            let s = std::str::from_utf8(rest).map_err(|e| e.to_string())?.trim();
-            content_length = Some(s.parse().map_err(|_| "bad Content-Length".to_string())?);
-        }
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).map_err(|e| e.to_string())?;
+    if raw.is_empty() {
+        return Err("daemon closed connection".into());
     }
-    let len = content_length.ok_or("missing Content-Length header")?;
-    let mut body = vec![0u8; len];
-    stream.read_exact(&mut body).map_err(|e| e.to_string())?;
-    String::from_utf8(body).map_err(|e| e.to_string())
+    let text = String::from_utf8(raw).map_err(|e| e.to_string())?;
+    let header_end = text
+        .find("\r\n\r\n")
+        .ok_or("malformed HTTP response from daemon")?;
+    Ok(text[header_end + 4..].to_string())
 }
 
 /// One request/response round-trip against the daemon. Returns the `result`
 /// value, or a string carrying the connection or JSON-RPC error.
 fn rpc(root: &str, method: &str, params: Value) -> Result<Value, String> {
+    rpc_with_timeout(root, method, params, Duration::from_secs(10))
+}
+
+fn rpc_with_timeout(
+    root: &str,
+    method: &str,
+    params: Value,
+    read_timeout: Duration,
+) -> Result<Value, String> {
     let sock = socket_path(root);
     let mut stream = UnixStream::connect(&sock).map_err(|e| {
         format!(
@@ -101,13 +90,11 @@ fn rpc(root: &str, method: &str, params: Value) -> Result<Value, String> {
         )
     })?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|e| e.to_string())?;
 
     let req = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    write_frame(&mut stream, &serde_json::to_string(&req).map_err(|e| e.to_string())?)?;
-
-    let body = read_frame(&mut stream)?;
+    let body = http_rpc(&mut stream, &serde_json::to_string(&req).map_err(|e| e.to_string())?)?;
     let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     if let Some(err) = v.get("error") {
         let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("rpc error");
@@ -118,30 +105,49 @@ fn rpc(root: &str, method: &str, params: Value) -> Result<Value, String> {
         .ok_or_else(|| "response missing result".to_string())
 }
 
+/// Run blocking work (socket rpc, fs scans) off the main thread. A sync
+/// `#[tauri::command]` executes ON the main thread; a daemon that answers
+/// slowly (engine lock held for a whole tick) would freeze the app for the
+/// full read timeout, every poll. Every command below is async and hops
+/// through here so the main thread never touches the socket.
+async fn run_blocking<T: Send + 'static>(
+    job: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(job)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// `{relations: [{name, columns: [{name, ty}], builtin?}]}`.
 #[tauri::command]
-pub fn sprefa_schema(root: String) -> Result<Value, String> {
-    rpc(&root, "schema", json!({}))
+pub async fn sprefa_schema(root: String) -> Result<Value, String> {
+    run_blocking(move || rpc(&root, "schema", json!({}))).await
 }
 
 /// Daemon liveness + loaded program: `{ok, root, tick_count, program}`.
+/// Tight 1s timeout: the daemon's ping handler is lock-free, so a slow answer
+/// means the daemon is wedged and the status row should say so quickly.
 #[tauri::command]
-pub fn sprefa_ping(root: String) -> Result<Value, String> {
-    rpc(&root, "ping", json!({}))
+pub async fn sprefa_ping(root: String) -> Result<Value, String> {
+    run_blocking(move || rpc_with_timeout(&root, "ping", json!({}), Duration::from_secs(1))).await
 }
 
 /// Evaluate a scratch `.dl` snippet against a throwaway engine (runtime-only
 /// relations; nothing persists). Returns `{ok, results: [{rel, columns, rows}],
 /// diagnostics: [...]}`.
 #[tauri::command]
-pub fn sprefa_eval(root: String, text: String) -> Result<Value, String> {
-    rpc(&root, "eval", json!({ "text": text }))
+pub async fn sprefa_eval(root: String, text: String) -> Result<Value, String> {
+    run_blocking(move || rpc(&root, "eval", json!({ "text": text }))).await
 }
 
 /// Raw parameterized SQL: `{rows: [[Value]]}`.
 #[tauri::command]
-pub fn sprefa_query_sql(root: String, sql: String, params: Vec<Value>) -> Result<Value, String> {
-    rpc(&root, "query_sql", json!({"sql": sql, "params": params}))
+pub async fn sprefa_query_sql(
+    root: String,
+    sql: String,
+    params: Vec<Value>,
+) -> Result<Value, String> {
+    run_blocking(move || rpc(&root, "query_sql", json!({"sql": sql, "params": params}))).await
 }
 
 /// One source site for a relation: a `.dl` declaration / rule head, or a Rust
@@ -188,8 +194,12 @@ fn collect(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>, budget: &mut usize
 /// for `"<name>"` literals (builtin relations are emitted from Rust). Returns
 /// up to 60 sites, decls and rule heads first.
 #[tauri::command]
-pub fn sprefa_rel_source(root: String, rel: String) -> Result<Vec<RelSite>, String> {
-    let base = expand(&root);
+pub async fn sprefa_rel_source(root: String, rel: String) -> Result<Vec<RelSite>, String> {
+    run_blocking(move || rel_source_blocking(&root, &rel)).await
+}
+
+fn rel_source_blocking(root: &str, rel: &str) -> Result<Vec<RelSite>, String> {
+    let base = expand(root);
     let mut sites: Vec<RelSite> = Vec::new();
 
     let mut dl_files = Vec::new();

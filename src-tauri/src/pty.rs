@@ -118,8 +118,18 @@ fn tmux_cmd() -> std::process::Command {
     c
 }
 
+// The poll-loop commands below are async + spawn_blocking: they shell out
+// (tmux/ps/lsof), and a sync `#[tauri::command]` runs on the main thread —
+// per-poll subprocess spawns there beachball the app whenever the system is
+// loaded and spawn latency climbs.
 #[tauri::command]
-pub fn list_sessions() -> Vec<Session> {
+pub async fn list_sessions() -> Vec<Session> {
+    tauri::async_runtime::spawn_blocking(list_sessions_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+fn list_sessions_blocking() -> Vec<Session> {
     let out = tmux_cmd()
         .args([
             "list-sessions",
@@ -610,7 +620,13 @@ fn process_cwd(pid: i32) -> Option<String> {
 /// any tmux session. Lets the frontend surface "you're running an agent off
 /// the grid" and offer to adopt its cwd into a tracked tmux worktree session.
 #[tauri::command]
-pub fn rogue_agent_sessions() -> Vec<RogueSession> {
+pub async fn rogue_agent_sessions() -> Vec<RogueSession> {
+    tauri::async_runtime::spawn_blocking(rogue_agent_sessions_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+fn rogue_agent_sessions_blocking() -> Vec<RogueSession> {
     let known_ttys = tmux_ttys();
     let Ok(out) = std::process::Command::new("ps")
         .args(["-axo", "pid=,tty=,args="])

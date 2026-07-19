@@ -589,14 +589,20 @@ pub fn cdp_navigate(store: State<CdpStore>, id: String, url: String) -> Result<(
 /// session, or something is already answering the DevTools port. The engine is
 /// spawned lazily on first cdp_open, so `false` means "idle", not "broken".
 #[tauri::command]
-pub fn cdp_status(app: AppHandle) -> bool {
-    {
-        let eng = app.state::<ChromeEngine>();
-        if eng.0.lock().unwrap().is_some() {
-            return true;
+pub async fn cdp_status(app: AppHandle) -> bool {
+    // Poll-loop command: the engine-mutex peek is cheap, but `http_get` is a
+    // blocking TCP round-trip; both hop off the main thread together.
+    tauri::async_runtime::spawn_blocking(move || {
+        {
+            let eng = app.state::<ChromeEngine>();
+            if eng.0.lock().unwrap().is_some() {
+                return true;
+            }
         }
-    }
-    http_get("/json/version").is_ok()
+        http_get("/json/version").is_ok()
+    })
+    .await
+    .unwrap_or(false)
 }
 
 #[tauri::command]

@@ -144,7 +144,11 @@ export function registerBuiltinStatus() {
   if (builtinDone) return;
   builtinDone = true;
   registerStatus({ id: "ghcache", label: "ghcache daemon", check: ghcacheProbe });
-  registerStatus({ id: "sprefa", label: "sprefa daemon", check: sprefaProbe });
+  // sprefa integration disabled for now (2026-07-18): no probe, no panel.
+  // Re-enable by restoring this line, registerSprefa() in main.ts, and the
+  // sprefa_* command registrations in src-tauri/src/lib.rs.
+  void sprefaProbe;
+  // registerStatus({ id: "sprefa", label: "sprefa daemon", check: sprefaProbe });
   registerStatus({ id: "tmux", label: "tmux sessions", check: tmuxProbe });
   registerStatus({ id: "cdp", label: "browser engine", check: cdpProbe });
   registerStatus({ id: "rogue", label: "rogue agent shells", check: rogueProbe });

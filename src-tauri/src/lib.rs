@@ -9,6 +9,9 @@ mod kitty;
 mod ledger;
 mod meme;
 mod pty;
+// sprefa integration disabled for now (2026-07-18): commands kept compiling
+// but unregistered; re-enable by restoring the invoke_handler entries below.
+#[allow(dead_code)]
 mod sprefa_plugin;
 mod workspace;
 mod worktrees;
@@ -85,8 +88,22 @@ fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, ki
 /// / Input Monitoring permission, same as the hotkey.
 fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        // This thread services a HID-level event tap: at default QoS a loaded
+        // machine schedules it behind other work, and a slow tap callback
+        // delays every keystroke and click systemwide. Pin user-interactive.
+        unsafe {
+            libc::pthread_set_qos_class_self_np(
+                libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE,
+                0,
+            );
+        }
         let g = Mutex::new(Gesture::default());
-        let ta = tap_active.clone();
+        // Supervisor loop: macOS disables a tap whose callback stalls
+        // (TapDisabledByTimeout) or on user action (TapDisabledByUserInput).
+        // core-graphics 0.25 gives the callback no path to the tap's mach port
+        // (CGEventTapEnable is crate-private), so the callback marks the tap
+        // dead and stops its runloop, and this loop re-creates the tap.
+        loop {
         let res = CGEventTap::with_enabled(
             CGEventTapLocation::HID,
             CGEventTapPlacement::HeadInsertEventTap,
@@ -105,6 +122,14 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<At
             |_proxy, ty, event| {
                 let mut g = g.lock().unwrap();
                 match ty {
+                    CGEventType::TapDisabledByTimeout
+                    | CGEventType::TapDisabledByUserInput => {
+                        // Delivered regardless of the event mask. Mark the tap
+                        // dead and stop the runloop; the supervisor loop above
+                        // re-creates the tap.
+                        tap_active.store(false, Ordering::Relaxed);
+                        CFRunLoop::get_current().stop();
+                    }
                     CGEventType::RightMouseDown => {
                         let now = Instant::now();
                         let is_double = g
@@ -193,10 +218,10 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<At
                 }
                 CallbackResult::Keep // passive: pass every event through unchanged
             },
-            move || {
+            || {
                 // Tap created OK; mark it live for the capture diagnostics, then
-                // run its runloop (blocks this thread for the app's lifetime).
-                ta.store(true, Ordering::Relaxed);
+                // run its runloop (blocks this thread until the tap is disabled).
+                tap_active.store(true, Ordering::Relaxed);
                 CFRunLoop::run_current()
             },
         );
@@ -206,7 +231,14 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<At
                 "input taps disabled: event tap creation failed \
                  (grant Accessibility / Input Monitoring permission)"
             );
+            return;
         }
+        if tap_active.load(Ordering::Relaxed) {
+            // Runloop ended without a TapDisabled event; nothing to recover
+            // from, so don't spin re-creating taps.
+            return;
+        }
+        } // loop
     });
 }
 
@@ -855,11 +887,12 @@ pub fn run() {
             favorites::fav_add,
             favorites::fav_remove,
             favorites::fav_list,
-            sprefa_plugin::commands::sprefa_schema,
-            sprefa_plugin::commands::sprefa_ping,
-            sprefa_plugin::commands::sprefa_eval,
-            sprefa_plugin::commands::sprefa_query_sql,
-            sprefa_plugin::commands::sprefa_rel_source,
+            // sprefa_* unregistered while the integration is disabled:
+            // sprefa_plugin::commands::sprefa_schema,
+            // sprefa_plugin::commands::sprefa_ping,
+            // sprefa_plugin::commands::sprefa_eval,
+            // sprefa_plugin::commands::sprefa_query_sql,
+            // sprefa_plugin::commands::sprefa_rel_source,
             screenshot,
             open_target,
             run_click,
