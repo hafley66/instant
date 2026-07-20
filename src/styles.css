@@ -3158,6 +3158,34 @@ body.xp-pixel .xterm canvas {
   flex-wrap: wrap;
   gap: 4px 10px;
 }
+
+.metrics-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  padding: 8px;
+}
+.metrics-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--frame, #0003);
+  background: var(--surface, #fff);
+}
+.metrics-card-label,
+.metrics-card-help {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.metrics-card-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+.metrics-chart {
+  min-height: 220px;
+  padding: 4px 8px;
+}
 .rm-rec {
   font-size: 11px;
   font-family: var(--mono, monospace);

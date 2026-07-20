@@ -40,8 +40,15 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
   "selector": ".usage-row",       // selector mode only
   "regex": "(\\d+)% used",        // capture groups feed `captures`
   "captures": { "1": "percent" }, // group (name or 1-based index) -> field
+  "request": {                     // netcapture request gate
+    "methods": ["GET"],
+    "url": "/api/.*usage"
+  },
+  "response": {                     // JSONata output field -> expression
+    "extract": { "percent": "five_hour.utilization * 100" }
+  },
+  "emit": { "stream": "claude.usage" },
   "schedule": { "intervalMin": 5 }, // or "passive" / omit
-  "action": "report",
   "enabled": true
 }
 ```

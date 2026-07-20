@@ -75,7 +75,7 @@
       },
       "Rule": {
         "type": "object",
-        "required": ["id", "host", "mode", "action"],
+        "required": ["id", "host", "mode"],
         "properties": {
           "id": { "type": "string" },
           "host": { "type": "string" },
@@ -84,13 +84,31 @@
           "selector": { "type": "string" },
           "regex": { "type": "string" },
           "captures": { "type": "object", "additionalProperties": { "type": "string" } },
+          "request": {
+            "type": "object",
+            "properties": {
+              "methods": { "type": "array", "items": { "type": "string" } },
+              "url": { "type": "string" }
+            }
+          },
+          "response": {
+            "type": "object",
+            "properties": { "extract": { "type": "object", "additionalProperties": { "type": "string" } } }
+          },
+          "emit": {
+            "type": "object",
+            "required": ["stream"],
+            "properties": {
+              "stream": { "type": "string" },
+              "schema": { "$ref": "#/components/schemas/JsonSchema" }
+            }
+          },
           "schedule": {
             "oneOf": [
               { "type": "string", "enum": ["passive"] },
               { "type": "object", "required": ["intervalMin"], "properties": { "intervalMin": { "type": "number" } } }
             ]
           },
-          "action": { "type": "string", "enum": ["report"] },
           "enabled": { "type": "boolean" }
         }
       },
@@ -100,6 +118,20 @@
         "properties": {
           "revision": { "type": "integer" },
           "rules": { "type": "array", "items": { "$ref": "#/components/schemas/Rule" } }
+        }
+      },
+      "JsonSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "type": { "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "properties": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/JsonSchema" } },
+          "items": { "$ref": "#/components/schemas/JsonSchema" },
+          "minimum": { "type": "number" },
+          "maximum": { "type": "number" },
+          "format": { "type": "string" }
         }
       },
       "ActivityEvent": {
@@ -120,7 +152,9 @@
           "ruleId": { "type": "string" },
           "url": { "type": "string" },
           "ts": { "type": "integer" },
-          "matches": { "type": "array", "items": { "type": "object", "additionalProperties": { "type": "string" } } }
+          "matches": { "type": "array", "items": { "type": "object", "additionalProperties": {} } },
+          "stream": { "type": "string" },
+          "schema": { "$ref": "#/components/schemas/JsonSchema" }
         }
       },
       "EditorEvent": {

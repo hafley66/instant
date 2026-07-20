@@ -6,7 +6,16 @@
 
 export type RuleMode = "textnodes" | "selector" | "netcapture";
 export type RuleSchedule = { intervalMin: number } | "passive";
-export type RuleAction = "report";
+export interface JsonSchema {
+  type?: string | string[];
+  title?: string;
+  description?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  minimum?: number;
+  maximum?: number;
+  format?: string;
+}
 
 export interface Rule {
   id: string;
@@ -16,8 +25,10 @@ export interface Rule {
   selector?: string;
   regex?: string;
   captures?: Record<string, string>;
+  request?: { methods?: string[]; url?: string };
+  response?: { extract?: Record<string, string> };
+  emit?: { stream: string; schema?: JsonSchema };
   schedule?: RuleSchedule;
-  action: RuleAction;
   enabled?: boolean;
 }
 
@@ -26,13 +37,14 @@ export interface RuleMatch {
   ruleId: string;
   url: string;
   ts: number;
-  matches: Record<string, string>[];
+  matches: Record<string, unknown>[];
+  stream?: string;
+  schema?: JsonSchema;
 }
 
 // Select-column option sets. `as const` so they double as the runtime validator
 // and the TreeColumn select options (readonly string[]).
 export const RULE_MODES = ["textnodes", "selector", "netcapture"] as const;
-export const RULE_ACTIONS = ["report"] as const;
 
 // Cell display (host column, feed). "5m" / "passive" / "".
 export function scheduleLabel(s: Rule["schedule"]): string {
@@ -109,9 +121,6 @@ export function applyCellEdit(rule: Rule, columnId: string, value: string): Fiel
       if (!p.ok) return { ok: false, error: p.error };
       return { ok: true, rule: { ...rule, schedule: p.value } };
     }
-    case "action":
-      if (!has(RULE_ACTIONS, value)) return { ok: false, error: `bad action: ${value}` };
-      return { ok: true, rule: { ...rule, action: value } };
     default:
       return { ok: false, error: `not editable: ${columnId}` };
   }

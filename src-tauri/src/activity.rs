@@ -97,17 +97,18 @@ pub struct Rule {
     pub regex: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub captures: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emit: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub schedule: serde_json::Value, // {intervalMin} | "passive" | null
-    #[serde(default = "default_action")]
-    pub action: String, // "report"
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
 
-fn default_action() -> String {
-    "report".into()
-}
 fn default_true() -> bool {
     true
 }
@@ -159,7 +160,11 @@ pub struct RuleMatch {
     #[serde(default)]
     pub ts: i64,
     #[serde(default)]
-    pub matches: Vec<HashMap<String, String>>,
+    pub matches: Vec<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub stream: Option<String>,
+    #[serde(default)]
+    pub schema: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -359,7 +364,7 @@ pub fn spawn_server(app: AppHandle) {
                                     respond(req, 200, "filtered");
                                     continue;
                                 }
-                                let text = serde_json::to_string(&m.matches).unwrap_or_default();
+                                let text = serde_json::to_string(&m).unwrap_or_default();
                                 let db = app.state::<ActivityDb>();
                                 let row = {
                                     let conn = db.0.lock().unwrap();
@@ -486,8 +491,10 @@ fn collect_matches(db: &ActivityDb) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     let mut out: Vec<serde_json::Value> = Vec::new();
     for (ts, url, rule_id, text) in rows {
-        let matches: Vec<HashMap<String, String>> =
-            serde_json::from_str(&text).unwrap_or_default();
+        let matches: Vec<HashMap<String, serde_json::Value>> = serde_json::from_str::<RuleMatch>(&text)
+            .map(|m| m.matches)
+            .or_else(|_| serde_json::from_str(&text))
+            .unwrap_or_default();
         for m in matches {
             for (field, val) in m {
                 out.push(serde_json::json!({
@@ -630,7 +637,12 @@ pub fn activity_rule_matches(state: State<ActivityDb>, limit: Option<i64>) -> Re
                 rule_id: row.get(0)?,
                 url: row.get(1)?,
                 ts: row.get(2)?,
-                matches: serde_json::from_str(&text).unwrap_or_default(),
+                stream: serde_json::from_str::<RuleMatch>(&text).ok().and_then(|m| m.stream),
+                schema: serde_json::from_str::<RuleMatch>(&text).ok().and_then(|m| m.schema),
+                matches: serde_json::from_str::<RuleMatch>(&text)
+                    .map(|m| m.matches)
+                    .or_else(|_| serde_json::from_str(&text))
+                    .unwrap_or_default(),
             })
         })
         .map_err(|e| e.to_string())?;

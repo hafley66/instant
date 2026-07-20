@@ -9,6 +9,7 @@
 import type { MatchFields, NetCaptureMessage, Rule } from "./0_types";
 import { compile, mapCaptures, ruleMatchesLocation, rulesForHost } from "./1_match";
 import { scanRule } from "./2_scan";
+import { extractResponse } from "./3_extract";
 
 const MAX = 4000;
 
@@ -106,7 +107,14 @@ function reportMatches(rule: Rule, matches: MatchFields[]) {
   });
   if (!fresh.length) return;
   chrome.runtime
-    .sendMessage({ cmd: "rulematch", ruleId: rule.id, url: location.href, matches: fresh })
+    .sendMessage({
+      cmd: "rulematch",
+      ruleId: rule.id,
+      url: location.href,
+      matches: fresh,
+      stream: rule.emit?.stream,
+      schema: rule.emit?.schema,
+    })
     .catch(() => {});
 }
 
@@ -114,10 +122,21 @@ function reportMatches(rule: Rule, matches: MatchFields[]) {
 function publishNetPatterns() {
   const pats = active
     .filter((r) => r.mode === "netcapture")
-    .map((r) => r.url || r.regex)
-    .filter((p): p is string => !!p);
+    .map((r) => ({
+      url: r.request?.url || r.url || r.regex,
+      methods: r.request?.methods?.map((m) => m.toUpperCase()),
+    }))
+    .filter((p) => !!p.url);
   if (pats.length) document.documentElement.setAttribute(NET_ATTR, JSON.stringify(pats));
   else document.documentElement.removeAttribute(NET_ATTR);
+}
+
+function netRuleMatches(rule: Rule, method: string, url: string): boolean {
+  const urlPattern = rule.request?.url || rule.url || rule.regex;
+  const urlRe = compile(urlPattern);
+  if (urlRe && !urlRe.test(url)) return false;
+  const methods = rule.request?.methods;
+  return !methods?.length || methods.some((m) => m.toUpperCase() === method.toUpperCase());
 }
 
 function runPassiveScans() {
@@ -160,9 +179,10 @@ window.addEventListener("message", (event) => {
   if (!d || d.source !== "ext-netcapture") return;
   for (const rule of active) {
     if (rule.mode !== "netcapture") continue;
-    const urlRe = compile(rule.url);
-    if (urlRe && !urlRe.test(d.url)) continue;
-    if (rule.regex) {
+    if (!netRuleMatches(rule, d.method, d.url)) continue;
+    if (rule.response?.extract) {
+      void extractResponse(rule, d.body).then((out) => reportMatches(rule, out));
+    } else if (rule.regex) {
       const re = compile(rule.regex, "g");
       if (!re) continue;
       const text = typeof d.body === "string" ? d.body : JSON.stringify(d.body);

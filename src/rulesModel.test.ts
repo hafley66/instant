@@ -16,7 +16,6 @@ const base: Rule = {
   regex: "(\\d+)",
   captures: { "1": "value" },
   schedule: "passive",
-  action: "report",
   enabled: true,
 };
 
@@ -68,9 +67,6 @@ describe("applyCellEdit", () => {
     expect(mode).toEqual({ ok: true, rule: { ...base, mode: "selector" } });
     expect(applyCellEdit(base, "mode", "nope").ok).toBe(false);
 
-    const action = applyCellEdit(base, "action", "report");
-    expect(action).toEqual({ ok: true, rule: { ...base, action: "report" } });
-    expect(applyCellEdit(base, "action", "bogus").ok).toBe(false);
   });
 
   it("validates host and regex as RegExp", () => {
