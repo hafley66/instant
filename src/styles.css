@@ -445,7 +445,9 @@ body[data-skin] .actbar-item.active {
 /* Like #actbar-panels: dissolve the wrapper so child buttons are direct flex
    children of .actbar and stack vertically under their panel button. */
 .actbar-children {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
 }
 .actbar-child {
   display: block;

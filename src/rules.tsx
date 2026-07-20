@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
 import { registerPlugin, type RailChild } from "./plugin";
+import { isOpen, togglePanel } from "./reactdock";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
 import {
@@ -42,16 +43,24 @@ function watcherLabel(status: WatcherStatus): string {
   return Date.now() - status.last_heartbeat <= WATCHER_STALE_MS ? "extension active" : "extension stale";
 }
 
+function openRuleSection(id: string): void {
+  if (!isOpen("rules")) {
+    togglePanel("rules");
+    window.setTimeout(() => scrollRuleSection(id), 0);
+    return;
+  }
+  scrollRuleSection(id);
+}
+
 function scrollRuleSection(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function rulesRailChildren(): Promise<RailChild[]> {
   return Promise.resolve([
-    { id: "watcher", label: "watcher status", run: () => scrollRuleSection(RULE_SECTION_IDS.watcher) },
-    { id: "table", label: "rule table", run: () => scrollRuleSection(RULE_SECTION_IDS.table) },
-    { id: "selected", label: "selected rule details", run: () => scrollRuleSection(RULE_SECTION_IDS.selected) },
-    { id: "matches", label: "match history", run: () => scrollRuleSection(RULE_SECTION_IDS.matches) },
+    { id: "watcher", label: "watcher status", run: () => openRuleSection(RULE_SECTION_IDS.watcher) },
+    { id: "table", label: "rule table", run: () => openRuleSection(RULE_SECTION_IDS.table) },
+    { id: "matches", label: "match history", run: () => openRuleSection(RULE_SECTION_IDS.matches) },
   ]);
 }
 
@@ -382,29 +391,33 @@ export function RulesPanelV2() {
           )}
         </div>
 
-        {selectedRule ? (
-          <div id={RULE_SECTION_IDS.selected} className="rules-section rule-editor">
-            <textarea
-              className="rule-json"
-              spellCheck={false}
-              value={draft}
-              onChange={(e) =>
-                setDrafts((d) => ({ ...d, [selectedRule.id]: e.target.value }))
-              }
-            />
-            {errors[selectedRule.id] ? (
-              <div className="rule-error">{errors[selectedRule.id]}</div>
-            ) : null}
-            <div className="rule-actions">
-              <button type="button" onClick={() => applyDraft(selectedRule.id)}>
-                Apply
-              </button>
-              <button type="button" onClick={cancelEdit}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
+        <div id={RULE_SECTION_IDS.selected} className="rules-section rule-editor">
+          {selectedRule ? (
+            <>
+              <textarea
+                className="rule-json"
+                spellCheck={false}
+                value={draft}
+                onChange={(e) =>
+                  setDrafts((d) => ({ ...d, [selectedRule.id]: e.target.value }))
+                }
+              />
+              {errors[selectedRule.id] ? (
+                <div className="rule-error">{errors[selectedRule.id]}</div>
+              ) : null}
+              <div className="rule-actions">
+                <button type="button" onClick={() => applyDraft(selectedRule.id)}>
+                  Apply
+                </button>
+                <button type="button" onClick={cancelEdit}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="session-empty">select a rule to edit its raw JSON</div>
+          )}
+        </div>
 
         <div id={RULE_SECTION_IDS.matches} className="rules-section act-bar rules-feed-head">
           <span className="spy-title">matches</span>

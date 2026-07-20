@@ -73,3 +73,24 @@ test("Paint layers revive after save, Cmd+W, and Cmd+Shift+T", async ({ page }) 
     )
     .toBe(1);
 });
+
+test("Rules rail sections open and navigate", async ({ page }) => {
+  await page.goto("/e2e-paint.html?e2e=1");
+  const rulesButton = page.locator("#rules-toggle");
+  await expect(rulesButton).toBeVisible();
+
+  await rulesButton.click();
+  await expect(page.locator(".rules-panel")).toBeVisible();
+
+  await rulesButton.locator(".actbar-exp").click();
+  await expect(page.locator(".actbar-child")).toHaveCount(4);
+
+  for (const [label, section] of [
+    ["watcher status", "#rules-watcher"],
+    ["rule table", "#rules-table"],
+    ["match history", "#rules-matches"],
+  ] as const) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await expect(page.locator(section)).toBeVisible();
+  }
+});

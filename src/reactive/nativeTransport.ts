@@ -15,6 +15,11 @@ function browserE2eInvoke<T>(command: string): Promise<T> {
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" as T,
     );
   }
+  if (command === "rules_get") return Promise.resolve([] as T);
+  if (command === "activity_rule_matches") return Promise.resolve([] as T);
+  if (command === "watcher_status") {
+    return Promise.resolve({ last_heartbeat: 0, config_revision: 0, rules_count: 0 } as T);
+  }
   return Promise.resolve(undefined as T);
 }
 

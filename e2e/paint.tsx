@@ -3,6 +3,8 @@ import "../src/styles.css";
 import { createElement } from "react";
 import type { IDockviewPanelProps } from "dockview";
 import { registerPlugin } from "../src/plugin";
+import { registerRulesPlugin } from "../src/rules";
+import { initRail } from "../src/rail";
 import { mountReactDock } from "../src/reactdock";
 import { openPaintFile, registerPaint } from "../src/paintPanel";
 import { paintSession } from "../src/paintSessions";
@@ -26,6 +28,7 @@ registerPlugin({
   ],
 });
 registerPaint();
+registerRulesPlugin();
 paintSession.$({ recent: ["/tmp/paint-second.png"], lastPath: null });
 installKeymap([
   { id: "e2e-close", keys: ["$mod+w"], run: closeActiveTab },
@@ -36,3 +39,4 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-first]")!.onclick =
   openPaintFile("/tmp/paint-first.png");
 };
 mountReactDock(document.getElementById("dock")!);
+initRail();
