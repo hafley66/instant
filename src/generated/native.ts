@@ -47,6 +47,8 @@ export type CommandName =
   | "read_text"
   | "save_text"
   | "delete_file"
+  | "fs_watch_claim"
+  | "fs_watch_release"
   | "harness_session"
   | "harness_sessions"
   | "list_ai_sessions"
@@ -146,6 +148,8 @@ export namespace commands {
     export const readText = "read_text";
     export const saveText = "save_text";
     export const deleteFile = "delete_file";
+    export const fsWatchClaim = "fs_watch_claim";
+    export const fsWatchRelease = "fs_watch_release";
   }
 
   export namespace harness {

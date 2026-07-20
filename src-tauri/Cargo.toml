@@ -34,4 +34,4 @@ libc = "0.2"
 png = "0.17"
 tungstenite = "0.29"
 arboard = "3"
-
+notify = "8.2"

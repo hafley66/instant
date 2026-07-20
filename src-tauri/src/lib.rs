@@ -4,6 +4,7 @@ mod cdp;
 mod config;
 mod favorites;
 mod fs;
+mod fs_watch;
 mod harness;
 mod kitty;
 mod ledger;
@@ -640,6 +641,7 @@ pub fn run() {
         .manage(cdp::ChromeEngine::default())
         .manage(workspace::Workspaces::default())
         .manage(favorites::Favorites::default())
+        .manage(fs_watch::FsWatchClaims::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -867,6 +869,8 @@ pub fn run() {
             fs::save_text,
             fs::delete_file,
             fs::read_text,
+            fs_watch::fs_watch_claim,
+            fs_watch::fs_watch_release,
             harness::harness_session,
             harness::harness_sessions,
             ledger::list_ai_sessions,

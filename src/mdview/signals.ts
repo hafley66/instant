@@ -79,6 +79,15 @@ export async function loadMdDoc(path: string): Promise<void> {
   }
 }
 
+export async function reloadMdDoc(path: string): Promise<void> {
+  try {
+    const text = await invoke<string>("read_text", { path });
+    mdDocs.$({ ...mdDocs.$(), [path]: { status: "ready", text, doc: parseMdSections(text) } });
+  } catch (e) {
+    mdDocs.$({ ...mdDocs.$(), [path]: { status: "error", error: String(e) } });
+  }
+}
+
 // Per-open-panel collapse state (session-only — a reopen re-applies the
 // startFolded default). One Signal per path so a fold only re-renders its own
 // panel. The lib's node type isn't exported (only the Signal$ accessor type

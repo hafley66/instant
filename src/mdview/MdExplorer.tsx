@@ -7,6 +7,7 @@ import { invoke } from "../generated/native";
 import { FileTree } from "../fileTree";
 import { MD_EXTS } from "../core";
 import type { FsEntry } from "../state";
+import { useFsWatch } from "./0_watch";
 
 function dirOf(p: string): string {
   const i = p.lastIndexOf("/");
@@ -22,6 +23,7 @@ export function MdExplorer({
 }) {
   const [root, setRoot] = useState(() => dirOf(docPath));
   const [entries, setEntries] = useState<FsEntry[]>([]);
+  const [revision, setRevision] = useState(0);
 
   // Follow the document: navigating resets the root to the new doc's folder.
   useEffect(() => {
@@ -43,7 +45,9 @@ export function MdExplorer({
     return () => {
       dead = true;
     };
-  }, [root]);
+  }, [root, revision]);
+
+  useFsWatch(root, () => setRevision((value) => value + 1));
 
   return (
     <div className="mdview-explorer">

@@ -6,6 +6,7 @@ import {
   expandChain,
   resolveMdLink,
   allSectionIds,
+  sectionDisplayTitle,
 } from "./model";
 
 const DOC = [
@@ -33,6 +34,40 @@ describe("slugify", () => {
     expect(slugify("Hello, World!")).toBe("hello-world");
     expect(slugify("  Spaces   and_under ")).toBe("spaces-and_under".replace("_", "-"));
     expect(slugify("")).toBe("section");
+  });
+});
+
+describe("sectionDisplayTitle", () => {
+  it("numbers unprefixed siblings and preserves explicit alphanumeric prefixes", () => {
+    expect([
+      sectionDisplayTitle("Introduction", 0),
+      sectionDisplayTitle("Details", 1),
+      sectionDisplayTitle("3. Existing number", 2),
+      sectionDisplayTitle("A. Existing letter", 3),
+      sectionDisplayTitle("0a. Existing mixed prefix", 4),
+    ]).toMatchInlineSnapshot(`
+      [
+        "1. Introduction",
+        "2. Details",
+        "3. Existing number",
+        "A. Existing letter",
+        "0a. Existing mixed prefix",
+      ]
+    `);
+  });
+
+  it("requires a prefix, dot, whitespace, and title text", () => {
+    expect([
+      sectionDisplayTitle("A.Title", 0),
+      sectionDisplayTitle("A. ", 1),
+      sectionDisplayTitle(". Title", 2),
+    ]).toMatchInlineSnapshot(`
+      [
+        "1. A.Title",
+        "2. A. ",
+        "3. . Title",
+      ]
+    `);
   });
 });
 

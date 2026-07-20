@@ -71,6 +71,12 @@ export function slugify(title: string): string {
   return s || "section";
 }
 
+const EXPLICIT_SECTION_NUMBER = /^[\p{L}\p{N}]+\.\s+\S/u;
+
+export function sectionDisplayTitle(title: string, siblingIndex: number): string {
+  return EXPLICIT_SECTION_NUMBER.test(title) ? title : `${siblingIndex + 1}. ${title}`;
+}
+
 function headingText(h: Heading): string {
   const walk = (nodes: PhrasingContent[]): string =>
     nodes

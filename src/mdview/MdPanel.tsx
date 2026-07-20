@@ -7,12 +7,18 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SignalReact } from "@hafley66/signals/react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { codeToHtml } from "shiki";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { invoke } from "../generated/native";
 import { useApp } from "../useStore";
 import { baseName } from "../core";
-import { expandChain, resolveMdLink, sliceOwn, type ListFolds, type MdSection } from "./model";
+import {
+  expandChain,
+  resolveMdLink,
+  sectionDisplayTitle,
+  sliceOwn,
+  type ListFolds,
+  type MdSection,
+} from "./model";
 import {
   blockFoldsFor,
   collapsedFor,
@@ -20,6 +26,7 @@ import {
   initCollapsedForReadyDoc,
   layoutFor,
   loadMdDoc,
+  reloadMdDoc,
   mdDocs,
   mdUi,
   setAllCollapsed,
@@ -34,41 +41,9 @@ import { setPendingFrag, takePendingFrag } from "./open";
 import { resetPanelZoom } from "../panelZoom";
 import { MdExplorer } from "./MdExplorer";
 import { MermaidBlock } from "./Mermaid";
+import { ShikiCode } from "./0_ShikiCode";
+import { useFsWatch } from "./0_watch";
 import "./mdview.css";
-
-// ---- fenced code: shiki (same highlighter + themes as preview.ts) ----
-
-const shikiCache = new Map<string, string>();
-
-function ShikiCode({ lang, code, theme }: { lang: string; code: string; theme: string }) {
-  const key = `${theme}|${lang}|${code}`;
-  const [html, setHtml] = useState<string | null>(() => shikiCache.get(key) ?? null);
-  useEffect(() => {
-    const hit = shikiCache.get(key);
-    if (hit != null) {
-      setHtml(hit);
-      return;
-    }
-    let dead = false;
-    codeToHtml(code, { lang, theme })
-      .then((h) => {
-        // Take only the <code> contents: the surrounding <pre> comes from
-        // react-markdown, and .md-body styles it; the spans carry the colors.
-        const inner = new DOMParser().parseFromString(h, "text/html").querySelector("code")
-          ?.innerHTML;
-        if (inner == null) return;
-        if (shikiCache.size > 300) shikiCache.clear();
-        shikiCache.set(key, inner);
-        if (!dead) setHtml(inner);
-      })
-      .catch(() => {}); // unknown language etc: stay on the plain fallback
-    return () => {
-      dead = true;
-    };
-  }, [key, lang, code, theme]);
-  if (html == null) return <code>{code}</code>;
-  return <code dangerouslySetInnerHTML={{ __html: html }} />;
-}
 
 // ---- images: local files load via read_image (data URL), like preview.ts ----
 
@@ -146,13 +121,14 @@ function FoldTwisty({
 
 interface SectionProps {
   sec: MdSection;
+  siblingIndex: number;
   text: string;
   collapsed: Set<string>;
   onToggle: (id: string) => void;
   components: React.ComponentProps<typeof ReactMarkdown>["components"];
 }
 
-function SectionView({ sec, text, collapsed, onToggle, components }: SectionProps) {
+function SectionView({ sec, siblingIndex, text, collapsed, onToggle, components }: SectionProps) {
   const isCollapsed = collapsed.has(sec.id);
   // Untrimmed for rendering (offset alignment, see SliceBaseContext); the trim
   // is only the emptiness check.
@@ -175,7 +151,7 @@ function SectionView({ sec, text, collapsed, onToggle, components }: SectionProp
         }}
       >
         <span className="mdview-twisty">{isCollapsed ? "▸" : "▾"}</span>
-        <span className="mdview-title">{sec.title}</span>
+        <span className="mdview-title">{sectionDisplayTitle(sec.title, siblingIndex)}</span>
       </div>
       {!isCollapsed && (
         <div className="mdview-body">
@@ -188,10 +164,11 @@ function SectionView({ sec, text, collapsed, onToggle, components }: SectionProp
               </SliceBaseContext.Provider>
             </div>
           ) : null}
-          {sec.children.map((c) => (
+          {sec.children.map((c, index) => (
             <SectionView
               key={c.id}
               sec={c}
+              siblingIndex={index}
               text={text}
               collapsed={collapsed}
               onToggle={onToggle}
@@ -228,6 +205,7 @@ export const MdPanel = SignalReact(function MdPanel({
   useEffect(() => {
     void loadMdDoc(path);
   }, [path]);
+  useFsWatch(path, () => void reloadMdDoc(path));
   useEffect(() => {
     if (state?.status === "ready") initCollapsedForReadyDoc(path);
   }, [path, state?.status]);
@@ -392,10 +370,11 @@ export const MdPanel = SignalReact(function MdPanel({
             </SliceBaseContext.Provider>
           </div>
         ) : null}
-        {state.doc.tree.map((s) => (
+        {state.doc.tree.map((s, index) => (
           <SectionView
             key={s.id}
             sec={s}
+            siblingIndex={index}
             text={text}
             collapsed={collapsed}
             onToggle={onToggle}
