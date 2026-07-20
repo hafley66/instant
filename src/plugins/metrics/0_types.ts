@@ -13,4 +13,6 @@ export interface MetricPoint {
   ts: number;
   field: string;
   value: number;
+  ruleId: string;
+  url: string;
 }

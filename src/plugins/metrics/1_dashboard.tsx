@@ -5,6 +5,8 @@ import { TreeTable, type TreeColumn } from "../../treetable";
 import type { JsonSchema } from "../../rulesModel";
 import type { State } from "../../lib/json-rx/0_types";
 import type { MetricMatch, MetricPoint } from "./0_types";
+import { metricChartSpec } from "./0a_chart";
+import { MetricsSplit } from "./0b_layout";
 import { createMetricsDashboardState } from "./2_runtime";
 
 const LIMIT = 500;
@@ -37,7 +39,7 @@ function points(rows: MetricMatch[], schema?: JsonSchema): MetricPoint[] {
     row.matches.flatMap((match) =>
       Object.entries(match)
         .filter((entry): entry is [string, number] => numeric(entry[1]) && isPercentMetric(entry[0], schema?.properties?.[entry[0]]))
-        .map(([field, value]) => ({ ts: row.ts, field, value })),
+        .map(([field, value]) => ({ ts: row.ts, field, value, ruleId: row.ruleId, url: row.url })),
     ),
   );
 }
@@ -76,42 +78,57 @@ const HISTORY_COLUMNS: TreeColumn<MetricMatch & { key: string }>[] = [
 
 function MetricChart({ data }: { data: MetricPoint[] }) {
   const host = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const [renderState, setRenderState] = useState<"loading" | "ready" | "error">("loading");
+  const [renderError, setRenderError] = useState("");
   useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.floor(entry.contentRect.width)));
+    const observer = new ResizeObserver(([entry]) => {
+      const next = {
+        width: Math.floor(entry.contentRect.width),
+        height: Math.floor(entry.contentRect.height),
+      };
+      setSize((current) => current.width === next.width && current.height === next.height ? current : next);
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (!host.current || !data.length || width < 1) return;
+    if (!host.current || !data.length || size.width < 1 || size.height < 1) return;
+    let active = true;
     let view: { finalize: () => void } | undefined;
-    embed(host.current, {
-      $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-      width: Math.max(240, width - 80),
-      height: 260,
-      autosize: { type: "fit-x", contains: "padding" },
-      data: { values: data },
-      mark: { type: "line", point: { filled: true, size: 55 } },
-      encoding: {
-        x: { field: "ts", type: "temporal", title: "time", axis: { format: "%H:%M:%S", labelAngle: 0 } },
-        y: { field: "value", type: "quantitative", title: "usage %", scale: { domain: [0, 100] } },
-        color: { field: "field", type: "nominal", title: "measure" },
-        tooltip: [
-          { field: "ts", type: "temporal", title: "time" },
-          { field: "field", type: "nominal", title: "measure" },
-          { field: "value", type: "quantitative", title: "usage", format: ".2f" },
-        ],
-      },
-    }, { actions: false }).then((result) => {
+    setRenderState("loading");
+    setRenderError("");
+    embed(host.current, metricChartSpec(data, size.width, size.height), { actions: false }).then((result) => {
+      if (!active) {
+        result.view.finalize();
+        return;
+      }
       view = result.view;
-    }).catch(console.error);
+      setRenderState("ready");
+    }).catch((error: unknown) => {
+      if (!active) return;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(error);
+      setRenderError(message);
+      setRenderState("error");
+    });
     return () => {
+      active = false;
       view?.finalize();
     };
-  }, [data, width]);
-  return <div ref={host} className="metrics-chart" />;
+  }, [data, size]);
+  return (
+    <div
+      ref={host}
+      className="metrics-chart"
+      data-testid="metrics-chart"
+      data-render-state={renderState}
+      data-render-error={renderError || undefined}
+      style={{ width: "100%", height: "100%", minHeight: 0, boxSizing: "border-box" }}
+    />
+  );
 }
 
 export function MetricsDashboardPanel() {
@@ -148,11 +165,15 @@ export function MetricsDashboardPanel() {
           </select>
         ) : <span className="wt-count">no stream</span>}
       </div>
-      <div className="panel-scroll">
+      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {latest && schema ? <MetricCards row={latest} schema={schema} /> : <div className="session-empty">{dashboardState.error ? String(dashboardState.error) : "no emitted metrics"}</div>}
-        {chartData.length ? <MetricChart data={chartData} /> : null}
-        {data.length ? (
-          <TreeTable columns={HISTORY_COLUMNS} data={data} getRowId={(row) => row.key} defaultSorting={[{ id: "time", desc: true }]} />
+        {chartData.length || data.length ? (
+          <MetricsSplit
+            chart={chartData.length ? <MetricChart data={chartData} /> : <div className="session-empty">no chartable values</div>}
+            history={data.length ? (
+              <TreeTable columns={HISTORY_COLUMNS} data={data} getRowId={(row) => row.key} defaultSorting={[{ id: "time", desc: true }]} />
+            ) : null}
+          />
         ) : null}
       </div>
     </div>

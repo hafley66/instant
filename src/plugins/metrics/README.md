@@ -50,6 +50,32 @@ second chart grammar. A later rule field can carry a complete Vega-Lite spec or
 a named spec reference when inferred rendering cannot represent a dashboard.
 The record data remains governed by JSON Schema.
 
+The current chart interaction contract uses Vega-Lite selection parameters:
+
+- Drag the plot horizontally to pan its time scale.
+- Use the mouse wheel over the plot to zoom its time scale.
+- Double-click the plot to clear the interval selection.
+- Select legend entries to isolate series; double-click clears the selection.
+- Drag the horizontal sash to divide space between the chart and history grid.
+
+The chart/history percentage layout is stored in the `metrics` plugin state and
+restored on the next panel mount. Vega receives the measured chart panel width
+and height after every resize.
+
+Implementation boundaries follow dependency and reading order:
+
+| File | Interface |
+| --- | --- |
+| `0_types.ts` | persisted metric and chart-point data shapes |
+| `0a_chart.ts` | pure metric records plus dimensions to Vega-Lite spec |
+| `0b_layout.tsx` | chart/history split and plugin-state persistence |
+| `1_dashboard.tsx` | data formatting and React composition |
+| `2_runtime.ts` | polling and JSON-Rx state transitions |
+
+`MetricChart` publishes `data-render-state` and `data-render-error` on its host
+element. The golden browser test waits for Vega to finish compiling and
+rendering before measuring or capturing the panel.
+
 ## End-to-end call tree
 
 Legend: `->` synchronous call or message, `~>` asynchronous boundary,
@@ -217,8 +243,9 @@ store.
   local page, a real local API request, delayed configuration, extraction, and
   ingest assertions using the Claude response fixture.
 - `e2e/metrics-dashboard.spec.ts` injects the native query result, opens Metrics
-  through the Rules child rail item, checks semantic values, and records the
-  golden dashboard screenshot.
+  through the Rules child rail item, waits for Vega rendering, checks semantic
+  and rendered dimensions, records the golden dashboard screenshot, and drags
+  the chart/history split.
 - `src/lib/json-rx/*.test.ts` covers state updates, machine scans, partitioned
   instances, catalogs, and expression traces.
 
