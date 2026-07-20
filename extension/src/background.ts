@@ -77,7 +77,12 @@ async function refreshConfig(): Promise<Rule[]> {
   try {
     const cfg = await executeHttp(paths.activityConfig.endpoint, undefined);
     const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
-    await chrome.storage.local.set({ rules });
+    await chrome.storage.local.set({ rules, rulesRevision: cfg.revision ?? 0 });
+    await fetch("http://127.0.0.1:8787/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: cfg.revision ?? 0, rulesCount: rules.length }),
+    }).catch(() => {});
     await armDrivenAlarms(rules);
     return rules;
   } catch {

@@ -31,6 +31,7 @@ export interface Rule {
 // GET /config response. `rules` is authoritative; the extension replaces its
 // cache with whatever the server returns.
 export interface ServerConfig {
+  revision?: number;
   rules: Rule[];
 }
 

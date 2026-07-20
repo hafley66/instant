@@ -943,6 +943,16 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   justify-content: flex-end;
   gap: 8px;
 }
+
+.rules-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 2px 6px;
+  color: var(--muted, #666);
+  font-size: 11px;
+}
 /* Each terminal is its own dockview panel now; the host fills the panel's
    .dv-host (a flex box) instead of stacking inside a .terminals container. */
 .term-host {

@@ -727,7 +727,9 @@ pub fn run() {
             app.manage(activity::RulesState {
                 rules: Mutex::new(rules),
                 path: rules_path,
+                revision: std::sync::atomic::AtomicU64::new(1),
             });
+            app.manage(activity::WatcherState(Mutex::new(activity::WatcherStatus::default())));
 
             // ntfy publish target for action:"notify" rules (notify.json,
             // created empty if absent). Edited alongside the rule list in the
@@ -863,6 +865,8 @@ pub fn run() {
             activity::rules_set,
             activity::notify_config_get,
             activity::notify_config_set,
+            activity::activity_rule_matches,
+            activity::watcher_status,
             capture::capture_permissions,
             capture::capture_request_screen,
             config::config_get,

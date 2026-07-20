@@ -97,7 +97,10 @@
       "ServerConfig": {
         "type": "object",
         "required": ["rules"],
-        "properties": { "rules": { "type": "array", "items": { "$ref": "#/components/schemas/Rule" } } }
+        "properties": {
+          "revision": { "type": "integer" },
+          "rules": { "type": "array", "items": { "$ref": "#/components/schemas/Rule" } }
+        }
       },
       "ActivityEvent": {
         "type": "object",

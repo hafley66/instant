@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -117,7 +117,17 @@ fn default_true() -> bool {
 pub struct RulesState {
     pub rules: Mutex<Vec<Rule>>,
     pub path: PathBuf,
+    pub revision: AtomicU64,
 }
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct WatcherStatus {
+    pub last_heartbeat: i64,
+    pub config_revision: u64,
+    pub rules_count: usize,
+}
+
+pub struct WatcherState(pub Mutex<WatcherStatus>);
 
 /// Read rules.json, writing an empty list if absent. A parse error yields an
 /// empty list (the extension then falls back to its chrome.storage cache).
@@ -189,6 +199,14 @@ pub struct RuleMatch {
     pub ts: i64,
     #[serde(default)]
     pub matches: Vec<HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+struct WatcherHeartbeat {
+    #[serde(default)]
+    revision: u64,
+    #[serde(default, rename = "rulesCount")]
+    rules_count: usize,
 }
 
 // Compact ntfy body: rule id, matched fields (key-sorted for determinism —
@@ -409,12 +427,30 @@ pub fn spawn_server(app: AppHandle) {
                 (Method::Get, "/config") => {
                     let rules = app.state::<RulesState>();
                     let list = rules.rules.lock().unwrap();
-                    let body = serde_json::json!({ "rules": &*list }).to_string();
+                    let revision = rules.revision.load(Ordering::Relaxed);
+                    let body = serde_json::json!({ "revision": revision, "rules": &*list }).to_string();
                     let resp = Response::from_string(body).with_header(header(
                         b"Content-Type",
                         b"application/json",
                     ));
                     let _ = req.respond(with_cors(resp));
+                }
+                (Method::Post, "/heartbeat") => {
+                    let mut body = String::new();
+                    let _ = req.as_reader().read_to_string(&mut body);
+                    match serde_json::from_str::<WatcherHeartbeat>(&body) {
+                        Ok(h) => {
+                            let status = app.state::<WatcherState>();
+                            *status.0.lock().unwrap() = WatcherStatus {
+                                last_heartbeat: now_ms(),
+                                config_revision: h.revision,
+                                rules_count: h.rules_count,
+                            };
+                            respond(req, 200, "ok");
+                        }
+                        Err(_) => respond(req, 400, "bad json"),
+                    }
+                    continue;
                 }
                 // Recent rule matches, flattened for the sprefa `sh matches()`
                 // effect: `[{rule_id,url,field,val,ts}, …]`, newest first. sprefa
@@ -698,7 +734,38 @@ pub fn rules_get(state: State<RulesState>) -> Vec<Rule> {
 pub fn rules_set(state: State<RulesState>, rules: Vec<Rule>) -> Result<Vec<Rule>, String> {
     write_rules(&state.path, &rules).map_err(|e| e.to_string())?;
     *state.rules.lock().unwrap() = rules.clone();
+    state.revision.fetch_add(1, Ordering::Relaxed);
     Ok(rules)
+}
+
+#[tauri::command]
+pub fn activity_rule_matches(state: State<ActivityDb>, limit: Option<i64>) -> Result<Vec<RuleMatch>, String> {
+    let cap = limit.unwrap_or(100).clamp(1, 500);
+    let conn = state.0.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT title, url, ts, text FROM events
+             WHERE source='browser' AND kind='rulematch'
+             ORDER BY ts DESC LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![cap], |row| {
+            let text: String = row.get(3)?;
+            Ok(RuleMatch {
+                rule_id: row.get(0)?,
+                url: row.get(1)?,
+                ts: row.get(2)?,
+                matches: serde_json::from_str(&text).unwrap_or_default(),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn watcher_status(state: State<WatcherState>) -> WatcherStatus {
+    state.0.lock().unwrap().clone()
 }
 
 /// The ntfy target the Rules panel's settings row edits.

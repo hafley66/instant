@@ -36,6 +36,7 @@ export namespace components {
     }
 
     export interface ServerConfig {
+      revision?: number;
       rules: components.schemas.Rule[];
     }
 

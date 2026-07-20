@@ -24,6 +24,18 @@ import {
 } from "./rulesModel";
 
 const FEED_CAP = 100;
+const WATCHER_STALE_MS = 3 * 60 * 1000;
+
+interface WatcherStatus {
+  last_heartbeat: number;
+  config_revision: number;
+  rules_count: number;
+}
+
+function watcherLabel(status: WatcherStatus): string {
+  if (!status.last_heartbeat) return "extension offline";
+  return Date.now() - status.last_heartbeat <= WATCHER_STALE_MS ? "extension active" : "extension stale";
+}
 
 function template(id: string): Rule {
   return {
@@ -159,9 +171,22 @@ export function RulesPanelV2() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [feed, setFeed] = useState<RuleMatch[]>([]);
   const [ntfyUrl, setNtfyUrl] = useState("");
+  const [watcher, setWatcher] = useState<WatcherStatus>({
+    last_heartbeat: 0,
+    config_revision: 0,
+    rules_count: 0,
+  });
+
+  function refreshWatcher() {
+    invoke<WatcherStatus>("watcher_status").then(setWatcher).catch(console.error);
+  }
 
   useEffect(() => {
     invoke<Rule[]>("rules_get").then(setRules).catch(console.error);
+    invoke<RuleMatch[]>("activity_rule_matches", { limit: FEED_CAP }).then(setFeed).catch(console.error);
+    refreshWatcher();
+    const timer = window.setInterval(refreshWatcher, 2_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -350,8 +375,18 @@ export function RulesPanelV2() {
         <button type="button" onClick={add}>
           + Rule
         </button>
+        <button type="button" onClick={refreshWatcher} title="refresh extension status">
+          refresh
+        </button>
       </div>
       <div className="panel-scroll">
+        <div className="rules-status-row">
+          <span>{watcherLabel(watcher)}</span>
+          <span>config r{watcher.config_revision}</span>
+          <span>{watcher.rules_count} cached</span>
+          <span className="spy-spacer" />
+          <span>{watcher.last_heartbeat ? new Date(watcher.last_heartbeat).toLocaleTimeString() : "no heartbeat"}</span>
+        </div>
         <NtfySettingsRow value={ntfyUrl} onSave={saveNtfyUrl} />
         {rules.length === 0 ? (
           <div className="session-empty">no rules — served at GET /config</div>
