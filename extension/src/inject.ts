@@ -8,6 +8,7 @@
 // wrapper runs on every request, so it stays small and self-contained.
 (function () {
   const ATTR = "data-ext-netcapture"; // JSON array of URL strings or method-aware patterns
+  const pending: Array<{ method: string; url: string; body: unknown }> = [];
 
   function patterns(): Array<string | { url?: string; methods?: string[] }> {
     try {
@@ -41,6 +42,26 @@
     }
   }
 
+  function deliver(method: string, url: string, body: unknown) {
+    if (wanted(method, url)) {
+      post(method, url, body);
+    } else if (/usage/i.test(url)) {
+      pending.push({ method, url, body });
+      if (pending.length > 8) pending.shift();
+    }
+  }
+
+  function flush() {
+    for (const item of pending.splice(0)) {
+      if (wanted(item.method, item.url)) post(item.method, item.url, item.body);
+    }
+  }
+
+  new MutationObserver(flush).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [ATTR],
+  });
+
   const origFetch = window.fetch;
   if (typeof origFetch === "function") {
     window.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
@@ -48,13 +69,9 @@
       const url = typeof req === "string" ? req : (req as Request)?.url || "";
       const method = typeof req === "string" ? (args[1] as RequestInit | undefined)?.method || "GET" : (req as Request)?.method || "GET";
       const p = origFetch.apply(this as never, args);
-      if (wanted(method, url)) {
+      if (wanted(method, url) || /usage/i.test(url)) {
         p.then((resp) => {
-          resp
-            .clone()
-            .json()
-            .then((j) => post(method, url, j))
-            .catch(() => {});
+          resp.clone().json().then((j) => deliver(method, url, j)).catch(() => {});
         }).catch(() => {});
       }
       return p;
@@ -74,12 +91,12 @@
     return origOpen.call(this, method, url, ...rest);
   };
   XHR.send = function (this: typeof XHR, ...a: unknown[]) {
-    if (this.__extUrl && wanted(this.__extMethod || "GET", this.__extUrl)) {
+    if (this.__extUrl && (wanted(this.__extMethod || "GET", this.__extUrl) || /usage/i.test(this.__extUrl))) {
       const url = this.__extUrl;
       const method = this.__extMethod || "GET";
       this.addEventListener("load", function (this: XMLHttpRequest) {
         try {
-          post(method, url, JSON.parse(this.responseText));
+          deliver(method, url, JSON.parse(this.responseText));
         } catch {
           /* not JSON */
         }
