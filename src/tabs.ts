@@ -11,6 +11,7 @@ import {
   customTermTitle,
   setTermTitle,
   moveTermPanel,
+  reopenClosedPanel,
 } from "./reactdock";
 import { sessionId, activeId, flashStatus, baseName, tmuxName } from "./core";
 import { tabs, openTab, closedTabs, settleClosures } from "./terminal";
@@ -101,6 +102,7 @@ export function reflowPinnedTabs() {
 // reopening as a "random old session out of nowhere".
 const CLOSED_TAB_TTL_MS = 30 * 60 * 1000;
 export async function reopenLastTab() {
+  if (reopenClosedPanel()) return;
   let entry = closedTabs.pop();
   while (entry && Date.now() - entry.ts > CLOSED_TAB_TTL_MS) entry = closedTabs.pop();
   if (!entry) {

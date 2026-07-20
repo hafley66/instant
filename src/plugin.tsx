@@ -31,8 +31,20 @@ export interface PanelDef {
   html?: string;
   component: ComponentType<IDockviewPanelProps>;
   keepAlive?: boolean;
+  onRemove?: (panelId: string) => void;
+  onDiscard?: (panelId: string) => void;
   onShow?: () => void;
   railChildren?: () => Promise<RailChild[]>; // child rows under the rail button (rail.ts refreshChildren)
+}
+
+export interface PanelInstanceDef {
+  id: string;
+  prefix: string;
+  componentName: string;
+  component: ComponentType<IDockviewPanelProps>;
+  keepAlive?: boolean;
+  onRemove?: (panelId: string) => void;
+  onDiscard?: (panelId: string) => void;
 }
 
 // A declarative config toggle a plugin contributes to the Config panel's
@@ -79,17 +91,22 @@ export interface StatusProbe {
 export interface Plugin {
   id: string;
   panels: PanelDef[];
+  instances?: PanelInstanceDef[];
   options?: ConfigOption[]; // config toggles surfaced in the Config panel
   status?: StatusProbe[]; // service health surfaced in the Status panel
 }
 
 const panelMap = new Map<string, PanelDef>();
+const instanceMap = new Map<string, PanelInstanceDef>();
 const optionList: ConfigOption[] = [];
 const statusList: StatusProbe[] = [];
 
 export function registerPlugin(p: Plugin) {
   for (const panel of p.panels) {
     panelMap.set(panel.id, panel);
+  }
+  for (const instance of p.instances ?? []) {
+    instanceMap.set(instance.id, instance);
   }
   if (p.options) optionList.push(...p.options);
   if (p.status) statusList.push(...p.status);
@@ -114,6 +131,14 @@ export function configOptions(): ConfigOption[] {
 
 export function getPanel(id: string): PanelDef | undefined {
   return panelMap.get(id);
+}
+
+export function getPanelInstance(id: string): PanelInstanceDef | undefined {
+  return instanceMap.get(id);
+}
+
+export function panelInstanceForId(panelId: string): PanelInstanceDef | undefined {
+  return [...instanceMap.values()].find((instance) => panelId.startsWith(instance.prefix));
 }
 
 export function panelIds(): string[] {
@@ -199,6 +224,15 @@ export function dockComponents(): Record<string, ComponentType<IDockviewPanelPro
     const Inner = p.component;
     out[id] = function BoundedPanel(props: IDockviewPanelProps) {
       return createElement(PanelErrorBoundary, { title: p.title, children: createElement(Inner, props) });
+    };
+  }
+  for (const instance of instanceMap.values()) {
+    const Inner = instance.component;
+    out[instance.componentName] = function BoundedInstance(props: IDockviewPanelProps) {
+      return createElement(PanelErrorBoundary, {
+        title: instance.id,
+        children: createElement(Inner, props),
+      });
     };
   }
   return out;

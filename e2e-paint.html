@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paint E2E</title>
+    <style>
+      #e2e-controls { position: fixed; z-index: 10; top: 4px; left: 4px; }
+    </style>
+    <script type="module" src="/e2e/paint.tsx" defer></script>
+  </head>
+  <body data-skin="xp">
+    <div id="e2e-controls">
+      <button data-testid="open-first">Open first painting</button>
+    </div>
+    <div id="app" class="window" style="height: calc(100vh - 40px)">
+      <div class="window-body body">
+        <div id="dock" class="dock"></div>
+      </div>
+    </div>
+  </body>
+</html>

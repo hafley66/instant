@@ -13,7 +13,7 @@ interface MiniPaintAction {
   action_id?: string;
 }
 
-const SVG_SOURCE_SLOT = "paint_svg_source";
+const slot = (base: string, panelId: string) => `${base}:${encodeURIComponent(panelId)}`;
 
 // The miniPaint globals, typed structurally (the vendored app ships no types).
 interface MiniPaintWindow {
@@ -27,6 +27,9 @@ interface MiniPaintWindow {
   AppConfig?: { WIDTH: number; HEIGHT: number };
   State?: {
     do_action(action: MiniPaintAction, ...rest: unknown[]): unknown;
+    Base_layers?: {
+      reset_layers(): void;
+    };
   };
   FileOpen?: {
     file_open_data_url_handler(data: string): void;
@@ -64,20 +67,23 @@ export interface PaintBridgeHooks {
 export function installPaintBridge(
   iframe: HTMLIFrameElement,
   hooks: PaintBridgeHooks,
+  panelId = "paint",
 ): PaintBridge | null {
   const w = iframe.contentWindow as (Window & MiniPaintWindow) | null;
   if (!w?.Layers || !w.AppConfig || !w.State || !w.FileOpen) return null;
   const { Layers, AppConfig, State, FileOpen } = w as Required<MiniPaintWindow>;
 
   const origDoAction = State.do_action.bind(State);
-  let svgSource = localStorage.getItem(SVG_SOURCE_SLOT);
+  const svgSourceSlot = slot("paint_svg_source", panelId);
+  const quicksaveSlot = slot("quicksave_data", panelId);
+  let svgSource = localStorage.getItem(svgSourceSlot);
   State.do_action = (action: MiniPaintAction, ...rest: unknown[]) => {
     const id = String(action?.action_id ?? "");
     const result = origDoAction(action, ...rest);
     if (id.startsWith("open_file") || id.startsWith("open_image") || id.startsWith("quickload")) hooks.onClean();
     else if (!/select|selection/i.test(id)) {
       svgSource = null;
-      localStorage.removeItem(SVG_SOURCE_SLOT);
+      localStorage.removeItem(svgSourceSlot);
       hooks.onEdit();
     }
     return result;
@@ -86,12 +92,14 @@ export function installPaintBridge(
   return {
     loadDataUrl(dataUrl) {
       svgSource = null;
-      localStorage.removeItem(SVG_SOURCE_SLOT);
+      localStorage.removeItem(svgSourceSlot);
+      State.Base_layers?.reset_layers();
       FileOpen.file_open_data_url_handler(dataUrl);
     },
     loadSvgText(svg) {
       svgSource = svg;
-      localStorage.setItem(SVG_SOURCE_SLOT, svg);
+      localStorage.setItem(svgSourceSlot, svg);
+      State.Base_layers?.reset_layers();
       const metadata = new DOMParser()
         .parseFromString(svg, "image/svg+xml")
         .querySelector("metadata#instant-paint-document")
@@ -129,7 +137,7 @@ export function installPaintBridge(
     },
     clearSvgSource() {
       svgSource = null;
-      localStorage.removeItem(SVG_SOURCE_SLOT);
+      localStorage.removeItem(svgSourceSlot);
     },
     quicksave() {
       try {
@@ -137,24 +145,24 @@ export function installPaintBridge(
         if (!fileSave) return false;
         const data = fileSave.export_as_json();
         if (data.length > 5_000_000) return false;
-        localStorage.setItem("quicksave_data", data);
+        localStorage.setItem(quicksaveSlot, data);
         return true;
       } catch {
         return false;
       }
     },
     quickload() {
-      const data = localStorage.getItem("quicksave_data");
+      const data = localStorage.getItem(quicksaveSlot);
       if (!data) return false;
       void FileOpen.load_json(data);
       return true;
     },
     hasQuicksave() {
-      return !!localStorage.getItem("quicksave_data");
+      return !!localStorage.getItem(quicksaveSlot);
     },
     clearQuicksave() {
-      localStorage.removeItem("quicksave_data");
-      localStorage.removeItem(SVG_SOURCE_SLOT);
+      localStorage.removeItem(quicksaveSlot);
+      localStorage.removeItem(svgSourceSlot);
       svgSource = null;
     },
     destroy() {
@@ -163,12 +171,7 @@ export function installPaintBridge(
   };
 }
 
-// The live bridge (one paint panel at a time — it's a singleton tool panel).
-// paintSessions drives loads/saves without owning the iframe.
-let active: PaintBridge | null = null;
-export function setActivePaintBridge(b: PaintBridge | null): void {
-  active = b;
-}
-export function activePaintBridge(): PaintBridge | null {
-  return active;
+export function clearPaintSessionSnapshot(panelId: string): void {
+  localStorage.removeItem(slot("quicksave_data", panelId));
+  localStorage.removeItem(slot("paint_svg_source", panelId));
 }

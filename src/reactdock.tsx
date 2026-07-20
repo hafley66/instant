@@ -5,7 +5,7 @@
 // Layout persists with a version stamp. Terminal panels are recreated fresh
 // on reload from openTabs.
 
-import { useEffect, useRef, useState, type ComponentType, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -19,10 +19,9 @@ import {
 import "dockview/dist/styles/dockview.css";
 
 import { store } from "./state";
-import { dockComponents, getPanel } from "./plugin";
+import { dockComponents, getPanel, getPanelInstance, panelInstanceForId } from "./plugin";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
-import { confirmClose, dropDirtyProbe } from "./dirtyGuard";
-import { discardPaintSession } from "./paintSessions";
+import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -62,7 +61,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
       { label: "Split left", action: () => split("left") },
       { label: "Split up", action: () => split("above") },
       { sep: true },
-      { label: "Close", action: () => { if (confirmClose(api.id)) api.close(); } },
+      { label: "Close", action: () => { if (confirmAndDiscard(api.id)) api.close(); } },
     ];
     showContextMenu(e.clientX, e.clientY, items);
   };
@@ -116,7 +115,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
-          if (confirmClose(api.id)) api.close();
+          if (confirmAndDiscard(api.id)) api.close();
         }}
       >
         ✕
@@ -142,20 +141,21 @@ const isPreview = (id: string) => id.startsWith(PREVIEW);
 // Markdown viewer panels (`md:<path>`): pure React (params carry the path), no
 // adopted content node — but treated as dynamic for layout-restore purposes.
 const MD = "md:";
-const isMd = (id: string) => id.startsWith(MD);
 // Full dock panel id for a markdown path (openMarkdownPanel steers live panels
 // via this — see mdview/open.ts).
-export const mdPanelId = (path: string) => MD + path;
+export const mdPanelId = (path: string) => MD + encodeURIComponent(path);
 // Both terminals and previews adopt a content node owned by JS (not in the dock
 // JSON), keyed by full panel id.
 const dynamicNodes = new Map<string, HTMLElement>();
-
-// Extra dock components registered by plugins at boot (before mountReactDock),
-// e.g. mdview's "mdview-instance". Keeps reactdock free of plugin imports.
-const extraComponents: Record<string, ComponentType<IDockviewPanelProps>> = {};
-export function registerDockComponent(name: string, comp: ComponentType<IDockviewPanelProps>) {
-  extraComponents[name] = comp;
+interface ClosedPanel {
+  id: string;
+  component: string;
+  params: Record<string, unknown>;
+  title: string;
+  renderer?: "always";
 }
+const closedPanels: ClosedPanel[] = [];
+let suppressClosedPanelCapture = false;
 
 let api: DockviewApi | null = null;
 let saving = false;
@@ -251,7 +251,14 @@ function buildDefault() {
 // in an old layout can never wedge a restore (same treatment as previews).
 function stripDynamicHusks() {
   if (!api) return;
-  for (const p of [...api.panels]) if (isTerm(p.id) || isPreview(p.id) || isMd(p.id)) api.removePanel(p);
+  suppressClosedPanelCapture = true;
+  try {
+    for (const p of [...api.panels]) {
+      if (isTerm(p.id) || isPreview(p.id) || panelInstanceForId(p.id)) api.removePanel(p);
+    }
+  } finally {
+    suppressClosedPanelCapture = false;
+  }
 }
 
 function onReady(e: DockviewReadyEvent) {
@@ -289,7 +296,19 @@ function onReady(e: DockviewReadyEvent) {
     api.onDidRemovePanel((p) => {
       if (lastActivePanelId === p.id) lastActivePanelId = null;
       dropDirtyProbe(p.id);
-      if (p.id === "paint") discardPaintSession();
+      const definition = getPanel(p.id);
+      const instance = panelInstanceForId(p.id);
+      if (!suppressClosedPanelCapture && (definition || instance)) {
+        closedPanels.push({
+          id: p.id,
+          component: instance?.componentName ?? p.id,
+          params: { ...(p.params ?? {}) },
+          title: p.title ?? p.id,
+          renderer: definition?.keepAlive || instance?.keepAlive ? "always" : undefined,
+        });
+      }
+      getPanel(p.id)?.onRemove?.(p.id);
+      panelInstanceForId(p.id)?.onRemove?.(p.id);
       if (isTerm(p.id)) {
         dynamicNodes.delete(p.id);
         hooks.onTermClose(termSid(p.id));
@@ -460,7 +479,42 @@ export function focusPanelById(pid: string) {
 // …) can veto the close.
 export function closeActivePanel() {
   const p = api?.activePanel;
-  if (p && confirmClose(p.id)) api!.removePanel(p);
+  if (p && confirmAndDiscard(p.id)) api!.removePanel(p);
+}
+
+function confirmAndDiscard(panelId: string): boolean {
+  const dirty = dirtyMessage(panelId);
+  if (!confirmClose(panelId)) return false;
+  if (dirty) {
+    getPanel(panelId)?.onDiscard?.(panelId);
+    panelInstanceForId(panelId)?.onDiscard?.(panelId);
+  }
+  return true;
+}
+
+export function reopenClosedPanel(): boolean {
+  const entry = closedPanels.pop();
+  if (!api || !entry) return false;
+  const existing = api.getPanel(entry.id);
+  if (existing) {
+    existing.api.setActive();
+    return true;
+  }
+  const anchor = anchorPanel();
+  try {
+    api.addPanel({
+      id: entry.id,
+      component: entry.component,
+      params: entry.params,
+      title: withOverride(entry.id, entry.title),
+      ...(entry.renderer ? { renderer: entry.renderer } : {}),
+      ...(anchor ? { position: { referencePanel: anchor, direction: "within" as const } } : {}),
+    });
+    return true;
+  } catch (error) {
+    console.error("reopenClosedPanel", error);
+    return false;
+  }
 }
 
 // Terminal tab ids (the sid, i.e. the "s:name") in visual left-to-right order,
@@ -533,42 +587,52 @@ export function closePreviewPanel(path: string) {
   if (p) api!.removePanel(p);
 }
 
-// Open (or focus) the markdown viewer tab for `path`. Same placement logic as
-// addPreviewPanel: stack into the existing md group when one is open, else
-// split right of the anchor. The component ("mdview-instance") is registered
-// by the mdview plugin via registerDockComponent at boot.
-export function addMdPanel(path: string, title: string) {
-  if (!api) return;
-  const pid = MD + path;
+export function openPanelInstance(
+  kind: string,
+  key: string,
+  title: string,
+  params: Record<string, unknown> = {},
+) : string | null {
+  if (!api) return null;
+  const instance = getPanelInstance(kind);
+  if (!instance) return null;
+  const pid = instance.prefix + encodeURIComponent(key);
   const existing = api.getPanel(pid);
   if (existing) {
     existing.api.setActive();
-    return;
+    return pid;
   }
-  const openMd = api.panels.find((p) => isMd(p.id));
+  const openInstance = api.panels.find((p) => p.id.startsWith(instance.prefix));
   let position:
     | { referencePanel: string; direction: "within" | "right" }
     | undefined;
-  if (openMd) {
-    position = { referencePanel: openMd.id, direction: "within" };
+  if (openInstance) {
+    position = { referencePanel: openInstance.id, direction: "within" };
   } else {
     const anchor = anchorPanel();
     if (anchor) position = { referencePanel: anchor, direction: "right" };
   }
   api.addPanel({
     id: pid,
-    component: "mdview-instance",
-    params: { panelId: pid, path },
+    component: instance.componentName,
+    params: { panelId: pid, ...params },
     title: withOverride(pid, title),
+    ...(instance.keepAlive ? { renderer: "always" as const } : {}),
     ...(position ? { position } : {}),
   });
+  return pid;
+}
+
+// Open (or focus) the markdown viewer tab for `path`.
+export function addMdPanel(path: string, title: string) {
+  openPanelInstance("md", path, title, { path });
 }
 
 export function togglePanel(id: string) {
   if (!api) return;
   const existing = api.getPanel(id);
   if (existing) {
-    if (confirmClose(id)) api.removePanel(existing);
+    if (confirmAndDiscard(id)) api.removePanel(existing);
     return;
   }
   const ref = anchorPanel();
@@ -598,7 +662,7 @@ export function onDockChange(fn: () => void) {
 function DockApp() {
   const comps = dockComponents();
   return createElement(DockviewReact, {
-    components: { ...comps, ...extraComponents, terminal: TerminalPanel, "preview-instance": PreviewPanel },
+    components: { ...comps, terminal: TerminalPanel, "preview-instance": PreviewPanel },
     defaultTabComponent: CustomTab,
     theme: themeLight,
     onReady,

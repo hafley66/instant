@@ -1,12 +1,13 @@
 // Paint "sessions" — the tmux-reattach equivalent for paintings. Persisted in
 // pluginState.paint: the recent-files MRU and the last-opened path, so the
 // panel resumes the previous painting on open and the rail button's children
-// list the history. The live edit counter (paintEdits) is the dirty signal the
-// tab wrapper's guard reads; it's session-only, like the editor itself.
+// list the history. Each panel instance owns its live edit counter and dirty
+// signal; those values are session-only, like the editor itself.
 import { Signal } from "@hafley66/signals";
 import { invoke } from "./generated/native";
 import { readPluginState, savePluginState } from "./pluginState";
-import { activePaintBridge } from "./paintBridge";
+import type { PaintBridge } from "./paintBridge";
+import { clearPaintSessionSnapshot } from "./paintBridge";
 import { baseName, flashStatus, getHomeDir } from "./core";
 import { formatTimestamp } from "./memeExport";
 
@@ -24,14 +25,37 @@ export const paintSession = Signal<PaintSession>({
   ...readPluginState<Partial<PaintSession>>(PLUGIN_ID, {}),
 });
 
-// UI/session signals (not persisted): the path input's value and the unsaved
-// edit counter (bumped by the bridge's onEdit, reset on load/save).
-export const paintCurrent = Signal("");
-export const paintEdits = Signal(0);
+type WritableSignal<T> = {
+  $(): T;
+  $(value: T): void;
+};
 
-export function discardPaintSession(): void {
-  activePaintBridge()?.clearQuicksave();
-  paintEdits.$(0);
+export interface PaintPanelState {
+  panelId: string;
+  current: WritableSignal<string>;
+  edits: WritableSignal<number>;
+  bridge: PaintBridge | null;
+}
+
+const panelStates = new Map<string, PaintPanelState>();
+
+export function paintPanelState(panelId: string): PaintPanelState {
+  const existing = panelStates.get(panelId);
+  if (existing) return existing;
+  const state: PaintPanelState = { panelId, current: Signal(""), edits: Signal(0), bridge: null };
+  panelStates.set(panelId, state);
+  return state;
+}
+
+export function releasePaintPanelState(panelId: string): void {
+  panelStates.delete(panelId);
+}
+
+export function discardPaintSession(panelId: string): void {
+  const state = panelStates.get(panelId);
+  state?.bridge?.clearQuicksave();
+  clearPaintSessionSnapshot(panelId);
+  state?.edits.$(0);
 }
 
 // MRU insert: dedup + most-recent-first + cap. Pure, unit-tested.
@@ -47,8 +71,8 @@ function record(path: string): void {
 }
 
 // Load an image file into the editor and make it the current session.
-export async function loadPaintFile(path: string): Promise<boolean> {
-  const bridge = activePaintBridge();
+export async function loadPaintFile(state: PaintPanelState, path: string): Promise<boolean> {
+  const bridge = state.bridge;
   if (!bridge) return false;
   try {
     if (/\.svg$/i.test(path)) {
@@ -58,9 +82,10 @@ export async function loadPaintFile(path: string): Promise<boolean> {
       const dataUrl = await invoke<string>("read_image", { path });
       bridge.loadDataUrl(dataUrl);
     }
-    paintCurrent.$(path);
-    paintEdits.$(0);
+    state.current.$(path);
+    state.edits.$(0);
     record(path);
+    bridge.quicksave();
     flashStatus(`paint: opened ${baseName(path)}`);
     return true;
   } catch (e) {
@@ -69,19 +94,34 @@ export async function loadPaintFile(path: string): Promise<boolean> {
   }
 }
 
+export async function requestLoadPaintFile(state: PaintPanelState, path: string): Promise<boolean> {
+  if (state.edits.$() > 0) {
+    const saveChanges = window.confirm(
+      `“${baseName(state.current.$()) || "untitled painting"}” has unsaved changes. Save before opening ${baseName(path)}?`,
+    );
+    if (saveChanges) {
+      if (!(await savePaint(state))) return false;
+    } else {
+      state.bridge?.clearQuicksave();
+      state.edits.$(0);
+    }
+  }
+  return loadPaintFile(state, path);
+}
+
 // Write the painting as SVG when the path ends in .svg, otherwise flatten it
 // to PNG. The default path is ~/Desktop/paint-<timestamp>.png.
-export async function savePaint(): Promise<void> {
-  const bridge = activePaintBridge();
+export async function savePaint(state: PaintPanelState): Promise<boolean> {
+  const bridge = state.bridge;
   const path =
-    paintCurrent.$().trim() ||
+    state.current.$().trim() ||
     `${getHomeDir() || "/Users"}/Desktop/paint-${formatTimestamp(new Date())}.png`;
   const isSvg = /\.svg$/i.test(path);
   const dataUrl = isSvg ? null : bridge?.compositePng();
   const svg = isSvg ? bridge?.exportSvg() : null;
   if (!dataUrl && !svg) {
     flashStatus("paint: nothing to save");
-    return;
+    return false;
   }
   try {
     if (svg) await invoke("save_text", { path, contents: svg });
@@ -89,12 +129,14 @@ export async function savePaint(): Promise<void> {
       await invoke("save_meme", { path, dataUrl });
       bridge?.clearSvgSource();
     }
-    paintCurrent.$(path);
-    paintEdits.$(0);
+    state.current.$(path);
+    state.edits.$(0);
     record(path);
     bridge?.quicksave();
     flashStatus(`paint: saved ${baseName(path)}`);
+    return true;
   } catch (e) {
     flashStatus(`paint: ${String(e)}`);
+    return false;
   }
 }

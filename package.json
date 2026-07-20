@@ -13,7 +13,8 @@
     "ext:build": "node extension/build.mjs",
     "ext:watch": "node extension/build.mjs --watch",
     "ext:check": "tsc -p extension/tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@hafley66/signals": "0.0.2",
@@ -44,6 +45,7 @@
     "xp.css": "^0.2.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2",
     "@types/chrome": "^0.2.2",
     "@types/mdast": "^4.0.4",

@@ -1,104 +1,95 @@
-// Paint panel: miniPaint (MIT, https://github.com/viliusle/miniPaint) — an
-// open-source Photoshop-style editor with a real multi-layer system — vendored
-// into public/vendor/miniPaint by scripts/vendor-minipaint.sh and embedded via
-// its official iframe integration. Everything runs locally in the webview.
-//
-// The instant toolbar above the iframe is the disk bridge (miniPaint's own
-// File>Save goes through a browser download, which Tauri may not deliver):
-// save flattens layers via the same-origin bridge (paintBridge.ts) and writes
-// through the save_meme Rust command; open/load read via read_image. Sessions
-// (recent files + resume-last) live in paintSessions.ts. Unsaved edits signal
-// the tab wrapper through the generic dirty guard (dirtyGuard.ts), so closing
-// the tab with changes asks first.
+// Paint panel backed by one miniPaint iframe per dock panel instance.
 import { useEffect, useRef } from "react";
 import { SignalReact } from "@hafley66/signals/react";
+import type { IDockviewPanelProps } from "dockview";
 import { registerPlugin, type RailChild } from "./plugin";
 import { setDirtyProbe } from "./dirtyGuard";
-import { installPaintBridge, setActivePaintBridge, activePaintBridge } from "./paintBridge";
+import { installPaintBridge } from "./paintBridge";
 import {
   loadPaintFile,
-  paintCurrent,
-  paintEdits,
+  paintPanelState,
   paintSession,
+  discardPaintSession,
+  releasePaintPanelState,
   savePaint,
+  requestLoadPaintFile,
+  type PaintPanelState,
 } from "./paintSessions";
-import { focusPanelById, isOpen, togglePanel } from "./reactdock";
+import { openPanelInstance } from "./reactdock";
 import { baseName } from "./core";
 
 const PANEL_ID = "paint";
 
-// A file asked for while the panel/iframe wasn't up yet — consumed once the
-// bridge installs (see the iframe load handler).
-let pendingOpen: string | null = null;
-let quicksaveTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleQuicksave(): void {
-  if (quicksaveTimer) clearTimeout(quicksaveTimer);
-  quicksaveTimer = setTimeout(() => {
-    quicksaveTimer = null;
-    activePaintBridge()?.quicksave();
-  }, 1_500);
+interface PaintInstanceProps {
+  panelId: string;
+  initialPath?: string;
 }
 
-// Open a file in the Paint panel from anywhere (rail children, future links):
-// raise the panel, then load — now if the bridge is live, else on iframe load
-// (pendingOpen survives until the load handler consumes it).
-export function openPaintFile(path: string): void {
-  pendingOpen = path;
-  if (!isOpen(PANEL_ID)) togglePanel(PANEL_ID);
-  else focusPanelById(PANEL_ID);
-  if (activePaintBridge()) {
-    pendingOpen = null;
-    void loadPaintFile(path);
-  }
-}
-
-const PaintPanel = SignalReact(function PaintPanel() {
+const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: PaintInstanceProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const current = paintCurrent.$();
-  const edits = paintEdits.$();
+  const stateRef = useRef<PaintPanelState | null>(null);
+  const quicksaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const state = stateRef.current ?? paintPanelState(panelId);
+  stateRef.current = state;
+  const current = state.current.$();
+  const edits = state.edits.$();
   const session = paintSession.$();
-  const dirty = edits > 0;
+
+  const scheduleQuicksave = () => {
+    if (quicksaveTimer.current) clearTimeout(quicksaveTimer.current);
+    quicksaveTimer.current = setTimeout(() => {
+      quicksaveTimer.current = null;
+      state.bridge?.quicksave();
+    }, 1_500);
+  };
 
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
-    let bridgeForPanel: ReturnType<typeof installPaintBridge> = null;
+    const disposeDirtyProbe = setDirtyProbe(
+      panelId,
+      () =>
+        state.edits.$() > 0
+          ? `“${baseName(state.current.$()) || "untitled painting"}” has unsaved changes.`
+          : null,
+    );
     const onLoad = () => {
-      const bridge = installPaintBridge(iframe, {
-        onEdit: () => {
-          paintEdits.$(paintEdits.$() + 1);
-          scheduleQuicksave();
+      const bridge = installPaintBridge(
+        iframe,
+        {
+          onEdit: () => {
+            state.edits.$(state.edits.$() + 1);
+            scheduleQuicksave();
+          },
+          onClean: () => state.edits.$(0),
         },
-        onClean: () => paintEdits.$(0),
-      });
-      bridgeForPanel = bridge;
-      setActivePaintBridge(bridge);
-      // Session resume: an explicit request wins, else the last-opened file.
-      const explicitTarget = pendingOpen;
-      const target = explicitTarget ?? paintSession.$().lastPath;
-      pendingOpen = null;
-      if (explicitTarget) void loadPaintFile(explicitTarget);
-      else if (bridge?.hasQuicksave()) bridge.quickload();
-      else if (target) void loadPaintFile(target);
+        panelId,
+      );
+      state.bridge = bridge;
+      const target = initialPath || state.current.$() || (panelId === PANEL_ID ? paintSession.$().lastPath : null);
+      if (bridge?.hasQuicksave()) bridge.quickload();
+      else if (initialPath) void loadPaintFile(state, initialPath);
+      else if (target) void loadPaintFile(state, target);
     };
     iframe.addEventListener("load", onLoad);
     return () => {
       iframe.removeEventListener("load", onLoad);
-      if (quicksaveTimer) clearTimeout(quicksaveTimer);
-      if (paintEdits.$() > 0) bridgeForPanel?.quicksave();
-      bridgeForPanel?.destroy();
-      setActivePaintBridge(null);
+      disposeDirtyProbe();
+      if (quicksaveTimer.current) clearTimeout(quicksaveTimer.current);
+      if (state.edits.$() > 0) state.bridge?.quicksave();
+      state.bridge?.destroy();
+      state.bridge = null;
+      releasePaintPanelState(panelId);
     };
-  }, []);
+  }, [initialPath, panelId, state]);
 
   return (
     <div className="v2-panel paint-root">
       <div className="act-bar">
         <span
           className="paint-dirty-dot"
-          title={dirty ? "unsaved changes" : "no unsaved changes"}
-          style={{ opacity: dirty ? 1 : 0.25, color: dirty ? "#c0392b" : "inherit" }}
+          title={edits > 0 ? "unsaved changes" : "no unsaved changes"}
+          style={{ opacity: edits > 0 ? 1 : 0.25, color: edits > 0 ? "#c0392b" : "inherit" }}
         >
           ●
         </span>
@@ -108,21 +99,16 @@ const PaintPanel = SignalReact(function PaintPanel() {
           placeholder="path to open / save (PNG)…"
           value={current}
           spellCheck={false}
-          onChange={(e) => paintCurrent.$(e.target.value)}
+          onChange={(e) => state.current.$(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && current.trim()) void loadPaintFile(current.trim());
+            if (e.key === "Enter" && current.trim()) void requestLoadPaintFile(state, current.trim());
           }}
           style={{ flex: 1, minWidth: 80 }}
         />
-        <button
-          type="button"
-          disabled={!current.trim()}
-          onClick={() => void loadPaintFile(current.trim())}
-          title="open this file in the editor"
-        >
+        <button type="button" disabled={!current.trim()} onClick={() => void requestLoadPaintFile(state, current.trim())}>
           open
         </button>
-        <button type="button" onClick={() => void savePaint()} title="flatten layers and save as PNG">
+        <button type="button" onClick={() => void savePaint(state)} title="flatten layers and save as PNG">
           save
         </button>
         {session.recent.length ? (
@@ -131,13 +117,13 @@ const PaintPanel = SignalReact(function PaintPanel() {
             value=""
             title="recent paintings"
             onChange={(e) => {
-              if (e.target.value) void loadPaintFile(e.target.value);
+              if (e.target.value) void requestLoadPaintFile(state, e.target.value);
             }}
           >
             <option value="">recent…</option>
-            {session.recent.map((p) => (
-              <option key={p} value={p} title={p}>
-                {baseName(p)}
+            {session.recent.map((path) => (
+              <option key={path} value={path} title={path}>
+                {baseName(path)}
               </option>
             ))}
           </select>
@@ -147,12 +133,29 @@ const PaintPanel = SignalReact(function PaintPanel() {
         ref={iframeRef}
         className="paint-frame"
         src="/vendor/miniPaint/index.html"
-        title="miniPaint — layers image editor"
+        title="miniPaint layers image editor"
         style={{ flex: 1, minHeight: 0, width: "100%", border: 0, display: "block", background: "#fff" }}
       />
     </div>
   );
 });
+
+function PaintDefault(props: IDockviewPanelProps) {
+  return <PaintEditor panelId={String(props.params.panelId ?? PANEL_ID)} />;
+}
+
+function PaintInstance(props: IDockviewPanelProps) {
+  return (
+    <PaintEditor
+      panelId={String(props.params.panelId ?? "")}
+      initialPath={String(props.params.path ?? "")}
+    />
+  );
+}
+
+export function openPaintFile(path: string): void {
+  openPanelInstance("paint", path, baseName(path), { path });
+}
 
 export function registerPaint() {
   registerPlugin({
@@ -163,24 +166,27 @@ export function registerPaint() {
         title: "Paint",
         icon: "🎨",
         iconLabel: "Paint",
-        component: PaintPanel,
+        component: PaintDefault,
         keepAlive: true,
-        // The paint "session history": recent files under the rail button.
+        onDiscard: discardPaintSession,
         railChildren: async (): Promise<RailChild[]> =>
-          paintSession.$().recent.map((p) => ({
-            id: p,
-            label: baseName(p),
-            hint: p,
-            run: () => openPaintFile(p),
+          paintSession.$().recent.map((path) => ({
+            id: path,
+            label: baseName(path),
+            hint: path,
+            run: () => openPaintFile(path),
           })),
       },
     ],
+    instances: [
+      {
+        id: "paint",
+        prefix: "paint:",
+        componentName: "paint-instance",
+        component: PaintInstance,
+        keepAlive: true,
+        onDiscard: discardPaintSession,
+      },
+    ],
   });
-  setDirtyProbe(
-    PANEL_ID,
-    () =>
-      paintEdits.$() > 0
-        ? `“${baseName(paintCurrent.$()) || "untitled painting"}” has unsaved changes.`
-        : null,
-  );
 }
