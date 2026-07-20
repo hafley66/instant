@@ -13,6 +13,7 @@ import { formatTimestamp } from "./memeExport";
 
 const PLUGIN_ID = "paint";
 const RECENT_CAP = 10;
+export const PAINT_SIDEBAR_RECENT_CAP = 5;
 
 export interface PaintSession {
   recent: string[]; // MRU first, capped at RECENT_CAP
@@ -68,6 +69,29 @@ function record(path: string): void {
   const next: PaintSession = { recent: mruPush(cur.recent, path), lastPath: path };
   paintSession.$(next);
   savePluginState<PaintSession>(PLUGIN_ID, next);
+}
+
+export function removeRecentPaint(path: string): void {
+  const cur = paintSession.$();
+  const next: PaintSession = {
+    recent: cur.recent.filter((entry) => entry !== path),
+    lastPath: cur.lastPath === path ? null : cur.lastPath,
+  };
+  paintSession.$(next);
+  savePluginState<PaintSession>(PLUGIN_ID, next);
+}
+
+export async function deletePaintFile(path: string): Promise<boolean> {
+  if (!window.confirm(`Delete “${baseName(path)}” from disk?`)) return false;
+  try {
+    await invoke("delete_file", { path });
+    removeRecentPaint(path);
+    flashStatus(`paint: deleted ${baseName(path)}`);
+    return true;
+  } catch (e) {
+    flashStatus(`paint: ${String(e)}`);
+    return false;
+  }
 }
 
 // Load an image file into the editor and make it the current session.

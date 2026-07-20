@@ -304,6 +304,19 @@ pub fn save_text(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&resolved, contents).map_err(|e| format!("{}: {e}", resolved.display()))
 }
 
+/// Delete one user-selected file. Directories are rejected so a Paint recent
+/// entry can never remove a tree by mistake.
+#[tauri::command]
+pub fn delete_file(path: String) -> Result<(), String> {
+    let resolved = resolve(Some(path));
+    let meta = std::fs::metadata(&resolved)
+        .map_err(|e| format!("{}: {e}", resolved.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", resolved.display()));
+    }
+    std::fs::remove_file(&resolved).map_err(|e| format!("{}: {e}", resolved.display()))
+}
+
 /// Read a UTF-8 text file for the preview pane. Caps size, rejects binary
 /// (any NUL in the first 8 KB) and non-UTF-8 so the webview never gets a blob
 /// it can't render.

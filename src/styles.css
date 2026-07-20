@@ -908,6 +908,41 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   opacity: 1;
   color: #c00;
 }
+
+.unsaved-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: 2px solid var(--window-frame, #808080);
+  background: var(--window-face, #c0c0c0);
+  color: var(--window-text, #000);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.35);
+}
+
+.unsaved-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.unsaved-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.unsaved-dialog-title {
+  font-weight: 700;
+}
+
+.unsaved-dialog-message {
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+
+.unsaved-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 /* Each terminal is its own dockview panel now; the host fills the panel's
    .dv-host (a flex box) instead of stacking inside a .terminals container. */
 .term-host {

@@ -25,12 +25,32 @@ export function dirtyMessage(pid: string): string | null {
 }
 
 // Gate every panel-close path through this: true = proceed, false = keep the
-// panel. Native confirm() — WKWebView renders it fine, and the Esc-hide /
-// reload paths intentionally bypass it (sessions survive both).
-export function confirmClose(pid: string): boolean {
+// panel. The app-owned dialog keeps the decision visible inside the window,
+// including on WKWebView where native confirm dialogs can be unavailable.
+export function confirmClose(pid: string): Promise<boolean> {
   const msg = dirtyMessage(pid);
-  if (!msg) return true;
-  return window.confirm(`${msg}\n\nClose anyway and discard the changes?`);
+  if (!msg) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "unsaved-dialog";
+    dialog.innerHTML = `
+      <form method="dialog" class="unsaved-dialog-form">
+        <div class="unsaved-dialog-title">Unsaved changes</div>
+        <div class="unsaved-dialog-message"></div>
+        <div class="unsaved-dialog-actions">
+          <button value="cancel" type="submit">Keep open</button>
+          <button value="discard" type="submit">Close without saving</button>
+        </div>
+      </form>`;
+    const message = dialog.querySelector<HTMLElement>(".unsaved-dialog-message");
+    if (message) message.textContent = msg;
+    dialog.addEventListener("close", () => {
+      resolve(dialog.returnValue === "discard");
+      dialog.remove();
+    }, { once: true });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  });
 }
 
 // Teardown hook for reactdock's onDidRemovePanel.

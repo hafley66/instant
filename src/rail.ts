@@ -105,6 +105,12 @@ function renderChildren(id: string, kids: RailChild[]): void {
     b.textContent = kid.label;
     if (kid.hint) b.title = kid.hint;
     b.onclick = kid.run;
+    if (kid.contextMenu) {
+      b.oncontextmenu = (e) => {
+        e.preventDefault();
+        kid.contextMenu?.();
+      };
+    }
     host.appendChild(b);
   }
   tip.after(host);

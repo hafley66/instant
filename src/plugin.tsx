@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import type { IDockviewPanelProps } from "dockview";
+import type { CtxItem } from "./ctxmenu";
 
 // One row under a panel's rail button (rail.ts renders these when the panel is
 // expanded there). Providers fetch their own data; an empty list means no
@@ -16,6 +17,7 @@ export interface RailChild {
   label: string;
   hint?: string; // title tooltip on the child button
   run: () => void;
+  contextMenu?: () => CtxItem[];
 }
 
 export interface PanelDef {

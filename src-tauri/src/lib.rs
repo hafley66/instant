@@ -874,6 +874,7 @@ pub fn run() {
             fs::list_dir_recursive,
             fs::read_image,
             fs::save_text,
+            fs::delete_file,
             fs::read_text,
             harness::harness_session,
             harness::harness_sessions,

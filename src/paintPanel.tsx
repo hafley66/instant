@@ -13,6 +13,8 @@ import {
   releasePaintPanelState,
   savePaint,
   requestLoadPaintFile,
+  deletePaintFile,
+  PAINT_SIDEBAR_RECENT_CAP,
   type PaintPanelState,
 } from "./paintSessions";
 import { openPanelInstance } from "./reactdock";
@@ -170,11 +172,14 @@ export function registerPaint() {
         keepAlive: true,
         onDiscard: discardPaintSession,
         railChildren: async (): Promise<RailChild[]> =>
-          paintSession.$().recent.map((path) => ({
+          paintSession.$().recent.slice(0, PAINT_SIDEBAR_RECENT_CAP).map((path) => ({
             id: path,
             label: baseName(path),
             hint: path,
             run: () => openPaintFile(path),
+            contextMenu: () => [
+              { label: "Delete file…", action: () => void deletePaintFile(path) },
+            ],
           })),
       },
     ],

@@ -46,6 +46,7 @@ export type CommandName =
   | "read_image"
   | "read_text"
   | "save_text"
+  | "delete_file"
   | "harness_session"
   | "harness_sessions"
   | "list_ai_sessions"
@@ -144,6 +145,7 @@ export namespace commands {
     export const readImage = "read_image";
     export const readText = "read_text";
     export const saveText = "save_text";
+    export const deleteFile = "delete_file";
   }
 
   export namespace harness {

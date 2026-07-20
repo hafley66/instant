@@ -61,7 +61,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
       { label: "Split left", action: () => split("left") },
       { label: "Split up", action: () => split("above") },
       { sep: true },
-      { label: "Close", action: () => { if (confirmAndDiscard(api.id)) api.close(); } },
+      { label: "Close", action: () => void closePanelAfterConfirm(api.id) },
     ];
     showContextMenu(e.clientX, e.clientY, items);
   };
@@ -115,7 +115,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
-          if (confirmAndDiscard(api.id)) api.close();
+          void closePanelAfterConfirm(api.id);
         }}
       >
         ✕
@@ -254,7 +254,8 @@ function stripDynamicHusks() {
   suppressClosedPanelCapture = true;
   try {
     for (const p of [...api.panels]) {
-      if (isTerm(p.id) || isPreview(p.id) || panelInstanceForId(p.id)) api.removePanel(p);
+      if (isTerm(p.id) || isPreview(p.id) || (panelInstanceForId(p.id) && !p.id.startsWith("paint:")))
+        api.removePanel(p);
     }
   } finally {
     suppressClosedPanelCapture = false;
@@ -479,12 +480,17 @@ export function focusPanelById(pid: string) {
 // …) can veto the close.
 export function closeActivePanel() {
   const p = api?.activePanel;
-  if (p && confirmAndDiscard(p.id)) api!.removePanel(p);
+  if (p) void closePanelAfterConfirm(p.id);
 }
 
-function confirmAndDiscard(panelId: string): boolean {
+async function closePanelAfterConfirm(panelId: string): Promise<void> {
+  if (!(await confirmAndDiscard(panelId))) return;
+  api?.getPanel(panelId)?.api.close();
+}
+
+async function confirmAndDiscard(panelId: string): Promise<boolean> {
   const dirty = dirtyMessage(panelId);
-  if (!confirmClose(panelId)) return false;
+  if (!(await confirmClose(panelId))) return false;
   if (dirty) {
     getPanel(panelId)?.onDiscard?.(panelId);
     panelInstanceForId(panelId)?.onDiscard?.(panelId);
@@ -632,7 +638,7 @@ export function togglePanel(id: string) {
   if (!api) return;
   const existing = api.getPanel(id);
   if (existing) {
-    if (confirmAndDiscard(id)) api.removePanel(existing);
+    void closePanelAfterConfirm(id);
     return;
   }
   const ref = anchorPanel();
