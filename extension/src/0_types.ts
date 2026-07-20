@@ -23,9 +23,30 @@ export interface Rule {
   // Map a regex capture (group name or 1-based index as a string) to a field
   // name in the reported match. Empty = report the whole match under "match".
   captures?: Record<string, string>;
+  request?: {
+    methods?: string[];
+    url?: string;
+  };
+  response?: {
+    extract?: Record<string, string>;
+  };
+  emit?: {
+    stream: string;
+    schema?: JsonSchema;
+  };
   schedule?: Schedule;
-  action: "report";
   enabled?: boolean; // default true; the control-center toggle writes this
+}
+
+export interface JsonSchema {
+  type?: string | string[];
+  title?: string;
+  description?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  minimum?: number;
+  maximum?: number;
+  format?: string;
 }
 
 // GET /config response. `rules` is authoritative; the extension replaces its
@@ -36,7 +57,7 @@ export interface ServerConfig {
 }
 
 // One extracted record: capture field -> value.
-export type MatchFields = Record<string, string>;
+export type MatchFields = Record<string, unknown>;
 
 // POST /ingest body for a rule hit (new event type, alongside the activity spy's
 // {kind,url,title,text} events which stay unchanged).
@@ -46,6 +67,8 @@ export interface RuleMatchEvent {
   url: string;
   ts: number; // unix ms
   matches: MatchFields[];
+  stream?: string;
+  schema?: JsonSchema;
 }
 
 // Activity-spy event (unchanged shape the server already accepts).
@@ -61,6 +84,7 @@ export interface ActivityEvent {
 export interface NetCaptureMessage {
   source: "ext-netcapture";
   url: string;
+  method: string;
   ts: number;
   body: unknown;
 }

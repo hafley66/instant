@@ -19,6 +19,7 @@ import { allPanels } from "./plugin";
 import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
+import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerMeme } from "./meme";
 import { registerMdview } from "./mdview";
 import { registerPaint } from "./paintPanel";
@@ -208,6 +209,7 @@ async function main() {
   applyZoom(); // restore persisted webview zoom
   registerBuiltin();
   registerRulesPlugin();
+  registerMetricsPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.
   void registerSprefa;
   // registerSprefa();

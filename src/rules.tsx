@@ -16,7 +16,6 @@ import {
   type Rule,
   type RuleMatch,
   RULE_MODES,
-  RULE_ACTIONS,
   scheduleLabel,
   formatSchedule,
   applyCellEdit,
@@ -72,14 +71,13 @@ function template(id: string): Rule {
     regex: "(\\d+)",
     captures: { "1": "value" },
     schedule: "passive",
-    action: "report",
     enabled: true,
   };
 }
 
-function matchFields(fields: Record<string, string>): string {
+function matchFields(fields: Record<string, unknown>): string {
   return Object.entries(fields)
-    .map(([k, v]) => `${k}=${v}`)
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
     .join(" · ");
 }
 
@@ -326,14 +324,6 @@ export function RulesPanelV2() {
       cell: (r) => scheduleLabel(r.schedule),
       edit: { kind: "text" },
       getEditValue: (r) => formatSchedule(r.schedule),
-    },
-    {
-      id: "action",
-      header: "action",
-      sortValue: (r) => r.action,
-      cell: (r) => r.action,
-      edit: { kind: "select", options: RULE_ACTIONS },
-      getEditValue: (r) => r.action,
     },
     {
       id: "enabled",

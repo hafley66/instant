@@ -7,6 +7,7 @@ const outputPath = resolve(root, "src/generated/api.ts");
 const spec = JSON.parse(await readFile(specPath, "utf8"));
 
 const typeFor = (schema) => {
+  if (!Object.keys(schema).length) return "unknown";
   if (schema.$ref) return `components.schemas.${schema.$ref.split("/").at(-1)}`;
   if (schema.oneOf) return schema.oneOf.map(typeFor).join(" | ");
   if (schema.type === "array") return `${typeFor(schema.items)}[]`;

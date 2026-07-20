@@ -30,14 +30,27 @@ export namespace components {
       selector?: string;
       regex?: string;
       captures?: Record<string, string>;
+      request?: { "methods"?: string[]; "url"?: string };
+      response?: { "extract"?: Record<string, string> };
+      emit?: { "stream": string; "schema"?: components.schemas.JsonSchema };
       schedule?: "passive" | { "intervalMin": number };
-      action: "report";
       enabled?: boolean;
     }
 
     export interface ServerConfig {
       revision?: number;
       rules: components.schemas.Rule[];
+    }
+
+    export interface JsonSchema {
+      type?: string | string[];
+      title?: string;
+      description?: string;
+      properties?: Record<string, components.schemas.JsonSchema>;
+      items?: components.schemas.JsonSchema;
+      minimum?: number;
+      maximum?: number;
+      format?: string;
     }
 
     export interface ActivityEvent {
@@ -52,7 +65,9 @@ export namespace components {
       ruleId: string;
       url: string;
       ts: number;
-      matches: Record<string, string>[];
+      matches: Record<string, unknown>[];
+      stream?: string;
+      schema?: components.schemas.JsonSchema;
     }
 
     export interface EditorEvent {

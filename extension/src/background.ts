@@ -4,7 +4,7 @@
 //   1. Activity spy — tab lifecycle + relayed DOM events -> POST /ingest.
 //   2. Config transport — GET /config each alarm tick; rules cached in storage.
 //   3. Driven scans — chrome.alarms per scheduled rule reload+scrape a bg tab.
-import type { MatchFields, Rule, RuleMatchEvent } from "./0_types";
+import type { JsonSchema, MatchFields, Rule, RuleMatchEvent } from "./0_types";
 import { paths } from "../../src/generated/api";
 import { executeHttp } from "./httpTransport";
 
@@ -61,12 +61,20 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (typeof msg.kind === "string") {
     send(msg);
   } else if (msg.cmd === "rulematch") {
-    postRuleMatch(msg.ruleId, msg.url, msg.matches);
+    postRuleMatch(msg.ruleId, msg.url, msg.matches, msg.stream, msg.schema);
   }
 });
 
-function postRuleMatch(ruleId: string, url: string, matches: MatchFields[]) {
-  const ev: RuleMatchEvent = { type: "rulematch", ruleId, url, ts: Date.now(), matches: matches || [] };
+function postRuleMatch(ruleId: string, url: string, matches: MatchFields[], stream?: string, schema?: JsonSchema) {
+  const ev: RuleMatchEvent = {
+    type: "rulematch",
+    ruleId,
+    url,
+    ts: Date.now(),
+    matches: matches || [],
+    ...(stream ? { stream } : {}),
+    ...(schema ? { schema } : {}),
+  };
   send(ev);
 }
 
