@@ -7,7 +7,6 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
-
   // Two HTML entries: the app (index.html) and the headless drop-catcher window
   // (dropcatcher.html). The catcher is the only surface with the native Tauri
   // drag handler; the main window keeps it off so dockview tab-drag works.

@@ -15,6 +15,9 @@ const opts = {
   format: "iife",
   target: "chrome111", // content_scripts `world: "MAIN"` landed in Chrome 111
   logLevel: "info",
+  define: {
+    __INSTANT_ACTIVITY_ORIGIN__: JSON.stringify(process.env.INSTANT_ACTIVITY_ORIGIN ?? "http://127.0.0.1:8787"),
+  },
 };
 
 if (process.argv.includes("--watch")) {

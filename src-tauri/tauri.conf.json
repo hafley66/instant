@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.instant.summon",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "corepack pnpm@10.12.4 run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "corepack pnpm@10.12.4 run build",
     "frontendDist": "../dist"
   },
   "app": {

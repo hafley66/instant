@@ -346,6 +346,16 @@ pub fn spawn_server(app: AppHandle) {
                     ));
                     let _ = req.respond(with_cors(resp));
                 }
+                (Method::Get, "/diagnostics") => {
+                    let db = app.state::<ActivityDb>();
+                    let body = collect_network_diagnostics(&db)
+                        .unwrap_or_else(|e| serde_json::json!({ "error": e }).to_string());
+                    let resp = Response::from_string(body).with_header(header(
+                        b"Content-Type",
+                        b"application/json",
+                    ));
+                    let _ = req.respond(with_cors(resp));
+                }
                 (Method::Post, "/ingest") => {
                     let mut body = String::new();
                     let _ = req.as_reader().read_to_string(&mut body);
@@ -358,12 +368,10 @@ pub fn spawn_server(app: AppHandle) {
                     if is_match {
                         match serde_json::from_str::<RuleMatch>(&body) {
                             Ok(m) => {
-                                let cfg = app.state::<crate::config::ConfigState>();
-                                if cfg.config.lock().unwrap().site_excluded(&m.url) {
-                                    crate::config::note_excluded(&cfg);
-                                    respond(req, 200, "filtered");
-                                    continue;
-                                }
+                                // A rule explicitly authorizes its target host.
+                                // Observation exclusions still apply to generic
+                                // browser activity below, but must not discard
+                                // the rule's requested output.
                                 let text = serde_json::to_string(&m).unwrap_or_default();
                                 let db = app.state::<ActivityDb>();
                                 let row = {
@@ -505,6 +513,31 @@ fn collect_matches(db: &ActivityDb) -> Result<String, String> {
         }
     }
     Ok(serde_json::Value::Array(out).to_string())
+}
+
+/// Return recent extension network diagnostics without response bodies.
+fn collect_network_diagnostics(db: &ActivityDb) -> Result<String, String> {
+    let conn = db.0.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts,url,title,text FROM events
+             WHERE source='browser' AND (kind LIKE 'netcapture.%' OR kind='rule.trace')
+             ORDER BY ts DESC LIMIT 200",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(serde_json::json!({
+                "ts": r.get::<_, i64>(0)?,
+                "url": r.get::<_, String>(1)?,
+                "title": r.get::<_, String>(2)?,
+                "text": r.get::<_, String>(3)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::Value::Array(rows).to_string())
 }
 
 /// Most-recent events first, capped at `limit` (default 2000), optionally

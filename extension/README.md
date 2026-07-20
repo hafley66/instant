@@ -13,13 +13,14 @@ TypeScript sources live in `src/`; the manifest loads the bundled output in
 `dist/`. Build before loading:
 
 ```sh
-just ext-build      # one shot  (npm run ext:build)
+just ext-build      # one shot  (corepack pnpm@10.12.4 ext:build)
 just ext-watch      # rebuild on save
-just ext-check      # typecheck (npm run ext:check)
+just ext-check      # typecheck (corepack pnpm@10.12.4 ext:check)
 ```
 
 `src/` reads in dependency order: `0_types` → `1_match` → `2_scan` →
-`background` / `content` / `inject`.
+`3_extract` → `4_browserEffects` → `5_scheduleRuntime` → `background` /
+`content` / `inject`.
 
 | output | world | when | role |
 |---|---|---|---|
@@ -62,6 +63,42 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
   over the stringified body. Only installed on hosts a netcapture rule matches.
 - **driven** (`schedule.intervalMin`): a per-rule alarm reloads a background tab
   at `url` and asks the content script to scan it. `url` must be a concrete URL.
+- **effect schedule**: `schedule.effects` replaces the legacy dedicated-tab
+  scan with serializable effects interpreted by extension plugins.
+
+The first browser effect uses the WebDriver BiDi command name
+`browsingContext.reload`:
+
+```json
+{
+  "schedule": {
+    "intervalMin": 15,
+    "effects": [{
+      "id": "reload-usage-when-idle",
+      "op": "browsingContext.reload",
+      "input": {
+        "target": {
+          "url": "^https://claude\\.ai/",
+          "active": false,
+          "idleForMs": 300000,
+          "cardinality": "one"
+        },
+        "ignoreCache": false
+      }
+    }]
+  }
+}
+```
+
+The alarm emits a `schedule.tick` event into a JSON-Rx machine. Its transition
+returns the configured effects. JSON-Rx executes them sequentially through the
+browser interpreter and feeds each result event back into the same machine.
+
+Target resolution happens at execution time because Chrome tab IDs are
+process-local and ephemeral. `cardinality` defaults to `one`; the most recently
+accessed matching context wins. `all` executes sequentially across every match.
+Each execution posts `browser.effect.next` or `browser.effect.error` to Instant
+with the effect ID and resolved context IDs.
 
 Matches POST to `/ingest` as `{type:"rulematch", ruleId, url, ts, matches:[…]}`.
 

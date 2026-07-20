@@ -4,6 +4,7 @@ import { createElement } from "react";
 import type { IDockviewPanelProps } from "dockview";
 import { registerPlugin } from "../src/plugin";
 import { registerRulesPlugin } from "../src/rules";
+import { registerMetricsPlugin } from "../src/plugins/metrics";
 import { initRail } from "../src/rail";
 import { mountReactDock } from "../src/reactdock";
 import { openPaintFile, registerPaint } from "../src/paintPanel";
@@ -29,6 +30,7 @@ registerPlugin({
 });
 registerPaint();
 registerRulesPlugin();
+registerMetricsPlugin();
 paintSession.$({ recent: ["/tmp/paint-second.png"], lastPath: null });
 installKeymap([
   { id: "e2e-close", keys: ["$mod+w"], run: closeActiveTab },

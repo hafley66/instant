@@ -9,7 +9,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
+    command: "corepack pnpm@10.12.4 run dev --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173/e2e-paint.html",
     reuseExistingServer: true,
     timeout: 30_000,

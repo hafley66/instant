@@ -3,8 +3,8 @@
   "name": "instant activity",
   "version": "0.3.0",
   "description": "Config-driven core: streams tab/DOM activity to the local instant app (127.0.0.1:8787) and runs server-defined rules (textnodes / selector / netcapture) that report matches back.",
-  "permissions": ["tabs", "webNavigation", "alarms", "storage"],
-  "host_permissions": ["http://127.0.0.1:8787/*"],
+  "permissions": ["tabs", "webNavigation", "webRequest", "alarms", "storage"],
+  "host_permissions": ["http://127.0.0.1:8787/*", "http://127.0.0.1:8788/*", "https://claude.ai/*", "https://*.claude.ai/*"],
   "background": { "service_worker": "dist/background.js" },
   "content_scripts": [
     {

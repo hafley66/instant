@@ -13,7 +13,7 @@ ${commands.map((command) => `    export const ${camel(command)} = ${JSON.stringi
   }`).join("\n\n");
 
 const generated = `// Generated from ipc/commands.json by scripts/generate-native.mjs.
-// Do not edit by hand. Run: npm run api:generate
+// Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
 import { nativeTransport } from "../reactive/nativeTransport";
 
 export type CommandName =
@@ -34,7 +34,7 @@ ${namespaces}
 if (process.argv.includes("--check")) {
   const existing = await readFile(outputPath, "utf8").catch(() => "");
   if (existing !== generated) {
-    console.error("src/generated/native.ts is stale; run npm run api:generate");
+    console.error("src/generated/native.ts is stale; run corepack pnpm@10.12.4 api:generate");
     process.exit(1);
   }
 } else {

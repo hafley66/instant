@@ -11,6 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
+import type { Event } from "./state";
 import claudeUsageRuleJson from "./plugins/metrics/0_claude-usage.rule.json";
 import {
   type Rule,
@@ -143,6 +144,7 @@ export function RulesPanelV2() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [feed, setFeed] = useState<RuleMatch[]>([]);
+  const [lastNetwork, setLastNetwork] = useState<Event | null>(null);
   const [watcher, setWatcher] = useState<WatcherStatus>({
     last_heartbeat: 0,
     config_revision: 0,
@@ -156,6 +158,9 @@ export function RulesPanelV2() {
   useEffect(() => {
     invoke<Rule[]>("rules_get").then(setRules).catch(console.error);
     invoke<RuleMatch[]>("activity_rule_matches", { limit: FEED_CAP }).then(setFeed).catch(console.error);
+    invoke<Event[]>("activity_events", { limit: FEED_CAP, source: "browser" })
+      .then((events) => setLastNetwork(events.find((event) => event.kind.startsWith("netcapture.") && event.url.includes("claude.ai")) ?? null))
+      .catch(console.error);
     refreshWatcher();
     const timer = window.setInterval(refreshWatcher, 2_000);
     return () => window.clearInterval(timer);
@@ -165,8 +170,14 @@ export function RulesPanelV2() {
     const un = listen<RuleMatch>("rule-match", (e) => {
       setFeed((f) => [e.payload, ...f].slice(0, FEED_CAP));
     });
+    const activityUn = listen<Event>("activity-added", (e) => {
+      if (e.payload.kind.startsWith("netcapture.") && e.payload.url.includes("claude.ai")) {
+        setLastNetwork(e.payload);
+      }
+    });
     return () => {
       un.then((f) => f());
+      activityUn.then((f) => f());
     };
   }, []);
 
@@ -344,6 +355,7 @@ export function RulesPanelV2() {
           <span>config r{watcher.config_revision}</span>
           <span>{watcher.rules_count} cached</span>
           <span>last config fetch {watcher.last_heartbeat ? new Date(watcher.last_heartbeat).toLocaleTimeString() : "none"}</span>
+          <span title={lastNetwork?.url}>last network {lastNetwork ? `${lastNetwork.kind} ${new Date(lastNetwork.ts).toLocaleTimeString()}` : "none"}</span>
           <span>last match {feed[0] ? new Date(feed[0].ts).toLocaleTimeString() : "none"}</span>
           <span>server 127.0.0.1:8787</span>
           <span className="spy-spacer" />

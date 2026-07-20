@@ -4,17 +4,17 @@
   "mode": "netcapture",
   "request": {
     "methods": ["GET"],
-    "url": "/usage"
+    "url": "/api/organizations/[^/]+/usage"
   },
   "response": {
     "extract": {
-      "five_hour_percent": "five_hour.utilization * 100",
+      "five_hour_percent": "five_hour.utilization",
       "five_hour_resets_at": "five_hour.resets_at",
-      "seven_day_percent": "seven_day.utilization * 100",
+      "seven_day_percent": "seven_day.utilization",
       "seven_day_resets_at": "seven_day.resets_at",
       "extra_used_credits": "extra_usage.used_credits",
       "extra_monthly_limit": "extra_usage.monthly_limit",
-      "extra_percent": "extra_usage.utilization * 100",
+      "extra_percent": "extra_usage.utilization",
       "extra_enabled": "extra_usage.is_enabled"
     }
   },
@@ -34,5 +34,6 @@
       }
     }
   },
-  "enabled": true
+  "enabled": true,
+  "diagnostics": "all"
 }

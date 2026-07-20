@@ -7,6 +7,7 @@ export function registerMetricsPlugin(): void {
     panels: [
       {
         id: "metrics",
+        railParent: "rules",
         title: "Metrics",
         icon: "▥",
         iconLabel: "Metrics",

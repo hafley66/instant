@@ -1,5 +1,5 @@
 // Generated from ipc/commands.json by scripts/generate-native.mjs.
-// Do not edit by hand. Run: npm run api:generate
+// Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
 import { nativeTransport } from "../reactive/nativeTransport";
 
 export type CommandName =

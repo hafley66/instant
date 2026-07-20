@@ -27,7 +27,7 @@ absolute filesystem path. `line` is 1-based.
 just vscode-build
 ```
 
-Runs `npm install` + `tsc` in this directory, emitting `out/extension.js`.
+Runs `corepack pnpm@10.12.4 install` + `tsc` in this directory, emitting `out/extension.js`.
 No bundler — plain `tsc` compiles `src/extension.ts` straight to `out/`.
 
 ## Install (dev)
@@ -36,7 +36,7 @@ No bundler — plain `tsc` compiles `src/extension.ts` straight to `out/`.
 just vscode-install
 ```
 
-Packages the extension with `npx @vscode/vsce package` (works for local
+Packages the extension with `corepack pnpm@10.12.4 exec @vscode/vsce package` (works for local
 packaging without a publisher account — the marketplace publisher id in
 `package.json` is a placeholder) and installs the resulting `.vsix` with
 `code --install-extension`. Reload VS Code / the extension host afterward.

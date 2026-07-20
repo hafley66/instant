@@ -10,6 +10,7 @@ import type { PaintBridge } from "./paintBridge";
 import { clearPaintSessionSnapshot } from "./paintBridge";
 import { baseName, flashStatus, getHomeDir } from "./core";
 import { formatTimestamp } from "./memeExport";
+import { copyMemePng } from "./memeExport";
 
 const PLUGIN_ID = "paint";
 const RECENT_CAP = 10;
@@ -87,6 +88,22 @@ export async function deletePaintFile(path: string): Promise<boolean> {
     await invoke("delete_file", { path });
     removeRecentPaint(path);
     flashStatus(`paint: deleted ${baseName(path)}`);
+    return true;
+  } catch (e) {
+    flashStatus(`paint: ${String(e)}`);
+    return false;
+  }
+}
+
+export async function copyPaintImage(state: PaintPanelState): Promise<boolean> {
+  const dataUrl = state.bridge?.compositePng();
+  if (!dataUrl) {
+    flashStatus("paint: nothing to copy");
+    return false;
+  }
+  try {
+    await copyMemePng(dataUrl);
+    flashStatus("paint: copied image");
     return true;
   } catch (e) {
     flashStatus(`paint: ${String(e)}`);

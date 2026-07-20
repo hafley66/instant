@@ -57,15 +57,15 @@ browser events, file opens, session visits) into a searchable timeline.
 ## Develop
 
 ```sh
-npm install
-npm run tauri dev      # builds the Rust backend + serves the front end
+corepack pnpm@10.12.4 install
+corepack pnpm@10.12.4 run tauri dev      # builds the Rust backend + serves the front end
 ```
 
 Type-check and build the front end alone:
 
 ```sh
-npx tsc --noEmit
-npm run build
+corepack pnpm@10.12.4 exec tsc --noEmit
+corepack pnpm@10.12.4 build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 

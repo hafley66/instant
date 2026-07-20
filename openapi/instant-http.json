@@ -41,6 +41,22 @@
         }
       }
     },
+    "/heartbeat": {
+      "post": {
+        "operationId": "activityHeartbeat",
+        "servers": [{ "url": "http://127.0.0.1:8787" }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WatcherHeartbeat" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Extension watcher status recorded",
+            "content": { "text/plain": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
     "/ingest": {
       "post": {
         "operationId": "activityIngest",
@@ -106,10 +122,37 @@
           "schedule": {
             "oneOf": [
               { "type": "string", "enum": ["passive"] },
-              { "type": "object", "required": ["intervalMin"], "properties": { "intervalMin": { "type": "number" } } }
+              {
+                "type": "object",
+                "required": ["intervalMin"],
+                "properties": {
+                  "intervalMin": { "type": "number" },
+                  "effects": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/RuleEffect" }
+                  }
+                }
+              }
             ]
           },
           "enabled": { "type": "boolean" }
+        }
+      },
+      "WatcherHeartbeat": {
+        "type": "object",
+        "required": ["revision", "rulesCount"],
+        "properties": {
+          "revision": { "type": "integer" },
+          "rulesCount": { "type": "integer" }
+        }
+      },
+      "RuleEffect": {
+        "type": "object",
+        "required": ["op"],
+        "properties": {
+          "id": { "type": "string" },
+          "op": { "type": "string" },
+          "input": {}
         }
       },
       "ServerConfig": {

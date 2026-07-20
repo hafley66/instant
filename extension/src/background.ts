@@ -7,6 +7,7 @@
 import type { JsonSchema, MatchFields, Rule, RuleMatchEvent } from "./0_types";
 import { paths } from "../../src/generated/api";
 import { executeHttp } from "./httpTransport";
+import { createBrowserScheduleRuntime } from "./5_scheduleRuntime";
 
 const CONFIG_ALARM = "config";
 const DRIVEN_PREFIX = "driven:";
@@ -18,6 +19,15 @@ function send(ev: unknown) {
     ev as paths.activityIngest.Input,
   ).catch(() => {});
 }
+
+const browserSchedule = createBrowserScheduleRuntime((event) => {
+  send({
+    kind: event.type,
+    url: "",
+    title: event.causationId ?? "",
+    text: JSON.stringify(event.data),
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 1. Activity spy — tab lifecycle + relayed DOM events (unchanged behavior).
@@ -40,6 +50,19 @@ if (chrome.webNavigation?.onCreatedNavigationTarget) {
   });
 }
 
+if (chrome.webNavigation?.onCommitted) {
+  chrome.webNavigation.onCommitted.addListener((d) => {
+    if (/^https:\/\/(?:www\.)?claude\.ai\//.test(d.url)) {
+      send({
+        kind: "netcapture.navigation",
+        url: d.url,
+        title: "",
+        text: JSON.stringify({ source: "webNavigation", tabId: d.tabId, frameId: d.frameId }),
+      });
+    }
+  });
+}
+
 let lastSwitch = 0;
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   const now = Date.now();
@@ -55,13 +78,49 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   send({ kind: "tabclose", url: "", title: "", text: `closed tab ${tabId}` });
 });
 
+// MAIN-world interception supplies response bodies. webRequest supplies a
+// metadata fallback for usage requests issued by workers or another page
+// context, where window.fetch/XHR cannot observe the request.
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (!/\/api\/organizations\/[^/]+\/usage(?:[?#]|$)/.test(details.url)) return undefined;
+    send({
+      kind: "netcapture.seen",
+      url: details.url,
+      title: "",
+      text: JSON.stringify({
+        method: details.method,
+        source: "webRequest",
+        tabId: details.tabId,
+      }),
+    });
+    return undefined;
+  },
+  { urls: ["https://claude.ai/*", "https://*.claude.ai/*"] },
+);
+
 // Relayed messages: activity events carry {kind}; rule hits carry {cmd:"rulematch"}.
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg) return;
-  if (typeof msg.kind === "string") {
-    send(msg);
-  } else if (msg.cmd === "rulematch") {
+  if (msg.cmd === "rulematch") {
     postRuleMatch(msg.ruleId, msg.url, msg.matches, msg.stream, msg.schema);
+  } else if (msg.cmd === "expressionTrace") {
+    send({
+      kind: "rule.trace",
+      url: msg.url,
+      title: msg.ruleId,
+      text: JSON.stringify({ ruleId: msg.ruleId, traces: msg.traces }),
+    });
+  } else if (msg.cmd === "netcaptureDiagnostic") {
+    const details = JSON.stringify({
+      method: msg.method,
+      status: msg.status,
+      rules: msg.rules,
+      detail: msg.detail,
+    });
+    send({ kind: msg.kind, url: msg.url, title: "", text: details });
+  } else if (typeof msg.kind === "string") {
+    send(msg);
   }
 });
 
@@ -84,12 +143,11 @@ function postRuleMatch(ruleId: string, url: string, matches: MatchFields[], stre
 async function refreshConfig(): Promise<Rule[]> {
   try {
     const cfg = await executeHttp(paths.activityConfig.endpoint, undefined);
-    const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
+    const rules = Array.isArray(cfg.rules) ? cfg.rules as unknown as Rule[] : [];
     await chrome.storage.local.set({ rules, rulesRevision: cfg.revision ?? 0 });
-    await fetch("http://127.0.0.1:8787/heartbeat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ revision: cfg.revision ?? 0, rulesCount: rules.length }),
+    await executeHttp(paths.activityHeartbeat.endpoint, {
+      revision: cfg.revision ?? 0,
+      rulesCount: rules.length,
     }).catch(() => {});
     await armDrivenAlarms(rules);
     return rules;
@@ -113,6 +171,8 @@ chrome.alarms.onAlarm.addListener((a) => {
   else if (a.name.startsWith(DRIVEN_PREFIX)) runDriven(a.name.slice(DRIVEN_PREFIX.length)).catch(() => {});
 });
 
+void setup();
+
 // ---------------------------------------------------------------------------
 // 3. Driven scans — reload a dedicated bg tab per rule and scrape it.
 // ---------------------------------------------------------------------------
@@ -120,7 +180,6 @@ function drivenRules(rules: Rule[]): Rule[] {
   return rules.filter(
     (r) =>
       r.enabled !== false &&
-      r.url &&
       typeof r.schedule === "object" &&
       r.schedule != null &&
       typeof r.schedule.intervalMin === "number",
@@ -175,7 +234,12 @@ function waitForLoad(tabId: number, timeoutMs = 20000): Promise<boolean> {
 async function runDriven(ruleId: string) {
   const { rules } = await chrome.storage.local.get("rules");
   const rule = (rules as Rule[] | undefined)?.find((r) => r.id === ruleId);
-  if (!rule || !rule.url) return;
+  if (!rule || typeof rule.schedule !== "object") return;
+  if (rule.schedule.effects?.length) {
+    browserSchedule.dispatch(rule.id, rule.schedule.effects);
+    return;
+  }
+  if (!rule.url) return;
   const tab = await getDrivenTab(ruleId, rule.url);
   if (tab.id == null) return;
   const cur = await chrome.tabs.get(tab.id);

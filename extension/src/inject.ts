@@ -8,7 +8,7 @@
 // wrapper runs on every request, so it stays small and self-contained.
 (function () {
   const ATTR = "data-ext-netcapture"; // JSON array of URL strings or method-aware patterns
-  const pending: Array<{ method: string; url: string; body: unknown }> = [];
+  const pending: Array<{ method: string; url: string; body: unknown; status?: number }> = [];
 
   function patterns(): Array<string | { url?: string; methods?: string[] }> {
     try {
@@ -34,26 +34,35 @@
     });
   }
 
-  function post(method: string, url: string, body: unknown) {
+  function post(type: "seen" | "response" | "error", method: string, url: string, extra: Record<string, unknown> = {}) {
     try {
-      window.postMessage({ source: "ext-netcapture", method, url, ts: Date.now(), body }, "*");
+      window.postMessage({ source: "ext-netcapture", type, method, url, ts: Date.now(), ...extra }, "*");
     } catch {
       /* not cloneable — drop */
     }
   }
 
-  function deliver(method: string, url: string, body: unknown) {
-    if (wanted(method, url)) {
-      post(method, url, body);
-    } else if (/usage/i.test(url)) {
-      pending.push({ method, url, body });
+  function candidate(method: string, url: string): boolean {
+    return wanted(method, url) || /usage/i.test(url);
+  }
+
+  function announce(method: string, url: string) {
+    if (candidate(method, url)) post("seen", method, url);
+  }
+
+  function deliver(method: string, url: string, body: unknown, status?: number) {
+    if (wanted(method, url)) post("response", method, url, { body, status });
+    else if (/usage/i.test(url)) {
+      pending.push({ method, url, body, status });
       if (pending.length > 8) pending.shift();
     }
   }
 
   function flush() {
     for (const item of pending.splice(0)) {
-      if (wanted(item.method, item.url)) post(item.method, item.url, item.body);
+      if (wanted(item.method, item.url)) {
+        post("response", item.method, item.url, { body: item.body, status: item.status });
+      }
     }
   }
 
@@ -66,13 +75,15 @@
   if (typeof origFetch === "function") {
     window.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
       const req = args[0];
-      const url = typeof req === "string" ? req : (req as Request)?.url || "";
+      const rawUrl = typeof req === "string" ? req : (req as Request)?.url || "";
+      const url = rawUrl ? new URL(rawUrl, location.href).href : "";
       const method = typeof req === "string" ? (args[1] as RequestInit | undefined)?.method || "GET" : (req as Request)?.method || "GET";
+      announce(method, url);
       const p = origFetch.apply(this as never, args);
-      if (wanted(method, url) || /usage/i.test(url)) {
+      if (candidate(method, url)) {
         p.then((resp) => {
-          resp.clone().json().then((j) => deliver(method, url, j)).catch(() => {});
-        }).catch(() => {});
+          resp.clone().json().then((j) => deliver(method, url, j, resp.status)).catch(() => {});
+        }).catch((error) => post("error", method, url, { detail: String(error) }));
       }
       return p;
     };
@@ -85,22 +96,24 @@
   const origOpen = XHR.open;
   const origSend = XHR.send;
   XHR.open = function (this: typeof XHR, method: string, url: string, ...rest: unknown[]) {
-    this.__extUrl = url;
+    this.__extUrl = new URL(url, location.href).href;
     this.__extMethod = method;
     // @ts-expect-error variadic passthrough to the native open
     return origOpen.call(this, method, url, ...rest);
   };
   XHR.send = function (this: typeof XHR, ...a: unknown[]) {
-    if (this.__extUrl && (wanted(this.__extMethod || "GET", this.__extUrl) || /usage/i.test(this.__extUrl))) {
+    if (this.__extUrl && candidate(this.__extMethod || "GET", this.__extUrl)) {
       const url = this.__extUrl;
       const method = this.__extMethod || "GET";
+      announce(method, url);
       this.addEventListener("load", function (this: XMLHttpRequest) {
         try {
-          deliver(method, url, JSON.parse(this.responseText));
-        } catch {
-          /* not JSON */
+          deliver(method, url, JSON.parse(this.responseText), this.status);
+        } catch (error) {
+          post("error", method, url, { status: this.status, detail: String(error) });
         }
       });
+      this.addEventListener("error", () => post("error", method, url, { detail: "XHR error" }));
     }
     // @ts-expect-error variadic passthrough to the native send
     return origSend.apply(this, a);

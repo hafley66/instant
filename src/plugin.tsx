@@ -18,10 +18,12 @@ export interface RailChild {
   hint?: string; // title tooltip on the child button
   run: () => void;
   contextMenu?: () => CtxItem[];
+  dragPath?: string;
 }
 
 export interface PanelDef {
   id: string;
+  railParent?: string; // registered/dockable panel rendered under this panel in the activity rail
   title: string;
   icon: string; // fallback glyph when iconUrl is absent
   iconUrl?: string; // XP-style raster icon (public/icons/*.png); wins over `icon`
@@ -145,6 +147,14 @@ export function panelInstanceForId(panelId: string): PanelInstanceDef | undefine
 
 export function panelIds(): string[] {
   return [...panelMap.keys()];
+}
+
+export function railPanelIds(): string[] {
+  return [...panelMap.values()].filter((panel) => !panel.railParent).map((panel) => panel.id);
+}
+
+export function railChildPanels(parentId: string): PanelDef[] {
+  return [...panelMap.values()].filter((panel) => panel.railParent === parentId);
 }
 
 export function allPanels(): PanelDef[] {

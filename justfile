@@ -1,6 +1,6 @@
 # instant — task runner. `just` lists recipes; `just dev` runs the full app.
 # The Tauri shell (Rust backend) is what you want for real runs — it spawns the
-# vite frontend itself (tauri.conf beforeDevCommand = "npm run dev"). Running
+# vite frontend itself (tauri.conf beforeDevCommand = "corepack pnpm@10.12.4 run dev"). Running
 # vite alone (`just web`) gives the UI in a browser but no Rust commands
 # (tmux/pty/worktrees/harness all no-op).
 
@@ -15,19 +15,19 @@ default:
 # `just signing-setup` once) so its macOS TCC grants survive rebuilds. Without
 # the cert the shim is a harmless no-op (binary stays ad-hoc, as before).
 dev:
-    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 tauri dev
 
 # same as `dev`, but with INSTANT_NO_GLOBALS=1: skips the tray icon, the global
 # Cmd+Alt+Space shortcut, and the double-click/double-cmd summon gesture, so
 # this instance doesn't fight the owner's always-running one. Use this for
 # agent/verification runs.
 dev-safe:
-    INSTANT_NO_GLOBALS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev
+    INSTANT_NO_GLOBALS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 tauri dev
 
 # isolated second instance: separate Vite port + summon shortcut, with no second
 # tray icon or process-wide summon gesture. Use Cmd+Shift+Space to summon it.
 dev-isolated:
-    INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" npm run tauri dev -- --config '{"build":{"beforeDevCommand":"npm run dev -- --port 1422","devUrl":"http://localhost:1422"}}'
+    INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 run tauri dev -- --config '{"build":{"beforeDevCommand":"corepack pnpm@10.12.4 run dev --port 1422","devUrl":"http://localhost:1422"}}'
 
 # one-time: install the Tauri CLI machine-global (~/.cargo/bin, on PATH across
 # all checkouts and nvm node versions) so any repo can run `cargo tauri …` /
@@ -54,15 +54,15 @@ voice-setup:
 
 # frontend only in a browser (no backend; invoke() calls fail)
 web:
-    npm run dev
+    corepack pnpm@10.12.4 run dev
 
 # typecheck + production frontend build
 build:
-    npm run build
+    corepack pnpm@10.12.4 run build
 
 # release bundle (.app/.dmg) via Tauri
 bundle:
-    npm run tauri build
+    corepack pnpm@10.12.4 run tauri build
 
 # regenerate the linked architectural backlog from comment_node relations
 todos:
@@ -78,25 +78,25 @@ todos-check:
 
 # typecheck only
 check: todos-check
-    npm run api:check
-    npx tsc --noEmit
+    corepack pnpm@10.12.4 run api:check
+    corepack pnpm@10.12.4 exec tsc --noEmit
 
 # build the Chrome extension (extension/src/*.ts -> extension/dist/*.js). Load
 # extension/ unpacked in chrome://extensions after this. `ext-watch` rebuilds
 # on save while iterating.
 ext-build:
-    npm run ext:build
+    corepack pnpm@10.12.4 run ext:build
 
 ext-watch:
-    npm run ext:watch
+    corepack pnpm@10.12.4 run ext:watch
 
 # typecheck the extension (its own tsconfig + @types/chrome)
 ext-check:
-    npm run ext:check
+    corepack pnpm@10.12.4 run ext:check
 
 # run the frontend (vitest) unit tests
 test:
-    npx vitest run
+    corepack pnpm@10.12.4 exec vitest run
 
 # compile-check the Rust backend
 cargo-check:
@@ -115,9 +115,9 @@ audit:
 # full preflight before a commit: tsc + vite build + cargo check + tests
 verify: check build cargo-check test
 
-# build the VS Code extension (npm install + tsc -> vscode-ext/out)
+# build the VS Code extension (corepack pnpm 10 install + tsc -> vscode-ext/out)
 vscode-build:
-    cd vscode-ext && npm install && npx tsc -p ./
+    cd vscode-ext && corepack pnpm@10.12.4 install && corepack pnpm@10.12.4 exec tsc -p ./
 
 # package + install the VS Code extension for local dev use. Packaging with
 # vsce works without a publisher account (the marketplace id in package.json
@@ -125,5 +125,5 @@ vscode-build:
 # on PATH, symlink vscode-ext/ into ~/.vscode/extensions instead — see
 # vscode-ext/README.md.
 vscode-install: vscode-build
-    cd vscode-ext && npx @vscode/vsce package --allow-missing-repository -o instant-activity.vsix
+    cd vscode-ext && corepack pnpm@10.12.4 exec @vscode/vsce package --allow-missing-repository -o instant-activity.vsix
     code --install-extension vscode-ext/instant-activity.vsix

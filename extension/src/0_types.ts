@@ -1,3 +1,5 @@
+import type { Effect } from "../../src/lib/json-rx/0_types";
+
 // Shared types for the config-driven MV3 core. The server (instant) is the
 // source of truth for rules; the extension caches them in chrome.storage.local
 // and re-fetches each alarm tick. Everything here is plain data — no chrome.*
@@ -9,9 +11,25 @@
 //   netcapture: MAIN-world fetch/XHR responses whose URL matches `url`|`regex`.
 export type RuleMode = "textnodes" | "selector" | "netcapture";
 
+export type RuleEffect = Effect;
+
 // "passive" (or absent) = only react to live pages the user visits.
-// {intervalMin} = driven: an alarm reloads a background tab and scans it.
-export type Schedule = { intervalMin: number } | "passive";
+// An interval with no effects preserves the legacy dedicated-tab scan.
+// Effects are interpreted by extension plugins; the rule model stays generic.
+export type Schedule = { intervalMin: number; effects?: RuleEffect[] } | "passive";
+
+export type DiagnosticsMode = "off" | "errors" | "all";
+
+export type ExpressionTrace = {
+  ruleId: string;
+  phase: "extract" | "guard" | "filter";
+  path: string;
+  language: "jsonata" | "json-logic";
+  expression: string | unknown;
+  outcome: "passed" | "filtered" | "missing" | "error";
+  result?: unknown;
+  reason?: string;
+};
 
 export interface Rule {
   id: string;
@@ -30,6 +48,7 @@ export interface Rule {
   response?: {
     extract?: Record<string, string>;
   };
+  diagnostics?: DiagnosticsMode;
   emit?: {
     stream: string;
     schema?: JsonSchema;
@@ -83,8 +102,11 @@ export interface ActivityEvent {
 // intercepted JSON responses; the isolated relay matches them against rules.
 export interface NetCaptureMessage {
   source: "ext-netcapture";
+  type?: "seen" | "response" | "error";
   url: string;
   method: string;
   ts: number;
-  body: unknown;
+  status?: number;
+  detail?: string;
+  body?: unknown;
 }

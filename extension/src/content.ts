@@ -9,7 +9,7 @@
 import type { MatchFields, NetCaptureMessage, Rule } from "./0_types";
 import { compile, mapCaptures, ruleMatchesLocation, rulesForHost } from "./1_match";
 import { scanRule } from "./2_scan";
-import { extractResponse } from "./3_extract";
+import { extractResponseDetailed } from "./3_extract";
 
 const MAX = 4000;
 
@@ -157,6 +157,12 @@ function scheduleScan() {
 
 function startEngine(rules: Rule[]) {
   active = rulesForHost(rules, location.host);
+  chrome.runtime.sendMessage({
+    cmd: "netcaptureDiagnostic",
+    kind: "netcapture.ready",
+    url: location.href,
+    rules: active.filter((rule) => rule.mode === "netcapture").map((rule) => rule.id),
+  }).catch(() => {});
   if (!active.length) {
     document.documentElement.removeAttribute(NET_ATTR);
     return;
@@ -177,11 +183,38 @@ window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const d = event.data as NetCaptureMessage | undefined;
   if (!d || d.source !== "ext-netcapture") return;
+  if (d.type === "seen" || d.type === "error") {
+    const rules = active
+      .filter((rule) => rule.mode === "netcapture" && netRuleMatches(rule, d.method, d.url))
+      .map((rule) => rule.id);
+    chrome.runtime.sendMessage({
+      cmd: "netcaptureDiagnostic",
+      kind: d.type === "seen" ? "netcapture.seen" : "netcapture.error",
+      url: d.url,
+      method: d.method,
+      status: d.status,
+      detail: d.detail,
+      rules,
+    }).catch(() => {});
+    return;
+  }
+  if (d.type && d.type !== "response") return;
+  if (!d.body) return;
   for (const rule of active) {
     if (rule.mode !== "netcapture") continue;
     if (!netRuleMatches(rule, d.method, d.url)) continue;
     if (rule.response?.extract) {
-      void extractResponse(rule, d.body).then((out) => reportMatches(rule, out));
+      void extractResponseDetailed(rule, d.body).then(({ matches, traces }) => {
+        if (traces.length) {
+          chrome.runtime.sendMessage({
+            cmd: "expressionTrace",
+            ruleId: rule.id,
+            url: d.url,
+            traces,
+          }).catch(() => {});
+        }
+        reportMatches(rule, matches);
+      });
     } else if (rule.regex) {
       const re = compile(rule.regex, "g");
       if (!re) continue;

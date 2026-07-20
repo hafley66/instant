@@ -80,7 +80,7 @@ ${sse}
 }
 
 const generated = `// Generated from openapi/instant-http.json by scripts/generate-api.mjs.
-// Do not edit by hand. Run: npm run api:generate
+// Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
 import type { EndpointConfig, Serializable } from "@hafley66/signals";
 
 export const baseUrl = ${JSON.stringify(baseUrl)};
@@ -105,7 +105,7 @@ ${operations.join("\n\n")}
 if (process.argv.includes("--check")) {
   const existing = await readFile(outputPath, "utf8").catch(() => "");
   if (existing !== generated) {
-    console.error("src/generated/api.ts is stale; run npm run api:generate");
+    console.error("src/generated/api.ts is stale; run corepack pnpm@10.12.4 api:generate");
     process.exit(1);
   }
 } else {

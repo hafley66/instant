@@ -2,7 +2,14 @@
 // activity-bar style. Persisted via pluginState under id "rail". The pure
 // merge/reorder/filter functions live in ./railOrder.ts (covered by
 // railOrder.test.ts without any DOM); this file is the DOM/store wiring.
-import { buildActivityRail, getPanel, panelIds, type PanelDef, type RailChild } from "./plugin";
+import {
+  buildActivityRail,
+  getPanel,
+  railChildPanels,
+  railPanelIds,
+  type PanelDef,
+  type RailChild,
+} from "./plugin";
 import { readPluginState, savePluginState } from "./pluginState";
 import { store } from "./state";
 import { togglePanel } from "./reactdock";
@@ -45,7 +52,7 @@ let rebuildSeq = 0;
 function rebuild(): void {
   const state = readRailState();
   lastKey = railKey(state);
-  const ids = resolveRailIds(panelIds(), state);
+  const ids = resolveRailIds(railPanelIds(), state);
   const panels = ids.map(getPanel).filter((p): p is PanelDef => !!p);
   buildActivityRail(panels);
   // buildActivityRail() rebuilds #actbar-panels from scratch (see plugin.tsx),
@@ -65,11 +72,20 @@ function rebuild(): void {
 // empty/failing one) keep a plain button — no dead affordance.
 async function refreshChildren(seq: number): Promise<void> {
   const state = readRailState();
-  const ids = resolveRailIds(panelIds(), state);
+  const ids = resolveRailIds(railPanelIds(), state);
   for (const id of ids) {
     const p = getPanel(id);
-    if (!p?.railChildren) continue;
-    const kids = await p.railChildren().catch(() => [] as RailChild[]);
+    if (!p) continue;
+    const panelKids: RailChild[] = railChildPanels(id).map((panel) => ({
+      id: panel.id,
+      label: panel.title,
+      hint: panel.iconLabel,
+      run: () => togglePanel(panel.id),
+    }));
+    const providedKids = p.railChildren
+      ? await p.railChildren().catch(() => [] as RailChild[])
+      : [];
+    const kids = [...panelKids, ...providedKids];
     if (seq !== rebuildSeq) return; // a newer rebuild replaced the buttons
     if (kids.length === 0) continue;
     const btn = document.getElementById(`${id}-toggle`);
@@ -101,10 +117,24 @@ function renderChildren(id: string, kids: RailChild[]): void {
   host.className = "actbar-children";
   for (const kid of kids) {
     const b = document.createElement("button");
+    b.id = `${id}-${kid.id}-child`;
     b.className = "actbar-child";
     b.textContent = kid.label;
     if (kid.hint) b.title = kid.hint;
     b.onclick = kid.run;
+    if (kid.dragPath) {
+      b.draggable = true;
+      b.ondragstart = (e) => {
+        const fileUrl = encodeURI(`file://${kid.dragPath}`);
+        e.dataTransfer?.setData("text/uri-list", fileUrl);
+        e.dataTransfer?.setData("text/plain", kid.dragPath!);
+        e.dataTransfer?.setData(
+          "DownloadURL",
+          `image/png:${kid.dragPath!.split("/").pop() ?? "image.png"}:${fileUrl}`,
+        );
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+      };
+    }
     if (kid.contextMenu) {
       b.oncontextmenu = (e) => {
         e.preventDefault();
@@ -147,7 +177,7 @@ function wireDragReorder(actbar: HTMLElement): void {
     const startY = e.clientY;
     const pointerId = e.pointerId;
     let dragging = false;
-    let order = mergeOrder(readRailState().order, panelIds());
+    let order = mergeOrder(readRailState().order, railPanelIds());
 
     const onMove = (ev: PointerEvent) => {
       if (!dragging) {
@@ -187,7 +217,7 @@ function wireDragReorder(actbar: HTMLElement): void {
 
 function railMenuItems(): CtxItem[] {
   const state = readRailState();
-  const ids = mergeOrder(state.order, panelIds());
+  const ids = mergeOrder(state.order, railPanelIds());
   const hiddenSet = new Set(state.hidden);
   return ids.map((id) => {
     const p = getPanel(id);

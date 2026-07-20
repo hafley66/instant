@@ -7,9 +7,17 @@ export interface NativeTransport {
 const browserE2e =
   typeof window !== "undefined" && new URLSearchParams(window.location.search).has("e2e");
 
+type E2eWindow = Window & {
+  __instantE2eNativeCalls?: string[];
+  __instantE2eNativeResults?: Record<string, unknown>;
+};
+
 function browserE2eInvoke<T>(command: string): Promise<T> {
-  const w = window as Window & { __instantE2eNativeCalls?: string[] };
+  const w = window as E2eWindow;
   (w.__instantE2eNativeCalls ??= []).push(command);
+  if (command in (w.__instantE2eNativeResults ?? {})) {
+    return Promise.resolve(w.__instantE2eNativeResults?.[command] as T);
+  }
   if (command === "read_image") {
     return Promise.resolve(
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" as T,

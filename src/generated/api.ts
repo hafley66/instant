@@ -1,5 +1,5 @@
 // Generated from openapi/instant-http.json by scripts/generate-api.mjs.
-// Do not edit by hand. Run: npm run api:generate
+// Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
 import type { EndpointConfig, Serializable } from "@hafley66/signals";
 
 export const baseUrl = "http://127.0.0.1:7748";
@@ -33,8 +33,19 @@ export namespace components {
       request?: { "methods"?: string[]; "url"?: string };
       response?: { "extract"?: Record<string, string> };
       emit?: { "stream": string; "schema"?: components.schemas.JsonSchema };
-      schedule?: "passive" | { "intervalMin": number };
+      schedule?: "passive" | { "intervalMin": number; "effects"?: components.schemas.RuleEffect[] };
       enabled?: boolean;
+    }
+
+    export interface WatcherHeartbeat {
+      revision: number;
+      rulesCount: number;
+    }
+
+    export interface RuleEffect {
+      id?: string;
+      op: string;
+      input?: unknown;
     }
 
     export interface ServerConfig {
@@ -129,6 +140,23 @@ export namespace paths {
 
     export const endpoint: EndpointConfig<Input, Output> = {
       request: (_input) => ({ url, method }),
+      decode: (response) => {
+        if (response.status < 200 || response.status >= 300) {
+          throw new HttpStatusError(response.status);
+        }
+        return response.body as unknown as Output;
+      },
+    };
+  }
+
+  export namespace activityHeartbeat {
+    export const method = "POST";
+    export const url = "http://127.0.0.1:8787" + "/heartbeat";
+    export type Input = components.schemas.WatcherHeartbeat;
+    export type Output = string;
+
+    export const endpoint: EndpointConfig<Input, Output> = {
+      request: (input) => ({ url, method, body: input as unknown as Serializable }),
       decode: (response) => {
         if (response.status < 200 || response.status >= 300) {
           throw new HttpStatusError(response.status);

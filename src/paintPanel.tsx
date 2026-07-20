@@ -14,6 +14,7 @@ import {
   savePaint,
   requestLoadPaintFile,
   deletePaintFile,
+  copyPaintImage,
   PAINT_SIDEBAR_RECENT_CAP,
   type PaintPanelState,
 } from "./paintSessions";
@@ -113,6 +114,9 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
         <button type="button" onClick={() => void savePaint(state)} title="flatten layers and save as PNG">
           save
         </button>
+        <button type="button" onClick={() => void copyPaintImage(state)} title="copy the composited image to the system clipboard">
+          copy
+        </button>
         {session.recent.length ? (
           <select
             className="paint-recent"
@@ -177,6 +181,7 @@ export function registerPaint() {
             label: baseName(path),
             hint: path,
             run: () => openPaintFile(path),
+            dragPath: path,
             contextMenu: () => [
               { label: "Delete file…", action: () => void deletePaintFile(path) },
             ],
