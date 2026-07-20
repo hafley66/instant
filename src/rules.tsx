@@ -11,6 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
+import claudeUsageRuleJson from "./plugins/metrics/0_claude-usage.rule.json";
 import {
   type Rule,
   type RuleMatch,
@@ -24,6 +25,7 @@ import {
 const FEED_CAP = 100;
 const WATCHER_STALE_MS = 3 * 60 * 1000;
 const RULE_SECTION_IDS = { watcher: "rules-watcher", table: "rules-table", selected: "rules-selected", matches: "rules-matches" } as const;
+const CLAUDE_USAGE_RULE = claudeUsageRuleJson as unknown as Rule;
 
 interface WatcherStatus {
   last_heartbeat: number;
@@ -192,6 +194,9 @@ export function RulesPanelV2() {
   function add() {
     save([...rules, template(nextRuleId(rules))]);
   }
+  function addClaudeUsage() {
+    if (!rules.some((r) => r.id === CLAUDE_USAGE_RULE.id)) save([...rules, CLAUDE_USAGE_RULE]);
+  }
   function edit(id: string) {
     setSelected(id);
   }
@@ -324,6 +329,11 @@ export function RulesPanelV2() {
         <button type="button" onClick={add}>
           + Rule
         </button>
+        {!rules.some((r) => r.id === CLAUDE_USAGE_RULE.id) ? (
+          <button type="button" onClick={addClaudeUsage}>
+            + Claude usage
+          </button>
+        ) : null}
         <button type="button" onClick={refreshWatcher} title="refresh extension status">
           refresh
         </button>
