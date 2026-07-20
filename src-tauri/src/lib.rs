@@ -731,17 +731,6 @@ pub fn run() {
             });
             app.manage(activity::WatcherState(Mutex::new(activity::WatcherStatus::default())));
 
-            // ntfy publish target for action:"notify" rules (notify.json,
-            // created empty if absent). Edited alongside the rule list in the
-            // Rules panel; empty ntfy_url = notify is a silent no-op.
-            let notify_path = data_dir.join("notify.json");
-            let notify_cfg = activity::read_notify_config(&notify_path);
-            app.manage(activity::NotifyState {
-                config: Mutex::new(notify_cfg),
-                path: notify_path,
-                warned: AtomicBool::new(false),
-            });
-
             activity::spawn_server(app.handle().clone());
             pty::reap_orphan_graphics(); // clean awrit orphans from a prior crash/restart
             cdp::reap_orphans(); // clean headless-Chrome orphans from a prior SIGTERM
@@ -863,8 +852,6 @@ pub fn run() {
             activity::capture_enabled,
             activity::rules_get,
             activity::rules_set,
-            activity::notify_config_get,
-            activity::notify_config_set,
             activity::activity_rule_matches,
             activity::watcher_status,
             capture::capture_permissions,

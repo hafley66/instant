@@ -32,8 +32,6 @@ export type CommandName =
   | "capture_enabled"
   | "rules_get"
   | "rules_set"
-  | "notify_config_get"
-  | "notify_config_set"
   | "activity_rule_matches"
   | "watcher_status"
   | "capture_permissions"
@@ -124,8 +122,6 @@ export namespace commands {
     export const captureEnabled = "capture_enabled";
     export const rulesGet = "rules_get";
     export const rulesSet = "rules_set";
-    export const notifyConfigGet = "notify_config_get";
-    export const notifyConfigSet = "notify_config_set";
     export const activityRuleMatches = "activity_rule_matches";
     export const watcherStatus = "watcher_status";
   }

@@ -8,11 +8,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
-import { registerPlugin } from "./plugin";
+import { registerPlugin, type RailChild } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
 import {
-  type NotifyConfig,
   type Rule,
   type RuleMatch,
   RULE_MODES,
@@ -25,6 +24,12 @@ import {
 
 const FEED_CAP = 100;
 const WATCHER_STALE_MS = 3 * 60 * 1000;
+const RULE_SECTION_IDS = {
+  watcher: "rules-watcher",
+  table: "rules-table",
+  selected: "rules-selected",
+  matches: "rules-matches",
+} as const;
 
 interface WatcherStatus {
   last_heartbeat: number;
@@ -35,6 +40,19 @@ interface WatcherStatus {
 function watcherLabel(status: WatcherStatus): string {
   if (!status.last_heartbeat) return "extension offline";
   return Date.now() - status.last_heartbeat <= WATCHER_STALE_MS ? "extension active" : "extension stale";
+}
+
+function scrollRuleSection(id: string): void {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function rulesRailChildren(): Promise<RailChild[]> {
+  return Promise.resolve([
+    { id: "watcher", label: "watcher status", run: () => scrollRuleSection(RULE_SECTION_IDS.watcher) },
+    { id: "table", label: "rule table", run: () => scrollRuleSection(RULE_SECTION_IDS.table) },
+    { id: "selected", label: "selected rule details", run: () => scrollRuleSection(RULE_SECTION_IDS.selected) },
+    { id: "matches", label: "match history", run: () => scrollRuleSection(RULE_SECTION_IDS.matches) },
+  ]);
 }
 
 function template(id: string): Rule {
@@ -104,33 +122,6 @@ function EnabledCell({ row, onToggle }: { row: Rule; onToggle: (id: string) => v
   );
 }
 
-// action:"notify" settings row: the ntfy publish URL (full URL incl. topic,
-// e.g. https://ntfy.sh/my-secret-topic). Read/write via notify_config_get/set;
-// empty = notify rules fire but publish nothing (Rust logs one stderr line the
-// first time that happens, rather than failing ingest).
-function NtfySettingsRow({ value, onSave }: { value: string; onSave: (v: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-  const on = value.trim() !== "";
-  const dirty = draft.trim() !== value.trim();
-  return (
-    <div className="act-bar rules-ntfy-row">
-      <span className="spy-title">notify</span>
-      <span className="wt-count">{on ? "→ ntfy on" : "→ ntfy off (no URL)"}</span>
-      <span className="spy-spacer" />
-      <input
-        className="rules-ntfy-input"
-        placeholder="https://ntfy.sh/my-secret-topic"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-      />
-      <button type="button" disabled={!dirty} onClick={() => onSave(draft.trim())}>
-        Save
-      </button>
-    </div>
-  );
-}
-
 const MATCH_COLUMNS: TreeColumn<RuleMatch & { key: string }>[] = [
   {
     id: "ts",
@@ -170,7 +161,6 @@ export function RulesPanelV2() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [feed, setFeed] = useState<RuleMatch[]>([]);
-  const [ntfyUrl, setNtfyUrl] = useState("");
   const [watcher, setWatcher] = useState<WatcherStatus>({
     last_heartbeat: 0,
     config_revision: 0,
@@ -190,12 +180,6 @@ export function RulesPanelV2() {
   }, []);
 
   useEffect(() => {
-    invoke<NotifyConfig>("notify_config_get")
-      .then((c) => setNtfyUrl(c.ntfy_url))
-      .catch(console.error);
-  }, []);
-
-  useEffect(() => {
     const un = listen<RuleMatch>("rule-match", (e) => {
       setFeed((f) => [e.payload, ...f].slice(0, FEED_CAP));
     });
@@ -203,13 +187,6 @@ export function RulesPanelV2() {
       un.then((f) => f());
     };
   }, []);
-
-  // Persist the ntfy target action:"notify" rules publish to.
-  function saveNtfyUrl(value: string) {
-    invoke<NotifyConfig>("notify_config_set", { ntfyUrl: value })
-      .then((c) => setNtfyUrl(c.ntfy_url))
-      .catch((e) => showError("notify", e));
-  }
 
   // Persist and adopt the server's echoed list (the extension picks it up on its
   // next /config tick, <= 1 min). Surface failures — a swallowed rules_set
@@ -380,29 +357,33 @@ export function RulesPanelV2() {
         </button>
       </div>
       <div className="panel-scroll">
-        <div className="rules-status-row">
+        <div id={RULE_SECTION_IDS.watcher} className="rules-section rules-status-row">
           <span>{watcherLabel(watcher)}</span>
           <span>config r{watcher.config_revision}</span>
           <span>{watcher.rules_count} cached</span>
+          <span>last config fetch {watcher.last_heartbeat ? new Date(watcher.last_heartbeat).toLocaleTimeString() : "none"}</span>
+          <span>last match {feed[0] ? new Date(feed[0].ts).toLocaleTimeString() : "none"}</span>
+          <span>server 127.0.0.1:8787</span>
           <span className="spy-spacer" />
-          <span>{watcher.last_heartbeat ? new Date(watcher.last_heartbeat).toLocaleTimeString() : "no heartbeat"}</span>
+          <span>{watcher.last_heartbeat ? "heartbeat" : "no heartbeat"}</span>
         </div>
-        <NtfySettingsRow value={ntfyUrl} onSave={saveNtfyUrl} />
-        {rules.length === 0 ? (
-          <div className="session-empty">no rules — served at GET /config</div>
-        ) : (
-          <TreeTable<Rule>
-            columns={RULES_COLUMNS}
-            data={rules}
-            getRowId={(r) => r.id}
-            rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
-            onRowClick={(r) => edit(r.id)}
-            onCellEdit={onCellEdit}
-          />
-        )}
+        <div id={RULE_SECTION_IDS.table} className="rules-section">
+          {rules.length === 0 ? (
+            <div className="session-empty">no rules — served at GET /config</div>
+          ) : (
+            <TreeTable<Rule>
+              columns={RULES_COLUMNS}
+              data={rules}
+              getRowId={(r) => r.id}
+              rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
+              onRowClick={(r) => edit(r.id)}
+              onCellEdit={onCellEdit}
+            />
+          )}
+        </div>
 
         {selectedRule ? (
-          <div className="rule-editor">
+          <div id={RULE_SECTION_IDS.selected} className="rules-section rule-editor">
             <textarea
               className="rule-json"
               spellCheck={false}
@@ -425,7 +406,7 @@ export function RulesPanelV2() {
           </div>
         ) : null}
 
-        <div className="act-bar rules-feed-head">
+        <div id={RULE_SECTION_IDS.matches} className="rules-section act-bar rules-feed-head">
           <span className="spy-title">matches</span>
           <span className="wt-count">{feed.length}</span>
           <span className="spy-spacer" />
@@ -462,6 +443,7 @@ export function registerRulesPlugin() {
         iconLabel: "Rules",
         html: "",
         component: RulesPanelV2,
+        railChildren: rulesRailChildren,
       },
     ],
   });

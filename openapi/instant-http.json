@@ -90,7 +90,7 @@
               { "type": "object", "required": ["intervalMin"], "properties": { "intervalMin": { "type": "number" } } }
             ]
           },
-          "action": { "type": "string", "enum": ["report", "notify"] },
+          "action": { "type": "string", "enum": ["report"] },
           "enabled": { "type": "boolean" }
         }
       },

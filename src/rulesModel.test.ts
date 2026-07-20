@@ -68,8 +68,8 @@ describe("applyCellEdit", () => {
     expect(mode).toEqual({ ok: true, rule: { ...base, mode: "selector" } });
     expect(applyCellEdit(base, "mode", "nope").ok).toBe(false);
 
-    const action = applyCellEdit(base, "action", "notify");
-    expect(action).toEqual({ ok: true, rule: { ...base, action: "notify" } });
+    const action = applyCellEdit(base, "action", "report");
+    expect(action).toEqual({ ok: true, rule: { ...base, action: "report" } });
     expect(applyCellEdit(base, "action", "bogus").ok).toBe(false);
   });
 

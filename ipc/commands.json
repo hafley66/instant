@@ -3,7 +3,7 @@
   "cdp": ["cdp_open", "cdp_send", "cdp_resize", "cdp_navigate", "cdp_close", "cdp_status"],
   "workspace": ["list_workspaces", "create_workspace", "remove_workspace"],
   "worktrees": ["scan_worktrees", "add_worktree", "git_diff", "remove_worktree", "worktree_at"],
-  "activity": ["activity_events", "activity_clear", "activity_log", "capture_set_enabled", "capture_enabled", "rules_get", "rules_set", "notify_config_get", "notify_config_set", "activity_rule_matches", "watcher_status"],
+  "activity": ["activity_events", "activity_clear", "activity_log", "capture_set_enabled", "capture_enabled", "rules_get", "rules_set", "activity_rule_matches", "watcher_status"],
   "capture": ["capture_permissions", "capture_request_screen"],
   "config": ["config_get", "config_set", "config_reload", "config_open"],
   "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "read_image", "read_text", "save_text", "delete_file"],

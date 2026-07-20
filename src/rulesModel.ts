@@ -6,7 +6,7 @@
 
 export type RuleMode = "textnodes" | "selector" | "netcapture";
 export type RuleSchedule = { intervalMin: number } | "passive";
-export type RuleAction = "report" | "notify";
+export type RuleAction = "report";
 
 export interface Rule {
   id: string;
@@ -21,12 +21,6 @@ export interface Rule {
   enabled?: boolean;
 }
 
-// ntfy publish target (Rust NotifyConfig, notify_config_get/set commands).
-// Empty ntfy_url = action:"notify" rules are a silent no-op.
-export interface NotifyConfig {
-  ntfy_url: string;
-}
-
 // rule-match payload (Rust RuleMatch, serialized with ruleId).
 export interface RuleMatch {
   ruleId: string;
@@ -38,7 +32,7 @@ export interface RuleMatch {
 // Select-column option sets. `as const` so they double as the runtime validator
 // and the TreeColumn select options (readonly string[]).
 export const RULE_MODES = ["textnodes", "selector", "netcapture"] as const;
-export const RULE_ACTIONS = ["report", "notify"] as const;
+export const RULE_ACTIONS = ["report"] as const;
 
 // Cell display (host column, feed). "5m" / "passive" / "".
 export function scheduleLabel(s: Rule["schedule"]): string {

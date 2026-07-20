@@ -9,7 +9,6 @@ the generated regions; update the `todo(category): …` comment at its source.
 - [todo(boundary): isolate CDP commands and events behind a browser-engine port](src/cdp.ts#L834)
 - [todo(boundary): isolate Chrome discovery HTTP and WebSocket traffic behind a CDP transport](src-tauri/src/cdp.rs#L623)
 - [todo(boundary): move remaining recurring application work into runtime-owned subscriptions](src/reactive/runtime.ts#L26)
-- [todo(boundary): replace curl-based ntfy publishing with a typed outbound notification port](src-tauri/src/activity.rs#L827)
 - [todo(codegen): verify ipc/commands.json against generate_handler registrations during build](src-tauri/src/lib.rs#L914)
 - [todo(http): support media-type-aware decoding instead of assuming JSON for every response](src/reactive/httpTransport.ts#L31)
 - [todo(lifecycle): add isolated plugin activation and epic teardown after Status proves the runtime](src/plugin.tsx#L275)

@@ -31,7 +31,7 @@ export namespace components {
       regex?: string;
       captures?: Record<string, string>;
       schedule?: "passive" | { "intervalMin": number };
-      action: "report" | "notify";
+      action: "report";
       enabled?: boolean;
     }
 

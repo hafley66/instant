@@ -3144,15 +3144,6 @@ body.xp-pixel .xterm canvas {
   margin-top: 8px;
   border-top: 1px solid var(--frame, #0003);
 }
-.rules-ntfy-row {
-  border-bottom: 1px solid var(--frame, #0002);
-}
-.rules-ntfy-input {
-  flex: 1;
-  min-width: 0;
-  font-family: "Menlo", "Consolas", monospace;
-  font-size: 11px;
-}
 .rm-url {
   font-size: 10px;
   opacity: 0.6;

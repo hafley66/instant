@@ -24,7 +24,7 @@ export interface Rule {
   // name in the reported match. Empty = report the whole match under "match".
   captures?: Record<string, string>;
   schedule?: Schedule;
-  action: "report" | "notify";
+  action: "report";
   enabled?: boolean; // default true; the control-center toggle writes this
 }
 

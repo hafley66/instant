@@ -100,7 +100,7 @@ pub struct Rule {
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub schedule: serde_json::Value, // {intervalMin} | "passive" | null
     #[serde(default = "default_action")]
-    pub action: String, // "report" | "notify"
+    pub action: String, // "report"
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -147,45 +147,6 @@ fn write_rules(path: &Path, rules: &[Rule]) -> std::io::Result<()> {
     std::fs::write(path, json)
 }
 
-// Notify target for action:"notify" rules. Mirrored to notify.json (same
-// alongside-rules.json pattern as RulesState). `ntfy_url` is the full publish
-// URL including topic (e.g. https://ntfy.sh/my-secret-topic, or a self-hosted
-// equivalent) per https://docs.ntfy.sh — publishing is a plain POST/PUT of the
-// body to that URL. Empty/absent = notify is a silent no-op.
-#[derive(Serialize, Deserialize, Clone, Default)]
-pub struct NotifyConfig {
-    #[serde(default)]
-    pub ntfy_url: String,
-}
-
-/// Process-lifetime notify config. `warned` latches the "no ntfy_url
-/// configured" stderr line to fire at most once per run rather than once per
-/// match.
-pub struct NotifyState {
-    pub config: Mutex<NotifyConfig>,
-    pub path: PathBuf,
-    pub warned: AtomicBool,
-}
-
-/// Read notify.json, writing an empty default if absent. A parse error yields
-/// the default (notify becomes a no-op) rather than failing ingest startup.
-pub fn read_notify_config(path: &Path) -> NotifyConfig {
-    if !path.exists() {
-        let def = NotifyConfig::default();
-        let _ = write_notify_config(path, &def);
-        return def;
-    }
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<NotifyConfig>(&s).ok())
-        .unwrap_or_default()
-}
-
-fn write_notify_config(path: &Path, cfg: &NotifyConfig) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(cfg).unwrap_or_else(|_| "{}".into());
-    std::fs::write(path, json)
-}
-
 // One rule hit reported by the extension: {type:"rulematch", ruleId, url, ts,
 // matches:[{field: value}]}. Stored as a source='browser' kind='rulematch' row
 // (text = JSON of matches) and emitted on `rule-match` for the Rules panel feed.
@@ -207,92 +168,6 @@ struct WatcherHeartbeat {
     revision: u64,
     #[serde(default, rename = "rulesCount")]
     rules_count: usize,
-}
-
-// Compact ntfy body: rule id, matched fields (key-sorted for determinism —
-// HashMap order isn't stable), then the page URL on its own line.
-fn notify_summary(rule_id: &str, url: &str, matches: &[HashMap<String, String>]) -> String {
-    let fields = matches
-        .iter()
-        .map(|m| {
-            let mut kvs: Vec<(&String, &String)> = m.iter().collect();
-            kvs.sort_by(|a, b| a.0.cmp(b.0));
-            kvs.iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .collect::<Vec<_>>()
-        .join(" | ");
-    if fields.is_empty() {
-        format!("{rule_id}\n{url}")
-    } else {
-        format!("{rule_id}: {fields}\n{url}")
-    }
-}
-
-// Fire-and-forget POST to ntfy (https://docs.ntfy.sh: publishing a message is a
-// plain POST/PUT of the body to <server>/<topic>, with an optional `Title`
-// header). Spawned off the ingest thread so a slow/unreachable ntfy server
-// never blocks /ingest. No HTTP client crate lives in this dependency tree
-// (tiny_http here is server-only) — shelling out to curl is the smaller diff
-// than adding one; curl ships with macOS and is reached via pty::path_env()
-// the same way tmux/claude/opencode are.
-fn fire_notify(ntfy_url: String, rule_id: String, body: String) {
-    std::thread::spawn(move || {
-        let title = format!("instant — {rule_id}");
-        let result = std::process::Command::new("curl")
-            .args(["-fsS", "-X", "POST", "-H"])
-            .arg(format!("Title: {title}"))
-            .arg("-d")
-            .arg(&body)
-            .arg(&ntfy_url)
-            .env("PATH", crate::pty::path_env())
-            .output();
-        match result {
-            Ok(out) if !out.status.success() => {
-                eprintln!(
-                    "notify: curl exited {}: {}",
-                    out.status,
-                    String::from_utf8_lossy(&out.stderr).trim()
-                );
-            }
-            Err(e) => eprintln!("notify: failed to spawn curl: {e}"),
-            _ => {}
-        }
-    });
-}
-
-// If the matched rule's action is "notify", fire an async ntfy POST. The
-// rulematch payload from the extension doesn't carry `action` — it's looked up
-// here by rule id against RulesState instead of duplicating it onto the wire,
-// since instant already holds the authoritative rule list (the extension's
-// own comment: "instant is the source of truth"). This also means a rule
-// edited between scan and ingest is judged by its *current* action, not a
-// stale snapshot.
-fn maybe_notify(app: &AppHandle, m: &RuleMatch) {
-    let action = {
-        let rules = app.state::<RulesState>();
-        let list = rules.rules.lock().unwrap();
-        list.iter().find(|r| r.id == m.rule_id).map(|r| r.action.clone())
-    };
-    if action.as_deref() != Some("notify") {
-        return;
-    }
-    let notify = app.state::<NotifyState>();
-    let url = notify.config.lock().unwrap().ntfy_url.trim().to_string();
-    if url.is_empty() {
-        if !notify.warned.swap(true, Ordering::Relaxed) {
-            eprintln!(
-                "notify: rule '{}' fired with action=notify but no ntfy_url is configured \
-                 (set it in the Rules panel) — skipping",
-                m.rule_id
-            );
-        }
-        return;
-    }
-    let body = notify_summary(&m.rule_id, &m.url, &m.matches);
-    fire_notify(url, m.rule_id.clone(), body);
 }
 
 pub fn now_ms() -> i64 {
@@ -499,7 +374,6 @@ pub fn spawn_server(app: AppHandle) {
                                         // event for the Rules panel's live feed.
                                         let _ = app.emit("activity-added", &event);
                                         let _ = app.emit("rule-match", &m);
-                                        maybe_notify(&app, &m);
                                         respond(req, 200, "ok");
                                     }
                                     Err(e) => respond(req, 500, &e.to_string()),
@@ -768,23 +642,6 @@ pub fn watcher_status(state: State<WatcherState>) -> WatcherStatus {
     state.0.lock().unwrap().clone()
 }
 
-/// The ntfy target the Rules panel's settings row edits.
-#[tauri::command]
-pub fn notify_config_get(state: State<NotifyState>) -> NotifyConfig {
-    state.config.lock().unwrap().clone()
-}
-
-/// Replace the ntfy target, persist to notify.json, return the stored config.
-#[tauri::command]
-pub fn notify_config_set(state: State<NotifyState>, ntfy_url: String) -> Result<NotifyConfig, String> {
-    let next = NotifyConfig {
-        ntfy_url: ntfy_url.trim().to_string(),
-    };
-    write_notify_config(&state.path, &next).map_err(|e| e.to_string())?;
-    *state.config.lock().unwrap() = next.clone();
-    Ok(next)
-}
-
 #[tauri::command]
 pub fn capture_set_enabled(app: AppHandle, state: State<CaptureEnabled>, on: bool) {
     state.0.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -868,27 +725,5 @@ mod tests {
         assert_eq!(count, 1);
     }
 
-    // notify body: rule id + key-sorted fields + url, so a HashMap's
-    // unspecified iteration order never makes the ntfy message flaky.
-    #[test]
-    fn notify_summary_formats_rule_fields_and_url() {
-        let mut fields = HashMap::new();
-        fields.insert("sku".to_string(), "abc".to_string());
-        fields.insert("price".to_string(), "42".to_string());
-        let body = notify_summary("rule-1", "https://example.com/x", &[fields]);
-        assert_eq!(body, "rule-1: price=42,sku=abc\nhttps://example.com/x");
-    }
-
-    #[test]
-    fn notify_summary_handles_multiple_records_and_no_fields() {
-        let a = HashMap::from([("a".to_string(), "1".to_string())]);
-        let b = HashMap::from([("b".to_string(), "2".to_string())]);
-        let body = notify_summary("rule-2", "https://x.test", &[a, b]);
-        assert_eq!(body, "rule-2: a=1 | b=2\nhttps://x.test");
-
-        let empty = notify_summary("rule-3", "https://y.test", &[]);
-        assert_eq!(empty, "rule-3\nhttps://y.test");
-    }
 }
 // todo(security): cap ingest request bodies and define localhost authentication policy
-// todo(boundary): replace curl-based ntfy publishing with a typed outbound notification port

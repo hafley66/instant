@@ -65,13 +65,6 @@ Brazil/Indonesia/Singapore/Thailand only; US stock Pixels unaffected today.
 GrapheneOS structurally exempt (not Play-certified) — permanent, not a
 reprieve.
 
-## Push to phone (phase 3)
-
-ntfy: phone app subscribes to a private topic; anything can publish with
-`curl -d "message" https://<server>/<topic>`. instant's rules engine
-`action:"notify"` publishes rule matches to a configured ntfy URL (work
-package in flight). Devops boxes curl the same topic directly.
-
 ## Later
 
 - GrapheneOS (Pixel-only) when Google's sideload verification actually bites;
