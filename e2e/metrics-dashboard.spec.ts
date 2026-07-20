@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test("JSON-Rx dashboard renders captured metric data", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.addInitScript(() => {
     const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
     w.__instantE2eNativeResults = {
@@ -76,4 +78,14 @@ test("JSON-Rx dashboard renders captured metric data", async ({ page }) => {
   const historyAfter = await historyPanel.boundingBox();
   expect(chartAfter!.height).toBeLessThan(chartBefore!.height - 40);
   expect(historyAfter!.height).toBeGreaterThan(historyBefore!.height + 40);
+
+  await page.locator("#rules-toggle").click({ button: "right" });
+  await expect(page.locator(".ctx-menu")).toBeVisible();
+  const currentHandle = await handle.boundingBox();
+  expect(currentHandle).not.toBeNull();
+  await page.mouse.move(currentHandle!.x + currentHandle!.width / 2, currentHandle!.y + currentHandle!.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.locator(".ctx-menu")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
 });

@@ -19,7 +19,15 @@ function dismiss() {
 }
 
 function onOutside(e: PointerEvent) {
-  if (openMenu && !openMenu.contains(e.target as Node)) dismiss();
+  const menu = openMenu;
+  if (!menu || menu.contains(e.target as Node)) return;
+  // Keep the event target connected until pointerdown dispatch completes.
+  // react-resizable-panels compares the target's stacking order with every
+  // nearby resize handle in its document-level listener; synchronously
+  // removing the menu here leaves that listener with a detached target.
+  queueMicrotask(() => {
+    if (openMenu === menu) dismiss();
+  });
 }
 
 // Render the menu at (x,y), flipping near the right/bottom edge so it stays
@@ -73,7 +81,7 @@ export function wireContextMenu(itemsFor: (target: HTMLElement) => CtxItem[]): v
     e.preventDefault();
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, itemsFor(e.target as HTMLElement));
-  }, true);
+  });
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") dismiss();
   });

@@ -11,6 +11,7 @@ import { openPaintFile, registerPaint } from "../src/paintPanel";
 import { paintSession } from "../src/paintSessions";
 import { closeActiveTab, reopenLastTab } from "../src/tabs";
 import { installKeymap } from "../src/keymap";
+import { wireContextMenu } from "../src/ctxmenu";
 
 function SessionsPanel(_props: IDockviewPanelProps) {
   return createElement("div", { "data-testid": "sessions-panel" }, "Sessions");
@@ -42,3 +43,4 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-first]")!.onclick =
 };
 mountReactDock(document.getElementById("dock")!);
 initRail();
+wireContextMenu(() => []);

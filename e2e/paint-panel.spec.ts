@@ -74,7 +74,7 @@ test("Paint layers revive after save, Cmd+W, and Cmd+Shift+T", async ({ page }) 
     .toBe(1);
 });
 
-test("Rules opens without secondary navigation", async ({ page }) => {
+test("Rules opens with Metrics as secondary navigation", async ({ page }) => {
   await page.goto("/e2e-paint.html?e2e=1");
   const rulesButton = page.locator("#rules-toggle");
   await expect(rulesButton).toBeVisible();
@@ -82,6 +82,30 @@ test("Rules opens without secondary navigation", async ({ page }) => {
   await rulesButton.click();
   await expect(page.locator(".rules-panel")).toBeVisible();
 
-  await expect(rulesButton.locator(".actbar-exp")).toHaveCount(0);
+  await expect(rulesButton.locator(".actbar-exp")).toHaveCount(1);
+  await rulesButton.locator(".actbar-exp").click();
+  await expect(page.locator("#rules-metrics-child")).toBeVisible();
   await expect(page.locator("#rules-table")).toBeVisible();
+});
+
+test("rail context menu hides and restores navigation items", async ({ page }) => {
+  await page.goto("/e2e-paint.html?e2e=1");
+  const rulesButton = page.locator("#rules-toggle");
+  await rulesButton.click({ button: "right" });
+
+  const hideRules = page.locator(".ctx-item", { hasText: "✓ Rules" });
+  await expect(hideRules).toBeVisible();
+  await hideRules.click();
+  await expect(rulesButton).toHaveCount(0);
+
+  await page.locator("#sessions-toggle").dispatchEvent("contextmenu", {
+    bubbles: true,
+    button: 2,
+    clientX: 16,
+    clientY: 16,
+  });
+  const restoreRules = page.locator(".ctx-item", { hasText: "Rules" });
+  await expect(restoreRules).toBeVisible();
+  await restoreRules.click();
+  await expect(page.locator("#rules-toggle")).toBeVisible();
 });
