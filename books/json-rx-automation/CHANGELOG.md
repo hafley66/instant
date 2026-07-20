@@ -15,5 +15,9 @@
   effect interpreters.
 - Assigned shell, process, HTTP, WebSocket, and LSP production to Sprefa-facing
   adapters rather than Instant or the portable runtime.
+- Recorded the deferred controlled shell-template contract and its dependency
+  on Sprefa `sh` and `sh*` semantics.
+- Defined shell execution as a host-lowered duplex JSON-Rx lifecycle stream
+  with cancellation, framing, ordering, and backpressure semantics.
 - Added a repository-local dashboard-builder subagent and
   `build-instant-dashboard` skill.
