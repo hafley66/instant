@@ -159,10 +159,11 @@ export function paintJsonToSvg(json: string, fallbackPng?: string | null): strin
         return renderer?.(layer, images) ?? "";
       })
       .join("");
+    const metadata = `<metadata id="instant-paint-document">${esc(json)}</metadata>`;
     if (unsupported && fallbackPng) {
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${esc(fallbackPng)}" width="${width}" height="${height}" /></svg>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${metadata}<image href="${esc(fallbackPng)}" width="${width}" height="${height}" /></svg>`;
     }
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><marker id="paint-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#000" /></marker></defs>${body}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${metadata}<defs><marker id="paint-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#000" /></marker></defs>${body}</svg>`;
   } catch {
     return null;
   }

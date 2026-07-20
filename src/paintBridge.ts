@@ -92,6 +92,21 @@ export function installPaintBridge(
     loadSvgText(svg) {
       svgSource = svg;
       localStorage.setItem(SVG_SOURCE_SLOT, svg);
+      const metadata = new DOMParser()
+        .parseFromString(svg, "image/svg+xml")
+        .querySelector("metadata#instant-paint-document")
+        ?.textContent;
+      if (metadata) {
+        try {
+          const documentData = JSON.parse(metadata);
+          if (Array.isArray(documentData.layers)) {
+            void FileOpen.load_json(metadata);
+            return;
+          }
+        } catch {
+          // Fall through to the normal SVG image loader.
+        }
+      }
       FileOpen.file_open_data_url_handler(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
     },
     compositePng() {
