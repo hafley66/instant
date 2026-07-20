@@ -8,8 +8,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
-import { registerPlugin, type RailChild } from "./plugin";
-import { isOpen, togglePanel } from "./reactdock";
+import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
 import {
@@ -24,12 +23,7 @@ import {
 
 const FEED_CAP = 100;
 const WATCHER_STALE_MS = 3 * 60 * 1000;
-const RULE_SECTION_IDS = {
-  watcher: "rules-watcher",
-  table: "rules-table",
-  selected: "rules-selected",
-  matches: "rules-matches",
-} as const;
+const RULE_SECTION_IDS = { watcher: "rules-watcher", table: "rules-table", selected: "rules-selected", matches: "rules-matches" } as const;
 
 interface WatcherStatus {
   last_heartbeat: number;
@@ -40,27 +34,6 @@ interface WatcherStatus {
 function watcherLabel(status: WatcherStatus): string {
   if (!status.last_heartbeat) return "extension offline";
   return Date.now() - status.last_heartbeat <= WATCHER_STALE_MS ? "extension active" : "extension stale";
-}
-
-function openRuleSection(id: string): void {
-  if (!isOpen("rules")) {
-    togglePanel("rules");
-    window.setTimeout(() => scrollRuleSection(id), 0);
-    return;
-  }
-  scrollRuleSection(id);
-}
-
-function scrollRuleSection(id: string): void {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function rulesRailChildren(): Promise<RailChild[]> {
-  return Promise.resolve([
-    { id: "watcher", label: "watcher status", run: () => openRuleSection(RULE_SECTION_IDS.watcher) },
-    { id: "table", label: "rule table", run: () => openRuleSection(RULE_SECTION_IDS.table) },
-    { id: "matches", label: "match history", run: () => openRuleSection(RULE_SECTION_IDS.matches) },
-  ]);
 }
 
 function template(id: string): Rule {
@@ -446,7 +419,6 @@ export function registerRulesPlugin() {
         iconLabel: "Rules",
         html: "",
         component: RulesPanelV2,
-        railChildren: rulesRailChildren,
       },
     ],
   });

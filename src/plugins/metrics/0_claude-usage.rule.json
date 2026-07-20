@@ -1,0 +1,38 @@
+{
+  "id": "claude-usage",
+  "host": "^claude\\.ai$",
+  "mode": "netcapture",
+  "request": {
+    "methods": ["GET"],
+    "url": "/usage"
+  },
+  "response": {
+    "extract": {
+      "five_hour_percent": "five_hour.utilization * 100",
+      "five_hour_resets_at": "five_hour.resets_at",
+      "seven_day_percent": "seven_day.utilization * 100",
+      "seven_day_resets_at": "seven_day.resets_at",
+      "extra_used_credits": "extra_usage.used_credits",
+      "extra_monthly_limit": "extra_usage.monthly_limit",
+      "extra_percent": "extra_usage.utilization * 100",
+      "extra_enabled": "extra_usage.is_enabled"
+    }
+  },
+  "emit": {
+    "stream": "claude.usage",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "five_hour_percent": { "type": "number", "title": "5-hour usage", "minimum": 0, "maximum": 100 },
+        "five_hour_resets_at": { "type": "string", "format": "date-time", "title": "5-hour reset" },
+        "seven_day_percent": { "type": "number", "title": "7-day usage", "minimum": 0, "maximum": 100 },
+        "seven_day_resets_at": { "type": "string", "format": "date-time", "title": "7-day reset" },
+        "extra_used_credits": { "type": "number", "title": "Extra credits used" },
+        "extra_monthly_limit": { "type": "number", "title": "Extra credit limit" },
+        "extra_percent": { "type": "number", "title": "Extra usage", "minimum": 0, "maximum": 100 },
+        "extra_enabled": { "type": "boolean", "title": "Extra usage enabled" }
+      }
+    }
+  },
+  "enabled": true
+}
