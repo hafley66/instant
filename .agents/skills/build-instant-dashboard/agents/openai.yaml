@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Instant Dashboard"
+  short_description: "Build schema-driven Instant metric dashboards"
+  default_prompt: "Use $build-instant-dashboard to add a dashboard for a captured usage or spend stream."
