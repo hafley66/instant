@@ -21,6 +21,7 @@ interface PaintDocument {
 }
 
 type LayerRenderer = (layer: PaintLayer, images: Map<number, string>) => string;
+type StrokePoint = [number, number, number?];
 
 const esc = (value: unknown): string =>
   String(value ?? "")
@@ -50,11 +51,44 @@ function transform(layer: PaintLayer): string {
   return rotate ? ` transform="rotate(${rotate} ${x + w / 2} ${y + h / 2})"` : "";
 }
 
+function strokeSvg(layer: PaintLayer, groups: unknown[], defaultWidth: number): string {
+  const color = esc(layer.color ?? "#000");
+  const opacity = n(layer.opacity, 100) / 100;
+  const tx = n(layer.x);
+  const ty = n(layer.y);
+  return groups.map((group) => {
+    if (!Array.isArray(group)) return "";
+    const segments: StrokePoint[][] = [[]];
+    for (const point of group) {
+      if (point === null) segments.push([]);
+      else if (Array.isArray(point) && point.length >= 2) segments[segments.length - 1].push(point as StrokePoint);
+    }
+    return segments.map((points) => {
+      if (!points.length) return "";
+      if (points.length === 1) {
+        const [x, y, width] = points[0];
+        return `<circle cx="${tx + x}" cy="${ty + y}" r="${n(width, defaultWidth) / 2}" fill="${color}" opacity="${opacity}" />`;
+      }
+      return points.slice(1).map((point, i) => {
+        const previous = points[i];
+        const [x, y, width] = point;
+        return `<line x1="${tx + previous[0]}" y1="${ty + previous[1]}" x2="${tx + x}" y2="${ty + y}" stroke="${color}" stroke-width="${n(width, defaultWidth)}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}" />`;
+      }).join("");
+    }).join("");
+  }).join("");
+}
+
 const renderers: Record<string, LayerRenderer> = {
   image(layer, images) {
     const data = images.get(layer.id);
     if (!data) return "";
     return `<image href="${esc(data)}" x="${n(layer.x)}" y="${n(layer.y)}" width="${n(layer.width)}" height="${n(layer.height)}" opacity="${n(layer.opacity, 100) / 100}"${transform(layer)} />`;
+  },
+  pencil(layer) {
+    return strokeSvg(layer, [layer.data], n(layer.params?.size, 1));
+  },
+  brush(layer) {
+    return strokeSvg(layer, Array.isArray(layer.data) ? layer.data : [], n(layer.params?.size, 1));
   },
   line(layer) {
     return `<line x1="${n(layer.x)}" y1="${n(layer.y)}" x2="${n(layer.x) + n(layer.width)}" y2="${n(layer.y) + n(layer.height)}" stroke="${esc(layer.color ?? "#000")}" stroke-width="${n(layer.params?.size, 1)}" opacity="${n(layer.opacity, 100) / 100}" />`;
