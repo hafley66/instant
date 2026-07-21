@@ -1,4 +1,4 @@
-import { Observable, defer, map, shareReplay } from "rxjs";
+import { Observable, defer, map, merge, scan, shareReplay } from "rxjs";
 import type { JsonObject, JsonValue } from "./0_types";
 import { instanceUrl } from "./1_identity";
 import {
@@ -15,6 +15,15 @@ export type NetworkResponse = {
   ts: number;
   body: JsonValue;
 };
+
+export type HostEvent = {
+  type: string;
+  data: JsonValue;
+  url: string;
+  ts: number;
+};
+
+export type RuntimeSource = NetworkResponse | HostEvent;
 
 export type DashboardEmission = {
   ruleId: string;
@@ -38,6 +47,13 @@ type LocatedValue = {
     ts: number;
   };
 };
+
+function sourceOrigin(value: RuntimeSource): LocatedValue["origin"] {
+  return {
+    url: "requestUrl" in value ? value.requestUrl : value.url,
+    ts: value.ts,
+  };
+}
 
 function get(value: JsonValue, pointer: string): JsonValue {
   let current = value;
@@ -63,7 +79,7 @@ function canonical(value: unknown): unknown {
 
 export function compileAutomationV2(
   input: unknown,
-  sources: Record<string, Observable<NetworkResponse>>,
+  sources: Record<string, Observable<RuntimeSource>>,
 ): AutomationV2Runtime {
   const automation = AutomationV2Schema.parse(input);
   const instances = new Map<string, Observable<LocatedValue>>();
@@ -75,7 +91,7 @@ export function compileAutomationV2(
         if (!source) throw new Error(`Missing source runtime binding: ${expression.source.ref}`);
         return source.pipe(map((response) => ({
           value: response as unknown as JsonValue,
-          origin: { url: response.requestUrl, ts: response.ts },
+          origin: sourceOrigin(response),
         })));
       });
     }
@@ -89,6 +105,45 @@ export function compileAutomationV2(
             ),
             origin: input.origin,
           };
+        }),
+      );
+    }
+    if ("merge" in expression) {
+      return merge(...expression.merge.inputs.map(compileExpression));
+    }
+    if ("machine" in expression) {
+      const definition = automation.circuit.machines[expression.machine.ref];
+      if (!definition) throw new Error(`Unknown v2 machine: ${expression.machine.ref}`);
+      return compileExpression(expression.machine.input).pipe(
+        scan<LocatedValue, LocatedValue>((previous, input) => {
+          const event = input.value as JsonObject;
+          const eventType = event.type;
+          if (typeof eventType !== "string") throw new Error("Machine input requires an event type");
+          const transition = definition.on[eventType];
+          if (!transition) return { value: previous.value, origin: input.origin };
+          const state = previous.value as JsonObject;
+          const previousContext = state.context as JsonObject;
+          const context = transition.replaceContext
+            ? get(input.value, transition.replaceContext)
+            : {
+                ...previousContext,
+                ...Object.fromEntries(
+                  Object.entries(transition.patchContext ?? {}).map(([field, path]) => [field, get(input.value, path)]),
+                ),
+              };
+          if (typeof context !== "object" || context === null || Array.isArray(context)) {
+            throw new Error(`Machine context must be an object: ${expression.machine.ref}`);
+          }
+          return {
+            value: {
+              value: transition.target ?? state.value,
+              context,
+            },
+            origin: input.origin,
+          } satisfies LocatedValue;
+        }, {
+          value: definition.initial as unknown as JsonValue,
+          origin: undefined,
         }),
       );
     }

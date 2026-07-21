@@ -1,67 +1,104 @@
 # JSON-Rx MVP lab
 
-This directory is isolated from Instant's running application and from
-`src/lib/json-rx`. It tests a narrow serialized circuit against RxJS 7.8.
+This directory is isolated from Instant's running application, extension, Rust
+server, and `src/lib/json-rx`. It tests serialized circuits against RxJS 7.8.
+The files here are an executable v2 reference fixture. They do not constitute a
+production Codex host integration or change the production v1 Rule JSON path.
 
-## Proof obligations
+## Current v2 circuits
 
-1. A reusable definition has a URI template.
-2. Filled path and query parameters produce one canonical instance URL.
-3. A runtime returns one Observable object for one canonical flow instance.
-4. `shareReplay({ bufferSize: 1, refCount: true })` shares one source acquisition
-   inside that instance.
-5. A `switchMap` binding can project an outer value into the path and query
-   parameters of an inner flow reference.
-6. Replacing the outer value releases the prior inner flow and source.
-7. RxJS terminal notifications lower into serializable `next`, `error`, and
-   `complete` records.
+The Claude fixture keeps the existing browser network-response shape:
+
+```text
+browser.network.response -> project -> shareReplay(1, refCount=true)
+```
+
+The Codex fixture models two host-event bindings and joins their event streams:
+
+```text
+host.event account/rateLimits/read       \
+                                           -> merge -> machine(scan) -> project -> shareReplay
+host.event account/rateLimits/updated    /
+```
+
+The bindings declare these operation names:
+
+```text
+account/rateLimits/read
+account/rateLimits/updated
+```
+
+The lab supplies the corresponding `HostEvent` Observables directly to
+`compileAutomationV2`. An operation name is a source-binding identifier here;
+the lab contains no app-server listener, operation dispatcher, authentication,
+or host event transport.
+
+## Machine context updates
+
+The Codex machine starts with `value: "loading"` and a structurally complete
+context: `provider` is `"Codex"`, and every projected usage, reset, credit, and
+plan field is present with a `null` value. A `codex.usage.snapshot` event uses
+`replaceContext: "$.data"`, replacing the whole context with the snapshot
+object. A `codex.usage.updated` event uses `patchContext` for
+`primary_percent` and `primary_resets_at`, merging those fields into the
+existing context while retaining the other snapshot or initial fields.
+
+The machine expression lowers to RxJS `scan`. The expression is compiled once
+as part of the flow graph. `scan` allocates its accumulator when the flow's
+upstream subscription begins. The `shareReplay` operator follows the machine,
+so overlapping subscribers share one upstream subscription, one machine
+accumulator, and one context lifetime. When the final subscriber leaves,
+`refCount` tears down that lifetime. A later subscription starts a fresh
+machine accumulator from the initial state.
+
+The sparse update is valid before the snapshot. `scan` patches the null-filled
+initial context, and `project` emits a structurally complete row with nulls for
+fields that the update does not carry. The fixture has deterministic coverage
+for both update-before-snapshot and snapshot-before-update ordering.
+
+## Dashboard row stream
+
+Each v2 output maps to the existing `DashboardEmission` shape:
+
+```ts
+type DashboardEmission = {
+  ruleId: string;
+  url: string;
+  ts: number;
+  matches: JsonObject[];
+  stream: string;
+  schema: Record<string, unknown>;
+};
+```
+
+The Codex root emits rows with `stream: "codex.usage"` and the Claude root
+emits rows with `stream: "claude.usage"`. The Codex test merges both roots into
+one Observable of `DashboardEmission` values, which models the input for a
+future two-stream Metrics view. The test does not persist rows, invoke the
+production `rulematch` transport, or mount a production Metrics panel.
+
+The existing production Metrics consumer already defines the row envelope and
+stream field. The v2 lab only verifies that both isolated fixtures produce that
+shape. A future adapter would need to connect host bindings, subscribe roots,
+and deliver these rows through the production transport.
 
 ## Supported grammar
 
-The compiler accepts five expression nodes:
+The v2 compiler accepts these expression nodes:
 
 ```text
 source
-of
-map.get
-switchMap.ref
+project
+merge
+machine
 shareReplay(1, refCount=true)
 ```
 
 Every expression node has an explicit stable node ID. Definition and instance
-references use URLs. This lab has no generic expression language, protocol
-binding vocabulary, scheduler profile, queue policy, persistence, or Instant
+references use URLs. Zod 4 validates the document and graph references;
+`z.toJSONSchema()` exports Draft 2020-12. The lab does not provide a generic
+expression language, scheduler profile, queue policy, persistence, or Instant
 integration.
-
-## Side-by-side automation v2
-
-The v2 lab adds a deployment envelope around the circuit while leaving the
-production v1 Rule JSON untouched:
-
-```text
-automation.v2
-  browser network-response source binding
-  source -> project -> shareReplay circuit
-  dashboard root subscription metadata
-```
-
-Zod 4 is the TypeScript authoring and runtime-validation implementation.
-`z.toJSONSchema()` exports the portable Draft 2020-12 schema. The v2 fixture
-imports the production Claude v1 rule only as comparison data.
-
-Future server coexistence is additive:
-
-```json
-{
-  "rules": [],
-  "automations": []
-}
-```
-
-The current extension continues reading `rules`. A future v2 adapter validates
-and compiles `automations`, subscribes declared roots, and sends the existing
-`rulematch` dashboard envelope. The v2 automation URL occupies `ruleId`, so the
-current database and Metrics query shape require no second transport.
 
 ## Run
 
