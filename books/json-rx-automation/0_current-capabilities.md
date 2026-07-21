@@ -12,7 +12,7 @@ what can execute without recompiling.
 
 The production tree now also contains an `automation.v2` Zod 4 schema and RxJS
 compiler under `src/lib/json-rx`. It compiles validated source, merge, scan,
-JSONata project, and `shareReplay` nodes into dashboard emissions. Stateful v2
+JSONata `map`, and `shareReplay` nodes into dashboard emissions. Stateful v2
 scans reference reusable reducers with direct object seeds and event-type
 cases. The extension lowers configured netcapture rules into v2 automations,
 subscribes their roots, and sends those emissions through the existing ingest
@@ -66,7 +66,7 @@ added after initial navigation.
 ### Network-response capture
 
 `netcapture` observes page-world `fetch` and XMLHttpRequest JSON responses. The
-compact Rule JSON is lowered into an `automation.v2` source, JSONata project,
+compact Rule JSON is lowered into an `automation.v2` source, JSONata `map`,
 shared root, and dashboard output. The browser host matches HTTP method and URL,
 then the v2 compiler evaluates one JSONata expression per output field.
 

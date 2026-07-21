@@ -38,8 +38,8 @@ export const claudeUsageV2 = {
             bufferSize: 1,
             refCount: true,
             input: {
-              node: "claude-usage.project",
-              project: {
+              node: "claude-usage.map",
+              map: {
                 input: {
                   node: "claude-usage.network-response",
                   source: { ref: "jsonrx://instant/sources/browser/network-response/claude-usage" },

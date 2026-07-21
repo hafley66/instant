@@ -60,7 +60,7 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
 - **selector**: `querySelectorAll(selector)`, `regex` per node's text.
 - **netcapture**: the MAIN-world patch intercepts matching fetch/XHR responses
   and relays the JSON. Rules with `response.extract` and `emit` lower into an
-  `automation.v2` source, JSONata project, `shareReplay` root, and dashboard
+  `automation.v2` source, JSONata `map`, `shareReplay` root, and dashboard
   output. Regex-only netcapture rules retain the compact fallback interpreter.
 - **driven** (`schedule.source.interval`): a per-rule Chrome alarm implements
   the serialized interval source. The configured pipe handles each tick.

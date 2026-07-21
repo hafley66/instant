@@ -1,5 +1,8 @@
 # Changelog
 
+- Renamed the automation v2 JSONata `project` operator to the RxJS-aligned
+  `map` operator across the schema, compiler, rule adapter, traces, and docs.
+
 ## 2026-07-20
 
 - Created the JSON-Rx automation book.

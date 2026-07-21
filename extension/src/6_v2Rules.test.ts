@@ -37,8 +37,7 @@ describe("v2 rule adapter", () => {
             "shareReplay": {
               "bufferSize": 1,
               "input": {
-                "node": "chatgpt-codex-usage.project",
-                "project": {
+                "map": {
                   "fields": {
                     "credit_balance": "$number(credits.balance)",
                     "has_credits": "credits.has_credits",
@@ -61,6 +60,7 @@ describe("v2 rule adapter", () => {
                   },
                   "language": "jsonata",
                 },
+                "node": "chatgpt-codex-usage.map",
               },
               "refCount": true,
             },

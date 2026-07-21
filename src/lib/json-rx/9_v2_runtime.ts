@@ -38,7 +38,7 @@ export type AutomationV2Runtime = {
 
 export type AutomationV2Trace = {
   node: string;
-  phase: "project";
+  phase: "map";
   path: string;
   language: "jsonata";
   expression: string;
@@ -113,21 +113,21 @@ export function compileAutomationV2(
         })));
       });
     }
-    if ("project" in expression) {
-      return compileExpression(expression.project.input).pipe(
+    if ("map" in expression) {
+      return compileExpression(expression.map.input).pipe(
         concatMap((inputValue) => {
-          const root = get(inputValue.value, expression.project.from);
-          return from(Promise.all(Object.entries(expression.project.fields).map(async ([field, source]) => {
+          const root = get(inputValue.value, expression.map.from);
+          return from(Promise.all(Object.entries(expression.map.fields).map(async ([field, source]) => {
             try {
               const value = await jsonata(source).evaluate(root);
               if (value === undefined) {
-                options.trace?.({ node: expression.node, phase: "project", path: field, language: "jsonata", expression: source, outcome: "missing" });
+                options.trace?.({ node: expression.node, phase: "map", path: field, language: "jsonata", expression: source, outcome: "missing" });
                 return [] as const;
               }
-              options.trace?.({ node: expression.node, phase: "project", path: field, language: "jsonata", expression: source, outcome: "passed", result: value });
+              options.trace?.({ node: expression.node, phase: "map", path: field, language: "jsonata", expression: source, outcome: "passed", result: value });
               return [field, value] as const;
             } catch (error) {
-              options.trace?.({ node: expression.node, phase: "project", path: field, language: "jsonata", expression: source, outcome: "error", reason: String(error) });
+              options.trace?.({ node: expression.node, phase: "map", path: field, language: "jsonata", expression: source, outcome: "error", reason: String(error) });
               return [] as const;
             }
           }))).pipe(map((entries) => ({

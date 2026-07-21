@@ -17,9 +17,9 @@ const SourceExpressionSchema = z.strictObject({
   source: z.strictObject({ ref: z.string().min(1) }),
 });
 
-const ProjectExpressionSchema = z.strictObject({
+const MapExpressionSchema = z.strictObject({
   node: z.string().min(1),
-  project: z.strictObject({
+  map: z.strictObject({
     input: z.lazy(() => ObservableExpressionSchema),
     from: z.string().regex(/^\$\.(?:[A-Za-z_][A-Za-z0-9_]*\.?)+$/),
     language: z.literal("jsonata").default("jsonata"),
@@ -51,7 +51,7 @@ const ScanExpressionSchema = z.strictObject({
 
 const ObservableExpressionSchema: z.ZodType<ObservableExpression> = z.lazy(() => z.union([
   SourceExpressionSchema,
-  ProjectExpressionSchema,
+  MapExpressionSchema,
   MergeExpressionSchema,
   ScanExpressionSchema,
   ShareReplayExpressionSchema,
@@ -61,7 +61,7 @@ export type ObservableExpression =
   | z.infer<typeof SourceExpressionSchema>
   | {
       node: string;
-      project: {
+      map: {
         input: ObservableExpression;
         from: string;
         language: "jsonata";
@@ -166,7 +166,7 @@ export const AutomationV2Schema = z.strictObject({
         message: `unknown source: ${expression.source.ref}`,
       });
     }
-    if ("project" in expression) visit(expression.project.input, flowRef);
+    if ("map" in expression) visit(expression.map.input, flowRef);
     if ("merge" in expression) expression.merge.inputs.forEach((input) => visit(input, flowRef));
     if ("scan" in expression) {
       if (!automation.circuit.reducers[expression.scan.reducer.ref]) {

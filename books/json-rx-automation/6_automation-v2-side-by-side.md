@@ -83,7 +83,7 @@ Its circuit is:
 
 ```text
 browser network response
-  -> project fields from $.body
+  -> map fields from $.body
   -> shareReplay(1, refCount=true)
   -> dashboard root subscription
 ```
@@ -186,7 +186,7 @@ GET /config rules[]
 page fetch/XHR response
   -> method and URL gate
   -> NetworkResponse Subject
-  -> JSONata project
+  -> JSONata map
   -> shareReplay root
   -> POST existing rulematch envelope
 ```
@@ -207,7 +207,7 @@ The production and lab surfaces prove:
 3. Zod validates its structural and graph constraints.
 4. Zod exports Draft 2020-12 JSON Schema.
 5. Canonical IR is independent of object insertion order.
-6. Claude network responses project into the existing metric fields.
+6. Claude network responses map into the existing metric fields.
 7. V2 emits the existing dashboard envelope with original URL and timestamp.
 8. Overlapping root subscribers share one network source acquisition.
 9. The production Metrics panel derives one or two stream views from one

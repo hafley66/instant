@@ -60,8 +60,8 @@ export function ruleToAutomationV2(rule: Rule): AutomationV2 {
               bufferSize: 1,
               refCount: true,
               input: {
-                node: `${rule.id}.project`,
-                project: {
+                node: `${rule.id}.map`,
+                map: {
                   input: { node: `${rule.id}.source`, source: { ref: source } },
                   from: "$.body",
                   language: "jsonata",

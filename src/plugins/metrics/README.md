@@ -120,7 +120,7 @@ Claude page fetch/XHR response: JSON object
      -> extension/src/6_v2Rules.ts V2RuleRuntime.next(NetworkResponse)
      ~> compileAutomationV2 root
         -> source Subject
-        -> JSONata project per output field [*]
+        -> JSONata map per output field [*]
         -> shareReplay(1, refCount=true)
         -> expression traces [*]
         -> DashboardEmission with automationVersion=automation.v2
