@@ -1,0 +1,45 @@
+{
+  "id": "chatgpt-codex-usage",
+  "host": "^chatgpt\\.com$",
+  "mode": "netcapture",
+  "request": {
+    "methods": ["GET"],
+    "url": "/backend-api/wham/usage"
+  },
+  "response": {
+    "extract": {
+      "provider": "'Codex'",
+      "plan_type": "plan_type",
+      "primary_percent": "rate_limit.primary_window.used_percent",
+      "primary_resets_at": "$fromMillis(rate_limit.primary_window.reset_at * 1000)",
+      "secondary_percent": "rate_limit.secondary_window.used_percent",
+      "secondary_resets_at": "$fromMillis(rate_limit.secondary_window.reset_at * 1000)",
+      "credit_balance": "$number(credits.balance)",
+      "has_credits": "credits.has_credits",
+      "spark_percent": "additional_rate_limits[limit_name='GPT-5.3-Codex-Spark'].rate_limit.primary_window.used_percent",
+      "spark_resets_at": "$fromMillis(additional_rate_limits[limit_name='GPT-5.3-Codex-Spark'].rate_limit.primary_window.reset_at * 1000)",
+      "reset_credits_available": "rate_limit_reset_credits.available_count"
+    }
+  },
+  "emit": {
+    "stream": "codex.usage",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "title": "Provider" },
+        "plan_type": { "type": "string", "title": "Plan" },
+        "primary_percent": { "type": "number", "title": "Primary usage", "minimum": 0, "maximum": 100 },
+        "primary_resets_at": { "type": "string", "format": "date-time", "title": "Primary reset" },
+        "secondary_percent": { "type": "number", "title": "Secondary usage", "minimum": 0, "maximum": 100 },
+        "secondary_resets_at": { "type": "string", "format": "date-time", "title": "Secondary reset" },
+        "credit_balance": { "type": "number", "title": "Credit balance" },
+        "has_credits": { "type": "boolean", "title": "Credits available" },
+        "spark_percent": { "type": "number", "title": "Codex Spark usage", "minimum": 0, "maximum": 100 },
+        "spark_resets_at": { "type": "string", "format": "date-time", "title": "Codex Spark reset" },
+        "reset_credits_available": { "type": "number", "title": "Reset credits available" }
+      }
+    }
+  },
+  "enabled": true,
+  "diagnostics": "all"
+}

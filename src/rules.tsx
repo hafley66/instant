@@ -13,6 +13,7 @@ import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
 import type { Event } from "./state";
 import claudeUsageRuleJson from "./plugins/metrics/0_claude-usage.rule.json";
+import chatgptUsageRuleJson from "./plugins/metrics/0a_chatgpt-usage.rule.json";
 import {
   type Rule,
   type RuleMatch,
@@ -27,6 +28,7 @@ const FEED_CAP = 100;
 const WATCHER_STALE_MS = 3 * 60 * 1000;
 const RULE_SECTION_IDS = { watcher: "rules-watcher", table: "rules-table", selected: "rules-selected", matches: "rules-matches" } as const;
 const CLAUDE_USAGE_RULE = claudeUsageRuleJson as unknown as Rule;
+const CHATGPT_USAGE_RULE = chatgptUsageRuleJson as unknown as Rule;
 
 interface WatcherStatus {
   last_heartbeat: number;
@@ -37,6 +39,10 @@ interface WatcherStatus {
 function watcherLabel(status: WatcherStatus): string {
   if (!status.last_heartbeat) return "extension offline";
   return Date.now() - status.last_heartbeat <= WATCHER_STALE_MS ? "extension active" : "extension stale";
+}
+
+function isUsageNetworkUrl(url: string): boolean {
+  return url.includes("claude.ai") || url.includes("chatgpt.com");
 }
 
 function template(id: string): Rule {
@@ -159,7 +165,7 @@ export function RulesPanelV2() {
     invoke<Rule[]>("rules_get").then(setRules).catch(console.error);
     invoke<RuleMatch[]>("activity_rule_matches", { limit: FEED_CAP }).then(setFeed).catch(console.error);
     invoke<Event[]>("activity_events", { limit: FEED_CAP, source: "browser" })
-      .then((events) => setLastNetwork(events.find((event) => event.kind.startsWith("netcapture.") && event.url.includes("claude.ai")) ?? null))
+      .then((events) => setLastNetwork(events.find((event) => event.kind.startsWith("netcapture.") && isUsageNetworkUrl(event.url)) ?? null))
       .catch(console.error);
     refreshWatcher();
     const timer = window.setInterval(refreshWatcher, 2_000);
@@ -171,7 +177,7 @@ export function RulesPanelV2() {
       setFeed((f) => [e.payload, ...f].slice(0, FEED_CAP));
     });
     const activityUn = listen<Event>("activity-added", (e) => {
-      if (e.payload.kind.startsWith("netcapture.") && e.payload.url.includes("claude.ai")) {
+      if (e.payload.kind.startsWith("netcapture.") && isUsageNetworkUrl(e.payload.url)) {
         setLastNetwork(e.payload);
       }
     });
@@ -207,6 +213,9 @@ export function RulesPanelV2() {
   }
   function addClaudeUsage() {
     if (!rules.some((r) => r.id === CLAUDE_USAGE_RULE.id)) save([...rules, CLAUDE_USAGE_RULE]);
+  }
+  function addChatgptUsage() {
+    if (!rules.some((r) => r.id === CHATGPT_USAGE_RULE.id)) save([...rules, CHATGPT_USAGE_RULE]);
   }
   function edit(id: string) {
     setSelected(id);
@@ -343,6 +352,11 @@ export function RulesPanelV2() {
         {!rules.some((r) => r.id === CLAUDE_USAGE_RULE.id) ? (
           <button type="button" onClick={addClaudeUsage}>
             + Claude usage
+          </button>
+        ) : null}
+        {!rules.some((r) => r.id === CHATGPT_USAGE_RULE.id) ? (
+          <button type="button" onClick={addChatgptUsage}>
+            + Codex usage
           </button>
         ) : null}
         <button type="button" onClick={refreshWatcher} title="refresh extension status">
