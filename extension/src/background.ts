@@ -16,6 +16,7 @@ import {
 
 const CONFIG_ALARM = "config";
 const DRIVEN_PREFIX = "driven:";
+const MIN_ALARM_MS = 30_000;
 
 function send(ev: unknown) {
   // Fire-and-forget; the app may be closed (no server) and that's fine.
@@ -26,6 +27,7 @@ function send(ev: unknown) {
 }
 
 const browserSchedules = new Map<string, { signature: string; runtime: BrowserScheduleRuntime }>();
+const drivenTimers = new Map<string, { periodMs: number; timer: ReturnType<typeof setInterval> }>();
 
 function reportBrowserEffect(event: { type: string; causationId?: string; data: unknown }) {
   send({
@@ -216,14 +218,35 @@ function syncScheduleRuntimes(rules: Rule[]) {
 
 async function armDrivenAlarms(rules: Rule[]) {
   syncScheduleRuntimes(rules);
-  const want = new Map(drivenRules(rules).map((r) => [DRIVEN_PREFIX + r.id, r]));
+  const scheduled = drivenRules(rules);
+  const shortPeriods = new Map(scheduled.flatMap((rule) => {
+    const periodMs = schedulePeriodMs(rule.schedule);
+    return periodMs != null && periodMs < MIN_ALARM_MS ? [[rule.id, periodMs] as const] : [];
+  }));
+  for (const [ruleId, current] of drivenTimers) {
+    if (shortPeriods.get(ruleId) !== current.periodMs) {
+      clearInterval(current.timer);
+      drivenTimers.delete(ruleId);
+    }
+  }
+  for (const [ruleId, periodMs] of shortPeriods) {
+    if (drivenTimers.has(ruleId)) continue;
+    drivenTimers.set(ruleId, {
+      periodMs,
+      timer: setInterval(() => void runDriven(ruleId), periodMs),
+    });
+  }
+  const want = new Map(scheduled.flatMap((rule) => {
+    const periodMs = schedulePeriodMs(rule.schedule);
+    return periodMs != null && periodMs >= MIN_ALARM_MS ? [[DRIVEN_PREFIX + rule.id, rule] as const] : [];
+  }));
   const existing = await chrome.alarms.getAll();
   const existingByName = new Map(existing.map((alarm) => [alarm.name, alarm]));
   for (const al of existing) {
     if (al.name.startsWith(DRIVEN_PREFIX) && !want.has(al.name)) chrome.alarms.clear(al.name);
   }
   for (const [name, rule] of want) {
-    const period = Math.max(1, (schedulePeriodMs(rule.schedule) ?? 60_000) / 60_000);
+    const period = Math.max(0.5, (schedulePeriodMs(rule.schedule) ?? 60_000) / 60_000);
     if (existingByName.get(name)?.periodInMinutes !== period) {
       chrome.alarms.create(name, { periodInMinutes: period });
     }

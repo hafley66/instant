@@ -332,10 +332,11 @@ stored rules and JSON-Rx's generic algebra.
 
 An interval with no effects retains the existing dedicated-background-tab scan.
 The production rules serialize
-`interval(300000).pipe(exhaustMap(() => browsingContext.reload(...)))`.
-Chrome alarms lower the interval source for MV3 suspension safety. Claude and
-ChatGPT usage rules tick every five minutes and
-reload one matching tab after it has been idle for at least five minutes. They
+`interval(5000).pipe(exhaustMap(() => browsingContext.reload(...)))`.
+Chrome alarms lower intervals of at least 30 seconds for MV3 suspension safety;
+shorter test intervals use the live service worker timer. Claude and ChatGPT
+usage rules currently tick every five seconds and reload one matching tab after
+it has been idle for at least five seconds. They
 do not gate on Chrome's `tab.active` flag, because a selected tab remains active
 inside a minimized window. The extension E2E fires the same effect path,
 observes a second page load, and asserts the correlated success diagnostic.

@@ -36,7 +36,7 @@
   },
   "schedule": {
     "source": {
-      "interval": { "periodMs": 300000 }
+      "interval": { "periodMs": 5000 }
     },
     "pipe": [{
       "exhaustMap": {
@@ -46,7 +46,7 @@
           "input": {
             "target": {
               "url": "^https://claude\\.ai/.*#settings/usage$",
-              "idleForMs": 300000,
+              "idleForMs": 5000,
               "cardinality": "one"
             },
             "ignoreCache": false

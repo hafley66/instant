@@ -13,7 +13,7 @@ import type { Event, JsonObject, JsonValue, Machine, State } from "../../lib/jso
 import type { MetricMatch } from "./0_types";
 
 const dashboardMachine: Machine = {
-  initial: { value: "loading", rows: [], error: null },
+  initial: { value: "loading", rows: [], error: null, refreshedAt: null },
   transition: (_state, event) => {
     if (event.type === "metrics.matches.loaded") {
       const rows = (event.data as JsonObject).rows ?? [];
@@ -22,6 +22,7 @@ const dashboardMachine: Machine = {
           { op: "set", path: "/value", value: Array.isArray(rows) && rows.length ? "ready" : "empty" },
           { op: "set", path: "/rows", value: rows },
           { op: "set", path: "/error", value: null },
+          { op: "set", path: "/refreshedAt", value: (event.data as JsonObject).refreshedAt ?? null },
         ],
       };
     }
@@ -31,6 +32,7 @@ const dashboardMachine: Machine = {
         updates: [
           { op: "set", path: "/value", value: "error" },
           { op: "set", path: "/error", value: error },
+          { op: "set", path: "/refreshedAt", value: (event.data as JsonObject).refreshedAt ?? null },
         ],
       };
     }
@@ -39,11 +41,11 @@ const dashboardMachine: Machine = {
 };
 
 function loaded(rows: MetricMatch[]): Event {
-  return { type: "metrics.matches.loaded", data: { rows: rows as unknown as JsonValue } };
+  return { type: "metrics.matches.loaded", data: { rows: rows as unknown as JsonValue, refreshedAt: Date.now() } };
 }
 
 function failed(error: unknown): Event {
-  return { type: "metrics.matches.failed", data: { error: String(error) } };
+  return { type: "metrics.matches.failed", data: { error: String(error), refreshedAt: Date.now() } };
 }
 
 export function createMetricsDashboardState(

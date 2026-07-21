@@ -39,7 +39,7 @@ describe("browser interval pipeline", () => {
     `);
   });
 
-  it("ships five-minute interval pipelines for both usage screens", () => {
+  it("ships five-second interval pipelines for both usage screens", () => {
     const schedules = [claudeUsageRule.schedule, chatgptUsageRule.schedule] as unknown as IntervalPipeSchedule[];
     expect(schedules.map((entry) => ({
       periodMs: schedulePeriodMs(entry),
@@ -49,12 +49,12 @@ describe("browser interval pipeline", () => {
       [
         {
           "operator": "browsingContext.reload",
-          "periodMs": 300000,
+          "periodMs": 5000,
           "target": "^https://claude\\.ai/.*#settings/usage$",
         },
         {
           "operator": "browsingContext.reload",
-          "periodMs": 300000,
+          "periodMs": 5000,
           "target": "^https://chatgpt\\.com/.*#settings/Usage$",
         },
       ]

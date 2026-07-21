@@ -92,6 +92,9 @@ const HISTORY_COLUMNS: TreeColumn<MetricMatch & { key: string }>[] = [
 
 function MetricChart({ data }: { data: MetricPoint[] }) {
   const host = useRef<HTMLDivElement>(null);
+  const dataRef = useRef(data);
+  const viewRef = useRef<{ data: (name: string, values: MetricPoint[]) => unknown; runAsync: () => Promise<unknown>; finalize: () => void } | undefined>(undefined);
+  const hasData = data.length > 0;
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [renderState, setRenderState] = useState<"loading" | "ready" | "error">("loading");
   const [renderError, setRenderError] = useState("");
@@ -109,17 +112,22 @@ function MetricChart({ data }: { data: MetricPoint[] }) {
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (!host.current || !data.length || size.width < 1 || size.height < 1) return;
+    dataRef.current = data;
+    if (!viewRef.current) return;
+    viewRef.current.data("metrics", data);
+    void viewRef.current.runAsync();
+  }, [data]);
+  useEffect(() => {
+    if (!host.current || !hasData || size.width < 1 || size.height < 1) return;
     let active = true;
-    let view: { finalize: () => void } | undefined;
     setRenderState("loading");
     setRenderError("");
-    embed(host.current, metricChartSpec(data, size.width, size.height), { actions: false }).then((result) => {
+    embed(host.current, metricChartSpec(dataRef.current, size.width, size.height), { actions: false }).then((result) => {
       if (!active) {
         result.view.finalize();
         return;
       }
-      view = result.view;
+      viewRef.current = result.view;
       setRenderState("ready");
     }).catch((error: unknown) => {
       if (!active) return;
@@ -130,9 +138,10 @@ function MetricChart({ data }: { data: MetricPoint[] }) {
     });
     return () => {
       active = false;
-      view?.finalize();
+      viewRef.current?.finalize();
+      viewRef.current = undefined;
     };
-  }, [data, size]);
+  }, [hasData, size]);
   return (
     <div
       ref={host}
@@ -150,7 +159,7 @@ export function MetricsDashboardPanel() {
     () => createMetricsDashboardState(() => invoke<MetricMatch[]>("activity_rule_matches", { limit: LIMIT })),
     [],
   );
-  const [dashboardState, setDashboardState] = useState<State>({ value: "loading", rows: [], error: null });
+  const [dashboardState, setDashboardState] = useState<State>({ value: "loading", rows: [], error: null, refreshedAt: null });
   const storedMetrics = useMemo(
     () => readPluginState<Partial<MetricsUiState>>("metrics", {}),
     [],
@@ -176,6 +185,11 @@ export function MetricsDashboardPanel() {
       <div className="act-bar">
         <span className="spy-title">metrics</span>
         <span className="wt-count">{rows.length}</span>
+        <span className="wt-count" data-testid="metrics-refreshed-at">
+          {numeric(dashboardState.refreshedAt)
+            ? `refreshed ${new Date(dashboardState.refreshedAt).toLocaleTimeString()}`
+            : "waiting for refresh"}
+        </span>
         <span className="spy-spacer" />
         {streams.length ? (
           <>

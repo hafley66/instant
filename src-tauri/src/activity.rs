@@ -136,15 +136,20 @@ const BUILTIN_USAGE_RULES: [&str; 2] = [
 ];
 
 fn reconcile_builtin_schedules(rules: &mut [Rule]) -> usize {
-    let schedules: HashMap<String, serde_json::Value> = BUILTIN_USAGE_RULES
+    let schedules: HashMap<String, (serde_json::Value, serde_json::Value)> = BUILTIN_USAGE_RULES
         .iter()
         .filter_map(|json| serde_json::from_str::<Rule>(json).ok())
-        .map(|rule| (rule.id, rule.schedule))
+        .map(|rule| {
+            let mut previous = rule.schedule.clone();
+            previous["source"]["interval"]["periodMs"] = serde_json::json!(300_000);
+            previous["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"] = serde_json::json!(300_000);
+            (rule.id, (rule.schedule, previous))
+        })
         .collect();
     let mut changed = 0;
     for rule in rules {
-        if rule.schedule.is_null() {
-            if let Some(schedule) = schedules.get(&rule.id) {
+        if let Some((schedule, previous)) = schedules.get(&rule.id) {
+            if rule.schedule.is_null() || rule.schedule == *previous {
                 rule.schedule = schedule.clone();
                 changed += 1;
             }
@@ -785,9 +790,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(reconcile_builtin_schedules(&mut rules), 1);
-        assert_eq!(rules[0].schedule["source"]["interval"]["periodMs"], 300_000);
+        assert_eq!(rules[0].schedule["source"]["interval"]["periodMs"], 5_000);
         assert_eq!(rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["op"], "browsingContext.reload");
         assert_eq!(rules[1].schedule, "passive");
+    }
+
+    #[test]
+    fn migrates_previous_builtin_schedule_without_overwriting_custom_schedule() {
+        let mut rules: Vec<Rule> = BUILTIN_USAGE_RULES
+            .iter()
+            .map(|json| serde_json::from_str(json).unwrap())
+            .collect();
+        rules[0].schedule["source"]["interval"]["periodMs"] = serde_json::json!(300_000);
+        rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"] = serde_json::json!(300_000);
+        rules[1].schedule["source"]["interval"]["periodMs"] = serde_json::json!(42_000);
+
+        assert_eq!(reconcile_builtin_schedules(&mut rules), 1);
+        assert_eq!(rules[0].schedule["source"]["interval"]["periodMs"], 5_000);
+        assert_eq!(rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"], 5_000);
+        assert_eq!(rules[1].schedule["source"]["interval"]["periodMs"], 42_000);
     }
 
     // Editor rows must round-trip through insert + the 7-day prune query
