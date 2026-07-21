@@ -6,6 +6,16 @@ and cancellation semantics. JSON-Rx supplies JSON-shaped events, state,
 updates, effects, expression descriptions, machine instances, and reusable
 references.
 
+This library is the current implementation slice. The specification direction
+is documented in
+[`books/json-rx-automation/4_json-rx-specification-synthesis.md`](../../../books/json-rx-automation/4_json-rx-specification-synthesis.md).
+That design treats named flows as the public programs, host and portable
+sources as Observable constructors, machines as recurrence that can lower to
+`scan`, sharing through `share` and `shareReplay`, and application consumption
+through host subscriptions. It also separates scheduler policy from demand,
+queue bounds, and backpressure so a later Rust implementation can use
+`futures::Stream` and `StreamExt` rather than an all-push Rx runtime.
+
 ## Public algebra
 
 All public data types live in `0_types.ts`.

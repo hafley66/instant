@@ -21,3 +21,29 @@
   with cancellation, framing, ordering, and backpressure semantics.
 - Added a repository-local dashboard-builder subagent and
   `build-instant-dashboard` skill.
+- Added the JSON-Rx specification synthesis covering named flows, source
+  externalization, higher-order composition, recurrence, lifecycle taps,
+  sharing, scheduler versus demand, Rust Stream lowering, time domains, host
+  profiles, prior-art comparisons, and cross-runtime conformance.
+- Added authoring directives for normalized definitions and point-free pipes,
+  plus host delivery contracts for Go channels, bounded MPSC, ordering,
+  closure, cancellation, and overflow behavior.
+- Added the specification lifecycle for interpretation, code generation,
+  existing-code implementation claims, structural checks, and behavioral
+  conformance fixtures.
+- Added a provisional minimal calculus with RxJS operators as derived authoring
+  forms and a removal-based minimality test.
+- Added Kafka's durable-log semantics as an optional single-binary host profile:
+  partitions, offsets, replay, retention, batching, idempotence, and atomic
+  output-plus-checkpoint updates without requiring a broker deployment.
+- Defined the process-local circuit as JSON-Rx's primary boundary and compared
+  it with Temporal's optional durable history, deterministic replay, Activity,
+  retry, worker-routing, and crash-recovery profile.
+- Added the Sprefa comparison: relation-valued flows, ticks, least fixpoints,
+  `@next` delay, clocks, asynchronous and streaming effects, demand relations,
+  content-addressed operation identity, stable coordinates, and the bridge
+  among CSP channels, Rx sequences, and Datalog relations.
+- Added the side-by-side `automation.v2` lab using Zod 4, generated Draft
+  2020-12 JSON Schema, canonical IR, graph validation, a Claude v1/v2
+  equivalence fixture, existing dashboard-envelope output, and overlapping
+  subscriber sharing proof. Production v1 paths remain unchanged.
