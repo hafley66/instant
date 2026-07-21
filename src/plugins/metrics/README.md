@@ -315,13 +315,12 @@ selection and Chrome API calls.
 
 ```text
 alarm tick
-  -> JSON-Rx schedule.tick Event
-  -> schedule machine Transition.effects [*]
-  -> JSON-Rx concatMap effect interpreter
+  -> per-rule Subject
+  -> RxJS exhaustMap overlap gate
+  -> concatMap effect interpreter [*]
      -> resolve logical target against current contexts
      -> execute command
      -> browser.effect.next | browser.effect.error
-  -> result Event re-enters the schedule machine
   -> localhost ingest diagnostic
 ```
 
@@ -332,9 +331,17 @@ and appear only in result events. This keeps ephemeral browser identity out of
 stored rules and JSON-Rx's generic algebra.
 
 An interval with no effects retains the existing dedicated-background-tab scan.
-No production rule enables scheduled Claude reloads. The extension E2E adds an
-effect to its local fixture rule, fires the alarm, observes a second page load,
-and asserts the correlated success diagnostic.
+The production rules serialize
+`interval(300000).pipe(exhaustMap(() => browsingContext.reload(...)))`.
+Chrome alarms lower the interval source for MV3 suspension safety. Claude and
+ChatGPT usage rules tick every five minutes and
+reload one matching tab after it has been idle for at least five minutes. They
+do not gate on Chrome's `tab.active` flag, because a selected tab remains active
+inside a minimized window. The extension E2E fires the same effect path,
+observes a second page load, and asserts the correlated success diagnostic.
+At app startup, existing built-in usage rules with no schedule receive the
+bundled pipeline. Setting a rule's schedule to `"passive"` is an explicit opt
+out and is preserved.
 
 ## Network recording and API annotation path
 

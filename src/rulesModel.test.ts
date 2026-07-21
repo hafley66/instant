@@ -50,6 +50,47 @@ describe("schedule label vs edit value", () => {
     const p = parseSchedule(formatSchedule({ intervalMin: 7 }));
     expect(p).toEqual({ ok: true, value: { intervalMin: 7 } });
   });
+  it("labels and edits an interval pipeline without discarding its operators", () => {
+    const schedule = {
+      source: { interval: { periodMs: 300_000 } },
+      pipe: [{ exhaustMap: { effect: { op: "browsingContext.reload" } } }],
+    } satisfies Exclude<Rule["schedule"], "passive" | undefined>;
+    expect({ label: scheduleLabel(schedule), edit: formatSchedule(schedule) }).toEqual({
+      label: "5m",
+      edit: "5",
+    });
+    expect(applyCellEdit({ ...base, schedule }, "schedule", "10")).toMatchInlineSnapshot(`
+      {
+        "ok": true,
+        "rule": {
+          "captures": {
+            "1": "value",
+          },
+          "enabled": true,
+          "host": "example\\.com",
+          "id": "rule-1",
+          "mode": "textnodes",
+          "regex": "(\\d+)",
+          "schedule": {
+            "pipe": [
+              {
+                "exhaustMap": {
+                  "effect": {
+                    "op": "browsingContext.reload",
+                  },
+                },
+              },
+            ],
+            "source": {
+              "interval": {
+                "periodMs": 600000,
+              },
+            },
+          },
+        },
+      }
+    `);
+  });
 });
 
 describe("validateRegex", () => {

@@ -5,7 +5,10 @@
 // string) pairs and we map them back onto an immutable Rule (or reject).
 
 export type RuleMode = "textnodes" | "selector" | "netcapture";
-export type RuleSchedule = { intervalMin: number } | "passive";
+export type RuleSchedule =
+  | { source: { interval: { periodMs: number } }; pipe: Array<{ exhaustMap: { effect: unknown } }> }
+  | { intervalMin: number }
+  | "passive";
 export interface JsonSchema {
   type?: string | string[];
   title?: string;
@@ -50,7 +53,7 @@ export const RULE_MODES = ["textnodes", "selector", "netcapture"] as const;
 export function scheduleLabel(s: Rule["schedule"]): string {
   if (s == null) return "";
   if (s === "passive") return "passive";
-  return `${s.intervalMin}m`;
+  return `${"source" in s ? s.source.interval.periodMs / 60_000 : s.intervalMin}m`;
 }
 
 // Edit value for the schedule cell: bare "passive" | minutes | "" (no trailing
@@ -59,10 +62,11 @@ export function scheduleLabel(s: Rule["schedule"]): string {
 export function formatSchedule(s: Rule["schedule"]): string {
   if (s == null) return "";
   if (s === "passive") return "passive";
-  return String(s.intervalMin);
+  return String("source" in s ? s.source.interval.periodMs / 60_000 : s.intervalMin);
 }
 
-export type ScheduleParse = { ok: true; value: RuleSchedule } | { ok: false; error: string };
+type EditableSchedule = { intervalMin: number } | "passive";
+export type ScheduleParse = { ok: true; value: EditableSchedule } | { ok: false; error: string };
 
 // "passive" (any case) | positive integer minutes. Empty / non-integer / <= 0
 // are rejected so a bad edit flashes and never persists.
@@ -119,6 +123,18 @@ export function applyCellEdit(rule: Rule, columnId: string, value: string): Fiel
     case "schedule": {
       const p = parseSchedule(value);
       if (!p.ok) return { ok: false, error: p.error };
+      if (p.value !== "passive" && typeof rule.schedule === "object" && "source" in rule.schedule) {
+        return {
+          ok: true,
+          rule: {
+            ...rule,
+            schedule: {
+              ...rule.schedule,
+              source: { interval: { periodMs: p.value.intervalMin * 60_000 } },
+            },
+          },
+        };
+      }
       return { ok: true, rule: { ...rule, schedule: p.value } };
     }
     default:

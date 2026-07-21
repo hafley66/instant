@@ -44,12 +44,16 @@ const rule = {
   enabled: true,
   diagnostics: "all",
   schedule: {
-    intervalMin: 60,
-    effects: [{
-      id: "reload-fixture",
-      op: "browsingContext.reload",
-      input: {
-        target: { url: `^http://127\\.0\\.0\\.1:${fixturePort}/fixture\\.html$` },
+    source: { interval: { periodMs: 60 * 60 * 1000 } },
+    pipe: [{
+      exhaustMap: {
+        effect: {
+          id: "reload-fixture",
+          op: "browsingContext.reload",
+          input: {
+            target: { url: `^http://127\\.0\\.0\\.1:${fixturePort}/fixture\\.html$` },
+          },
+        },
       },
     }],
   },

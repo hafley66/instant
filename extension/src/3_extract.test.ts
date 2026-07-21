@@ -31,7 +31,7 @@ describe("extractResponse", () => {
   });
 
   it("extracts the ChatGPT usage response captured in the HAR", async () => {
-    const out = await extractResponse(chatgptUsageRule as Rule, {
+    const out = await extractResponse(chatgptUsageRule as unknown as Rule, {
       plan_type: "prolite",
       rate_limit: {
         primary_window: { used_percent: 89, reset_at: 1_784_949_856 },

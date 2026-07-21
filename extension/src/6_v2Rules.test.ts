@@ -3,7 +3,7 @@ import chatgptUsageRule from "../../src/plugins/metrics/0a_chatgpt-usage.rule.js
 import type { Rule } from "./0_types";
 import { createV2RuleRuntime, ruleToAutomationV2 } from "./6_v2Rules";
 
-const rule = chatgptUsageRule as Rule;
+const rule = chatgptUsageRule as unknown as Rule;
 
 describe("v2 rule adapter", () => {
   it("lowers a network rule into an automation.v2 circuit", () => {

@@ -7,7 +7,12 @@
 import type { JsonSchema, MatchFields, Rule, RuleMatchEvent } from "./0_types";
 import { paths } from "../../src/generated/api";
 import { executeHttp } from "./httpTransport";
-import { createBrowserScheduleRuntime } from "./5_scheduleRuntime";
+import {
+  createBrowserScheduleRuntime,
+  isIntervalPipeSchedule,
+  schedulePeriodMs,
+  type BrowserScheduleRuntime,
+} from "./5_scheduleRuntime";
 
 const CONFIG_ALARM = "config";
 const DRIVEN_PREFIX = "driven:";
@@ -20,14 +25,16 @@ function send(ev: unknown) {
   ).catch(() => {});
 }
 
-const browserSchedule = createBrowserScheduleRuntime((event) => {
+const browserSchedules = new Map<string, { signature: string; runtime: BrowserScheduleRuntime }>();
+
+function reportBrowserEffect(event: { type: string; causationId?: string; data: unknown }) {
   send({
     kind: event.type,
     url: "",
     title: event.causationId ?? "",
     text: JSON.stringify(event.data),
   });
-});
+}
 
 // ---------------------------------------------------------------------------
 // 1. Activity spy — tab lifecycle + relayed DOM events (unchanged behavior).
@@ -157,7 +164,9 @@ async function refreshConfig(): Promise<Rule[]> {
     /* server down -> keep the cached rules */
   }
   const { rules } = await chrome.storage.local.get("rules");
-  return Array.isArray(rules) ? (rules as Rule[]) : [];
+  const cached = Array.isArray(rules) ? (rules as Rule[]) : [];
+  await armDrivenAlarms(cached);
+  return cached;
 }
 
 async function setup() {
@@ -179,24 +188,45 @@ void setup();
 // 3. Driven scans — reload a dedicated bg tab per rule and scrape it.
 // ---------------------------------------------------------------------------
 function drivenRules(rules: Rule[]): Rule[] {
-  return rules.filter(
-    (r) =>
-      r.enabled !== false &&
-      typeof r.schedule === "object" &&
-      r.schedule != null &&
-      typeof r.schedule.intervalMin === "number",
-  );
+  return rules.filter((rule) => rule.enabled !== false && schedulePeriodMs(rule.schedule) != null);
+}
+
+function syncScheduleRuntimes(rules: Rule[]) {
+  const effectRules = new Map(drivenRules(rules).flatMap((rule) => {
+    if (typeof rule.schedule !== "object") return [];
+    const hasEffects = isIntervalPipeSchedule(rule.schedule) || (rule.schedule.effects?.length ?? 0) > 0;
+    return hasEffects ? [[rule.id, rule] as const] : [];
+  }));
+  for (const [ruleId, current] of browserSchedules) {
+    const rule = effectRules.get(ruleId);
+    const signature = rule ? JSON.stringify(rule.schedule) : "";
+    if (!rule || signature !== current.signature) {
+      current.runtime.close();
+      browserSchedules.delete(ruleId);
+    }
+  }
+  for (const [ruleId, rule] of effectRules) {
+    if (browserSchedules.has(ruleId) || typeof rule.schedule !== "object") continue;
+    browserSchedules.set(ruleId, {
+      signature: JSON.stringify(rule.schedule),
+      runtime: createBrowserScheduleRuntime(rule.schedule, reportBrowserEffect),
+    });
+  }
 }
 
 async function armDrivenAlarms(rules: Rule[]) {
+  syncScheduleRuntimes(rules);
   const want = new Map(drivenRules(rules).map((r) => [DRIVEN_PREFIX + r.id, r]));
   const existing = await chrome.alarms.getAll();
+  const existingByName = new Map(existing.map((alarm) => [alarm.name, alarm]));
   for (const al of existing) {
     if (al.name.startsWith(DRIVEN_PREFIX) && !want.has(al.name)) chrome.alarms.clear(al.name);
   }
   for (const [name, rule] of want) {
-    const period = Math.max(1, (rule.schedule as { intervalMin: number }).intervalMin);
-    chrome.alarms.create(name, { periodInMinutes: period });
+    const period = Math.max(1, (schedulePeriodMs(rule.schedule) ?? 60_000) / 60_000);
+    if (existingByName.get(name)?.periodInMinutes !== period) {
+      chrome.alarms.create(name, { periodInMinutes: period });
+    }
   }
 }
 
@@ -237,8 +267,9 @@ async function runDriven(ruleId: string) {
   const { rules } = await chrome.storage.local.get("rules");
   const rule = (rules as Rule[] | undefined)?.find((r) => r.id === ruleId);
   if (!rule || typeof rule.schedule !== "object") return;
-  if (rule.schedule.effects?.length) {
-    browserSchedule.dispatch(rule.id, rule.schedule.effects);
+  const browserSchedule = browserSchedules.get(rule.id);
+  if (browserSchedule) {
+    browserSchedule.runtime.dispatch(rule.id);
     return;
   }
   if (!rule.url) return;

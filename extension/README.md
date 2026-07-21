@@ -49,7 +49,7 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
     "extract": { "percent": "five_hour.utilization * 100" }
   },
   "emit": { "stream": "claude.usage" },
-  "schedule": { "intervalMin": 5 }, // or "passive" / omit
+  "schedule": "passive",            // or interval source + pipe / omit
   "enabled": true
 }
 ```
@@ -62,8 +62,8 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
   and relays the JSON. Rules with `response.extract` and `emit` lower into an
   `automation.v2` source, JSONata project, `shareReplay` root, and dashboard
   output. Regex-only netcapture rules retain the compact fallback interpreter.
-- **driven** (`schedule.intervalMin`): a per-rule alarm reloads a background tab
-  at `url` and asks the content script to scan it. `url` must be a concrete URL.
+- **driven** (`schedule.source.interval`): a per-rule Chrome alarm implements
+  the serialized interval source. The configured pipe handles each tick.
 - **effect schedule**: `schedule.effects` replaces the legacy dedicated-tab
   scan with serializable effects interpreted by extension plugins.
 
@@ -73,27 +73,30 @@ The first browser effect uses the WebDriver BiDi command name
 ```json
 {
   "schedule": {
-    "intervalMin": 15,
-    "effects": [{
-      "id": "reload-usage-when-idle",
-      "op": "browsingContext.reload",
-      "input": {
-        "target": {
-          "url": "^https://claude\\.ai/",
-          "active": false,
-          "idleForMs": 300000,
-          "cardinality": "one"
+    "source": { "interval": { "periodMs": 900000 } },
+    "pipe": [{
+      "exhaustMap": {
+        "effect": {
+          "id": "reload-usage-when-idle",
+          "op": "browsingContext.reload",
+          "input": {
+            "target": {
+              "url": "^https://claude\\.ai/",
+              "idleForMs": 300000,
+              "cardinality": "one"
+            },
+            "ignoreCache": false
+          }
         },
-        "ignoreCache": false
       }
     }]
   }
 }
 ```
 
-The alarm emits a `schedule.tick` event into a JSON-Rx machine. Its transition
-returns the configured effects. JSON-Rx executes them sequentially through the
-browser interpreter and feeds each result event back into the same machine.
+The host alarm emits into a per-rule Subject. The runtime lowers the serialized
+shape to `ticks.pipe(exhaustMap(() => executeBrowserEffect(effect)))`.
+Overlapping ticks are discarded until the current effect completes.
 
 Target resolution happens at execution time because Chrome tab IDs are
 process-local and ephemeral. `cardinality` defaults to `one`; the most recently

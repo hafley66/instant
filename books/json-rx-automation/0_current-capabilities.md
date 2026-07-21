@@ -118,19 +118,24 @@ effect interpreter currently implements `browsingContext.reload`.
 ```json
 {
   "schedule": {
-    "intervalMin": 5,
-    "effects": [
+    "source": {
+      "interval": { "periodMs": 300000 }
+    },
+    "pipe": [
       {
-        "id": "reload-usage",
-        "op": "browsingContext.reload",
-        "input": {
-          "target": {
-            "url": "^https://example\\.com/usage",
-            "active": false,
-            "idleForMs": 300000,
-            "cardinality": "one"
+        "exhaustMap": {
+          "effect": {
+            "id": "reload-usage",
+            "op": "browsingContext.reload",
+            "input": {
+              "target": {
+                "url": "^https://example\\.com/usage",
+                "idleForMs": 300000,
+                "cardinality": "one"
+              },
+              "ignoreCache": false
+            }
           },
-          "ignoreCache": false
         }
       }
     ]
@@ -138,10 +143,11 @@ effect interpreter currently implements `browsingContext.reload`.
 }
 ```
 
+The serialized semantics are `interval(300000).pipe(exhaustMap(reload))`.
+Chrome alarms implement the interval source because MV3 workers can suspend.
 Target fields select tabs by URL regex, active status, idle duration, and
-cardinality. `one` selects the most recently accessed match. `all` selects every
-match. An interval schedule without effects retains the older dedicated-tab
-scan behavior.
+cardinality. `one` selects the most recently accessed match. `all` selects
+every match. Legacy `intervalMin` schedules remain readable for stored rules.
 
 ## JSON-Rx library
 

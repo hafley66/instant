@@ -1,51 +1,75 @@
-import { createEffectMachineRuntime } from "../../src/lib/json-rx/7_effects";
-import type { Effect, Event, JsonObject, JsonValue, Machine } from "../../src/lib/json-rx/0_types";
-import { chromeBrowserEffects, executeBrowserEffect } from "./4_browserEffects";
+import { concatMap, exhaustMap, from, map, Subject, type Observable } from "rxjs";
+import type { Event, JsonValue } from "../../src/lib/json-rx/0_types";
+import {
+  chromeBrowserEffects,
+  executeBrowserEffect,
+  type BrowserEffectResult,
+  type BrowserEffectsPort,
+} from "./4_browserEffects";
+import type { IntervalPipeSchedule, RuleEffect, Schedule } from "./0_types";
 
-const scheduleMachine: Machine = {
-  initial: { value: "idle", completed: 0, failed: 0 },
-  transition: (state, event) => {
-    if (event.type === "schedule.tick") {
-      const effects = (event.data as JsonObject).effects as unknown as Effect[];
-      return {
-        updates: [{ op: "set", path: "/value", value: "running" }],
-        effects,
-      };
-    }
-    if (event.type === "browser.effect.next" || event.type === "browser.effect.error") {
-      const field = event.type === "browser.effect.next" ? "completed" : "failed";
-      return {
-        updates: [
-          { op: "set", path: "/value", value: "idle" },
-          { op: "set", path: `/${field}`, value: Number(state[field] ?? 0) + 1 },
-        ],
-      };
-    }
-    return {};
-  },
+type ScheduleTick = { ruleId: string; ts: number };
+
+export type BrowserScheduleRuntime = {
+  dispatch: (ruleId: string) => void;
+  close: () => void;
 };
 
-export function createBrowserScheduleRuntime(report: (event: Event) => void) {
-  const runtime = createEffectMachineRuntime(scheduleMachine, async (effect, cause) => {
-    const result = await executeBrowserEffect(effect, chromeBrowserEffects);
-    return {
-      type: result.type,
-      causationId: effect.id ?? cause.id,
-      data: result as unknown as JsonValue,
-    };
-  });
-  const subscription = runtime.emissions$.subscribe((emission) => {
-    if (emission.event.type.startsWith("browser.effect.")) report(emission.event);
-  });
+export function isIntervalPipeSchedule(schedule: Schedule): schedule is IntervalPipeSchedule {
+  return typeof schedule === "object"
+    && "source" in schedule
+    && typeof schedule.source?.interval?.periodMs === "number"
+    && Array.isArray(schedule.pipe)
+    && schedule.pipe.length === 1
+    && schedule.pipe[0]?.exhaustMap?.effect != null;
+}
+
+export function schedulePeriodMs(schedule: Schedule | undefined): number | null {
+  if (!schedule || schedule === "passive") return null;
+  if (isIntervalPipeSchedule(schedule)) return schedule.source.interval.periodMs;
+  return typeof schedule.intervalMin === "number" ? schedule.intervalMin * 60_000 : null;
+}
+
+function scheduleEffects(schedule: Exclude<Schedule, "passive">): RuleEffect[] {
+  if (isIntervalPipeSchedule(schedule)) return [schedule.pipe[0].exhaustMap.effect];
+  return schedule.effects ?? [];
+}
+
+function resultEvent(tick: ScheduleTick, result: BrowserEffectResult): Event {
   return {
-    dispatch: (ruleId: string, effects: Effect[]) => runtime.dispatch({
-      type: "schedule.tick",
-      id: `${ruleId}:${Date.now()}`,
-      data: { ruleId, effects } as unknown as JsonValue,
-    }),
+    type: result.type,
+    causationId: `${tick.ruleId}:${tick.ts}`,
+    data: result as unknown as JsonValue,
+  };
+}
+
+function executeEffects(
+  tick: ScheduleTick,
+  effects: RuleEffect[],
+  port: BrowserEffectsPort,
+): Observable<Event> {
+  return from(effects).pipe(
+    concatMap((effect) => from(executeBrowserEffect(effect, port))),
+    map((result) => resultEvent(tick, result)),
+  );
+}
+
+export function createBrowserScheduleRuntime(
+  schedule: Exclude<Schedule, "passive">,
+  report: (event: Event) => void,
+  port: BrowserEffectsPort = chromeBrowserEffects,
+): BrowserScheduleRuntime {
+  const effects = scheduleEffects(schedule);
+  if (!effects.length) throw new Error("Browser schedule runtime requires an effect pipeline");
+  const ticks = new Subject<ScheduleTick>();
+  const subscription = ticks.pipe(
+    exhaustMap((tick) => executeEffects(tick, effects, port)),
+  ).subscribe(report);
+  return {
+    dispatch: (ruleId) => ticks.next({ ruleId, ts: Date.now() }),
     close: () => {
       subscription.unsubscribe();
-      runtime.close();
+      ticks.complete();
     },
   };
 }

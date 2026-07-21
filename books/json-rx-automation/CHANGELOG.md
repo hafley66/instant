@@ -59,3 +59,6 @@
   Rule JSON lowering adapter. Browser responses now enter v2 source Subjects,
   JSONata projection, shared dashboard roots, `/ingest`, persistence, and the
   existing Metrics consumer. Added expression traces and extension E2E proof.
+- Enabled serialized `interval(...).pipe(exhaustMap(...))` idle-tab reload
+  flows for the production Claude and ChatGPT usage screens. Chrome alarms
+  provide the MV3-safe host clock while RxJS owns overlap semantics.

@@ -40,6 +40,27 @@
       }
     }
   },
+  "schedule": {
+    "source": {
+      "interval": { "periodMs": 300000 }
+    },
+    "pipe": [{
+      "exhaustMap": {
+        "effect": {
+          "id": "reload-chatgpt-usage",
+          "op": "browsingContext.reload",
+          "input": {
+            "target": {
+              "url": "^https://chatgpt\\.com/.*#settings/Usage$",
+              "idleForMs": 300000,
+              "cardinality": "one"
+            },
+            "ignoreCache": false
+          }
+        }
+      }
+    }]
+  },
   "enabled": true,
   "diagnostics": "all"
 }

@@ -130,6 +130,29 @@ pub struct WatcherStatus {
 
 pub struct WatcherState(pub Mutex<WatcherStatus>);
 
+const BUILTIN_USAGE_RULES: [&str; 2] = [
+    include_str!("../../src/plugins/metrics/0_claude-usage.rule.json"),
+    include_str!("../../src/plugins/metrics/0a_chatgpt-usage.rule.json"),
+];
+
+fn reconcile_builtin_schedules(rules: &mut [Rule]) -> usize {
+    let schedules: HashMap<String, serde_json::Value> = BUILTIN_USAGE_RULES
+        .iter()
+        .filter_map(|json| serde_json::from_str::<Rule>(json).ok())
+        .map(|rule| (rule.id, rule.schedule))
+        .collect();
+    let mut changed = 0;
+    for rule in rules {
+        if rule.schedule.is_null() {
+            if let Some(schedule) = schedules.get(&rule.id) {
+                rule.schedule = schedule.clone();
+                changed += 1;
+            }
+        }
+    }
+    changed
+}
+
 /// Read rules.json, writing an empty list if absent. A parse error yields an
 /// empty list (the extension then falls back to its chrome.storage cache).
 pub fn read_rules(path: &Path) -> Vec<Rule> {
@@ -137,10 +160,14 @@ pub fn read_rules(path: &Path) -> Vec<Rule> {
         let _ = std::fs::write(path, "[]");
         return Vec::new();
     }
-    std::fs::read_to_string(path)
+    let mut rules = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<Rule>>(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if reconcile_builtin_schedules(&mut rules) > 0 {
+        let _ = write_rules(path, &rules);
+    }
+    rules
 }
 
 fn write_rules(path: &Path, rules: &[Rule]) -> std::io::Result<()> {
@@ -746,6 +773,21 @@ mod tests {
         assert_eq!(ev.source_type, ""); // absent => not routed to the editor branch
         assert_eq!(ev.kind, "nav");
         assert_eq!(ev.url, "https://example.com");
+    }
+
+    #[test]
+    fn adds_builtin_interval_pipeline_without_overwriting_passive() {
+        let mut rules: Vec<Rule> = serde_json::from_str(
+            r#"[
+              {"id":"claude-usage","host":"^claude\\.ai$","mode":"netcapture"},
+              {"id":"chatgpt-codex-usage","host":"^chatgpt\\.com$","mode":"netcapture","schedule":"passive"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(reconcile_builtin_schedules(&mut rules), 1);
+        assert_eq!(rules[0].schedule["source"]["interval"]["periodMs"], 300_000);
+        assert_eq!(rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["op"], "browsingContext.reload");
+        assert_eq!(rules[1].schedule, "passive");
     }
 
     // Editor rows must round-trip through insert + the 7-day prune query

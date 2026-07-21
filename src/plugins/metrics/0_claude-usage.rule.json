@@ -34,6 +34,27 @@
       }
     }
   },
+  "schedule": {
+    "source": {
+      "interval": { "periodMs": 300000 }
+    },
+    "pipe": [{
+      "exhaustMap": {
+        "effect": {
+          "id": "reload-claude-usage",
+          "op": "browsingContext.reload",
+          "input": {
+            "target": {
+              "url": "^https://claude\\.ai/.*#settings/usage$",
+              "idleForMs": 300000,
+              "cardinality": "one"
+            },
+            "ignoreCache": false
+          }
+        }
+      }
+    }]
+  },
   "enabled": true,
   "diagnostics": "all"
 }

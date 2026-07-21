@@ -13,10 +13,18 @@ export type RuleMode = "textnodes" | "selector" | "netcapture";
 
 export type RuleEffect = Effect;
 
-// "passive" (or absent) = only react to live pages the user visits.
-// An interval with no effects preserves the legacy dedicated-tab scan.
-// Effects are interpreted by extension plugins; the rule model stays generic.
-export type Schedule = { intervalMin: number; effects?: RuleEffect[] } | "passive";
+export type IntervalPipeSchedule = {
+  source: { interval: { periodMs: number } };
+  pipe: Array<{ exhaustMap: { effect: RuleEffect } }>;
+};
+
+// "passive" (or absent) = only react to live pages the user visits. The
+// interval/pipe form is the v2 authoring shape. intervalMin remains readable so
+// existing stored rules continue to run.
+export type Schedule =
+  | IntervalPipeSchedule
+  | { intervalMin: number; effects?: RuleEffect[] }
+  | "passive";
 
 export type DiagnosticsMode = "off" | "errors" | "all";
 
