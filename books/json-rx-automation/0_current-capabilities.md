@@ -12,11 +12,11 @@ what can execute without recompiling.
 
 The production tree now also contains an `automation.v2` Zod 4 schema and RxJS
 compiler under `src/lib/json-rx`. It compiles validated source, merge, scan,
-project, and `shareReplay` nodes into dashboard emissions. Stateful v2 scans
-reference reusable reducers with direct object seeds and event-type cases.
-Claude v1 remains the
-active extension capture format; the Metrics plugin exports a matching Claude
-v2 definition for production-side compilation.
+JSONata project, and `shareReplay` nodes into dashboard emissions. Stateful v2
+scans reference reusable reducers with direct object seeds and event-type
+cases. The extension lowers configured netcapture rules into v2 automations,
+subscribes their roots, and sends those emissions through the existing ingest
+and Metrics path.
 
 ## Rule JSON
 
@@ -65,9 +65,10 @@ added after initial navigation.
 
 ### Network-response capture
 
-`netcapture` observes page-world `fetch` and XMLHttpRequest JSON responses. It
-matches HTTP method and URL, then evaluates one JSONata expression per output
-field.
+`netcapture` observes page-world `fetch` and XMLHttpRequest JSON responses. The
+compact Rule JSON is lowered into an `automation.v2` source, JSONata project,
+shared root, and dashboard output. The browser host matches HTTP method and URL,
+then the v2 compiler evaluates one JSONata expression per output field.
 
 ```json
 {
@@ -105,7 +106,7 @@ field.
 }
 ```
 
-Emissions appear in Rules match history and the Metrics panel. JSON Schema
+V2 emissions appear in Rules match history and the Metrics panel. JSON Schema
 drives labels and value formatting. Numeric fields ending in `_percent`, or
 having a zero-to-one-hundred schema domain, become chart series.
 
@@ -157,6 +158,13 @@ JSON-Rx currently supplies:
 
 Production v2 host status:
 
+- Browser netcapture sources are live in the Chrome extension through
+  `extension/src/6_v2Rules.ts`.
+- Claude and ChatGPT usage responses execute through `compileAutomationV2` and
+  POST the compiler's dashboard envelope to `/ingest`.
+- The extension E2E requires `automationVersion: "automation.v2"` at the ingest
+  boundary and verifies JSONata traces and extracted values.
+
 - Codex account/rate-limit snapshot and sparse-update contracts are typed and
   normalized in `src/lib/json-rx/10_codex_host.ts`.
 - Complete nullable Codex records are produced for snapshot, update, and
@@ -167,5 +175,5 @@ Production v2 host status:
 - Process execution, shell execution, credentials, and transport forwarding
   remain outside this repository change.
 
-Rule JSON does not currently expose arbitrary machines, custom event sources,
+The compact Rule JSON adapter does not currently expose arbitrary scans, custom event sources,
 DOM action effects, authenticated HTTP effects, or keyed materialized views.

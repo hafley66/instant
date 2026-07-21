@@ -2,9 +2,9 @@
 
 This note documents the production v2 Codex definition and its deterministic
 host boundary. The original executable fixture remains under
-`labs/json-rx-mvp`. The production extension still uses Claude v1 capture.
-Metrics consumes persisted v1 and v2-compatible dashboard envelopes through one
-generic one-or-two stream view.
+`labs/json-rx-mvp`. The production extension lowers Claude and ChatGPT
+netcapture rules into v2 browser automations. Metrics consumes their persisted
+dashboard envelopes through one generic one-or-two stream view.
 
 ## Flow shape
 

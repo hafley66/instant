@@ -55,3 +55,7 @@
 - Replaced the automation.v2 machine/context encoding with an explicit RxJS
   `scan` node and reusable reducer catalog. Reducers now define a direct seed
   plus event cases that replace or patch the emitted accumulator.
+- Connected extension netcapture rules to automation.v2 through a deterministic
+  Rule JSON lowering adapter. Browser responses now enter v2 source Subjects,
+  JSONata projection, shared dashboard roots, `/ingest`, persistence, and the
+  existing Metrics consumer. Added expression traces and extension E2E proof.

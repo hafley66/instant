@@ -1,4 +1,5 @@
-import { defer, map, merge, Observable, scan, shareReplay } from "rxjs";
+import jsonata from "jsonata";
+import { concatMap, defer, from, map, merge, Observable, scan, shareReplay } from "rxjs";
 import type { JsonObject, JsonValue } from "./0_types";
 import { AutomationV2Schema, type AutomationV2, type ObservableExpression } from "./8_v2_schema";
 
@@ -35,13 +36,28 @@ export type AutomationV2Runtime = {
   canonicalIr: string;
 };
 
+export type AutomationV2Trace = {
+  node: string;
+  phase: "project";
+  path: string;
+  language: "jsonata";
+  expression: string;
+  outcome: "passed" | "missing" | "error";
+  result?: unknown;
+  reason?: string;
+};
+
+export type AutomationV2RuntimeOptions = {
+  trace?: (entry: AutomationV2Trace) => void;
+};
+
 type LocatedValue = {
   value: JsonValue;
   origin?: { url: string; ts: number };
 };
 
 function sourceOrigin(value: RuntimeSource): LocatedValue["origin"] {
-  return { url: "requestUrl" in value ? value.requestUrl : value.url, ts: value.ts };
+  return { url: "pageUrl" in value ? value.pageUrl : value.url, ts: value.ts };
 }
 
 function get(value: JsonValue, pointer: string): JsonValue {
@@ -81,6 +97,7 @@ function flowKey(ref: string, parameters: unknown): string {
 export function compileAutomationV2(
   input: unknown,
   sources: Record<string, Observable<RuntimeSource>>,
+  options: AutomationV2RuntimeOptions = {},
 ): AutomationV2Runtime {
   const automation = AutomationV2Schema.parse(input);
   const instances = new Map<string, Observable<LocatedValue>>();
@@ -98,14 +115,25 @@ export function compileAutomationV2(
     }
     if ("project" in expression) {
       return compileExpression(expression.project.input).pipe(
-        map((inputValue) => {
+        concatMap((inputValue) => {
           const root = get(inputValue.value, expression.project.from);
-          return {
-            value: Object.fromEntries(
-              Object.entries(expression.project.fields).map(([field, path]) => [field, get(root, path)]),
-            ),
+          return from(Promise.all(Object.entries(expression.project.fields).map(async ([field, source]) => {
+            try {
+              const value = await jsonata(source).evaluate(root);
+              if (value === undefined) {
+                options.trace?.({ node: expression.node, phase: "project", path: field, language: "jsonata", expression: source, outcome: "missing" });
+                return [] as const;
+              }
+              options.trace?.({ node: expression.node, phase: "project", path: field, language: "jsonata", expression: source, outcome: "passed", result: value });
+              return [field, value] as const;
+            } catch (error) {
+              options.trace?.({ node: expression.node, phase: "project", path: field, language: "jsonata", expression: source, outcome: "error", reason: String(error) });
+              return [] as const;
+            }
+          }))).pipe(map((entries) => ({
+            value: Object.fromEntries(entries.filter((entry) => entry.length === 2)) as JsonValue,
             origin: inputValue.origin,
-          };
+          })));
         }),
       );
     }

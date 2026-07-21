@@ -180,7 +180,7 @@ describe("automation.v2 side-by-side lab", () => {
         },
         "stream": "claude.usage",
         "ts": 1784579986984,
-        "url": "https://claude.ai/api/organizations/test/usage",
+        "url": "https://claude.ai/new#settings/usage",
       }
     `);
   });

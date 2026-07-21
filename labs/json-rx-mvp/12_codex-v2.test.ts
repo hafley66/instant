@@ -303,7 +303,7 @@ describe("Codex usage scan", () => {
             "seven_day_resets_at",
           ],
           "stream": "claude.usage",
-          "url": "https://claude.ai/api/organizations/test/usage",
+          "url": "https://claude.ai/new#settings/usage",
         },
       ]
     `);

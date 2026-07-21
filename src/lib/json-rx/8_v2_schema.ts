@@ -22,10 +22,8 @@ const ProjectExpressionSchema = z.strictObject({
   project: z.strictObject({
     input: z.lazy(() => ObservableExpressionSchema),
     from: z.string().regex(/^\$\.(?:[A-Za-z_][A-Za-z0-9_]*\.?)+$/),
-    fields: z.record(
-      z.string().min(1),
-      z.string().regex(/^\$\.(?:[A-Za-z_][A-Za-z0-9_]*\.?)+$/),
-    ),
+    language: z.literal("jsonata").default("jsonata"),
+    fields: z.record(z.string().min(1), z.string().min(1)),
   }),
 });
 
@@ -66,6 +64,7 @@ export type ObservableExpression =
       project: {
         input: ObservableExpression;
         from: string;
+        language: "jsonata";
         fields: Record<string, string>;
       };
     }

@@ -1,4 +1,5 @@
-import { Observable, defer, map, merge, scan, shareReplay } from "rxjs";
+import jsonata from "jsonata";
+import { Observable, concatMap, defer, from, map, merge, scan, shareReplay } from "rxjs";
 import type { JsonObject, JsonValue } from "./0_types";
 import { instanceUrl } from "./1_identity";
 import {
@@ -50,7 +51,7 @@ type LocatedValue = {
 
 function sourceOrigin(value: RuntimeSource): LocatedValue["origin"] {
   return {
-    url: "requestUrl" in value ? value.requestUrl : value.url,
+    url: "pageUrl" in value ? value.pageUrl : value.url,
     ts: value.ts,
   };
 }
@@ -97,14 +98,15 @@ export function compileAutomationV2(
     }
     if ("project" in expression) {
       return compileExpression(expression.project.input).pipe(
-        map((input) => {
+        concatMap((input) => {
           const root = get(input.value, expression.project.from);
-          return {
-            value: Object.fromEntries(
-              Object.entries(expression.project.fields).map(([field, path]) => [field, get(root, path)]),
-            ),
+          return from(Promise.all(Object.entries(expression.project.fields).map(async ([field, source]) => {
+            const value = await jsonata(source).evaluate(root);
+            return value === undefined ? [] as const : [field, value] as const;
+          }))).pipe(map((entries) => ({
+            value: Object.fromEntries(entries.filter((entry) => entry.length === 2)) as JsonValue,
             origin: input.origin,
-          };
+          })));
         }),
       );
     }

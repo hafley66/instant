@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { extractResponse } from "./3_extract";
 import chatgptUsageRule from "../../src/plugins/metrics/0a_chatgpt-usage.rule.json";
+import type { Rule } from "./0_types";
 
 describe("extractResponse", () => {
   it("maps JSONata expressions into metric fields", async () => {
@@ -30,7 +31,7 @@ describe("extractResponse", () => {
   });
 
   it("extracts the ChatGPT usage response captured in the HAR", async () => {
-    const out = await extractResponse(chatgptUsageRule, {
+    const out = await extractResponse(chatgptUsageRule as Rule, {
       plan_type: "prolite",
       rate_limit: {
         primary_window: { used_percent: 89, reset_at: 1_784_949_856 },

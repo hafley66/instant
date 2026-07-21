@@ -251,6 +251,7 @@ test("MV3 Claude rule replays a usage response captured before config arrives", 
       .map((event) => ({ ...event, ts: "<timestamp>" }));
     expect(emitted).toEqual([
       {
+        automationVersion: "automation.v2",
         matches: [{
           five_hour_percent: 4,
           five_hour_resets_at: "2026-07-20T23:29:59.650480+00:00",

@@ -1,24 +1,25 @@
-# Automation v2 beside Rule JSON v1
+# Automation v2 behind compact Rule JSON
 
 ## Goal
 
-Introduce JSON-Rx automation documents without changing the current extension
-rule interpreter or dashboard transport.
+Execute network-response rules through JSON-Rx automation v2 while preserving
+the compact Rules editor format and dashboard transport.
 
 ```text
-server config
-  ├─ rules[]        -> existing v1 extension interpreter
-  └─ automations[]  -> production v2 compiler + host-owned source bindings
+GET /config rules[]
+  -> netcapture ruleToAutomationV2 adapter
+  -> production v2 compiler + browser source binding
+  -> existing rulematch dashboard transport
 ```
 
-The production implementation lives under `src/lib/json-rx` and is exported by
-the Metrics plugin. `labs/json-rx-mvp` remains a historical conformance fixture.
-The current extension still executes the v1 Claude rule; v2 definitions are
-available for production-side compilation and do not replace that capture path.
+The production compiler lives under `src/lib/json-rx`. The browser adapter is
+`extension/src/6_v2Rules.ts`. `labs/json-rx-mvp` remains an isolated
+conformance fixture. Selector and text-node scans retain their compact direct
+interpreters; netcapture projection executes through v2.
 
 ## Version boundaries
 
-V1 remains the current compact capture format:
+Rule JSON remains the compact authoring format:
 
 ```json
 {
@@ -30,7 +31,8 @@ V1 remains the current compact capture format:
 }
 ```
 
-V2 separates host bindings, the temporal circuit, and root subscriptions:
+The extension deterministically lowers that document into v2 host bindings,
+the temporal circuit, and root subscriptions:
 
 ```json
 {
@@ -169,26 +171,32 @@ This fixture guards the placement of `shareReplay`. The earlier MVP test caught
 a compiler that cached an Observable wrapper while constructing the sharing
 operator separately per subscription.
 
-## Current adapter seam
+## Live adapter seam
 
 The production compiler receives host-owned Observable bindings through one
 additive adapter:
 
 ```text
-GET /config
-  -> preserve rules[] behavior
-  -> parse automations[]
-  -> match browser source bindings
-  -> deliver NetworkResponse values
+GET /config rules[]
+  -> rulesForHost
+  -> ruleToAutomationV2 for each netcapture extraction rule
+  -> validate and compile
   -> subscribe declared dashboard roots
-  -> POST existing rulematch envelopes
+
+page fetch/XHR response
+  -> method and URL gate
+  -> NetworkResponse Subject
+  -> JSONata project
+  -> shareReplay root
+  -> POST existing rulematch envelope
 ```
 
-No v1-to-v2 migration is required. Individual automations can be represented in
-both formats during comparison. The Claude v2 definition is present in the
-production Metrics plugin. Browser v2 source matching and persistence wiring
-remain pending host work. Codex has typed normalized host contracts and a
-deterministic fake source; live native or Sprefa transport remains pending.
+The persisted Rules files require no migration because the compact format is an
+authoring syntax lowered at runtime. Config replacement disposes all previous
+root subscriptions before constructing the new per-page runtime set. Codex has
+typed normalized host contracts and a deterministic fake source; live native
+or Sprefa transport remains pending because browser ChatGPT capture supplies
+the production Codex usage stream.
 
 ## Proven scope
 
@@ -205,7 +213,7 @@ The production and lab surfaces prove:
 9. The production Metrics panel derives one or two stream views from one
    database read.
 
-The browser v2 source matcher, server config endpoint, extension v2 transport,
-live Codex host transport, and persistence of v2 roots remain pending host work.
-The Metrics plugin registration and generic comparison renderer are production
-code.
+Browser source matching, extension v2 execution, expression diagnostics,
+dashboard transport, persistence, and generic Metrics rendering are production
+code. Arbitrary serialized v2 documents in `/config` and live native Codex host
+transport remain outside this adapter.

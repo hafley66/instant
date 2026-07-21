@@ -42,8 +42,9 @@ export const claudeUsageV2 = {
                   },
                 },
                 from: "$.body",
+                language: "jsonata",
                 fields: Object.fromEntries(
-                  Object.entries(claudeUsageRule.response.extract).map(([field, path]) => [field, `$.${path}`]),
+                  Object.entries(claudeUsageRule.response.extract).map(([field, path]) => [field, path]),
                 ),
               },
             },

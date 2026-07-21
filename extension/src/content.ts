@@ -6,10 +6,12 @@
 //      netcapture patterns for the MAIN patch, and relay netcapture hits.
 // It no-ops the rule engine entirely on hosts no rule matches, so the cost on an
 // unrelated page is one storage read.
-import type { MatchFields, NetCaptureMessage, Rule } from "./0_types";
+import type { ExpressionTrace, MatchFields, NetCaptureMessage, Rule } from "./0_types";
+import type { DashboardEmission, NetworkResponse } from "../../src/lib/json-rx/9_v2_runtime";
 import { compile, mapCaptures, ruleMatchesLocation, rulesForHost } from "./1_match";
 import { scanRule } from "./2_scan";
 import { extractResponseDetailed } from "./3_extract";
+import { createV2RuleRuntime, type V2RuleRuntime } from "./6_v2Rules";
 
 const MAX = 4000;
 
@@ -89,14 +91,15 @@ let active: Rule[] = []; // rules whose host matches this page
 // Per-rule set of already-reported match signatures, so a MutationObserver
 // re-scan (or a repeated fetch) doesn't re-post identical records.
 const seen = new Map<string, Set<string>>();
+let v2Runtimes = new Map<string, V2RuleRuntime>();
 
 function sig(fields: MatchFields): string {
   const keys = Object.keys(fields).sort();
   return keys.map((k) => `${k}=${fields[k]}`).join("");
 }
 
-function reportMatches(rule: Rule, matches: MatchFields[]) {
-  if (!matches.length) return;
+function freshMatches(rule: Rule, matches: MatchFields[]): MatchFields[] {
+  if (!matches.length) return [];
   let dedup = seen.get(rule.id);
   if (!dedup) seen.set(rule.id, (dedup = new Set()));
   const fresh = matches.filter((m) => {
@@ -105,7 +108,12 @@ function reportMatches(rule: Rule, matches: MatchFields[]) {
     dedup!.add(s);
     return true;
   });
-  if (!fresh.length) return;
+  return fresh;
+}
+
+function reportMatches(rule: Rule, matches: MatchFields[]) {
+  const fresh = freshMatches(rule, matches);
+  if (!fresh?.length) return;
   chrome.runtime
     .sendMessage({
       cmd: "rulematch",
@@ -116,6 +124,24 @@ function reportMatches(rule: Rule, matches: MatchFields[]) {
       schema: rule.emit?.schema,
     })
     .catch(() => {});
+}
+
+function reportEmission(rule: Rule, emission: DashboardEmission) {
+  const fresh = freshMatches(rule, emission.matches.filter((match) => Object.keys(match).length > 0));
+  if (!fresh?.length) return;
+  chrome.runtime.sendMessage({
+    cmd: "automationEmission",
+    emission: { ...emission, matches: fresh, automationVersion: "automation.v2" },
+  }).catch(() => {});
+}
+
+function reportTraces(rule: Rule, traces: ExpressionTrace[]) {
+  chrome.runtime.sendMessage({
+    cmd: "expressionTrace",
+    ruleId: rule.id,
+    url: location.href,
+    traces,
+  }).catch(() => {});
 }
 
 // Publish the netcapture URL patterns so the MAIN patch knows what to intercept.
@@ -156,6 +182,8 @@ function scheduleScan() {
 }
 
 function startEngine(rules: Rule[]) {
+  for (const runtime of v2Runtimes.values()) runtime.close();
+  v2Runtimes = new Map();
   active = rulesForHost(rules, location.host);
   chrome.runtime.sendMessage({
     cmd: "netcaptureDiagnostic",
@@ -168,6 +196,14 @@ function startEngine(rules: Rule[]) {
     return;
   }
   publishNetPatterns();
+  for (const rule of active) {
+    if (rule.mode === "netcapture" && rule.response?.extract && rule.emit) {
+      v2Runtimes.set(rule.id, createV2RuleRuntime(rule, {
+        emission: reportEmission,
+        traces: reportTraces,
+      }));
+    }
+  }
   if (active.some((r) => r.mode !== "netcapture")) {
     runPassiveScans();
     if (document.body) {
@@ -203,7 +239,17 @@ window.addEventListener("message", (event) => {
   for (const rule of active) {
     if (rule.mode !== "netcapture") continue;
     if (!netRuleMatches(rule, d.method, d.url)) continue;
-    if (rule.response?.extract) {
+    const v2Runtime = v2Runtimes.get(rule.id);
+    if (v2Runtime) {
+      v2Runtime.next({
+        method: d.method,
+        pageUrl: location.href,
+        requestUrl: d.url,
+        status: d.status ?? 0,
+        ts: d.ts,
+        body: d.body as NetworkResponse["body"],
+      });
+    } else if (rule.response?.extract) {
       void extractResponseDetailed(rule, d.body).then(({ matches, traces }) => {
         if (traces.length) {
           chrome.runtime.sendMessage({

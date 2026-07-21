@@ -104,6 +104,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (!msg) return;
   if (msg.cmd === "rulematch") {
     postRuleMatch(msg.ruleId, msg.url, msg.matches, msg.stream, msg.schema);
+  } else if (msg.cmd === "automationEmission") {
+    send({ type: "rulematch", ...msg.emission });
   } else if (msg.cmd === "expressionTrace") {
     send({
       kind: "rule.trace",

@@ -19,7 +19,7 @@ just ext-check      # typecheck (corepack pnpm@10.12.4 ext:check)
 ```
 
 `src/` reads in dependency order: `0_types` → `1_match` → `2_scan` →
-`3_extract` → `4_browserEffects` → `5_scheduleRuntime` → `background` /
+`3_extract` → `4_browserEffects` → `5_scheduleRuntime` → `6_v2Rules` → `background` /
 `content` / `inject`.
 
 | output | world | when | role |
@@ -58,9 +58,10 @@ A rule (edited in the app's **Rules** panel, served from `GET /config`):
 - **textnodes**: TreeWalker over text nodes, `regex` per node; re-scans on DOM
   mutations (debounced) for SPAs.
 - **selector**: `querySelectorAll(selector)`, `regex` per node's text.
-- **netcapture**: the MAIN-world patch intercepts fetch/XHR responses whose URL
-  matches `url`/`regex` and relays the JSON; the isolated script runs `regex`
-  over the stringified body. Only installed on hosts a netcapture rule matches.
+- **netcapture**: the MAIN-world patch intercepts matching fetch/XHR responses
+  and relays the JSON. Rules with `response.extract` and `emit` lower into an
+  `automation.v2` source, JSONata project, `shareReplay` root, and dashboard
+  output. Regex-only netcapture rules retain the compact fallback interpreter.
 - **driven** (`schedule.intervalMin`): a per-rule alarm reloads a background tab
   at `url` and asks the content script to scan it. `url` must be a concrete URL.
 - **effect schedule**: `schedule.effects` replaces the legacy dedicated-tab
@@ -100,7 +101,9 @@ accessed matching context wins. `all` executes sequentially across every match.
 Each execution posts `browser.effect.next` or `browser.effect.error` to Instant
 with the effect ID and resolved context IDs.
 
-Matches POST to `/ingest` as `{type:"rulematch", ruleId, url, ts, matches:[…]}`.
+V2 matches POST to `/ingest` as `{type:"rulematch", ruleId, url, ts,
+matches:[…], stream, schema, automationVersion:"automation.v2"}`. Rust persists
+the common dashboard fields and ignores the diagnostic version marker.
 
 ## How it connects
 

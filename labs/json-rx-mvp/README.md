@@ -96,9 +96,11 @@ shareReplay(1, refCount=true)
 
 Every expression node has an explicit stable node ID. Definition and instance
 references use URLs. Zod 4 validates the document and graph references;
-`z.toJSONSchema()` exports Draft 2020-12. The lab does not provide a generic
-expression language, scheduler profile, queue policy, persistence, or Instant
-integration.
+`z.toJSONSchema()` exports Draft 2020-12. The lab does not provide scheduler
+profiles, queue policies, persistence, or Instant integration.
+
+The project node declares `language: "jsonata"`. Its field expressions execute
+against the object selected by `from`; missing expressions omit their fields.
 
 ## Run
 

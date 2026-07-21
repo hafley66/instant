@@ -29,12 +29,11 @@ The generic dashboard boundary is:
 
 ## Production integration status
 
-Claude v1 capture remains the active extension capture path in
-`0_claude-usage.rule.json`. `1_v2_definitions.ts` also exports a Claude
-`automation.v2` definition with the same host matcher, request matcher,
-extraction fields, stream, and schema. The production JSON-Rx compiler is in
-`src/lib/json-rx/8_v2_schema.ts` and `9_v2_runtime.ts`; it is covered by
-Vitest and does not replace the v1 extension interpreter.
+`0_claude-usage.rule.json` and `0a_chatgpt-usage.rule.json` remain the compact
+Rules authoring format. The extension lowers each matching netcapture rule into
+an `automation.v2` document through `extension/src/6_v2Rules.ts`. The
+production compiler in `src/lib/json-rx/9_v2_runtime.ts` executes the browser
+source, JSONata projection, and shared dashboard root.
 
 The v2 stateful primitive is an RxJS-shaped `scan` expression referencing a
 reusable reducer. Reducers contain a direct object seed and event-type cases
@@ -118,11 +117,13 @@ Claude page fetch/XHR response: JSON object
      -> window.postMessage(net capture response)
   ~> extension/src/content.ts message relay
      -> request matcher: host + method + URL expression
-     ~> extension/src/3_extract.ts extractResponseDetailed(rule, body)
-        -> JSONata expression per output field [*]
-        -> matches: object[0..1]
+     -> extension/src/6_v2Rules.ts V2RuleRuntime.next(NetworkResponse)
+     ~> compileAutomationV2 root
+        -> source Subject
+        -> JSONata project per output field [*]
+        -> shareReplay(1, refCount=true)
         -> expression traces [*]
-     -> rulematch DashboardEmission
+        -> DashboardEmission with automationVersion=automation.v2
   [NET] POST http://127.0.0.1:8787/ingest
   ~> src-tauri/src/activity.rs ingest
      -> persist kind=rulematch [DB]
@@ -167,7 +168,9 @@ ISOLATED content world
   content.ts reads rule configuration
   writes request patterns to data-ext-netcapture
   receives window messages
-  evaluates extraction and posts localhost ingest
+  lowers netcapture rules into v2 runtimes
+  feeds responses into source Subjects
+  relays v2 emissions to the service worker
 
 SERVICE WORKER
   background.ts reports extension and webRequest diagnostics
@@ -182,7 +185,8 @@ fixture response to cover this ordering.
 
 ## Rule example
 
-`0_claude-usage.rule.json` is the production example. Its essential contract is:
+`0_claude-usage.rule.json` is a compact production authoring example. Its
+essential contract is:
 
 ```json
 {

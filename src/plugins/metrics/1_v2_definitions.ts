@@ -45,8 +45,9 @@ export const claudeUsageV2 = {
                   source: { ref: "jsonrx://instant/sources/browser/network-response/claude-usage" },
                 },
                 from: "$.body",
+                language: "jsonata",
                 fields: Object.fromEntries(
-                  Object.entries(claudeUsageRule.response.extract).map(([field, path]) => [field, `$.${path}`]),
+                  Object.entries(claudeUsageRule.response.extract).map(([field, path]) => [field, path]),
                 ),
               },
             },
