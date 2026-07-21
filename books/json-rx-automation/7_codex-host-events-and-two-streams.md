@@ -23,7 +23,7 @@ order:
 
 ```text
 read source  \
-              -> merge -> machine(scan) -> project -> shareReplay -> dashboard root
+              -> merge -> scan(reducer) -> shareReplay -> dashboard root
 updated source /
 ```
 
@@ -45,67 +45,63 @@ The binding operation strings are carried in the serialized document.
 repository does not map the operation strings to a live app-server client and
 does not listen to live Codex events.
 
-## Machine state
+## Scan accumulator
 
-The machine starts with a complete output context:
+The reducer starts with a complete output seed:
 
 ```json
 {
-  "value": "loading",
-  "context": {
-    "provider": "Codex",
-    "primary_percent": null,
-    "primary_resets_at": null,
-    "secondary_percent": null,
-    "secondary_resets_at": null,
-    "credit_balance": null,
-    "has_credits": null,
-    "plan_type": null
-  }
+  "provider": "Codex",
+  "primary_percent": null,
+  "primary_resets_at": null,
+  "secondary_percent": null,
+  "secondary_resets_at": null,
+  "credit_balance": null,
+  "has_credits": null,
+  "plan_type": null
 }
 ```
 
-The snapshot event has type `codex.usage.snapshot`. Its transition targets
-`ready` and applies:
+The snapshot event has type `codex.usage.snapshot`. Its reducer case applies:
 
 ```json
-{ "replaceContext": "$.data" }
+{ "replace": "$.data" }
 ```
 
-The entire context becomes the rate-limit snapshot. The snapshot supplies the
+The entire accumulator becomes the rate-limit snapshot. The snapshot supplies the
 provider, both usage windows, credit fields, and plan fields. The initial
-context supplies the same field set before a snapshot exists.
+seed supplies the same field set before a snapshot exists.
 
-The update event has type `codex.usage.updated`. Its transition targets
-`ready` and applies a sparse patch:
+The update event has type `codex.usage.updated`. Its reducer case applies a
+sparse patch:
 
 ```json
 {
-  "patchContext": {
+  "patch": {
     "primary_percent": "$.data.primary_percent",
     "primary_resets_at": "$.data.primary_resets_at"
   }
 }
 ```
 
-The runtime implements the machine with `scan`. `replaceContext` reads one
-object from the event and stores it as the next context. `patchContext` reads
-the configured fields and spreads them over the previous context. The update
+The runtime implements this with RxJS `scan`. `replace` reads one object from
+the event and stores it as the next accumulator. `patch` reads the configured
+fields and spreads them over the previous accumulator. The update
 therefore changes the primary window while retaining the snapshot's secondary
 window, credits, provider, and plan fields.
 
-The initial context makes a sparse update valid before a snapshot. The patch
+The seed makes a sparse update valid before a snapshot. The patch
 replaces the two primary fields, while the remaining projected fields retain
-their null values. `project` consequently emits a structurally complete row.
+their null values. `scan` consequently emits a structurally complete row.
 The fixture has deterministic coverage for both update-before-snapshot and
 snapshot-before-update ordering.
 
-## Machine and sharing lifetime
+## Scan and sharing lifetime
 
 The flow expression is compiled once for the canonical flow instance. The
-machine's `scan` accumulator is created when that compiled flow's upstream
+`scan` accumulator is created when that compiled flow's upstream
 subscription begins. `shareReplay({ bufferSize: 1, refCount: true })` is the
-outer flow operator, after `project`.
+outer flow operator, after `scan`.
 
 For overlapping subscribers, the lifetime is:
 
@@ -118,23 +114,23 @@ second root subscriber
   -> joins the replayed shared flow
 
 first subscriber leaves
-  -> source and machine remain active
+  -> source and scan remain active
 
 final subscriber leaves
   -> refCount unsubscribes upstream
 
 later subscriber
-  -> new source subscription and fresh initial machine state
+  -> new source subscription and fresh reducer seed
 ```
 
-This is one machine instance for the active compiled-flow subscription sharing
-lifetime. Subscriber count does not create one independent machine context per
+This is one scan accumulator for the active compiled-flow subscription sharing
+lifetime. Subscriber count does not create one independent accumulator per
 subscriber while the shared subscription remains active.
 
 ## Dashboard emissions
 
-The machine output is projected from `$.context` into the Codex usage fields.
-The v2 runtime then maps the located object to:
+The scan accumulator already has the Codex usage row shape. The v2 runtime then
+maps the located object to:
 
 ```ts
 type DashboardEmission = {
@@ -148,7 +144,7 @@ type DashboardEmission = {
 ```
 
 Codex rows use `stream: "codex.usage"`. Their `url` and `ts` come from the
-host event that caused the current machine emission. The snapshot row uses the
+host event that caused the current scan emission. The snapshot row uses the
 `account/rateLimits/read` origin. The update row uses the
 `account/rateLimits/updated` origin.
 

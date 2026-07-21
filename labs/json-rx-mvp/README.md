@@ -17,7 +17,7 @@ The Codex fixture models two host-event bindings and joins their event streams:
 
 ```text
 host.event account/rateLimits/read       \
-                                           -> merge -> machine(scan) -> project -> shareReplay
+                                           -> merge -> scan(reducer) -> shareReplay
 host.event account/rateLimits/updated    /
 ```
 
@@ -33,26 +33,26 @@ The lab supplies the corresponding `HostEvent` Observables directly to
 the lab contains no app-server listener, operation dispatcher, authentication,
 or host event transport.
 
-## Machine context updates
+## Scan accumulator updates
 
-The Codex machine starts with `value: "loading"` and a structurally complete
-context: `provider` is `"Codex"`, and every projected usage, reset, credit, and
-plan field is present with a `null` value. A `codex.usage.snapshot` event uses
-`replaceContext: "$.data"`, replacing the whole context with the snapshot
-object. A `codex.usage.updated` event uses `patchContext` for
+The Codex reducer starts with a structurally complete seed: `provider` is
+`"Codex"`, and every usage, reset, credit, and plan field is present with a
+`null` value. A `codex.usage.snapshot` case uses `replace: "$.data"`, replacing
+the whole accumulator with the snapshot object. A `codex.usage.updated` case
+uses `patch` for
 `primary_percent` and `primary_resets_at`, merging those fields into the
-existing context while retaining the other snapshot or initial fields.
+the existing accumulator while retaining the other snapshot or seed fields.
 
-The machine expression lowers to RxJS `scan`. The expression is compiled once
+The scan expression lowers directly to RxJS `scan`. The expression is compiled once
 as part of the flow graph. `scan` allocates its accumulator when the flow's
-upstream subscription begins. The `shareReplay` operator follows the machine,
-so overlapping subscribers share one upstream subscription, one machine
-accumulator, and one context lifetime. When the final subscriber leaves,
+upstream subscription begins. The `shareReplay` operator follows `scan`, so
+overlapping subscribers share one upstream subscription and one accumulator
+lifetime. When the final subscriber leaves,
 `refCount` tears down that lifetime. A later subscription starts a fresh
-machine accumulator from the initial state.
+accumulator from the reducer seed.
 
 The sparse update is valid before the snapshot. `scan` patches the null-filled
-initial context, and `project` emits a structurally complete row with nulls for
+seed and emits a structurally complete row with nulls for
 fields that the update does not carry. The fixture has deterministic coverage
 for both update-before-snapshot and snapshot-before-update ordering.
 
@@ -90,7 +90,7 @@ The v2 compiler accepts these expression nodes:
 source
 project
 merge
-machine
+scan
 shareReplay(1, refCount=true)
 ```
 

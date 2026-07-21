@@ -36,6 +36,11 @@ extraction fields, stream, and schema. The production JSON-Rx compiler is in
 `src/lib/json-rx/8_v2_schema.ts` and `9_v2_runtime.ts`; it is covered by
 Vitest and does not replace the v1 extension interpreter.
 
+The v2 stateful primitive is an RxJS-shaped `scan` expression referencing a
+reusable reducer. Reducers contain a direct object seed and event-type cases
+that replace or patch the accumulator. The accumulator is the emitted value;
+the v2 format has no machine value, target, or context wrapper.
+
 Codex has a production-normalized schema and typed contracts for
 `account/rateLimits/read` and `account/rateLimits/updated`. The adapter accepts
 normalized snapshots and sparse updates, while the protocol helper maps the

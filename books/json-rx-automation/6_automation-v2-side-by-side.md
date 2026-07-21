@@ -42,6 +42,7 @@ V2 separates host bindings, the temporal circuit, and root subscriptions:
   },
   "circuit": {
     "sources": {},
+    "reducers": {},
     "flows": {}
   },
   "outputs": []

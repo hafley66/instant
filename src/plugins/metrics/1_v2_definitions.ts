@@ -54,7 +54,7 @@ export const claudeUsageV2 = {
         },
       },
     },
-    machines: {},
+    reducers: {},
   },
   outputs: [{
     kind: "instant.dashboard.emit",
@@ -80,7 +80,7 @@ export const codexUsageSchema = {
 
 const snapshotSource = "jsonrx://instant/sources/codex/rate-limits-read";
 const updateSource = "jsonrx://instant/sources/codex/rate-limits-updated";
-const machineRef = "jsonrx://instant/machines/codex-usage";
+const reducerRef = "jsonrx://instant/reducers/codex-usage";
 const flowRef = "jsonrx://instant/flows/codex-usage";
 const codexFields = Object.keys(codexUsageSchema.properties);
 
@@ -97,20 +97,15 @@ export const codexUsageV2 = {
   },
   circuit: {
     sources: { [snapshotSource]: {}, [updateSource]: {} },
-    machines: {
-      [machineRef]: {
-        initial: {
-          value: "loading",
-          context: Object.fromEntries(codexFields.map((field) => [field, field === "provider" ? "Codex" : null])),
-        },
-        on: {
+    reducers: {
+      [reducerRef]: {
+        seed: Object.fromEntries(codexFields.map((field) => [field, field === "provider" ? "Codex" : null])),
+        cases: {
           "codex.usage.snapshot": {
-            target: "ready",
-            replaceContext: "$.data",
+            replace: "$.data",
           },
           "codex.usage.updated": {
-            target: "ready",
-            patchContext: Object.fromEntries(codexFields.map((field) => [field, `$.data.${field}`])),
+            patch: Object.fromEntries(codexFields.map((field) => [field, `$.data.${field}`])),
           },
         },
       },
@@ -123,23 +118,16 @@ export const codexUsageV2 = {
             bufferSize: 1,
             refCount: true,
             input: {
-              node: "codex-usage.project-context",
-              project: {
-                from: "$.context",
-                fields: Object.fromEntries(codexFields.map((field) => [field, `$.${field}`])),
+              node: "codex-usage.scan",
+              scan: {
+                reducer: { ref: reducerRef },
                 input: {
-                  node: "codex-usage.machine",
-                  machine: {
-                    ref: machineRef,
-                    input: {
-                      node: "codex-usage.events",
-                      merge: {
-                        inputs: [
-                          { node: "codex-usage.snapshot-source", source: { ref: snapshotSource } },
-                          { node: "codex-usage.update-source", source: { ref: updateSource } },
-                        ],
-                      },
-                    },
+                  node: "codex-usage.events",
+                  merge: {
+                    inputs: [
+                      { node: "codex-usage.snapshot-source", source: { ref: snapshotSource } },
+                      { node: "codex-usage.update-source", source: { ref: updateSource } },
+                    ],
                   },
                 },
               },

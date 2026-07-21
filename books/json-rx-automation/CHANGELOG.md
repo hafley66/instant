@@ -52,3 +52,6 @@
   Claude v2 definition, and added the generic one-or-two stream Metrics view.
   Live Codex native/Sprefa transport remains pending and is exposed through
   `CODEX_HOST_STATUS`.
+- Replaced the automation.v2 machine/context encoding with an explicit RxJS
+  `scan` node and reusable reducer catalog. Reducers now define a direct seed
+  plus event cases that replace or patch the emitted accumulator.

@@ -16,7 +16,7 @@ export const codexUsageSchema = {
 
 const snapshotSource = "jsonrx://instant/sources/codex/rate-limits-read";
 const updateSource = "jsonrx://instant/sources/codex/rate-limits-updated";
-const machineRef = "jsonrx://instant/machines/codex-usage";
+const reducerRef = "jsonrx://instant/reducers/codex-usage";
 const flowRef = "jsonrx://instant/flows/codex-usage";
 
 export const codexUsageV2 = {
@@ -35,29 +35,24 @@ export const codexUsageV2 = {
       [snapshotSource]: {},
       [updateSource]: {},
     },
-    machines: {
-      [machineRef]: {
-        initial: {
-          value: "loading",
-          context: {
-            provider: "Codex",
-            primary_percent: null,
-            primary_resets_at: null,
-            secondary_percent: null,
-            secondary_resets_at: null,
-            credit_balance: null,
-            has_credits: null,
-            plan_type: null,
-          },
+    reducers: {
+      [reducerRef]: {
+        seed: {
+          provider: "Codex",
+          primary_percent: null,
+          primary_resets_at: null,
+          secondary_percent: null,
+          secondary_resets_at: null,
+          credit_balance: null,
+          has_credits: null,
+          plan_type: null,
         },
-        on: {
+        cases: {
           "codex.usage.snapshot": {
-            target: "ready",
-            replaceContext: "$.data",
+            replace: "$.data",
           },
           "codex.usage.updated": {
-            target: "ready",
-            patchContext: {
+            patch: {
               primary_percent: "$.data.primary_percent",
               primary_resets_at: "$.data.primary_resets_at",
             },
@@ -73,25 +68,16 @@ export const codexUsageV2 = {
             bufferSize: 1,
             refCount: true,
             input: {
-              node: "codex-usage.project-context",
-              project: {
-                from: "$.context",
-                fields: Object.fromEntries(
-                  Object.keys(codexUsageSchema.properties).map((field) => [field, `$.${field}`]),
-                ),
+              node: "codex-usage.scan",
+              scan: {
+                reducer: { ref: reducerRef },
                 input: {
-                  node: "codex-usage.machine",
-                  machine: {
-                    ref: machineRef,
-                    input: {
-                      node: "codex-usage.events",
-                      merge: {
-                        inputs: [
-                          { node: "codex-usage.snapshot-source", source: { ref: snapshotSource } },
-                          { node: "codex-usage.update-source", source: { ref: updateSource } },
-                        ],
-                      },
-                    },
+                  node: "codex-usage.events",
+                  merge: {
+                    inputs: [
+                      { node: "codex-usage.snapshot-source", source: { ref: snapshotSource } },
+                      { node: "codex-usage.update-source", source: { ref: updateSource } },
+                    ],
                   },
                 },
               },

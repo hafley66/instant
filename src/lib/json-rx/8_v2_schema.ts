@@ -43,11 +43,11 @@ const MergeExpressionSchema = z.strictObject({
   merge: z.strictObject({ inputs: z.array(z.lazy(() => ObservableExpressionSchema)).min(1) }),
 });
 
-const MachineExpressionSchema = z.strictObject({
+const ScanExpressionSchema = z.strictObject({
   node: z.string().min(1),
-  machine: z.strictObject({
+  scan: z.strictObject({
     input: z.lazy(() => ObservableExpressionSchema),
-    ref: z.string().min(1),
+    reducer: z.strictObject({ ref: z.string().min(1) }),
   }),
 });
 
@@ -55,7 +55,7 @@ const ObservableExpressionSchema: z.ZodType<ObservableExpression> = z.lazy(() =>
   SourceExpressionSchema,
   ProjectExpressionSchema,
   MergeExpressionSchema,
-  MachineExpressionSchema,
+  ScanExpressionSchema,
   ShareReplayExpressionSchema,
 ]));
 
@@ -70,7 +70,7 @@ export type ObservableExpression =
       };
     }
   | { node: string; merge: { inputs: ObservableExpression[] } }
-  | { node: string; machine: { input: ObservableExpression; ref: string } }
+  | { node: string; scan: { input: ObservableExpression; reducer: { ref: string } } }
   | {
       node: string;
       shareReplay: { input: ObservableExpression; bufferSize: 1; refCount: true };
@@ -90,23 +90,17 @@ const HostEventBindingSchema = z.strictObject({
   operation: z.string().min(1),
 });
 
-const MachineTransitionSchema = z.strictObject({
-  target: z.string().min(1).optional(),
-  replaceContext: z.string().min(1).optional(),
-  patchContext: z.record(z.string().min(1), z.string().min(1)).optional(),
+const ReducerCaseSchema = z.strictObject({
+  replace: z.string().min(1).optional(),
+  patch: z.record(z.string().min(1), z.string().min(1)).optional(),
 }).refine(
-  (transition) => transition.replaceContext !== undefined
-    || transition.patchContext !== undefined
-    || transition.target !== undefined,
-  { message: "machine transition must change value or context" },
+  (reducerCase) => (reducerCase.replace !== undefined) !== (reducerCase.patch !== undefined),
+  { message: "reducer case must specify exactly one of replace or patch" },
 );
 
-const MachineSchema = z.strictObject({
-  initial: z.strictObject({
-    value: z.string().min(1),
-    context: z.record(z.string(), z.unknown()),
-  }),
-  on: z.record(z.string().min(1), MachineTransitionSchema),
+const ReducerSchema = z.strictObject({
+  seed: z.record(z.string(), z.unknown()),
+  cases: z.record(z.string().min(1), ReducerCaseSchema),
 });
 
 const DashboardOutputSchema = z.strictObject({
@@ -130,7 +124,7 @@ export const AutomationV2Schema = z.strictObject({
       parameters: ParametersSchema.optional(),
       expression: ObservableExpressionSchema,
     })),
-    machines: z.record(z.string().min(1), MachineSchema).default({}),
+    reducers: z.record(z.string().min(1), ReducerSchema).default({}),
   }),
   outputs: z.array(DashboardOutputSchema).min(1),
 }).superRefine((automation, context) => {
@@ -175,15 +169,15 @@ export const AutomationV2Schema = z.strictObject({
     }
     if ("project" in expression) visit(expression.project.input, flowRef);
     if ("merge" in expression) expression.merge.inputs.forEach((input) => visit(input, flowRef));
-    if ("machine" in expression) {
-      if (!automation.circuit.machines[expression.machine.ref]) {
+    if ("scan" in expression) {
+      if (!automation.circuit.reducers[expression.scan.reducer.ref]) {
         context.addIssue({
           code: "custom",
-          path: ["circuit", "flows", flowRef, "expression", "machine", "ref"],
-          message: `unknown machine: ${expression.machine.ref}`,
+          path: ["circuit", "flows", flowRef, "expression", "scan", "reducer", "ref"],
+          message: `unknown reducer: ${expression.scan.reducer.ref}`,
         });
       }
-      visit(expression.machine.input, flowRef);
+      visit(expression.scan.input, flowRef);
     }
     if ("shareReplay" in expression) visit(expression.shareReplay.input, flowRef);
   };

@@ -11,8 +11,10 @@ Rule JSON schema. Keeping these surfaces distinct is important when describing
 what can execute without recompiling.
 
 The production tree now also contains an `automation.v2` Zod 4 schema and RxJS
-compiler under `src/lib/json-rx`. It compiles validated source, merge, machine,
-project, and `shareReplay` nodes into dashboard emissions. Claude v1 remains the
+compiler under `src/lib/json-rx`. It compiles validated source, merge, scan,
+project, and `shareReplay` nodes into dashboard emissions. Stateful v2 scans
+reference reusable reducers with direct object seeds and event-type cases.
+Claude v1 remains the
 active extension capture format; the Metrics plugin exports a matching Claude
 v2 definition for production-side compilation.
 

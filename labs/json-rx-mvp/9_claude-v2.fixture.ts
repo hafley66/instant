@@ -21,7 +21,7 @@ export const claudeUsageV2 = {
     },
   },
   circuit: {
-    machines: {},
+    reducers: {},
     sources: {
       "jsonrx://instant/sources/browser/network-response/claude-usage": {},
     },

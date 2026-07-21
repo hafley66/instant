@@ -111,38 +111,40 @@ export function compileAutomationV2(
     if ("merge" in expression) {
       return merge(...expression.merge.inputs.map(compileExpression));
     }
-    if ("machine" in expression) {
-      const definition = automation.circuit.machines[expression.machine.ref];
-      if (!definition) throw new Error(`Unknown v2 machine: ${expression.machine.ref}`);
-      return compileExpression(expression.machine.input).pipe(
+    if ("scan" in expression) {
+      const definition = automation.circuit.reducers[expression.scan.reducer.ref];
+      if (!definition) throw new Error(`Unknown v2 reducer: ${expression.scan.reducer.ref}`);
+      return compileExpression(expression.scan.input).pipe(
         scan<LocatedValue, LocatedValue>((previous, input) => {
           const event = input.value as JsonObject;
           const eventType = event.type;
-          if (typeof eventType !== "string") throw new Error("Machine input requires an event type");
-          const transition = definition.on[eventType];
-          if (!transition) return { value: previous.value, origin: input.origin };
-          const state = previous.value as JsonObject;
-          const previousContext = state.context as JsonObject;
-          const context = transition.replaceContext
-            ? get(input.value, transition.replaceContext)
+          if (typeof eventType !== "string") throw new Error("Scan input requires an event type");
+          const reducerCase = definition.cases[eventType];
+          if (!reducerCase) return { value: previous.value, origin: input.origin };
+          const previousAccumulator = previous.value as JsonObject;
+          const accumulator = reducerCase.replace
+            ? get(input.value, reducerCase.replace)
             : {
-                ...previousContext,
+                ...previousAccumulator,
                 ...Object.fromEntries(
-                  Object.entries(transition.patchContext ?? {}).map(([field, path]) => [field, get(input.value, path)]),
+                  Object.entries(reducerCase.patch ?? {}).flatMap(([field, path]) => {
+                    try {
+                      return [[field, get(input.value, path)]];
+                    } catch {
+                      return [];
+                    }
+                  }),
                 ),
               };
-          if (typeof context !== "object" || context === null || Array.isArray(context)) {
-            throw new Error(`Machine context must be an object: ${expression.machine.ref}`);
+          if (typeof accumulator !== "object" || accumulator === null || Array.isArray(accumulator)) {
+            throw new Error(`Scan accumulator must be an object: ${expression.scan.reducer.ref}`);
           }
           return {
-            value: {
-              value: transition.target ?? state.value,
-              context,
-            },
+            value: accumulator,
             origin: input.origin,
           } satisfies LocatedValue;
         }, {
-          value: definition.initial as unknown as JsonValue,
+          value: definition.seed as unknown as JsonValue,
           origin: undefined,
         }),
       );

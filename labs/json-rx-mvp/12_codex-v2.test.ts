@@ -47,7 +47,7 @@ const claudeResponse: NetworkResponse = {
   },
 };
 
-describe("Codex usage machine", () => {
+describe("Codex usage scan", () => {
   it("keeps sparse updates complete when they arrive before a snapshot", async () => {
     const snapshots$ = new Subject<HostEvent>();
     const updates$ = new Subject<HostEvent>();
@@ -73,7 +73,7 @@ describe("Codex usage machine", () => {
     `);
   });
 
-  it("replaces context from a snapshot and patches it from an update", async () => {
+  it("replaces the accumulator from a snapshot and patches it from an update", async () => {
     const snapshots$ = new Subject<HostEvent>();
     const updates$ = new Subject<HostEvent>();
     const runtime = compileAutomationV2(codexUsageV2, {
