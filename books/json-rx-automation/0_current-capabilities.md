@@ -10,6 +10,12 @@ The JSON-Rx library contains capabilities that have not yet been exposed in the
 Rule JSON schema. Keeping these surfaces distinct is important when describing
 what can execute without recompiling.
 
+The production tree now also contains an `automation.v2` Zod 4 schema and RxJS
+compiler under `src/lib/json-rx`. It compiles validated source, merge, machine,
+project, and `shareReplay` nodes into dashboard emissions. Claude v1 remains the
+active extension capture format; the Metrics plugin exports a matching Claude
+v2 definition for production-side compilation.
+
 ## Rule JSON
 
 A rule is selected by a host regular expression and an optional page URL
@@ -146,6 +152,18 @@ JSON-Rx currently supplies:
 - asynchronous effects whose result events re-enter the machine
 - JSON Logic predicates and JSONata projections with diagnostics
 - RxJS combination, flattening, timing, retry, and cancellation operators
+
+Production v2 host status:
+
+- Codex account/rate-limit snapshot and sparse-update contracts are typed and
+  normalized in `src/lib/json-rx/10_codex_host.ts`.
+- Complete nullable Codex records are produced for snapshot, update, and
+  update-before-snapshot orderings.
+- A deterministic fake host adapter is available for tests.
+- `CODEX_HOST_STATUS.state` is `"pending-host"`; live Codex app-server
+  transport is absent at the native and Sprefa boundary.
+- Process execution, shell execution, credentials, and transport forwarding
+  remain outside this repository change.
 
 Rule JSON does not currently expose arbitrary machines, custom event sources,
 DOM action effects, authenticated HTTP effects, or keyed materialized views.

@@ -33,7 +33,7 @@ describe("metrics Vega-Lite specification", () => {
             "name": "visibleSeries",
             "select": {
               "fields": [
-                "field",
+                "series",
               ],
               "type": "point",
             },

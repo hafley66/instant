@@ -19,7 +19,7 @@ export function metricChartSpec(data: MetricPoint[], width: number, height: numb
       },
       {
         name: "visibleSeries",
-        select: { type: "point", fields: ["field"] },
+        select: { type: "point", fields: ["series"] },
         bind: "legend",
       },
     ],
@@ -27,10 +27,11 @@ export function metricChartSpec(data: MetricPoint[], width: number, height: numb
     encoding: {
       x: { field: "ts", type: "temporal", title: "time", axis: { format: "%H:%M:%S", labelAngle: 0 } },
       y: { field: "value", type: "quantitative", title: "usage %", scale: { domain: [0, 100] } },
-      color: { field: "field", type: "nominal", title: "measure" },
+      color: { field: "series", type: "nominal", title: "stream / measure" },
       opacity: { condition: { param: "visibleSeries", value: 1 }, value: 0.15 },
       tooltip: [
         { field: "ts", type: "temporal", title: "time" },
+        { field: "stream", type: "nominal", title: "stream" },
         { field: "field", type: "nominal", title: "measure" },
         { field: "value", type: "quantitative", title: "usage", format: ".2f" },
         { field: "ruleId", type: "nominal", title: "rule" },

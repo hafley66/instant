@@ -27,6 +27,31 @@ The generic dashboard boundary is:
 (stream, JSON Schema, timestamped records, provenance)
 ```
 
+## Production integration status
+
+Claude v1 capture remains the active extension capture path in
+`0_claude-usage.rule.json`. `1_v2_definitions.ts` also exports a Claude
+`automation.v2` definition with the same host matcher, request matcher,
+extraction fields, stream, and schema. The production JSON-Rx compiler is in
+`src/lib/json-rx/8_v2_schema.ts` and `9_v2_runtime.ts`; it is covered by
+Vitest and does not replace the v1 extension interpreter.
+
+Codex has a production-normalized schema and typed contracts for
+`account/rateLimits/read` and `account/rateLimits/updated`. The adapter accepts
+normalized snapshots and sparse updates, while the protocol helper maps the
+Codex rate-limits response into those types. A deterministic fake adapter is
+available for tests. `CODEX_HOST_STATUS` reports `live: false` and
+`state: "pending-host"` because this repository has no live Codex app-server
+transport at the native or Sprefa boundary. No process, shell, credential, or
+transport implementation is included.
+
+Metrics performs one `activity_rule_matches(limit: 500)` read per poll and
+derives one selected stream by default. A second selected stream creates a
+generic side-by-side comparison using the same returned rows. Stream selection,
+the comparison split, and the chart/history split persist in the `metrics`
+`pluginState` slice. Histories use `TreeTable`; charts use Vega-Lite through
+`vega-embed`; splits use `react-resizable-panels`.
+
 - `stream` selects and groups a time series across rule executions.
 - `schema` describes one record. Standard JSON Schema annotations and numeric
   constraints drive labels, formatting, and chart eligibility.
@@ -58,9 +83,10 @@ The current chart interaction contract uses Vega-Lite selection parameters:
 - Select legend entries to isolate series; double-click clears the selection.
 - Drag the horizontal sash to divide space between the chart and history grid.
 
-The chart/history percentage layout is stored in the `metrics` plugin state and
-restored on the next panel mount. Vega receives the measured chart panel width
-and height after every resize.
+The chart/history and optional stream-comparison layouts are stored in the
+`metrics` plugin state and restored on the next panel mount. Vega receives the
+measured chart panel width and height after every resize. The default remains a
+single stream; the comparison selector can activate one additional stream.
 
 Implementation boundaries follow dependency and reading order:
 
@@ -106,6 +132,7 @@ MetricsDashboardPanel mount
   -> JSON-Rx runMachine / scan
      -> State { value: ready|empty|error, rows, error }
   -> React render
+     -> one or two selected stream views from the returned rows
      -> cards from latest record + JSON Schema
      -> Vega-Lite points from percentage fields [*]
      -> TreeTable history from emissions [*]
@@ -243,11 +270,13 @@ store.
   local page, a real local API request, delayed configuration, extraction, and
   ingest assertions using the Claude response fixture.
 - `e2e/metrics-dashboard.spec.ts` injects the native query result, opens Metrics
-  through the Rules child rail item, waits for Vega rendering, checks semantic
-  and rendered dimensions, records the golden dashboard screenshot, and drags
-  the chart/history split.
+  through the Rules child rail item, verifies one native read, selects Claude
+  and Codex streams through the generic comparison controls, waits for both
+  Vega render states, records the golden dashboard screenshot, and drags the
+  chart/history split.
 - `src/lib/json-rx/*.test.ts` covers state updates, machine scans, partitioned
-  instances, catalogs, and expression traces.
+  instances, catalogs, expression traces, automation.v2 validation and
+  compilation, Codex normalization, sparse update ordering, and host sharing.
 
 ## Off-the-shelf visualization layers
 

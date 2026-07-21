@@ -8,11 +8,13 @@ rule interpreter or dashboard transport.
 ```text
 server config
   ├─ rules[]        -> existing v1 extension interpreter
-  └─ automations[]  -> future v2 JSON-Rx adapter
+  └─ automations[]  -> production v2 compiler + host-owned source bindings
 ```
 
-The isolated implementation lives in `labs/json-rx-mvp`. No running Instant,
-extension, Rust server, or Metrics source imports the v2 compiler.
+The production implementation lives under `src/lib/json-rx` and is exported by
+the Metrics plugin. `labs/json-rx-mvp` remains a historical conformance fixture.
+The current extension still executes the v1 Claude rule; v2 definitions are
+available for production-side compilation and do not replace that capture path.
 
 ## Version boundaries
 
@@ -166,9 +168,10 @@ This fixture guards the placement of `shareReplay`. The earlier MVP test caught
 a compiler that cached an Observable wrapper while constructing the sharing
 operator separately per subscription.
 
-## Future adapter seam
+## Current adapter seam
 
-The later Instant integration needs one additive adapter:
+The production compiler receives host-owned Observable bindings through one
+additive adapter:
 
 ```text
 GET /config
@@ -181,12 +184,14 @@ GET /config
 ```
 
 No v1-to-v2 migration is required. Individual automations can be represented in
-both formats during comparison. A server-side enable flag can select which one
-is active to prevent duplicate emissions.
+both formats during comparison. The Claude v2 definition is present in the
+production Metrics plugin. Browser v2 source matching and persistence wiring
+remain pending host work. Codex has typed normalized host contracts and a
+deterministic fake source; live native or Sprefa transport remains pending.
 
 ## Proven scope
 
-The side-by-side lab currently proves:
+The production and lab surfaces prove:
 
 1. V1 and v2 remain independently versioned documents.
 2. V2 survives a JSON serialization round trip.
@@ -196,6 +201,10 @@ The side-by-side lab currently proves:
 6. Claude network responses project into the existing metric fields.
 7. V2 emits the existing dashboard envelope with original URL and timestamp.
 8. Overlapping root subscribers share one network source acquisition.
+9. The production Metrics panel derives one or two stream views from one
+   database read.
 
-The browser source matcher, server config endpoint, extension transport, and
-Instant plugin registration remain outside the lab and unchanged.
+The browser v2 source matcher, server config endpoint, extension v2 transport,
+live Codex host transport, and persistence of v2 roots remain pending host work.
+The Metrics plugin registration and generic comparison renderer are production
+code.

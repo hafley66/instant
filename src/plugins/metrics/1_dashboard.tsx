@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import embed from "vega-embed";
 import { invoke } from "../../generated/native";
 import { TreeTable, type TreeColumn } from "../../treetable";
+import { readPluginState, savePluginState } from "../../pluginState";
 import type { JsonSchema } from "../../rulesModel";
 import type { State } from "../../lib/json-rx/0_types";
-import type { MetricMatch, MetricPoint } from "./0_types";
+import type { MetricMatch, MetricPoint, MetricsUiState } from "./0_types";
 import { metricChartSpec } from "./0a_chart";
-import { MetricsSplit } from "./0b_layout";
+import { MetricsComparison, MetricsSplit } from "./0b_layout";
+import { metricPoints, selectedStreams, streamNames, streamRows } from "./0c_streams";
 import { createMetricsDashboardState } from "./2_runtime";
 
 const LIMIT = 500;
@@ -34,16 +36,6 @@ function formatMetricValue(field: string, value: unknown, definition?: JsonSchem
   return String(value);
 }
 
-function points(rows: MetricMatch[], schema?: JsonSchema): MetricPoint[] {
-  return rows.flatMap((row) =>
-    row.matches.flatMap((match) =>
-      Object.entries(match)
-        .filter((entry): entry is [string, number] => numeric(entry[1]) && isPercentMetric(entry[0], schema?.properties?.[entry[0]]))
-        .map(([field, value]) => ({ ts: row.ts, field, value, ruleId: row.ruleId, url: row.url })),
-    ),
-  );
-}
-
 function MetricCards({ row, schema }: { row: MetricMatch; schema: JsonSchema }) {
   const values = row.matches[0] ?? {};
   return (
@@ -59,6 +51,28 @@ function MetricCards({ row, schema }: { row: MetricMatch; schema: JsonSchema }) 
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function MetricStreamView({ stream, rows }: { stream: string; rows: MetricMatch[] }) {
+  const latest = rows[0];
+  const schema = latest?.schema;
+  const chartData = metricPoints(rows, schema);
+  const data = rows.map((row, index) => ({ ...row, key: `${stream}-${row.ts}-${index}` }));
+
+  return (
+    <div className="metrics-stream-view" data-testid={`metrics-stream-${stream}`} style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, height: "100%" }}>
+      <div className="metrics-stream-title">{stream}</div>
+      {latest && schema ? <MetricCards row={latest} schema={schema} /> : <div className="session-empty">no emitted metrics</div>}
+      {chartData.length || data.length ? (
+        <MetricsSplit
+          chart={chartData.length ? <MetricChart data={chartData} /> : <div className="session-empty">no chartable values</div>}
+          history={data.length ? (
+            <TreeTable columns={HISTORY_COLUMNS} data={data} getRowId={(row) => row.key} defaultSorting={[{ id: "time", desc: true }]} />
+          ) : null}
+        />
+      ) : null}
     </div>
   );
 }
@@ -137,44 +151,57 @@ export function MetricsDashboardPanel() {
     [],
   );
   const [dashboardState, setDashboardState] = useState<State>({ value: "loading", rows: [], error: null });
-  const [selectedStream, setSelectedStream] = useState<string>();
+  const storedMetrics = useMemo(
+    () => readPluginState<Partial<MetricsUiState>>("metrics", {}),
+    [],
+  );
+  const [storedSelection, setStoredSelection] = useState(storedMetrics.comparisonStreams ?? []);
   useEffect(() => {
     const subscription = runtime.subscribe(setDashboardState);
     return () => subscription.unsubscribe();
   }, [runtime]);
 
   const rows = dashboardState.rows as unknown as MetricMatch[];
-
-  const streams = [...new Set(rows.map((row) => row.stream).filter((stream): stream is string => !!stream))];
-  const stream = selectedStream && streams.includes(selectedStream) ? selectedStream : streams[0];
-  const metricRows = rows.filter((row) => row.stream === stream).sort((a, b) => b.ts - a.ts);
-  const latest = metricRows[0];
-  const schema = latest?.schema;
-  const chartData = useMemo(() => points(metricRows, schema), [metricRows, schema]);
-  const data = rows.map((row, index) => ({ ...row, key: `${row.ts}-${index}` }));
+  const streams = streamNames(rows);
+  const activeStreams = selectedStreams(streams, storedSelection);
+  const primaryStream = activeStreams[0] ?? "";
+  const comparisonStream = activeStreams[1] ?? "";
+  const changeSelection = (next: string[]) => {
+    setStoredSelection(next);
+    savePluginState<MetricsUiState>("metrics", { comparisonStreams: next });
+  };
 
   return (
     <div className="v2-panel metrics-panel" data-testid="metrics-dashboard" data-state={dashboardState.value}>
       <div className="act-bar">
         <span className="spy-title">metrics</span>
-        <span className="wt-count">{metricRows.length}</span>
+        <span className="wt-count">{rows.length}</span>
         <span className="spy-spacer" />
         {streams.length ? (
-          <select value={stream} onChange={(event) => setSelectedStream(event.target.value)}>
-            {streams.map((value) => <option value={value} key={value}>{value}</option>)}
-          </select>
+          <>
+            <label>stream <select aria-label="metrics stream" data-testid="metrics-primary-stream" value={primaryStream} onChange={(event) => {
+              const value = event.target.value;
+              changeSelection([value, ...activeStreams.filter((stream) => stream !== value)].slice(0, 2));
+            }}>
+              {streams.map((value) => <option value={value} key={value}>{value}</option>)}
+            </select></label>
+            <label>compare <select aria-label="metrics comparison stream" data-testid="metrics-comparison-stream" value={comparisonStream} onChange={(event) => {
+              const value = event.target.value;
+              changeSelection(value ? [primaryStream, value] : [primaryStream]);
+            }}>
+              <option value="">single stream</option>
+              {streams.filter((value) => value !== primaryStream).map((value) => <option value={value} key={value}>{value}</option>)}
+            </select></label>
+          </>
         ) : <span className="wt-count">no stream</span>}
       </div>
       <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {latest && schema ? <MetricCards row={latest} schema={schema} /> : <div className="session-empty">{dashboardState.error ? String(dashboardState.error) : "no emitted metrics"}</div>}
-        {chartData.length || data.length ? (
-          <MetricsSplit
-            chart={chartData.length ? <MetricChart data={chartData} /> : <div className="session-empty">no chartable values</div>}
-            history={data.length ? (
-              <TreeTable columns={HISTORY_COLUMNS} data={data} getRowId={(row) => row.key} defaultSorting={[{ id: "time", desc: true }]} />
-            ) : null}
-          />
-        ) : null}
+        {dashboardState.error ? <div className="session-empty">{String(dashboardState.error)}</div> : null}
+        {activeStreams.length ? (
+          <MetricsComparison streams={activeStreams}>
+            {activeStreams.map((stream) => <MetricStreamView key={stream} stream={stream} rows={streamRows(rows, stream)} />)}
+          </MetricsComparison>
+        ) : <div className="session-empty">no emitted metrics</div>}
       </div>
     </div>
   );

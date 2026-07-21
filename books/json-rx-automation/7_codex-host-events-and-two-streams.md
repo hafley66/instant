@@ -1,9 +1,10 @@
-# Codex host events in the isolated JSON-Rx v2 lab
+# Codex host events at the production JSON-Rx v2 boundary
 
-This note documents the current uncommitted v2 fixture under
-`labs/json-rx-mvp`. It describes the executable TypeScript lab surface. The
-production extension, Rust server, app-server event bridge, database, and
-Metrics panel remain outside this circuit.
+This note documents the production v2 Codex definition and its deterministic
+host boundary. The original executable fixture remains under
+`labs/json-rx-mvp`. The production extension still uses Claude v1 capture.
+Metrics consumes persisted v1 and v2-compatible dashboard envelopes through one
+generic one-or-two stream view.
 
 ## Flow shape
 
@@ -29,8 +30,8 @@ updated source /
 `merge` forwards whichever source event arrives. The event remains accompanied
 by its source origin, consisting of `url` and `ts`.
 
-The runtime receives already-created Observables in the `sources` argument to
-`compileAutomationV2`:
+The production runtime receives already-created Observables in the `sources`
+argument to `compileAutomationV2`:
 
 ```ts
 compileAutomationV2(codexUsageV2, {
@@ -39,9 +40,10 @@ compileAutomationV2(codexUsageV2, {
 });
 ```
 
-The binding operation strings are carried in the serialized document. The lab
-does not map those strings to an app-server client or listen to live Codex
-events.
+The binding operation strings are carried in the serialized document.
+`10_codex_host.ts` maps typed normalized adapter values into those events. The
+repository does not map the operation strings to a live app-server client and
+does not listen to live Codex events.
 
 ## Machine state
 
@@ -162,17 +164,26 @@ merge(
 ```
 
 The resulting Observable contains two stream identities in one
-`DashboardEmission` row sequence. This gives a future two-stream Metrics view
-one row contract and lets the view select `claude.usage` or `codex.usage` by the
-existing `stream` field. The test observes the rows in memory. Persistence,
-`rulematch` transport, live host bindings, and production rendering are not
-part of the lab.
+`DashboardEmission` row sequence. The production Metrics view selects
+`claude.usage` or `codex.usage` by the existing `stream` field and renders both
+from one database result. The test observes the rows in memory. Persistence of
+live v2 root emissions and live host bindings remain pending.
 
-## Production status
+## Production versus pending-host status
 
-The v2 source, machine, and output documents are isolated under
-`labs/json-rx-mvp`. The current production Claude rule remains v1 data and is
-imported by the Claude fixture for comparison. The production extension and
-server do not compile `AutomationV2`, create these host-event Observables, or
-forward these v2 roots. A future adapter would need to provide those bridges
-before the two fixtures could supply live Metrics rows.
+Production now includes:
+
+- the Zod 4 `automation.v2` schema and RxJS compiler;
+- the Codex normalized nullable schema;
+- typed contracts for `account/rateLimits/read` and
+  `account/rateLimits/updated`;
+- snapshot replacement, sparse patching, update-before-snapshot behavior, and
+  `shareReplay` test coverage;
+- a deterministic fake host source; and
+- the generic Metrics one-or-two stream comparison UI.
+
+Pending host work includes the live Codex app-server/native or Sprefa adapter,
+transport forwarding, credentials, persistence of v2 root emissions, and
+browser v2 source matching. `CODEX_HOST_STATUS` exposes this state as
+`live: false` and `state: "pending-host"`. No process or shell execution was
+added.

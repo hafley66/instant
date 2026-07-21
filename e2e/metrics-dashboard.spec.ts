@@ -35,6 +35,20 @@ test("JSON-Rx dashboard renders captured metric data", async ({ page }) => {
             },
           },
         },
+        {
+          ruleId: "codex-rate-limits",
+          url: "codex-app-server://account/rateLimits/read",
+          ts: 1893563045000,
+          matches: [{ primary_percent: 64, secondary_percent: 23 }],
+          stream: "codex.usage",
+          schema: {
+            type: "object",
+            properties: {
+              primary_percent: { type: ["number", "null"], title: "Primary usage", minimum: 0, maximum: 100 },
+              secondary_percent: { type: ["number", "null"], title: "Secondary usage", minimum: 0, maximum: 100 },
+            },
+          },
+        },
       ],
     };
   });
@@ -47,7 +61,13 @@ test("JSON-Rx dashboard renders captured metric data", async ({ page }) => {
   await expect(dashboard).toContainText("Usage percent");
   await expect(dashboard).toContainText("42%");
   await expect(dashboard).toContainText("fixture-usage");
-  const chart = page.getByTestId("metrics-chart");
+  expect(await page.evaluate(() => (window as Window & { __instantE2eNativeCalls?: string[] }).__instantE2eNativeCalls ?? [])).toEqual(["activity_rule_matches"]);
+  await page.getByTestId("metrics-comparison-stream").selectOption("codex.usage");
+  const codexPanel = page.getByTestId("metrics-stream-codex.usage");
+  await expect(codexPanel).toContainText("Primary usage");
+  await expect(codexPanel).toContainText("64%");
+  await expect(codexPanel.getByTestId("metrics-chart")).toHaveAttribute("data-render-state", "ready");
+  const chart = page.getByTestId("metrics-stream-fixture.usage").getByTestId("metrics-chart");
   await expect(chart).toHaveAttribute("data-render-state", "ready");
   const renderedChart = await chart.evaluate((host) => {
     const view = host.querySelector("canvas, svg");
@@ -56,14 +76,15 @@ test("JSON-Rx dashboard renders captured metric data", async ({ page }) => {
       view: view?.getBoundingClientRect().toJSON(),
     };
   });
-  expect(renderedChart.host.width).toBeGreaterThan(900);
-  expect(renderedChart.view?.width).toBeGreaterThan(700);
+  expect(renderedChart.host.width).toBeGreaterThan(500);
+  expect(renderedChart.view?.width).toBeGreaterThan(400);
   expect(renderedChart.view?.height).toBeGreaterThan(200);
   await expect(dashboard).toHaveScreenshot("metrics-dashboard.png", { animations: "disabled" });
 
-  const handle = dashboard.locator(".meme-sash-horizontal");
-  const chartPanel = dashboard.locator('[data-panel-id="metrics-chart-panel"]');
-  const historyPanel = dashboard.locator('[data-panel-id="metrics-history-panel"]');
+  const fixturePanel = page.getByTestId("metrics-stream-fixture.usage");
+  const handle = fixturePanel.locator(".meme-sash-horizontal");
+  const chartPanel = fixturePanel.locator('[data-panel-id="metrics-chart-panel"]');
+  const historyPanel = fixturePanel.locator('[data-panel-id="metrics-history-panel"]');
   const chartBefore = await chartPanel.boundingBox();
   const historyBefore = await historyPanel.boundingBox();
   const handleBox = await handle.boundingBox();

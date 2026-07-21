@@ -11,8 +11,16 @@ export interface MetricMatch {
 
 export interface MetricPoint {
   ts: number;
+  stream: string;
   field: string;
+  series: string;
   value: number;
   ruleId: string;
   url: string;
+}
+
+export interface MetricsUiState {
+  layout: number[];
+  comparisonLayout: number[];
+  comparisonStreams: string[];
 }

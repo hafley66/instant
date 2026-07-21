@@ -47,3 +47,8 @@
   2020-12 JSON Schema, canonical IR, graph validation, a Claude v1/v2
   equivalence fixture, existing dashboard-envelope output, and overlapping
   subscriber sharing proof. Production v1 paths remain unchanged.
+- Integrated the automation.v2 schema/compiler and Codex normalized typed host
+  boundary into production JSON-Rx, retained Claude v1 capture, added the
+  Claude v2 definition, and added the generic one-or-two stream Metrics view.
+  Live Codex native/Sprefa transport remains pending and is exposed through
+  `CODEX_HOST_STATUS`.
