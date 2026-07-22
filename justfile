@@ -64,6 +64,11 @@ build:
 bundle:
     corepack pnpm@10.12.4 run tauri build
 
+# update every release version, commit, and tag. Pushing the printed commands
+# invokes the macOS release workflow, which builds Apple Silicon + Intel DMGs.
+cut version:
+    ./scripts/0_release.sh {{version}}
+
 # regenerate the linked architectural backlog from comment_node relations
 todos:
     dl --no-daemon --apply

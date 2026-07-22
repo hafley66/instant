@@ -54,6 +54,21 @@ browser events, file opens, session visits) into a searchable timeline.
 - Permissions on first run: **Accessibility / Input Monitoring** (summon gesture,
   send-selection tap) and **Screen Recording** (the Shot button + capture).
 
+## Install
+
+Install the current GitHub Release with:
+
+```sh
+curl -fsSL https://github.com/hafley66/instant/releases/latest/download/instant-installer.sh | sh
+```
+
+It downloads the matching architecture DMG, installs `instant.app` in
+`~/Applications`, clears its quarantine attributes before its first launch, and
+does not require Rust, Node, pnpm, or a dependency install. The prior installed
+bundle, if any, is moved to a timestamped `.backup` sibling. macOS asks for
+Accessibility / Input Monitoring and Screen Recording permissions when those
+features are first used.
+
 ## Develop
 
 ```sh
@@ -68,6 +83,15 @@ corepack pnpm@10.12.4 exec tsc --noEmit
 corepack pnpm@10.12.4 build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
+## Release
+
+```sh
+just cut 0.1.1
+git push origin main && git push origin v0.1.1
+```
+
+The tag workflow builds and publishes both `aarch64` and `x86_64` macOS DMGs.
 
 ## Layout
 

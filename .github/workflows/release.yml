@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+      - id: release
+        name: Read GitHub release identifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "id=$(gh api repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME --jq .id)" >> "$GITHUB_OUTPUT"
+
+  bundle:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: macos-14
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check tag and package versions
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test "$(node -p 'require(\"./package.json\").version')" = "$version"
+          grep -qx "version = \"$version\"" src-tauri/Cargo.toml
+          grep -qx "  \"version\": \"$version\"," src-tauri/tauri.conf.json
+
+      # These secrets are optional until Developer ID signing is configured.
+      # When present, the build signs with the imported Developer ID identity
+      # and Tauri submits the bundle for notarization using the API key.
+      - name: Import Apple signing certificate and notarization key
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          certificate="$RUNNER_TEMP/instant-developer-id.p12"
+          api_key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$api_key"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import "$certificate" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security find-identity -v -p codesigning build.keychain | grep 'Developer ID Application'
+          echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
+
+      - name: Build and upload macOS bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.id }}
+          tagName: ${{ github.ref_name }}
+          releaseAssetNamePattern: "instant_[version]_[arch][ext]"
+          args: --target ${{ matrix.target }}
+
+  installer:
+    needs:
+      - bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render and upload macOS installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed \
+            -e "s/@RELEASE_TAG@/$GITHUB_REF_NAME/g" \
+            -e "s/@RELEASE_VERSION@/$version/g" \
+            scripts/1_install.sh > "$RUNNER_TEMP/instant-installer.sh"
+          chmod +x "$RUNNER_TEMP/instant-installer.sh"
+          gh release upload "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/instant-installer.sh#instant-installer.sh" \
+            --clobber
