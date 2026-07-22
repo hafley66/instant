@@ -2,6 +2,7 @@ import { registerPlugin } from "../../plugin";
 import { FilesPanel } from "./3_FilesPanel";
 
 export { FileExplorer } from "./2_FileExplorer";
+export { FileSearchTree, filesystemSearchSource } from "./4_FileSearchTree";
 
 export function registerFilesPlugin(): void {
   registerPlugin({

@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use ignore::WalkBuilder;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -210,6 +211,44 @@ pub fn list_dir_recursive(
         path: canon.to_string_lossy().into_owned(),
         entries,
     })
+}
+
+/// Gitignore-aware file candidates for the generic filesystem search UI. The
+/// client owns fzf-style query ranking, while this walker owns filesystem and
+/// ignore semantics. Directories are excluded because FileSearchTree retains
+/// its lazy expandable directory browser beside search results.
+#[tauri::command]
+pub fn search_files(path: Option<String>, max_files: Option<usize>) -> Result<Vec<Entry>, String> {
+    let dir = resolve(path);
+    let canon = dir.canonicalize().unwrap_or(dir);
+    let cap = max_files.unwrap_or(20_000);
+    let mut entries = Vec::new();
+    let mut builder = WalkBuilder::new(&canon);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .follow_links(false);
+    for result in builder.build() {
+        if entries.len() >= cap { break; }
+        let entry = match result { Ok(entry) => entry, Err(_) => continue };
+        let file_type = match entry.file_type() { Some(file_type) => file_type, None => continue };
+        if !file_type.is_file() { continue; }
+        let p = entry.into_path();
+        let meta = match std::fs::metadata(&p) { Ok(meta) => meta, Err(_) => continue };
+        entries.push(Entry {
+            name: p.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            path: p.to_string_lossy().into_owned(),
+            is_dir: false,
+            size: meta.len(),
+            modified: modified_ms(&meta),
+            ext: ext_of(&p, false),
+        });
+    }
+    entries.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    Ok(entries)
 }
 
 fn collect_files(

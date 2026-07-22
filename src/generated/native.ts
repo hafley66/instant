@@ -43,6 +43,7 @@ export type CommandName =
   | "list_dir"
   | "list_dir_meme"
   | "list_dir_recursive"
+  | "search_files"
   | "read_image"
   | "read_text"
   | "save_text"
@@ -144,6 +145,7 @@ export namespace commands {
     export const listDir = "list_dir";
     export const listDirMeme = "list_dir_meme";
     export const listDirRecursive = "list_dir_recursive";
+    export const searchFiles = "search_files";
     export const readImage = "read_image";
     export const readText = "read_text";
     export const saveText = "save_text";

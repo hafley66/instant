@@ -21,8 +21,15 @@ import {
 import { openPanelInstance } from "./reactdock";
 import { baseName } from "./core";
 import { PaintMemeControls } from "./paintMemeControls";
+import { FileSearchTree } from "./plugins/files";
+import { store } from "./state";
 
 const PANEL_ID = "paint";
+
+const dirOf = (path: string) => {
+  const index = path.lastIndexOf("/");
+  return index > 0 ? path.slice(0, index) : "";
+};
 
 interface PaintInstanceProps {
   panelId: string;
@@ -34,6 +41,8 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
   const stateRef = useRef<PaintPanelState | null>(null);
   const quicksaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bridgeRevision, setBridgeRevision] = useState(0);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [fileRoot, setFileRoot] = useState(() => store.get().scanRoot);
   const state = stateRef.current ?? paintPanelState(panelId);
   stateRef.current = state;
   const current = state.current.$();
@@ -114,6 +123,9 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
         <button type="button" disabled={!current.trim()} onClick={() => void requestLoadPaintFile(state, current.trim())}>
           open
         </button>
+        <button type="button" onClick={() => setFilesOpen((open) => !open)}>
+          files
+        </button>
         <button type="button" onClick={() => void savePaint(state)} title="flatten layers and save as PNG">
           save
         </button>
@@ -138,6 +150,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
           </select>
         ) : null}
       </div>
+      {filesOpen ? <div className="paint-file-search"><div className="paint-file-search-head"><input value={fileRoot} onChange={(event) => setFileRoot(event.currentTarget.value)} /><button type="button" onClick={() => setFilesOpen(false)}>×</button></div><FileSearchTree root={fileRoot} onSelect={(path) => { state.current.$(path); void requestLoadPaintFile(state, path); setFileRoot(dirOf(path) || fileRoot); setFilesOpen(false); }} /></div> : null}
       <div className="paint-editor-body"><iframe
         ref={iframeRef}
         className="paint-frame"

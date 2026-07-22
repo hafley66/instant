@@ -6,7 +6,7 @@
   "activity": ["activity_events", "activity_clear", "activity_log", "capture_set_enabled", "capture_enabled", "rules_get", "rules_set", "activity_rule_matches", "watcher_status"],
   "capture": ["capture_permissions", "capture_request_screen"],
   "config": ["config_get", "config_set", "config_reload", "config_open"],
-  "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "read_image", "read_text", "save_text", "delete_file", "fs_watch_claim", "fs_watch_release"],
+  "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "search_files", "read_image", "read_text", "save_text", "delete_file", "fs_watch_claim", "fs_watch_release"],
   "harness": ["harness_session", "harness_sessions"],
   "ledger": ["list_ai_sessions", "read_ai_messages", "latest_ai_message"],
   "meme": ["make_slack_emoji", "magick_available", "install_imagemagick", "save_meme", "copy_meme_image"],

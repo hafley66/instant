@@ -3527,6 +3527,11 @@ body[data-skin="ac3"] .meme-canvas-wrap {
 }
 
 .paint-editor-body { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.paint-file-search { display: flex; flex: 0 0 260px; min-height: 0; flex-direction: column; }
+.paint-file-search-head { display: flex; gap: 4px; padding: 4px; }
+.paint-file-search-head input { min-width: 0; flex: 1; }
+.file-search-tree { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.file-search-tree > input { margin: 4px; }
 .paint-meme-controls { display: flex; flex: 0 0 226px; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--frame, #888); overflow: auto; }
 .paint-meme-controls .tt-host { min-height: 0; }
 .paint-meme-controls.collapsed { flex-basis: auto; min-height: 0; }

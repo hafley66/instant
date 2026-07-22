@@ -865,6 +865,7 @@ pub fn run() {
             fs::list_dir,
             fs::list_dir_meme,
             fs::list_dir_recursive,
+            fs::search_files,
             fs::read_image,
             fs::save_text,
             fs::delete_file,
