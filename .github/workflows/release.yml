@@ -69,44 +69,14 @@ jobs:
           grep -qx "version = \"$version\"" src-tauri/Cargo.toml
           grep -qx "  \"version\": \"$version\"," src-tauri/tauri.conf.json
 
-      # These secrets are optional until Developer ID signing is configured.
-      # When present, the build signs with the imported Developer ID identity
-      # and Tauri submits the bundle for notarization using the API key.
-      - name: Import Apple signing certificate and notarization key
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        if: ${{ env.APPLE_CERTIFICATE != '' }}
-        run: |
-          certificate="$RUNNER_TEMP/instant-developer-id.p12"
-          api_key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
-          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
-          printf '%s' "$APPLE_API_KEY_CONTENT" > "$api_key"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import "$certificate" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          security find-identity -v -p codesigning build.keychain | grep 'Developer ID Application'
-          echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
-
       - name: Build and upload macOS bundle
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           releaseId: ${{ needs.create-release.outputs.id }}
           tagName: ${{ github.ref_name }}
-          releaseAssetNamePattern: "instant_[version]_[arch][ext]"
+          assetNamePattern: "instant_[version]_[arch][ext]"
           args: --target ${{ matrix.target }}
 
   installer:
