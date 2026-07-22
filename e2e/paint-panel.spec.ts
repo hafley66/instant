@@ -79,8 +79,8 @@ test("Paint caption panel creates top and bottom meme text layers", async ({ pag
   await page.getByTestId("open-first").click();
   const panel = page.getByTestId("meme-captions");
   await expect(panel).toBeVisible();
-  await panel.locator("textarea").nth(0).fill("TOP TEXT");
-  await panel.locator("textarea").nth(1).fill("BOTTOM TEXT");
+  await panel.getByLabel("top text").fill("TOP TEXT");
+  await panel.getByLabel("bottom text").fill("BOTTOM TEXT");
   await panel.getByLabel("top font size").fill("72");
   await panel.getByLabel("top fill color").fill("#ff0000");
   await panel.getByRole("button", { name: "add caption layers" }).click();
