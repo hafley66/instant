@@ -21,7 +21,6 @@ import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerFilesPlugin } from "./plugins/files";
-import { registerMeme } from "./meme";
 import { registerMdview } from "./mdview";
 import { registerPaint } from "./paintPanel";
 import { isFilePickerOpen } from "./overlayGuard";
@@ -216,7 +215,6 @@ async function main() {
   void registerSprefa;
   // registerSprefa();
   registerNav();
-  registerMeme();
   registerMdview(); // md panels open via routing (preview/clickrules), no rail button
   registerPaint();
   registerV2Bridges();

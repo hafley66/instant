@@ -7,8 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
-import { handleMemeDrop } from "./meme";
-import { activeId, pathArg, showError } from "./core";
+import { activeId, pathArg } from "./core";
 import { tabs, pasteToActive } from "./terminal";
 import { cancelHide } from "./capture";
 import { addScope } from "./sprefa";
@@ -64,10 +63,6 @@ export async function wireOsDrop() {
       const over = document.elementFromPoint(position.x / dpr, position.y / dpr);
       if (over?.closest("#sprefa-scope")) {
         for (const path of paths) addScope({ kind: "file", value: path });
-        return;
-      }
-      if (over?.closest("#meme-workspace")) {
-        handleMemeDrop(paths).catch((e) => showError("meme-drop", e));
         return;
       }
       const id = activeId();
