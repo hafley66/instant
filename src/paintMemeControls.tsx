@@ -15,7 +15,7 @@ export function PaintMemeControls({ bridge }: { bridge: PaintBridge | null }) {
   const [collapsed, setCollapsed] = useState(() => readPluginState<PaintCaptionUi>("paint", {}).captionsCollapsed ?? false);
   const update = (id: CaptionRow["id"], patch: Partial<MemeCaption>) => setRows((current) => current.map((row) => row.id === id ? { ...row, ...patch } : row));
   const columns = useMemo<TreeColumn<CaptionRow>[]>(() => [
-    { id: "enabled", header: "on", noRowClick: true, cell: (row) => <input aria-label={`${row.label} enabled`} type="checkbox" checked={row.enabled} onClick={stop} onChange={(event) => update(row.id, { enabled: event.currentTarget.checked })} /> },
+    { id: "enabled", header: "on", noRowClick: true, cell: (row) => <button type="button" className={`paint-caption-enabled${row.enabled ? " on" : ""}`} aria-label={`${row.label} enabled`} aria-pressed={row.enabled} onClick={(event) => { stop(event); update(row.id, { enabled: !row.enabled }); }}>{row.enabled ? "✓" : "○"}</button> },
     { id: "position", header: "position", tree: true, cell: (row) => row.label },
     { id: "text", header: "text", noRowClick: true, cell: (row) => <input aria-label={`${row.label} text`} value={row.text} onClick={stop} onChange={(event) => update(row.id, { text: event.currentTarget.value })} /> },
     { id: "font", header: "font", noRowClick: true, cell: (row) => <select aria-label={`${row.label} font family`} value={row.family} onClick={stop} onChange={(event) => update(row.id, { family: event.currentTarget.value })}><option>Impact</option><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Times New Roman</option></select> },
