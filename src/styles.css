@@ -668,6 +668,14 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   display: flex;
   overflow: hidden;
 }
+/* Terminal panels carry their frame + inset HERE (one level above .term-host),
+   not on .term-host itself, so FitAddon measures a zero-chrome box. The 2px
+   padding keeps the term-bg (black) gap between frame and the xterm surface. */
+.dv-host-term {
+  padding: 2px;
+  border: var(--frame-w) solid var(--term-frame);
+  background: var(--term-bg);
+}
 .panel {
   flex: 1;
   display: flex;
@@ -963,9 +971,7 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   min-height: 0;
   position: relative;
   overflow: hidden;
-  padding: 2px;
   background: var(--term-bg);
-  border: var(--frame-w) solid var(--term-frame);
 }
 .term-host .xterm,
 .term-host .xterm-viewport {

@@ -209,7 +209,13 @@ function TerminalPanel(props: IDockviewPanelProps) {
     };
   }, [id]);
 
-  return <div className="dv-host" ref={ref} />;
+  // dv-host-term carries the frame border + 2px inset (see styles.css), NOT
+  // .term-host: xterm's FitAddon measures .xterm's parent (.term-host) via
+  // getComputedStyle width/height, which under the global box-sizing: border-box
+  // returns the BORDER box. Any padding/border on .term-host gets silently
+  // counted as renderable area, rounding cols/rows one too large whenever the
+  // panel height lands within ~6px of a cell boundary -> tmux/xterm row drift.
+  return <div className="dv-host dv-host-term" ref={ref} />;
 }
 
 // Per-path preview instance. Like terminals, the content node lives in JS
