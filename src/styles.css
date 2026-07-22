@@ -696,6 +696,10 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   flex-direction: column;
   min-height: 0;
   background: var(--panel-bg);
+  /* Dockview panel hosts don't inherit --panel-fg from body (same reason
+     .v2-panel sets it explicitly), so without this the file/touched rows
+     rendered browser-default near-black — invisible in dark mode. */
+  color: var(--panel-fg);
   border-left: var(--frame-w) solid var(--frame);
   overflow: hidden;
 }
