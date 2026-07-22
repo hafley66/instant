@@ -235,7 +235,7 @@ export interface AppState {
   // sizes = react-resizable-panels layout for the [files | touched] vertical
   // stack (percent units, sums to 100); touched = MRU list of paths opened from
   // this session's sidebar (most-recent first). Both persist per session id.
-  termSidebar: Record<string, { open: boolean; width: number; sizes?: [number, number]; touched?: string[] }>;
+  termSidebar: Record<string, { open: boolean; width: number; source?: "files" | "turns"; sizes?: [number, number]; touched?: string[] }>;
   zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
   // Per-tab zoom FACTOR, keyed by full dock panel id ("term:<sid>", "md:<path>",
   // …). Generic successor of tabZoom — see src/panelZoom.ts (persisted).
@@ -446,7 +446,7 @@ function load(): AppState {
     wtView: loadKey<WtView>("wtView", "tree"),
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
-    termSidebar: loadKey<Record<string, { open: boolean; width: number; sizes?: [number, number]; touched?: string[] }>>("termSidebar", {}),
+    termSidebar: loadKey<Record<string, { open: boolean; width: number; source?: "files" | "turns"; sizes?: [number, number]; touched?: string[] }>>("termSidebar", {}),
     zoom: loadKey<number>("zoom", 1),
     panelZoom: loadKey<Record<string, number>>("panelZoom", {}),
     resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),

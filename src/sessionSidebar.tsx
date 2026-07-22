@@ -1,23 +1,41 @@
-// Per-terminal right sidebar. A vertical stack of panes (react-resizable-panels)
-// living in the same column: a file explorer reusing <TreeTable> (rooted at the
-// session's live cwd) on top, and a "touched files" MRU list below it. Later
-// panes — referenced files, agent turns with a scroll-spy that tracks live
-// xterm/tmux output against the session ledger — stack into the same
-// PanelGroup. All harness data flows through the generic HarnessAdapter, so no
-// agent is hard-wired here. Pane sizes + the touched list persist per session.
-import { useEffect, useRef, useState } from "react";
+// Per-terminal right sidebar. A source toggle at the top selects between two
+// views of the session: Files (a resizable Files-explorer / Touched-MRU stack
+// via react-resizable-panels) and Turns (the session's AI transcript, reusing
+// the favorites/harness ledger plumbing — one session node per on-disk
+// transcript holds its turns; double-click a turn to view its record; star it
+// to favorite). All harness data flows through the generic HarnessAdapter;
+// nothing here is hard-wired to an agent. Source + sizes + touched list persist
+// per session.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { invoke } from "./generated/native";
-import { store, type FsEntry, type DirListing } from "./state";
-import { fileGlyph } from "./core";
+import { store, type FsEntry, type DirListing, type AiMessage } from "./state";
+import { fileGlyph, baseName } from "./core";
 import { openPreviewPanel } from "./preview";
+import {
+  warmTurns,
+  tabTurns,
+  turnCwd,
+  isTurnFav,
+  favoriteTurn,
+  unfavoriteTurn,
+  openTurn,
+} from "./favorites";
+import type { HarnessId } from "./harness";
 
 type Entry = FsEntry;
 type Sizes = [number, number];
+type Source = "files" | "turns";
 
 // A patch the host (TerminalPanel) merges into store.termSidebar[sid].
-type SidebarPatch = Partial<{ open: boolean; width: number; sizes: Sizes; touched: string[] }>;
+type SidebarPatch = Partial<{
+  open: boolean;
+  width: number;
+  source: Source;
+  sizes: Sizes;
+  touched: string[];
+}>;
 
 // Explorer convention: folders before files, then alphabetical.
 const dirsFirst = (a: Entry, b: Entry) =>
@@ -55,6 +73,75 @@ const TOUCHED_COLS: TreeColumn<Entry>[] = [
   { id: "name", header: "Touched", tree: true, cell: (e) => <>{fileGlyph(e)} {e.name}</> },
 ];
 
+// Turns view: a session node per on-disk transcript, its turns as children. The
+// same row type drives both levels of the tree.
+type TurnNode =
+  | { kind: "session"; path: string; editor: HarnessId; sessionId: string; label: string; turns: AiMessage[] }
+  | { kind: "turn"; path: string; turn: AiMessage };
+
+function turnNodes(turns: AiMessage[]): TurnNode[] {
+  const groups = new Map<string, AiMessage[]>();
+  for (const t of turns) {
+    const k = `${t.editor}:${t.session_id}`;
+    const g = groups.get(k);
+    if (g) g.push(t);
+    else groups.set(k, [t]);
+  }
+  const nodes: TurnNode[] = [];
+  for (const [k, list] of groups) {
+    list.sort((a, b) => a.seq - b.seq);
+    const head = list[0];
+    const cwd = turnCwd.get(k);
+    nodes.push({
+      kind: "session",
+      path: `sess:${k}`,
+      editor: head.editor,
+      sessionId: head.session_id,
+      // label by the folder the ledger actually lives in (turnCwd), not the
+      // live pane cwd, which may be a subdir the session wasn't keyed under.
+      label: cwd ? baseName(cwd) : head.session_id.slice(0, 8),
+      turns: list,
+    });
+  }
+  return nodes;
+}
+
+// Favorite toggle for a turn row. cwd comes from turnCwd (where the session's
+// ledger lives) so a favorite resumes in the right folder.
+async function toggleTurnFav(t: AiMessage) {
+  const cwd = turnCwd.get(`${t.editor}:${t.session_id}`) ?? "";
+  if (isTurnFav(t)) await unfavoriteTurn(t);
+  else await favoriteTurn(t, cwd);
+}
+
+const TURN_COLS: TreeColumn<TurnNode>[] = [
+  {
+    id: "turn",
+    header: "Turns",
+    tree: true,
+    cell: (n) =>
+      n.kind === "session" ? (
+        <span className="turn-sess">{n.label}</span>
+      ) : (
+        <>
+          <span className="turn-role" data-role={n.turn.role}>{n.turn.role}</span>
+          <span className="turn-preview">{n.turn.preview}</span>
+          <button
+            className="turn-star"
+            data-on={isTurnFav(n.turn)}
+            title="favorite turn"
+            onClick={(e) => {
+              e.stopPropagation();
+              void toggleTurnFav(n.turn);
+            }}
+          >
+            {isTurnFav(n.turn) ? "★" : "☆"}
+          </button>
+        </>
+      ),
+  },
+];
+
 const MAX_TOUCHED = 50;
 
 export function SessionSidebar(props: {
@@ -63,19 +150,19 @@ export function SessionSidebar(props: {
   width: number;
   sizes: Sizes;
   touched: string[];
+  source: Source;
   onWidth: (px: number) => void;
   onResizeEnd: () => void;
   onPatch: (p: SidebarPatch) => void;
 }) {
-  const { sid, getCwd, width, sizes, touched, onWidth, onResizeEnd, onPatch } = props;
+  const { sid, getCwd, width, sizes, touched, source, onWidth, onResizeEnd, onPatch } = props;
   const [, bump] = useState(0);
   const [root, setRoot] = useState<string | null>(() => getCwd());
+  const [turns, setTurns] = useState<AiMessage[]>([]);
 
-  // Re-render when the shared listing cache changes (our own loads + the
-  // worktrees tree's loads both write here).
-  useEffect(() => store.subscribe(() => bump((n) => n + 1), ["fsChildren"]), []);
-  // Resolve the root cwd once the session reports one (tmux pane cwd may land
-  // after the panel mounts), and load its listing.
+  // Re-render when shared listings or favorites change. Star state lives in
+  // store.aiFavs; the turn rows re-read isTurnFav on each render.
+  useEffect(() => store.subscribe(() => bump((n) => n + 1), ["fsChildren", "aiFavs"]), []);
   useEffect(() => {
     const cwd = getCwd();
     if (cwd && cwd !== root) setRoot(cwd);
@@ -88,6 +175,25 @@ export function SessionSidebar(props: {
     }, ["sessions"]),
     [root, getCwd], // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  // Load (or refresh) this tab's turns through the shared ledger plumbing, then
+  // pull the merged list into local state so the tree re-renders. Re-runs when
+  // the turns view is opened or the session changes.
+  const loadTurns = useCallback(() => {
+    let alive = true;
+    warmTurns(sid)
+      .then(() => {
+        if (alive) setTurns(tabTurns.get(sid) ?? []);
+      })
+      .catch((e: unknown) => console.error("warmTurns:", e));
+    return () => {
+      alive = false;
+    };
+  }, [sid]);
+  useEffect(() => {
+    if (source !== "turns") return;
+    return loadTurns();
+  }, [source, loadTurns]);
 
   // PanelGroup reports sizes continuously during a drag; persist only on drag
   // end so the store isn't hammered and the live drag never fights a re-render.
@@ -120,11 +226,65 @@ export function SessionSidebar(props: {
 
   const fileData = root ? childrenOf(root) : [];
   const touchedData = touched.map(touchedEntry);
+  const turnData = turnNodes(turns);
   return (
     <aside className="term-sidebar" style={{ width }} data-sid={sid}>
       <div className="term-sidebar-resize" onPointerDown={startResize} title="drag to resize" />
+      <div className="term-sidebar-tabs">
+        <button
+          className="term-sidebar-tab"
+          data-active={source === "files"}
+          onClick={() => onPatch({ source: "files" })}
+        >
+          Files
+        </button>
+        <button
+          className="term-sidebar-tab"
+          data-active={source === "turns"}
+          onClick={() => onPatch({ source: "turns" })}
+        >
+          Turns
+        </button>
+      </div>
       <div className="term-sidebar-body">
-        {root ? (
+        {source === "turns" ? (
+          <div className="term-sidebar-turns" data-testid="sidebar-turns">
+            <div className="term-sidebar-turns-head">
+              <span className="turn-count">{turns.length ? `${turns.length} turn${turns.length === 1 ? "" : "s"}` : ""}</span>
+              <button className="turn-refresh" onClick={loadTurns} title="refresh turns">↻</button>
+            </div>
+            {turnData.length ? (
+              <TreeTable<TurnNode>
+                columns={TURN_COLS}
+                data={turnData}
+                getRowId={(n) => n.path}
+                getSubRows={(n) =>
+                  n.kind === "session"
+                    ? n.turns.map((t) => ({
+                        kind: "turn" as const,
+                        path: `turn:${t.editor}:${t.session_id}:${t.id}`,
+                        turn: t,
+                      }))
+                    : undefined
+                }
+                getRowCanExpand={(n) => n.kind === "session"}
+                toggleOnDoubleClick={(n) => n.kind === "session"}
+                defaultExpandedAll
+                onRowDoubleClick={(n) => {
+                  if (n.kind === "turn") openTurn(n.turn);
+                }}
+                controls
+                filter={(n, q) => {
+                  const hay = n.kind === "turn" ? `${n.turn.role} ${n.turn.preview}` : n.label;
+                  return hay.toLowerCase().includes(q.toLowerCase());
+                }}
+                searchPlaceholder="filter turns…"
+              />
+            ) : (
+              <div className="term-sidebar-empty">no AI session for this folder</div>
+            )}
+          </div>
+        ) : root ? (
           <PanelGroup
             key={sid}
             direction="vertical"

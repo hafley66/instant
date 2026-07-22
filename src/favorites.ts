@@ -258,6 +258,26 @@ function locateFav(f: Fav) {
   addPreviewPanel(key, title, inst.el, "right");
 }
 
+// Open one ledger turn as a viewable record (the "jsonl item") in a split-right
+// preview tab, keyed by turn identity. Same preview machinery as locateFav; we
+// render the parsed record so the on-disk jsonl line is viewable without a
+// (multi-MB) raw re-read. The locator carries its on-disk address.
+export function openTurn(turn: AiMessage) {
+  const key = `turn:${turn.editor}:${turn.session_id}:${turn.id}`;
+  let inst = previewInsts.get(key);
+  if (!inst) {
+    const el = document.createElement("div");
+    el.className = "fs-preview";
+    inst = { el };
+    previewInsts.set(key, inst);
+  }
+  const title = `${turn.role} · ${turn.editor}`;
+  inst.el.innerHTML =
+    `<div class="fs-preview-meta">${escapeHtml(title)}<br><span>${escapeHtml(turn.locator)}</span></div>` +
+    `<pre class="code-plain">${escapeHtml(JSON.stringify(turn, null, 2))}</pre>`;
+  addPreviewPanel(key, title, inst.el, "right");
+}
+
 // cmd+shift+s: favorite the active tab's latest turn (no pointer needed). Probes
 // the cwd for a session, so it works even when the tab is a plain shell.
 export async function favoriteCurrentTurn() {

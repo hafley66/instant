@@ -199,7 +199,7 @@ export function setDockHooks(h: Partial<Hooks>) {
 // Default per-terminal sidebar entry: closed, 264px, Files/Touched split 62/38,
 // empty touched list. Used wherever a missing entry is read.
 function sbDefault() {
-  return { open: false, width: 264, sizes: [62, 38] as [number, number], touched: [] as string[] };
+  return { open: false, width: 264, source: "files" as const, sizes: [62, 38] as [number, number], touched: [] as string[] };
 }
 
 function TerminalPanel(props: IDockviewPanelProps) {
@@ -217,6 +217,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
   );
   const open = sb.open;
   const width = sb.width;
+  const source = sb.source ?? "files";
   const sizes = sb.sizes ?? ([62, 38] as [number, number]);
   const touched = sb.touched ?? [];
 
@@ -238,7 +239,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
   // The drag handle refits on pointer-up via SessionSidebar's onResizeEnd.
   useEffect(() => { hooks.onTermLayout(sid); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patchSidebar = (patch: Partial<{ open: boolean; width: number; sizes: [number, number]; touched: string[] }>) => {
+  const patchSidebar = (patch: Partial<{ open: boolean; width: number; source: "files" | "turns"; sizes: [number, number]; touched: string[] }>) => {
     const cur = store.get().termSidebar[sid] ?? sbDefault();
     store.set({ termSidebar: { ...store.get().termSidebar, [sid]: { ...cur, ...patch } } });
   };
@@ -257,6 +258,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
           sid={sid}
           getCwd={() => hooks.onTermCwd(sid)}
           width={width}
+          source={source}
           sizes={sizes}
           touched={touched}
           onWidth={(px) => patchSidebar({ width: px })}
