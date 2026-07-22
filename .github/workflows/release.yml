@@ -71,13 +71,13 @@ jobs:
       # When present, the build signs with the imported Developer ID identity
       # and Tauri submits the bundle for notarization using the API key.
       - name: Import Apple signing certificate and notarization key
-        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        if: ${{ env.APPLE_CERTIFICATE != '' }}
         run: |
           certificate="$RUNNER_TEMP/instant-developer-id.p12"
           api_key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
