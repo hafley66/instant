@@ -14,6 +14,7 @@ interface MiniPaintAction {
 }
 
 export interface MemeCaption {
+  enabled: boolean;
   text: string;
   family: string;
   size: number;
@@ -70,7 +71,7 @@ export interface PaintBridge {
   quickload(): boolean;
   hasQuicksave(): boolean;
   clearQuicksave(): void;
-  applyMemeCaptions(top: MemeCaption, bottom: MemeCaption): Promise<void>;
+  applyMemeCaptions(top: MemeCaption, bottom: MemeCaption): Promise<number>;
   destroy(): void;
 }
 
@@ -188,8 +189,10 @@ export function installPaintBridge(
         params: { boundary: "box", kerning: "metrics", text_direction: "ltr", wrap_direction: "ttb", halign: "center", valign: "top", wrap: "word" },
         data: [[{ text: value.text, meta: { family: value.family, size: value.size, bold: value.bold, italic: value.italic, underline: value.underline, strikethrough: value.strikethrough, fill_color: value.fill, stroke_color: value.stroke, stroke_size: value.strokeWidth, leading: 0 } }]],
       });
-      if (top.text.trim()) await Layers.insert(caption("Meme top caption", top, Math.round(AppConfig.HEIGHT * 0.04)));
-      if (bottom.text.trim()) await Layers.insert(caption("Meme bottom caption", bottom, Math.round(AppConfig.HEIGHT * 0.78)));
+      let created = 0;
+      if (top.enabled && top.text.trim()) { await Layers.insert(caption("Meme top caption", top, Math.round(AppConfig.HEIGHT * 0.04))); created++; }
+      if (bottom.enabled && bottom.text.trim()) { await Layers.insert(caption("Meme bottom caption", bottom, Math.round(AppConfig.HEIGHT * 0.78))); created++; }
+      return created;
     },
     destroy() {
       State.do_action = origDoAction;
