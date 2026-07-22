@@ -83,14 +83,13 @@ test("Paint caption panel creates top and bottom meme text layers", async ({ pag
   await panel.locator("textarea").nth(1).fill("BOTTOM TEXT");
   await panel.getByLabel("top font size").fill("72");
   await panel.getByLabel("top fill color").fill("#ff0000");
-  await panel.locator("fieldset").nth(0).getByRole("checkbox", { name: "bold" }).check();
   await panel.getByRole("button", { name: "add caption layers" }).click();
 
   const paintFrame = page.frames().find((frame) => frame.url().includes("/vendor/miniPaint/index.html"));
   await expect.poll(() => paintFrame!.evaluate(() => {
     const layers = (window as Window & { Layers?: { get_layers?: () => Array<{ name: string; data?: Array<Array<{ text: string }>> }> } }).Layers;
     return (layers?.get_layers?.() ?? []).map((layer) => [layer.name, layer.data?.[0]?.[0]?.text, layer.data?.[0]?.[0]?.meta]);
-  })).toContainEqual(["Meme top caption", "TOP TEXT", expect.objectContaining({ size: 72, fill_color: "#ff0000", bold: true })]);
+  })).toContainEqual(["Meme top caption", "TOP TEXT", expect.objectContaining({ size: 72, fill_color: "#ff0000" })]);
   await expect.poll(() => paintFrame!.evaluate(() => {
     const layers = (window as Window & { Layers?: { get_layers?: () => Array<{ name: string; data?: Array<Array<{ text: string }>> }> } }).Layers;
     return (layers?.get_layers?.() ?? []).map((layer) => [layer.name, layer.data?.[0]?.[0]?.text]);

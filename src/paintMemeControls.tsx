@@ -19,5 +19,10 @@ function CaptionFields({ label, value, onChange }: { label: string; value: MemeC
 export function PaintMemeControls({ bridge }: { bridge: PaintBridge | null }) {
   const [top, setTop] = useState(blank);
   const [bottom, setBottom] = useState(blank);
-  return <aside className="paint-meme-controls" data-testid="meme-captions"><strong>meme captions</strong><CaptionFields label="top" value={top} onChange={setTop} /><CaptionFields label="bottom" value={bottom} onChange={setBottom} /><button type="button" disabled={!bridge || (!top.text.trim() && !bottom.text.trim())} onClick={() => void bridge?.applyMemeCaptions(top, bottom)}>add caption layers</button></aside>;
+  const [error, setError] = useState("");
+  const apply = async () => {
+    try { setError(""); await bridge?.applyMemeCaptions(top, bottom); }
+    catch (cause) { setError(String(cause)); }
+  };
+  return <aside className="paint-meme-controls" data-testid="meme-captions"><strong>meme captions</strong><div className="paint-caption-columns"><CaptionFields label="top" value={top} onChange={setTop} /><CaptionFields label="bottom" value={bottom} onChange={setBottom} /></div><button type="button" disabled={!bridge || (!top.text.trim() && !bottom.text.trim())} onClick={() => void apply()}>add caption layers</button>{error ? <output className="paint-caption-error">{error}</output> : null}</aside>;
 }

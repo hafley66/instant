@@ -3526,10 +3526,12 @@ body[data-skin="ac3"] .meme-canvas-wrap {
   gap: 8px;
 }
 
-.paint-editor-body { display: flex; flex: 1; min-height: 0; }
-.paint-meme-controls { display: flex; flex-direction: column; gap: 6px; width: 180px; padding: 8px; border-left: 1px solid var(--frame, #888); }
+.paint-editor-body { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.paint-meme-controls { display: flex; flex: 0 0 226px; gap: 6px; padding: 8px; border-top: 1px solid var(--frame, #888); overflow: auto; }
+.paint-caption-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; flex: 1; }
 .paint-meme-controls label { display: flex; flex-direction: column; gap: 2px; }
 .paint-meme-controls textarea { min-height: 64px; resize: vertical; }
 .paint-caption-fields { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .paint-caption-fields input, .paint-caption-fields select { min-width: 0; }
 .paint-caption-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.paint-caption-error { color: #c0392b; max-width: 300px; overflow-wrap: anywhere; }
