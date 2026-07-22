@@ -12,8 +12,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 git clone --depth 1 --branch "$TAG" https://github.com/viliusle/miniPaint.git "$TMP/src"
 cd "$TMP/src"
-corepack pnpm@10.12.4 install --frozen-lockfile --ignore-scripts
-corepack pnpm@10.12.4 build
+npm ci --ignore-scripts
+npm run build
 
 rm -rf "$DEST"
 mkdir -p "$DEST/images"

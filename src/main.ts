@@ -15,11 +15,12 @@ import { homeDir } from "@tauri-apps/api/path";
 // menus can be authored in native CSS. No-ops where the browser supports it.
 import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import { store, type CaptureStatus, type Event, type Fav } from "./state";
-import { allPanels } from "./plugin";
+import { allPanels, pluginCommands } from "./plugin";
 import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
+import { registerFilesPlugin } from "./plugins/files";
 import { registerMeme } from "./meme";
 import { registerMdview } from "./mdview";
 import { registerPaint } from "./paintPanel";
@@ -210,6 +211,7 @@ async function main() {
   registerBuiltin();
   registerRulesPlugin();
   registerMetricsPlugin();
+  registerFilesPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.
   void registerSprefa;
   // registerSprefa();
@@ -367,7 +369,7 @@ async function main() {
     group: "Panel",
     run: () => togglePanel(p.id),
   }));
-  installKeymap([...TAB_COMMANDS, ...panelCommands]);
+  installKeymap([...TAB_COMMANDS, ...pluginCommands(), ...panelCommands]);
 
   // Overlay: re-apply on any change to its config or the frontmost app, then once
   // now so a persisted mini/fade/follow is restored on boot.

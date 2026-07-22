@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { IDockviewPanelProps } from "dockview";
 import type { CtxItem } from "./ctxmenu";
+import type { Command } from "./keymap";
 
 // One row under a panel's rail button (rail.ts renders these when the panel is
 // expanded there). Providers fetch their own data; an empty list means no
@@ -92,20 +93,57 @@ export interface StatusProbe {
   check: () => Promise<StatusReport>;
 }
 
+// Commands, path routing, and tab-menu additions are plugin contributions.
+export type PluginCommand = Command;
+
+export interface PluginRoute {
+  id: string;
+  open: (path: string) => boolean;
+}
+
+export interface TabOverride {
+  id: string;
+  matches: (panelId: string) => boolean;
+  items: (panelId: string) => CtxItem[];
+}
+
 export interface Plugin {
   id: string;
   panels: PanelDef[];
   instances?: PanelInstanceDef[];
   options?: ConfigOption[]; // config toggles surfaced in the Config panel
   status?: StatusProbe[]; // service health surfaced in the Status panel
+  commands?: PluginCommand[];
+  routes?: PluginRoute[];
+  tabOverrides?: TabOverride[];
 }
 
+const pluginMap = new Map<string, Plugin>();
 const panelMap = new Map<string, PanelDef>();
 const instanceMap = new Map<string, PanelInstanceDef>();
 const optionList: ConfigOption[] = [];
 const statusList: StatusProbe[] = [];
+const commandList: PluginCommand[] = [];
+const routeList: PluginRoute[] = [];
+const tabOverrideList: TabOverride[] = [];
 
 export function registerPlugin(p: Plugin) {
+  const previous = pluginMap.get(p.id);
+  pluginMap.set(
+    p.id,
+    previous
+      ? {
+          id: p.id,
+          panels: [...previous.panels, ...p.panels],
+          instances: [...(previous.instances ?? []), ...(p.instances ?? [])],
+          options: [...(previous.options ?? []), ...(p.options ?? [])],
+          status: [...(previous.status ?? []), ...(p.status ?? [])],
+          commands: [...(previous.commands ?? []), ...(p.commands ?? [])],
+          routes: [...(previous.routes ?? []), ...(p.routes ?? [])],
+          tabOverrides: [...(previous.tabOverrides ?? []), ...(p.tabOverrides ?? [])],
+        }
+      : p,
+  );
   for (const panel of p.panels) {
     panelMap.set(panel.id, panel);
   }
@@ -114,6 +152,27 @@ export function registerPlugin(p: Plugin) {
   }
   if (p.options) optionList.push(...p.options);
   if (p.status) statusList.push(...p.status);
+  if (p.commands) commandList.push(...p.commands);
+  if (p.routes) routeList.push(...p.routes);
+  if (p.tabOverrides) tabOverrideList.push(...p.tabOverrides);
+}
+
+export function plugins(): Plugin[] {
+  return [...pluginMap.values()];
+}
+
+export function pluginCommands(): PluginCommand[] {
+  return commandList;
+}
+
+export function routePath(path: string): boolean {
+  return routeList.some((route) => route.open(path));
+}
+
+export function tabOverrideItems(panelId: string): CtxItem[] {
+  return tabOverrideList.flatMap((override) =>
+    override.matches(panelId) ? override.items(panelId) : [],
+  );
 }
 
 // Register a status probe on its own (for plugins with no panel/option to add).

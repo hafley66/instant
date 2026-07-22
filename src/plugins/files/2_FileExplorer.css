@@ -1,0 +1,26 @@
+.files-explorer {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+.files-explorer-head {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-bottom: 1px solid var(--frame, #888);
+}
+
+.files-explorer-head input {
+  min-width: 0;
+  flex: 1;
+}
+
+.files-explorer-tree {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}

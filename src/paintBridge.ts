@@ -13,6 +13,19 @@ interface MiniPaintAction {
   action_id?: string;
 }
 
+export interface MemeCaption {
+  text: string;
+  family: string;
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+}
+
 const slot = (base: string, panelId: string) => `${base}:${encodeURIComponent(panelId)}`;
 
 // The miniPaint globals, typed structurally (the vendored app ships no types).
@@ -23,6 +36,7 @@ interface MiniPaintWindow {
       layerId: string | null,
       isPreview: boolean,
     ): void;
+    insert(settings: unknown): Promise<unknown>;
   };
   AppConfig?: { WIDTH: number; HEIGHT: number };
   State?: {
@@ -56,6 +70,7 @@ export interface PaintBridge {
   quickload(): boolean;
   hasQuicksave(): boolean;
   clearQuicksave(): void;
+  applyMemeCaptions(top: MemeCaption, bottom: MemeCaption): Promise<void>;
   destroy(): void;
 }
 
@@ -164,6 +179,17 @@ export function installPaintBridge(
       localStorage.removeItem(quicksaveSlot);
       localStorage.removeItem(svgSourceSlot);
       svgSource = null;
+    },
+    async applyMemeCaptions(top, bottom) {
+      const caption = (name: string, value: MemeCaption, y: number) => ({
+        name, type: "text", x: Math.round(AppConfig.WIDTH * 0.05), y,
+        width: Math.round(AppConfig.WIDTH * 0.9), height: Math.max(48, Math.round(AppConfig.HEIGHT * 0.18)),
+        is_vector: true, render_function: ["text", "render"], color: "#ffffff",
+        params: { boundary: "box", kerning: "metrics", text_direction: "ltr", wrap_direction: "ttb", halign: "center", valign: "top", wrap: "word" },
+        data: [[{ text: value.text, meta: { family: value.family, size: value.size, bold: value.bold, italic: value.italic, underline: value.underline, strikethrough: value.strikethrough, fill_color: value.fill, stroke_color: value.stroke, stroke_size: value.strokeWidth, leading: 0 } }]],
+      });
+      if (top.text.trim()) await Layers.insert(caption("Meme top caption", top, Math.round(AppConfig.HEIGHT * 0.04)));
+      if (bottom.text.trim()) await Layers.insert(caption("Meme bottom caption", bottom, Math.round(AppConfig.HEIGHT * 0.78)));
     },
     destroy() {
       State.do_action = origDoAction;

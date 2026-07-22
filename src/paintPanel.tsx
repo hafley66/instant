@@ -1,5 +1,5 @@
 // Paint panel backed by one miniPaint iframe per dock panel instance.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SignalReact } from "@hafley66/signals/react";
 import type { IDockviewPanelProps } from "dockview";
 import { registerPlugin, type RailChild } from "./plugin";
@@ -20,6 +20,7 @@ import {
 } from "./paintSessions";
 import { openPanelInstance } from "./reactdock";
 import { baseName } from "./core";
+import { PaintMemeControls } from "./paintMemeControls";
 
 const PANEL_ID = "paint";
 
@@ -32,6 +33,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stateRef = useRef<PaintPanelState | null>(null);
   const quicksaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bridgeRevision, setBridgeRevision] = useState(0);
   const state = stateRef.current ?? paintPanelState(panelId);
   stateRef.current = state;
   const current = state.current.$();
@@ -69,6 +71,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
         panelId,
       );
       state.bridge = bridge;
+      setBridgeRevision((value) => value + 1);
       const target = initialPath || state.current.$() || (panelId === PANEL_ID ? paintSession.$().lastPath : null);
       if (bridge?.hasQuicksave()) bridge.quickload();
       else if (initialPath) void loadPaintFile(state, initialPath);
@@ -135,13 +138,13 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
           </select>
         ) : null}
       </div>
-      <iframe
+      <div className="paint-editor-body"><iframe
         ref={iframeRef}
         className="paint-frame"
         src="/vendor/miniPaint/index.html"
         title="miniPaint layers image editor"
         style={{ flex: 1, minHeight: 0, width: "100%", border: 0, display: "block", background: "#fff" }}
-      />
+      /><PaintMemeControls key={bridgeRevision} bridge={state.bridge} /></div>
     </div>
   );
 });

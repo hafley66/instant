@@ -19,7 +19,13 @@ import {
 import "dockview/dist/styles/dockview.css";
 
 import { store } from "./state";
-import { dockComponents, getPanel, getPanelInstance, panelInstanceForId } from "./plugin";
+import {
+  dockComponents,
+  getPanel,
+  getPanelInstance,
+  panelInstanceForId,
+  tabOverrideItems,
+} from "./plugin";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 
@@ -55,6 +61,7 @@ function CustomTab(props: IDockviewPanelHeaderProps) {
             },
           ]
         : []),
+      ...tabOverrideItems(api.id),
       { sep: true },
       { label: "Split right", action: () => split("right") },
       { label: "Split down", action: () => split("below") },

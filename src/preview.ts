@@ -3,13 +3,11 @@
 // node and renders into it; reactdock hosts the node. No untitled buffers: every
 // preview names a path.
 import { invoke } from "./generated/native";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
 import { codeToHtml } from "shiki";
 import { store } from "./state";
+import { routePath } from "./plugin";
 import { addPreviewPanel, isPreviewOpen, activatePreviewPanel } from "./reactdock";
-import { baseName, escapeHtml, tildify, IMAGE_EXTS, MD_EXTS, SHIKI_LANG } from "./core";
-import { openMarkdownPanel } from "./mdview/open";
+import { baseName, escapeHtml, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -29,9 +27,8 @@ export const previewOrigin = new Map<string, string>();
 
 // Open (or focus) the preview tab for `path`. A `line` (>0) selects the
 // line-numbered source view scrolled to that row; otherwise the rendered view
-// (image / syntax-highlighted code). Markdown files route to the dedicated
-// mdview panel (foldable GFM viewer) instead — every caller of this function
-// gets that routing for free.
+// (image / syntax-highlighted code). Registered plugin routes run first, so
+// Markdown opens in mdview without preview importing that feature directly.
 export function openPreviewPanel(
   path: string,
   line?: number,
@@ -39,10 +36,7 @@ export function openPreviewPanel(
 ) {
   const name = path.split("/").pop() ?? path;
   const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
-  if (!line && MD_EXTS.has(ext)) {
-    openMarkdownPanel(path);
-    return;
-  }
+  if (!line && routePath(path)) return;
   let inst = previewInsts.get(path);
   if (!inst) {
     const el = document.createElement("div");
@@ -147,12 +141,6 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
     const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} more lines</div>` : "";
     node.innerHTML = meta + `<pre class="src-pre">${body}${tail}</pre>`;
     node.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
-    return;
-  }
-
-  if (MD_EXTS.has(ext)) {
-    const html = DOMPurify.sanitize(await marked.parse(text));
-    node.innerHTML = meta + `<div class="md-body">${html}</div>`;
     return;
   }
 
