@@ -3532,4 +3532,6 @@ body[data-skin="ac3"] .meme-canvas-wrap {
 .paint-meme-controls.collapsed { flex-basis: auto; min-height: 0; }
 .paint-caption-enabled { min-width: 24px; min-height: 22px; padding: 0 4px; font-weight: 700; opacity: 0.45; }
 .paint-caption-enabled.on { opacity: 1; color: #1f8a3b; }
+.paint-caption-style { min-width: 26px; min-height: 22px; padding: 0 4px; font-weight: 700; opacity: 0.55; }
+.paint-caption-style.on { opacity: 1; color: var(--panel-fg, #111); background: var(--row-active-bg, #b8d6ff); }
 .paint-caption-error { color: #c0392b; max-width: 300px; overflow-wrap: anywhere; }
