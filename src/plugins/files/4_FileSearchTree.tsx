@@ -22,6 +22,7 @@ export interface FileSearchTreeProps {
   root: string;
   onSelect: (path: string) => void;
   sources?: FileSearchSource[];
+  activePath?: string;
 }
 
 // Filesystem-first source composition. With an empty query it is the lazy,
@@ -30,6 +31,7 @@ export function FileSearchTree({
   root,
   onSelect,
   sources = DEFAULT_SOURCES,
+  activePath,
 }: FileSearchTreeProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[]>([]);
   const [candidates, setCandidates] = useState<Record<string, FsEntry[]>>({});
@@ -55,7 +57,7 @@ export function FileSearchTree({
   ];
   const searching = query.trim().length > 0;
   return <div className="file-search-tree">
-    <input value={query} placeholder="fzf files…" onChange={(event) => setQuery(event.currentTarget.value)} />
-    {searching ? <TreeTable columns={columns} data={results} getRowId={(entry) => entry.path} onRowClick={(entry) => onSelect(entry.path)} virtual /> : <FileTree rootPath={root} rootEntries={rootEntries} listCommand="list_dir" onSelect={onSelect} />}
+    <input autoFocus value={query} placeholder="fzf files…" onChange={(event) => setQuery(event.currentTarget.value)} />
+    {searching ? <TreeTable columns={columns} data={results} getRowId={(entry) => entry.path} onRowClick={(entry) => onSelect(entry.path)} rowClass={(entry) => entry.path === activePath ? "file-tree-active" : undefined} virtual /> : <FileTree rootPath={root} rootEntries={rootEntries} activePath={activePath} listCommand="list_dir" onSelect={onSelect} />}
   </div>;
 }

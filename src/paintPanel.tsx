@@ -123,8 +123,8 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
         <button type="button" disabled={!current.trim()} onClick={() => void requestLoadPaintFile(state, current.trim())}>
           open
         </button>
-        <button type="button" onClick={() => setFilesOpen((open) => !open)}>
-          files
+        <button type="button" className={filesOpen ? "paint-files-toggle open" : "paint-files-toggle"} onClick={() => setFilesOpen((open) => !open)}>
+          {filesOpen ? "▾ files" : "▸ files"}
         </button>
         <button type="button" onClick={() => void savePaint(state)} title="flatten layers and save as PNG">
           save
@@ -150,7 +150,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
           </select>
         ) : null}
       </div>
-      {filesOpen ? <div className="paint-file-search"><div className="paint-file-search-head"><input value={fileRoot} onChange={(event) => setFileRoot(event.currentTarget.value)} /><button type="button" onClick={() => setFilesOpen(false)}>×</button></div><FileSearchTree root={fileRoot} onSelect={(path) => { state.current.$(path); void requestLoadPaintFile(state, path); setFileRoot(dirOf(path) || fileRoot); setFilesOpen(false); }} /></div> : null}
+      {filesOpen ? <div className="paint-file-search"><div className="paint-file-search-head"><input value={fileRoot} onChange={(event) => setFileRoot(event.currentTarget.value)} /><button type="button" onClick={() => setFilesOpen(false)}>×</button></div><FileSearchTree root={fileRoot} activePath={current} onSelect={(path) => { state.current.$(path); void requestLoadPaintFile(state, path); setFileRoot(dirOf(path) || fileRoot); setFilesOpen(false); }} /></div> : null}
       <div className="paint-editor-body"><iframe
         ref={iframeRef}
         className="paint-frame"
