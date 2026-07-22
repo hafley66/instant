@@ -825,15 +825,15 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
 .turn-preview { opacity: 0.85; }
 .turn-star {
-  border: none;
-  background: transparent;
+  display: inline-block;
+  width: 13px;
+  margin-right: 3px;
+  text-align: center;
   color: var(--muted, #888);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
-  padding: 0 2px;
-  margin-right: 4px;
-  border-radius: 3px;
+  user-select: none;
 }
 .turn-star[data-on="true"] { color: #e0a020; }
 .turn-star:hover { background: var(--row-hover); }
@@ -2176,7 +2176,8 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
 /* Virtualized TreeTable owns its own scroll container. */
 .tt-scroll {
   height: 100%;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 /* Focusable TreeTable wrapper for keyboard nav (no focus ring; the active-row
    highlight is the cursor). Dim when the table isn't focused, full when it is. */

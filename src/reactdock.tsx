@@ -219,7 +219,6 @@ function TerminalPanel(props: IDockviewPanelProps) {
   const width = sb.width;
   const source = sb.source ?? "files";
   const sizes = sb.sizes ?? ([62, 38] as [number, number]);
-  const touched = sb.touched ?? [];
 
   useEffect(() => {
     const node = dynamicNodes.get(id);
@@ -260,7 +259,6 @@ function TerminalPanel(props: IDockviewPanelProps) {
           width={width}
           source={source}
           sizes={sizes}
-          touched={touched}
           onWidth={(px) => patchSidebar({ width: px })}
           onResizeEnd={() => hooks.onTermLayout(sid)}
           onPatch={patchSidebar}

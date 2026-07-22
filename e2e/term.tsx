@@ -100,12 +100,13 @@ installKeymap([
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
   openTab("e2e", { cwd: "/tmp/term-e2e" });
   // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
-  // Seed the pane split + one touched file so both stacked panes render.
+  // Seed the pane split. Touched is derived from the session transcript, not
+  // seeded. Default source is Files.
   const sid = sessionId("e2e");
   store.set({
     termSidebar: {
       ...store.get().termSidebar,
-      [sid]: { open: true, width: 300, sizes: [55, 45], touched: ["/tmp/term-e2e/README.md"] },
+      [sid]: { open: true, width: 300, sizes: [55, 45] },
     },
   });
 };
