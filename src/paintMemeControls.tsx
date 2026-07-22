@@ -24,7 +24,9 @@ export function PaintMemeControls({ bridge }: { bridge: PaintBridge | null }) {
     { id: "fill", header: "fill", noRowClick: true, cell: (row) => <input aria-label={`${row.label} fill color`} type="color" value={row.fill} onClick={stop} onChange={(event) => update(row.id, { fill: event.currentTarget.value })} /> },
     { id: "stroke", header: "stroke", noRowClick: true, cell: (row) => <input aria-label={`${row.label} stroke color`} type="color" value={row.stroke} onClick={stop} onChange={(event) => update(row.id, { stroke: event.currentTarget.value })} /> },
     { id: "width", header: "stroke px", noRowClick: true, cell: (row) => <input aria-label={`${row.label} stroke width`} type="number" min="0" max="32" value={row.strokeWidth} onClick={stop} onChange={(event) => update(row.id, { strokeWidth: Number(event.currentTarget.value) })} /> },
-  ], []);
+    { id: "up", header: "up", noRowClick: true, cell: (row) => <button type="button" title="move caption layer up" onClick={(event) => { stop(event); void bridge?.moveMemeCaption(row.id, 1).catch((cause) => setError(String(cause))); }}>▲</button> },
+    { id: "down", header: "down", noRowClick: true, cell: (row) => <button type="button" title="move caption layer down" onClick={(event) => { stop(event); void bridge?.moveMemeCaption(row.id, -1).catch((cause) => setError(String(cause))); }}>▼</button> },
+  ], [bridge]);
   useEffect(() => {
     if (!bridge) return;
     const timer = window.setTimeout(() => {

@@ -14,6 +14,7 @@ interface MiniPaintAction {
 }
 
 interface MiniPaintLayer {
+  id: number;
   _instantCaptionKey?: string;
   _needs_update_data?: boolean;
   visible: boolean;
@@ -47,6 +48,7 @@ interface MiniPaintWindow {
     insert(settings: unknown): Promise<unknown>;
     get_layers(): MiniPaintLayer[];
     render(force: boolean): void;
+    move(id: number, direction: -1 | 1): Promise<unknown>;
   };
   AppConfig?: { WIDTH: number; HEIGHT: number };
   State?: {
@@ -81,6 +83,7 @@ export interface PaintBridge {
   hasQuicksave(): boolean;
   clearQuicksave(): void;
   syncMemeCaptions(captions: MemeCaption[]): Promise<void>;
+  moveMemeCaption(id: MemeCaption["id"], direction: -1 | 1): Promise<void>;
   destroy(): void;
 }
 
@@ -211,6 +214,13 @@ export function installPaintBridge(
         else await Layers.insert({ ...next, visible: value.enabled });
       }
       Layers.render(true);
+      hooks.onEdit();
+    },
+    async moveMemeCaption(id, direction) {
+      const key = `${panelId}:${id}`;
+      const layer = Layers.get_layers().find((candidate) => candidate._instantCaptionKey === key);
+      if (!layer) throw new Error(`Caption layer “${id}” has not been created yet`);
+      await Layers.move(layer.id, direction);
       hooks.onEdit();
     },
     destroy() {
