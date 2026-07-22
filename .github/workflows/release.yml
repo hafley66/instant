@@ -65,7 +65,7 @@ jobs:
       - name: Check tag and package versions
         run: |
           version="${GITHUB_REF_NAME#v}"
-          test "$(node -p 'require(\"./package.json\").version')" = "$version"
+          test "$(node -p 'require("./package.json").version')" = "$version"
           grep -qx "version = \"$version\"" src-tauri/Cargo.toml
           grep -qx "  \"version\": \"$version\"," src-tauri/tauri.conf.json
 
