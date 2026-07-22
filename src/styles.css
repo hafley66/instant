@@ -41,6 +41,14 @@ body {
   overflow: hidden;
   font-family: "Pixelated MS Sans Serif", Tahoma, sans-serif;
 }
+/* Global text color: every skin defines --panel-fg on body[data-skin], so it
+   resolves here and inherits to every descendant that doesn't set its own.
+   Without this, any component that forgets `color: var(--panel-fg)` falls back
+   to the browser default (near-black) and goes invisible on dark surfaces —
+   the recurring dark-mode bug. Light skins use #222, so this is a no-op there. */
+body {
+  color: var(--panel-fg);
+}
 
 /* =========================================================
    DESIGN TOKENS

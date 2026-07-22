@@ -9,7 +9,7 @@ import { registerZoomKind } from "../panelZoom";
 import { baseName, MD_EXTS } from "../core";
 import { MdPanel } from "./MdPanel";
 import { mdUi, pathSignalFor, setMdUi } from "./signals";
-import { registerMdNav } from "./open";
+import { registerMdNav, openMarkdownPanel } from "./open";
 
 export { openMarkdownPanel } from "./open";
 
