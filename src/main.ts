@@ -49,6 +49,8 @@ import {
   sendTextToTab,
   setReplaying,
   observeTerminalOutput,
+  tabMetaById,
+  getFocusedTermId,
 } from "./terminal";
 import { browserTabs, spawnBrowserTab, openBrowserTab, cycleBrowserQuality, setBrowserPerf } from "./browser";
 import {
@@ -104,6 +106,15 @@ import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
 import { startReactiveRuntime } from "./reactive/runtime";
 
+// Toggle the per-terminal right "session sidebar" (file explorer) on the
+// focused terminal. Each terminal remembers its own open state + width.
+function toggleTermSidebar() {
+  const id = getFocusedTermId();
+  if (!id) return;
+  const cur = store.get().termSidebar[id] ?? { open: false, width: 264 };
+  store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
+}
+
 const TAB_COMMANDS: Command[] = [
   // The palette lists every command below that carries a `title`. ⌘⇧P, the
   // VSCode-standard binding.
@@ -123,6 +134,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
+  { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -186,6 +198,7 @@ async function main() {
     onTermRetitle: (sid) => applyTabTitle(sid.slice(sessionId("").length)),
     isTermPinned: (sid) => isPinnedTab(sid.slice(sessionId("").length)),
     toggleTermPin: (sid) => togglePinTab(sid.slice(sessionId("").length)),
+    onTermCwd: (sid) => tabMetaById(sid)?.cwd ?? null,
   });
   store.subscribe(renderWorktreesPanel, [
     "worktrees",
