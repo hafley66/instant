@@ -1,16 +1,16 @@
 import claudeUsageRule from "./0_claude-usage.rule.json";
 import {
+  compileAutomationV2,
+  type AutomationV2,
+  type AutomationV2Runtime,
+} from "@hafley66/json-rx";
+import {
   CODEX_HOST_URLS,
   CODEX_HOST_STATUS,
   codexHostSources,
   CodexUsageSchema,
   type CodexHostAdapter,
 } from "../../lib/json-rx/10_codex_host";
-import {
-  compileAutomationV2,
-  type AutomationV2Runtime,
-} from "../../lib/json-rx/9_v2_runtime";
-import type { AutomationV2 } from "../../lib/json-rx/8_v2_schema";
 
 export const claudeUsageV1 = claudeUsageRule;
 
@@ -27,6 +27,7 @@ export const claudeUsageV2 = {
         request: { methods: ["GET"], url: "/api/organizations/[^/]+/usage" },
       },
     },
+    hosts: {},
   },
   circuit: {
     sources: { "jsonrx://instant/sources/browser/network-response/claude-usage": {} },
@@ -95,6 +96,7 @@ export const codexUsageV2 = {
       [snapshotSource]: { kind: "host.event", operation: "account/rateLimits/read" },
       [updateSource]: { kind: "host.event", operation: "account/rateLimits/updated" },
     },
+    hosts: {},
   },
   circuit: {
     sources: { [snapshotSource]: {}, [updateSource]: {} },

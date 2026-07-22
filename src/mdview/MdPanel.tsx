@@ -2,9 +2,8 @@
 // canonical TreeTable) | rendered sections, split with react-resizable-panels
 // (AGENTS "Split panes"). All state lives in the signals module; signal reads
 // happen here at the top (SignalReact tracks them) and flow down as props.
-import { Children, createContext, useContext, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Children, createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { StreamdownProps } from "streamdown";
 import { SignalReact } from "@hafley66/signals/react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -40,10 +39,10 @@ import {
 import { setPendingFrag, takePendingFrag } from "./open";
 import { resetPanelZoom } from "../panelZoom";
 import { MdExplorer } from "./MdExplorer";
-import { MermaidBlock } from "./Mermaid";
-import { ShikiCode } from "./0_ShikiCode";
 import { useFsWatch } from "./0_watch";
 import "./mdview.css";
+
+const StreamdownBody = lazy(() => import("./0_Streamdown"));
 
 // ---- images: local files load via read_image (data URL), like preview.ts ----
 
@@ -125,10 +124,19 @@ interface SectionProps {
   text: string;
   collapsed: Set<string>;
   onToggle: (id: string) => void;
-  components: React.ComponentProps<typeof ReactMarkdown>["components"];
+  components: StreamdownProps["components"];
+  dark: boolean;
 }
 
-function SectionView({ sec, siblingIndex, text, collapsed, onToggle, components }: SectionProps) {
+function MarkdownBody({ children, components, dark }: { children: string; components: SectionProps["components"]; dark: boolean }) {
+  return (
+    <Suspense fallback={<pre><code>{children}</code></pre>}>
+      <StreamdownBody components={components} dark={dark}>{children}</StreamdownBody>
+    </Suspense>
+  );
+}
+
+function SectionView({ sec, siblingIndex, text, collapsed, onToggle, components, dark }: SectionProps) {
   const isCollapsed = collapsed.has(sec.id);
   // Untrimmed for rendering (offset alignment, see SliceBaseContext); the trim
   // is only the emptiness check.
@@ -158,9 +166,9 @@ function SectionView({ sec, siblingIndex, text, collapsed, onToggle, components 
           {hasOwn ? (
             <div className="md-body">
               <SliceBaseContext.Provider value={sec.ownStart}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+                <MarkdownBody components={components} dark={dark}>
                   {ownRaw}
-                </ReactMarkdown>
+                </MarkdownBody>
               </SliceBaseContext.Provider>
             </div>
           ) : null}
@@ -173,6 +181,7 @@ function SectionView({ sec, siblingIndex, text, collapsed, onToggle, components 
               collapsed={collapsed}
               onToggle={onToggle}
               components={components}
+              dark={dark}
             />
           ))}
         </div>
@@ -191,7 +200,7 @@ export const MdPanel = SignalReact(function MdPanel({
   onNavigate: (path: string) => void;
 }) {
   const app = useApp();
-  const theme = app.mode === "dark" ? "github-dark" : "github-light";
+  const dark = app.mode === "dark";
   const path = pathSig.$();
   const state = mdDocs.$()[path];
   const ui = mdUi.$();
@@ -238,15 +247,8 @@ export const MdPanel = SignalReact(function MdPanel({
     if (frag && doc?.byId.has(frag)) jumpTo(frag);
   }, [path, state?.status]);
 
-  const components = useMemo<React.ComponentProps<typeof ReactMarkdown>["components"]>(
+  const components = useMemo<StreamdownProps["components"]>(
     () => ({
-      code({ className, children }) {
-        const raw = String(children ?? "").replace(/\n$/, "");
-        const lang = /language-(\S+)/.exec(className ?? "")?.[1];
-        if (lang === "mermaid") return <MermaidBlock code={raw} dark={theme === "github-dark"} />;
-        if (!lang && !raw.includes("\n")) return <code>{raw}</code>;
-        return <ShikiCode lang={lang ?? "text"} code={raw} theme={theme} />;
-      },
       a({ href, children }) {
         const onClick = (e: MouseEvent) => {
           if (!href) return;
@@ -344,7 +346,7 @@ export const MdPanel = SignalReact(function MdPanel({
       },
     }),
     // jumpTo is stable enough for the memo's purpose (reads latest via signals).
-    [theme, path, onNavigate, folds, blockFolds],
+    [path, onNavigate, folds, blockFolds],
   );
 
   const layout = layoutFor(pid);
@@ -364,9 +366,9 @@ export const MdPanel = SignalReact(function MdPanel({
         {state.doc.preamble ? (
           <div className="md-body">
             <SliceBaseContext.Provider value={0}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+              <MarkdownBody components={components} dark={dark}>
                 {state.doc.preamble}
-              </ReactMarkdown>
+              </MarkdownBody>
             </SliceBaseContext.Provider>
           </div>
         ) : null}
@@ -379,6 +381,7 @@ export const MdPanel = SignalReact(function MdPanel({
             collapsed={collapsed}
             onToggle={onToggle}
             components={components}
+            dark={dark}
           />
         ))}
         {!state.doc.tree.length && !state.doc.preamble ? (

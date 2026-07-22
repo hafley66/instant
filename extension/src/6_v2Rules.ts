@@ -1,11 +1,11 @@
 import { Subject, type Subscription } from "rxjs";
-import type { AutomationV2 } from "../../src/lib/json-rx/8_v2_schema";
 import {
   compileAutomationV2,
+  type AutomationV2,
   type AutomationV2Trace,
   type DashboardEmission,
   type NetworkResponse,
-} from "../../src/lib/json-rx/9_v2_runtime";
+} from "@hafley66/json-rx";
 import type { ExpressionTrace, Rule } from "./0_types";
 
 export type V2RuleRuntime = {
@@ -48,6 +48,7 @@ export function ruleToAutomationV2(rule: Rule): AutomationV2 {
           },
         },
       },
+      hosts: {},
     },
     circuit: {
       sources: { [source]: {} },

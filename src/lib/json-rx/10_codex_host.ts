@@ -1,6 +1,6 @@
 import { concat, defer, from, map, of, Subject, type Observable } from "rxjs";
 import * as z from "zod";
-import type { HostEvent, RuntimeSource } from "./9_v2_runtime";
+import type { HostEvent, RuntimeSource } from "@hafley66/json-rx";
 
 export const CODEX_HOST_OPERATIONS = {
   rateLimitsRead: "account/rateLimits/read",

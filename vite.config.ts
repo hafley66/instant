@@ -11,7 +11,10 @@ export default defineConfig(async () => ({
   // (dropcatcher.html). The catcher is the only surface with the native Tauri
   // drag handler; the main window keeps it off so dockview tab-drag works.
   build: {
-    rollupOptions: {
+    // xp.css contains legacy pseudo-element selector chains that Lightning CSS
+    // rejects. Preserve the published selectors without CSS minification.
+    cssMinify: false,
+    rolldownOptions: {
       input: {
         main: "index.html",
         dropcatcher: "dropcatcher.html",

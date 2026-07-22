@@ -32,7 +32,7 @@ The generic dashboard boundary is:
 `0_claude-usage.rule.json` and `0a_chatgpt-usage.rule.json` remain the compact
 Rules authoring format. The extension lowers each matching netcapture rule into
 an `automation.v2` document through `extension/src/6_v2Rules.ts`. The
-production compiler in `src/lib/json-rx/9_v2_runtime.ts` executes the browser
+production compiler in `@hafley66/json-rx` executes the browser
 source, JSONata projection, and shared dashboard root.
 
 The v2 stateful primitive is an RxJS-shaped `scan` expression referencing a

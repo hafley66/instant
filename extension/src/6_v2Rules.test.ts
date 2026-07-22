@@ -16,6 +16,7 @@ describe("v2 rule adapter", () => {
     }).toMatchInlineSnapshot(`
       {
         "bindings": {
+          "hosts": {},
           "sources": {
             "jsonrx://instant/rules/chatgpt-codex-usage/network-response": {
               "kind": "browser.network.response",

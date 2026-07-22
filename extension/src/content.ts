@@ -7,7 +7,7 @@
 // It no-ops the rule engine entirely on hosts no rule matches, so the cost on an
 // unrelated page is one storage read.
 import type { ExpressionTrace, MatchFields, NetCaptureMessage, Rule } from "./0_types";
-import type { DashboardEmission, NetworkResponse } from "../../src/lib/json-rx/9_v2_runtime";
+import type { DashboardEmission, NetworkResponse } from "@hafley66/json-rx";
 import { compile, mapCaptures, ruleMatchesLocation, rulesForHost } from "./1_match";
 import { scanRule } from "./2_scan";
 import { extractResponseDetailed } from "./3_extract";
