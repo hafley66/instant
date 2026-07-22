@@ -13,7 +13,14 @@ interface MiniPaintAction {
   action_id?: string;
 }
 
+interface MiniPaintLayer {
+  _instantCaptionKey?: string;
+  _needs_update_data?: boolean;
+  visible: boolean;
+}
+
 export interface MemeCaption {
+  id: "top" | "bottom";
   enabled: boolean;
   text: string;
   family: string;
@@ -38,6 +45,8 @@ interface MiniPaintWindow {
       isPreview: boolean,
     ): void;
     insert(settings: unknown): Promise<unknown>;
+    get_layers(): MiniPaintLayer[];
+    render(force: boolean): void;
   };
   AppConfig?: { WIDTH: number; HEIGHT: number };
   State?: {
@@ -71,7 +80,7 @@ export interface PaintBridge {
   quickload(): boolean;
   hasQuicksave(): boolean;
   clearQuicksave(): void;
-  applyMemeCaptions(top: MemeCaption, bottom: MemeCaption): Promise<number>;
+  syncMemeCaptions(captions: MemeCaption[]): Promise<void>;
   destroy(): void;
 }
 
@@ -181,18 +190,28 @@ export function installPaintBridge(
       localStorage.removeItem(svgSourceSlot);
       svgSource = null;
     },
-    async applyMemeCaptions(top, bottom) {
-      const caption = (name: string, value: MemeCaption, y: number) => ({
-        name, type: "text", x: Math.round(AppConfig.WIDTH * 0.05), y,
+    async syncMemeCaptions(captions) {
+      const caption = (value: MemeCaption, y: number) => ({
+        _instantCaptionKey: `${panelId}:${value.id}`,
+        name: `Meme ${value.id} caption`, type: "text", x: Math.round(AppConfig.WIDTH * 0.05), y,
         width: Math.round(AppConfig.WIDTH * 0.9), height: Math.max(48, Math.round(AppConfig.HEIGHT * 0.18)),
         is_vector: true, render_function: ["text", "render"], color: "#ffffff",
         params: { boundary: "box", kerning: "metrics", text_direction: "ltr", wrap_direction: "ttb", halign: "center", valign: "top", wrap: "word" },
         data: [[{ text: value.text, meta: { family: value.family, size: value.size, bold: value.bold, italic: value.italic, underline: value.underline, strikethrough: value.strikethrough, fill_color: value.fill, stroke_color: value.stroke, stroke_size: value.strokeWidth, leading: 0 } }]],
       });
-      let created = 0;
-      if (top.enabled && top.text.trim()) { await Layers.insert(caption("Meme top caption", top, Math.round(AppConfig.HEIGHT * 0.04))); created++; }
-      if (bottom.enabled && bottom.text.trim()) { await Layers.insert(caption("Meme bottom caption", bottom, Math.round(AppConfig.HEIGHT * 0.78))); created++; }
-      return created;
+      for (const value of captions) {
+        const key = `${panelId}:${value.id}`;
+        const existing = Layers.get_layers().find((layer) => layer._instantCaptionKey === key);
+        if (!value.text.trim()) {
+          if (existing) existing.visible = false;
+          continue;
+        }
+        const next = caption(value, Math.round(AppConfig.HEIGHT * (value.id === "top" ? 0.04 : 0.78)));
+        if (existing) Object.assign(existing, next, { visible: value.enabled, _needs_update_data: true });
+        else await Layers.insert({ ...next, visible: value.enabled });
+      }
+      Layers.render(true);
+      hooks.onEdit();
     },
     destroy() {
       State.do_action = origDoAction;

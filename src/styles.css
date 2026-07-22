@@ -3529,4 +3529,6 @@ body[data-skin="ac3"] .meme-canvas-wrap {
 .paint-editor-body { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .paint-meme-controls { display: flex; flex: 0 0 226px; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--frame, #888); overflow: auto; }
 .paint-meme-controls .tt-host { min-height: 0; }
+.paint-meme-controls.collapsed { flex-basis: auto; min-height: 0; }
+.paint-meme-controls input[type="checkbox"] { appearance: auto; width: 16px; height: 16px; accent-color: var(--accent, #2468d4); }
 .paint-caption-error { color: #c0392b; max-width: 300px; overflow-wrap: anywhere; }
