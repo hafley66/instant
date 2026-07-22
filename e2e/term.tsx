@@ -39,6 +39,27 @@ type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> 
       { name: "package.json", path: "/tmp/term-e2e/package.json", is_dir: false, size: 32, modified: 0, ext: "json" },
     ],
   },
+  // harness_session resolves a session id for a (tool, cwd) probe. The Turns
+  // pane resolver probes every editor; return one only for claude so a single
+  // clean transcript node renders (ccz shares claude storage). A function
+  // fixture uses the args-aware path in nativeTransport's e2e branch.
+  harness_session: (args: Record<string, unknown> | undefined) =>
+    args?.tool === "claude" ? "e2e-claude-1" : undefined,
+  // read_ai_messages returns the ledger for the resolved claude session.
+  read_ai_messages: [
+    {
+      editor: "claude", session_id: "e2e-claude-1", id: "m1", seq: 1, role: "user", ts: 0,
+      preview: "fix the off-by-one in fitTerm",
+      text: "fix the off-by-one in fitTerm so the rows stop drifting",
+      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:1",
+    },
+    {
+      editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: 0,
+      preview: "moving chrome to .dv-host-term",
+      text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host.",
+      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:2",
+    },
+  ],
 };
 
 function SessionsPanel(_props: IDockviewPanelProps) {

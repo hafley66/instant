@@ -24,7 +24,7 @@ test.afterAll(() => {
   }
 });
 
-test("session sidebar stacks a Files pane over a Touched pane (resizable)", async ({ page }) => {
+test("session sidebar Files view stacks Files over Touched (resizable)", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.getByTestId("open-term").click();
 
@@ -33,8 +33,8 @@ test("session sidebar stacks a Files pane over a Touched pane (resizable)", asyn
   // ...and the per-terminal right sidebar opened beside it.
   await expect(page.locator(".term-sidebar")).toBeVisible({ timeout: 10_000 });
 
-  // Two stacked panes: the Files explorer (top) and the Touched MRU list
-  // (bottom), each a reused <TreeTable> (.dtable).
+  // Default source is Files: two stacked panes (Files explorer + Touched MRU),
+  // each a reused <TreeTable> (.dtable).
   await expect(page.locator(".term-sidebar .dtable")).toHaveCount(2);
   await expect(page.locator('[data-testid="sidebar-files"] .dtable')).toContainText("src");
   await expect(page.locator('[data-testid="sidebar-files"] .dtable')).toContainText("package.json");
@@ -61,7 +61,30 @@ test("session sidebar stacks a Files pane over a Touched pane (resizable)", asyn
     }).toPass({ timeout: 5_000 });
   }
 
-  // Proof: the stacked sidebar (after resize) and the whole window.
   await page.locator(".term-sidebar").screenshot({ path: "test-results/term-sidebar.png" });
-  await page.screenshot({ path: "test-results/term-sidebar-window.png", fullPage: true });
+});
+
+test("session sidebar Turns view lists the transcript (session -> turns)", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-sidebar")).toBeVisible({ timeout: 10_000 });
+
+  // Switch the sidebar to the Turns source.
+  await page.locator(".term-sidebar-tab", { hasText: "Turns" }).click();
+  await expect(page.locator('[data-testid="sidebar-turns"]')).toBeVisible();
+
+  // One transcript node (labeled by the session's cwd) holds its turns. Sessions
+  // default-expand, so the turn rows render without an extra click.
+  await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("term-e2e");
+  await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("fix the off-by-one");
+  await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("moving chrome");
+
+  // Double-click a turn opens its record in a split-right preview tab.
+  await page
+    .locator(".term-sidebar-turns .dtable-row")
+    .filter({ hasText: "moving chrome" })
+    .dblclick();
+  await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-claude-1");
+
+  await page.locator(".term-sidebar").screenshot({ path: "test-results/term-turns.png" });
 });

@@ -12,11 +12,18 @@ type E2eWindow = Window & {
   __instantE2eNativeResults?: Record<string, unknown>;
 };
 
-function browserE2eInvoke<T>(command: string): Promise<T> {
+function browserE2eInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const w = window as E2eWindow;
   (w.__instantE2eNativeCalls ??= []).push(command);
-  if (command in (w.__instantE2eNativeResults ?? {})) {
-    return Promise.resolve(w.__instantE2eNativeResults?.[command] as T);
+  const table = w.__instantE2eNativeResults;
+  if (table && command in table) {
+    const v = table[command];
+    // A fixture may be a function of the invoke args, so an e2e can vary results
+    // per call (e.g. resolve a session only for one editor) without per-command
+    // branching here.
+    return Promise.resolve(
+      (typeof v === "function" ? v(args) : v) as T,
+    );
   }
   if (command === "read_image") {
     return Promise.resolve(
@@ -34,5 +41,5 @@ function browserE2eInvoke<T>(command: string): Promise<T> {
 // The only Tauri IPC edge. Application modules import the generated native
 // contract, so replacing the desktop shell means replacing this adapter.
 export const nativeTransport: NativeTransport = {
-  invoke: (command, args) => browserE2e ? browserE2eInvoke(command) : tauriInvoke(command, args),
+  invoke: (command, args) => browserE2e ? browserE2eInvoke(command, args) : tauriInvoke(command, args),
 };
