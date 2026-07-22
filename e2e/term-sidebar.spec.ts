@@ -78,6 +78,9 @@ test("session sidebar Turns view lists the transcript (session -> turns)", async
   await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("term-e2e");
   await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("fix the off-by-one");
   await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("moving chrome");
+  // The assistant turn's tool_use file_path is extracted into an expandable
+  // file child under the turn (default-expanded).
+  await expect(page.locator(".term-sidebar-turns .dtable")).toContainText("reactdock.tsx");
 
   // Double-click a turn opens its record in a split-right preview tab.
   await page

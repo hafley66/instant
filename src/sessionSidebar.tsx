@@ -1,11 +1,13 @@
 // Per-terminal right sidebar. A source toggle at the top selects between two
 // views of the session: Files (a resizable Files-explorer / Touched-MRU stack
 // via react-resizable-panels) and Turns (the session's AI transcript, reusing
-// the favorites/harness ledger plumbing — one session node per on-disk
-// transcript holds its turns; double-click a turn to view its record; star it
-// to favorite). All harness data flows through the generic HarnessAdapter;
-// nothing here is hard-wired to an agent. Source + sizes + touched list persist
-// per session.
+// the favorites/harness ledger plumbing). The transcript is a three-level tree:
+// a session node per on-disk transcript, its turns as children, and each turn's
+// referenced files (extracted from the tool_use calls serialized into the turn
+// text) as a further expandable level — double-click a turn to view its record,
+// double-click a file to open it, star a turn to favorite. All harness data
+// flows through the generic HarnessAdapter; nothing here is hard-wired to an
+// agent. Source + sizes + touched list persist per session.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { TreeTable, type TreeColumn } from "./treetable";
@@ -73,11 +75,37 @@ const TOUCHED_COLS: TreeColumn<Entry>[] = [
   { id: "name", header: "Touched", tree: true, cell: (e) => <>{fileGlyph(e)} {e.name}</> },
 ];
 
-// Turns view: a session node per on-disk transcript, its turns as children. The
-// same row type drives both levels of the tree.
+// --- Transcript tree (session -> turn -> referenced files). ---
+
+// tool_use input is serialized into the turn text (ledger.rs), so a tool's
+// file_path is recoverable as JSON — this is structured, not a free-text guess.
+const FILE_PATH_RE = /"file_path"\s*:\s*"([^"]+)"/g;
+function turnFiles(t: AiMessage): string[] {
+  const out: string[] = [];
+  for (const m of t.text.matchAll(FILE_PATH_RE)) {
+    const p = m[1];
+    if (p && !out.includes(p)) out.push(p);
+  }
+  return out;
+}
+// Resolve a referenced path against the session cwd: claude tool paths are
+// usually absolute, but tolerate relative ones by joining the ledger cwd.
+function resolveFile(raw: string, cwd: string): string {
+  if (raw.startsWith("~")) return raw;
+  if (raw.startsWith("/")) return raw;
+  return (cwd.replace(/\/$/, "") + "/" + raw).replace(/\/+/g, "/");
+}
+function fileEntry(raw: string, cwd: string): Entry {
+  const path = resolveFile(raw, cwd);
+  const name = path.split("/").pop() || path;
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+  return { name, path, is_dir: false, size: 0, modified: 0, ext };
+}
+
 type TurnNode =
   | { kind: "session"; path: string; editor: HarnessId; sessionId: string; label: string; turns: AiMessage[] }
-  | { kind: "turn"; path: string; turn: AiMessage };
+  | { kind: "turn"; path: string; turn: AiMessage; files: Entry[] }
+  | { kind: "file"; path: string; entry: Entry };
 
 function turnNodes(turns: AiMessage[]): TurnNode[] {
   const groups = new Map<string, AiMessage[]>();
@@ -91,7 +119,7 @@ function turnNodes(turns: AiMessage[]): TurnNode[] {
   for (const [k, list] of groups) {
     list.sort((a, b) => a.seq - b.seq);
     const head = list[0];
-    const cwd = turnCwd.get(k);
+    const cwd = turnCwd.get(k) ?? "";
     nodes.push({
       kind: "session",
       path: `sess:${k}`,
@@ -104,6 +132,12 @@ function turnNodes(turns: AiMessage[]): TurnNode[] {
     });
   }
   return nodes;
+}
+
+// A turn's file children, resolved against its session cwd.
+function turnFileChildren(turn: AiMessage): Entry[] {
+  const cwd = turnCwd.get(`${turn.editor}:${turn.session_id}`) ?? "";
+  return turnFiles(turn).map((raw) => fileEntry(raw, cwd));
 }
 
 // Favorite toggle for a turn row. cwd comes from turnCwd (where the session's
@@ -119,13 +153,12 @@ const TURN_COLS: TreeColumn<TurnNode>[] = [
     id: "turn",
     header: "Turns",
     tree: true,
-    cell: (n) =>
-      n.kind === "session" ? (
-        <span className="turn-sess">{n.label}</span>
-      ) : (
+    cell: (n) => {
+      if (n.kind === "session") return <span className="turn-sess">{n.label}</span>;
+      if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
+      // turn: star (left) + role + preview
+      return (
         <>
-          <span className="turn-role" data-role={n.turn.role}>{n.turn.role}</span>
-          <span className="turn-preview">{n.turn.preview}</span>
           <button
             className="turn-star"
             data-on={isTurnFav(n.turn)}
@@ -137,8 +170,11 @@ const TURN_COLS: TreeColumn<TurnNode>[] = [
           >
             {isTurnFav(n.turn) ? "★" : "☆"}
           </button>
+          <span className="turn-role" data-role={n.turn.role}>{n.turn.role}</span>
+          <span className="turn-preview">{n.turn.preview}</span>
         </>
-      ),
+      );
+    },
   },
 ];
 
@@ -257,25 +293,49 @@ export function SessionSidebar(props: {
               <TreeTable<TurnNode>
                 columns={TURN_COLS}
                 data={turnData}
-                getRowId={(n) => n.path}
-                getSubRows={(n) =>
-                  n.kind === "session"
-                    ? n.turns.map((t) => ({
-                        kind: "turn" as const,
-                        path: `turn:${t.editor}:${t.session_id}:${t.id}`,
-                        turn: t,
-                      }))
-                    : undefined
-                }
-                getRowCanExpand={(n) => n.kind === "session"}
-                toggleOnDoubleClick={(n) => n.kind === "session"}
+                virtual
                 defaultExpandedAll
+                getRowId={(n) => n.path}
+                getSubRows={(n) => {
+                  if (n.kind === "session") {
+                    return n.turns.map((t) => ({
+                      kind: "turn" as const,
+                      path: `turn:${t.editor}:${t.session_id}:${t.id}`,
+                      turn: t,
+                      files: turnFileChildren(t),
+                    }));
+                  }
+                  if (n.kind === "turn") {
+                    return n.files.map((f, i) => ({
+                      kind: "file" as const,
+                      path: `file:${n.path}:${i}:${f.path}`,
+                      entry: f,
+                    }));
+                  }
+                  return undefined;
+                }}
+                getRowCanExpand={(n) =>
+                  n.kind === "session" ? true : n.kind === "turn" ? n.files.length > 0 : false
+                }
+                // Sessions expand on double-click; turns open their record, files
+                // open the path. (A turn's files are visible anyway via the
+                // expand caret / defaultExpandedAll.)
+                toggleOnDoubleClick={(n) => n.kind === "session"}
                 onRowDoubleClick={(n) => {
                   if (n.kind === "turn") openTurn(n.turn);
+                  else if (n.kind === "file") {
+                    openPreviewPanel(n.entry.path);
+                    touch(n.entry.path);
+                  }
                 }}
                 controls
                 filter={(n, q) => {
-                  const hay = n.kind === "turn" ? `${n.turn.role} ${n.turn.preview}` : n.label;
+                  const hay =
+                    n.kind === "turn"
+                      ? `${n.turn.role} ${n.turn.preview}`
+                      : n.kind === "file"
+                        ? n.entry.name
+                        : n.label;
                   return hay.toLowerCase().includes(q.toLowerCase());
                 }}
                 searchPlaceholder="filter turns…"

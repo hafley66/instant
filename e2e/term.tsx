@@ -56,7 +56,7 @@ type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> 
     {
       editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: 0,
       preview: "moving chrome to .dv-host-term",
-      text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host.",
+      text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host. [Edit] {\"file_path\":\"src/reactdock.tsx\"}",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:2",
     },
   ],

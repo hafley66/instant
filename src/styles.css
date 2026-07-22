@@ -832,6 +832,7 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   font-size: 12px;
   line-height: 1;
   padding: 0 2px;
+  margin-right: 4px;
   border-radius: 3px;
 }
 .turn-star[data-on="true"] { color: #e0a020; }
