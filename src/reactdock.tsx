@@ -28,6 +28,7 @@ import {
 } from "./plugin";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
+import { SessionSidebar } from "./sessionSidebar";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -177,6 +178,10 @@ type Hooks = {
   // menu reads/writes through these.
   isTermPinned: (sid: string) => boolean;
   toggleTermPin: (sid: string) => void;
+  // Resolve a terminal's live cwd so the session sidebar can root its file
+  // explorer there. Lives in the hook (set by main.ts from terminal.ts) to keep
+  // this module free of a terminal.ts import cycle.
+  onTermCwd: (sid: string) => string | null;
 };
 let hooks: Hooks = {
   onTermActivate: () => {},
@@ -185,19 +190,39 @@ let hooks: Hooks = {
   onTermRetitle: () => {},
   isTermPinned: () => false,
   toggleTermPin: () => {},
+  onTermCwd: () => null,
 };
 export function setDockHooks(h: Partial<Hooks>) {
   hooks = { ...hooks, ...h };
 }
 
+// Default per-terminal sidebar entry: closed, 264px, Files/Touched split 62/38,
+// empty touched list. Used wherever a missing entry is read.
+function sbDefault() {
+  return { open: false, width: 264, sizes: [62, 38] as [number, number], touched: [] as string[] };
+}
+
 function TerminalPanel(props: IDockviewPanelProps) {
-  const ref = useRef<HTMLDivElement>(null);
+  const slotRef = useRef<HTMLDivElement>(null);
   const sid = termSid(props.params.panelId as string);
   const id = props.params.panelId as string;
+  // Per-terminal right "session sidebar" (file explorer now; touched files +
+  // agent turns layer in later). Open + width persist in the store keyed by
+  // session id, so each panel remembers its own. sb is the reactive snapshot;
+  // the store subscription updates it on any termSidebar change (toggle + drag).
+  const [sb, setSb] = useState(() => store.get().termSidebar[sid] ?? sbDefault());
+  useEffect(
+    () => store.subscribe(() => setSb(store.get().termSidebar[sid] ?? sbDefault()), ["termSidebar"]),
+    [sid],
+  );
+  const open = sb.open;
+  const width = sb.width;
+  const sizes = sb.sizes ?? ([62, 38] as [number, number]);
+  const touched = sb.touched ?? [];
 
   useEffect(() => {
     const node = dynamicNodes.get(id);
-    if (node && ref.current) ref.current.appendChild(node);
+    if (node && slotRef.current) slotRef.current.appendChild(node);
 
     const sub = props.api.onDidDimensionsChange(() => hooks.onTermLayout(sid));
     hooks.onTermLayout(sid);
@@ -208,6 +233,15 @@ function TerminalPanel(props: IDockviewPanelProps) {
       if (pool && node) pool.appendChild(node);
     };
   }, [id]);
+  // Opening the sidebar changes the xterm slot width without changing the
+  // dockview panel size, so onDidDimensionsChange won't fire — refit on toggle.
+  // The drag handle refits on pointer-up via SessionSidebar's onResizeEnd.
+  useEffect(() => { hooks.onTermLayout(sid); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const patchSidebar = (patch: Partial<{ open: boolean; width: number; sizes: [number, number]; touched: string[] }>) => {
+    const cur = store.get().termSidebar[sid] ?? sbDefault();
+    store.set({ termSidebar: { ...store.get().termSidebar, [sid]: { ...cur, ...patch } } });
+  };
 
   // dv-host-term carries the frame border + 2px inset (see styles.css), NOT
   // .term-host: xterm's FitAddon measures .xterm's parent (.term-host) via
@@ -215,7 +249,23 @@ function TerminalPanel(props: IDockviewPanelProps) {
   // returns the BORDER box. Any padding/border on .term-host gets silently
   // counted as renderable area, rounding cols/rows one too large whenever the
   // panel height lands within ~6px of a cell boundary -> tmux/xterm row drift.
-  return <div className="dv-host dv-host-term" ref={ref} />;
+  return (
+    <div className="dv-host dv-host-term term-panel">
+      <div className="term-slot" ref={slotRef} />
+      {open && (
+        <SessionSidebar
+          sid={sid}
+          getCwd={() => hooks.onTermCwd(sid)}
+          width={width}
+          sizes={sizes}
+          touched={touched}
+          onWidth={(px) => patchSidebar({ width: px })}
+          onResizeEnd={() => hooks.onTermLayout(sid)}
+          onPatch={patchSidebar}
+        />
+      )}
+    </div>
+  );
 }
 
 // Per-path preview instance. Like terminals, the content node lives in JS

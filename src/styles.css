@@ -676,6 +676,70 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   border: var(--frame-w) solid var(--term-frame);
   background: var(--term-bg);
 }
+/* Per-terminal right session sidebar. The terminal panel (.term-panel) is a
+   flex row: .term-slot fills with the xterm host, .term-sidebar is a fixed-
+   width resizable column persisted per session id. */
+.term-panel { flex-direction: row; }
+.term-slot { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.term-sidebar {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel-bg);
+  border-left: var(--frame-w) solid var(--frame);
+  overflow: hidden;
+}
+.term-sidebar-resize {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 5px;
+  cursor: ew-resize;
+  z-index: 5;
+}
+.term-sidebar-resize:hover { background: rgba(127, 127, 127, .3); }
+.term-sidebar-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.term-sidebar-empty { padding: 8px; color: var(--muted, #666); font-size: 11px; }
+
+/* Vertical stack of sidebar panes (Files | Touched, later turns/referenced).
+   react-resizable-panels drives the flex sizing itself; we only give the group
+   a definite height and let each Panel's <TreeTable> (tt-host, height:100%)
+   fill it. The sash mirrors .meme-sash-horizontal. */
+.term-sidebar-split { flex: 1; min-height: 0; height: 100%; }
+.term-sidebar-panel { min-height: 0; display: flex; }
+.term-sidebar-panel > .tt-host { flex: 1; min-height: 0; }
+.term-sidebar-empty-touched {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.term-sidebar-sash {
+  flex: none;
+  height: 7px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background 0.1s;
+}
+.term-sidebar-sash:hover,
+.term-sidebar-sash[data-resize-handle-state="hover"],
+.term-sidebar-sash[data-resize-handle-state="drag"] {
+  background: var(--row-active-bg);
+}
+.term-sidebar-sash::after {
+  content: "";
+  width: 32px;
+  height: 2px;
+  background: var(--frame);
+  border-radius: 1px;
+  opacity: 0.7;
+}
+.term-sidebar-sash[data-resize-handle-state="drag"]::after { opacity: 1; }
 .panel {
   flex: 1;
   display: flex;

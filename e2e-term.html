@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Term E2E</title>
+    <style>
+      #e2e-controls { position: fixed; z-index: 10; top: 4px; left: 4px; }
+    </style>
+    <script type="module" src="/e2e/term.tsx" defer></script>
+  </head>
+  <body data-skin="xp">
+    <div id="panel-pool" hidden></div>
+    <div id="e2e-controls">
+      <button data-testid="open-term">Open terminal</button>
+    </div>
+    <div id="app" class="window" style="height: calc(100vh - 40px)">
+      <div class="window-body body" id="workbench">
+        <nav class="actbar" id="actbar">
+          <span class="actbar-spacer"></span>
+        </nav>
+        <div class="actbar-resize" id="actbar-resize"></div>
+        <div id="dock" class="dock"></div>
+      </div>
+    </div>
+  </body>
+</html>

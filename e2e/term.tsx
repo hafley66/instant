@@ -1,0 +1,94 @@
+// E2E bootstrap for the terminal + session sidebar. Mirrors e2e/paint.tsx:
+// registers a minimal sessions panel, wires the dock hooks the terminal needs,
+// mounts the dock, and opens a terminal whose right sidebar shows a file
+// explorer. The native (Tauri) edge is mocked via __instantE2eNativeResults
+// (see src/reactive/nativeTransport.ts), so this runs in headless Chrome with
+// no Rust backend.
+import "xp.css";
+import "../src/styles.css";
+import { createElement } from "react";
+import type { IDockviewPanelProps } from "dockview";
+import { registerPlugin } from "../src/plugin";
+import { initRail } from "../src/rail";
+import { mountReactDock, setDockHooks } from "../src/reactdock";
+import {
+  openTab,
+  onTermShown,
+  onTermClosed,
+  fitTerm,
+  tabMetaById,
+  getFocusedTermId,
+} from "../src/terminal";
+import { setHomeDir, sessionId } from "../src/core";
+import { store } from "../src/state";
+import { installKeymap } from "../src/keymap";
+import { wireContextMenu } from "../src/ctxmenu";
+
+// Mock list_dir with a small fixture tree so the sidebar's file explorer has
+// rows to render. Other commands (open_session/resize_pty/write_pty) resolve
+// undefined, which the app tolerates in e2e (all invokes are .catch'd).
+type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
+(window as E2eWindow).__instantE2eNativeResults = {
+  list_dir: {
+    path: "/tmp/term-e2e",
+    parent: "/tmp",
+    entries: [
+      { name: "src", path: "/tmp/term-e2e/src", is_dir: true, size: 0, modified: 0, ext: "" },
+      { name: "e2e", path: "/tmp/term-e2e/e2e", is_dir: true, size: 0, modified: 0, ext: "" },
+      { name: "README.md", path: "/tmp/term-e2e/README.md", is_dir: false, size: 64, modified: 0, ext: "md" },
+      { name: "package.json", path: "/tmp/term-e2e/package.json", is_dir: false, size: 32, modified: 0, ext: "json" },
+    ],
+  },
+};
+
+function SessionsPanel(_props: IDockviewPanelProps) {
+  return createElement("div", { "data-testid": "sessions-panel" }, "Sessions");
+}
+
+registerPlugin({
+  id: "term-e2e-sessions",
+  panels: [
+    { id: "sessions", title: "Sessions", icon: "S", iconLabel: "Sessions", component: SessionsPanel },
+  ],
+});
+
+setHomeDir("/tmp");
+setDockHooks({
+  onTermActivate: onTermShown,
+  onTermClose: onTermClosed,
+  onTermLayout: fitTerm,
+  onTermRetitle: () => {},
+  isTermPinned: () => false,
+  toggleTermPin: () => {},
+  onTermCwd: (sid) => tabMetaById(sid)?.cwd ?? null,
+});
+
+installKeymap([
+  {
+    id: "term.sidebar",
+    keys: ["$mod+Shift+Backslash"],
+    run: () => {
+      const id = getFocusedTermId();
+      if (!id) return;
+      const cur = store.get().termSidebar[id] ?? { open: false, width: 264 };
+      store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
+    },
+  },
+]);
+
+document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
+  openTab("e2e", { cwd: "/tmp/term-e2e" });
+  // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
+  // Seed the pane split + one touched file so both stacked panes render.
+  const sid = sessionId("e2e");
+  store.set({
+    termSidebar: {
+      ...store.get().termSidebar,
+      [sid]: { open: true, width: 300, sizes: [55, 45], touched: ["/tmp/term-e2e/README.md"] },
+    },
+  });
+};
+
+mountReactDock(document.getElementById("dock")!);
+initRail();
+wireContextMenu(() => []);
