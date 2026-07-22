@@ -6,7 +6,7 @@ import { createElement, useCallback, useEffect } from "react";
 import type { IDockviewPanelProps } from "dockview";
 import { registerPlugin } from "../plugin";
 import { registerZoomKind } from "../panelZoom";
-import { baseName } from "../core";
+import { baseName, MD_EXTS } from "../core";
 import { MdPanel } from "./MdPanel";
 import { mdUi, pathSignalFor, setMdUi } from "./signals";
 import { registerMdNav } from "./open";
@@ -49,6 +49,17 @@ export function registerMdview() {
       componentName: "mdview-instance",
       component: MdInstance,
     }],
+    routes: [
+      {
+        id: "markdown",
+        open: (path) => {
+          const ext = path.split(".").pop()?.toLowerCase() ?? "";
+          if (!MD_EXTS.has(ext)) return false;
+          openMarkdownPanel(path);
+          return true;
+        },
+      },
+    ],
   });
   // Per-tab content zoom (⌘+/-/0 while the panel is active). Declarative:
   // MdPanel reads the factor from store.panelZoom and styles the content.

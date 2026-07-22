@@ -3525,3 +3525,11 @@ body[data-skin="ac3"] .meme-canvas-wrap {
   justify-content: flex-end;
   gap: 8px;
 }
+
+.paint-editor-body { display: flex; flex: 1; min-height: 0; }
+.paint-meme-controls { display: flex; flex-direction: column; gap: 6px; width: 180px; padding: 8px; border-left: 1px solid var(--frame, #888); }
+.paint-meme-controls label { display: flex; flex-direction: column; gap: 2px; }
+.paint-meme-controls textarea { min-height: 64px; resize: vertical; }
+.paint-caption-fields { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.paint-caption-fields input, .paint-caption-fields select { min-width: 0; }
+.paint-caption-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }

@@ -1,4 +1,4 @@
-/* Shared file-explorer tree (src/fileTree.tsx). These rules lived in
+/* Shared file-explorer tree (src/plugins/files/1_FileTree.tsx). These rules lived in
    styles.css as .meme-tree-*; moved here so both consumers (meme thumbs,
    mdview explorer) share them and styles.css stops growing. */
 .file-tree-cell {

@@ -3,11 +3,11 @@
 // explorer) share one implementation. Dirs lazy-load on first expand via the
 // given native list command; double-click toggles a dir, file-explorer style.
 import { useEffect, useMemo, useState } from "react";
-import { invoke, type CommandName } from "./generated/native";
+import { invoke, type CommandName } from "../../generated/native";
 import { type ExpandedState } from "@tanstack/react-table";
-import { TreeTable, type TreeColumn } from "./treetable";
-import type { FsEntry } from "./state";
-import "./fileTree.css";
+import { TreeTable, type TreeColumn } from "../../treetable";
+import type { FsEntry } from "../../state";
+import "./1_FileTree.css";
 
 export interface FileTreeRow {
   id: string;
@@ -56,7 +56,7 @@ export interface FileTreeProps {
   rootEntries: FsEntry[];
   activePath?: string;
   // Files with these extensions (lowercase, no dot) are shown; dirs always are.
-  filterExts: Set<string>;
+  filterExts?: ReadonlySet<string>;
   listCommand: CommandName; // native listing command ("list_dir" | "list_dir_meme")
   onSelect: (path: string) => void;
   glyphFor?: (row: FileTreeRow) => string;
@@ -92,7 +92,7 @@ export function FileTree({
     try {
       const listing = await invoke<{ entries: FsEntry[] }>(listCommand, { path });
       const filtered = listing.entries.filter(
-        (e) => e.is_dir || filterExts.has(e.ext.toLowerCase()),
+        (e) => e.is_dir || !filterExts || filterExts.has(e.ext.toLowerCase()),
       );
       setFsChildren((prev) => ({ ...prev, [path]: filtered }));
     } catch {

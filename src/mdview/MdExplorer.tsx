@@ -4,7 +4,7 @@
 // (FileTree, the shared lazy TreeTable explorer).
 import { useEffect, useState } from "react";
 import { invoke } from "../generated/native";
-import { FileTree } from "../fileTree";
+import { FileTree } from "../plugins/files/1_FileTree";
 import { MD_EXTS } from "../core";
 import type { FsEntry } from "../state";
 import { useFsWatch } from "./0_watch";

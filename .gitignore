@@ -14,6 +14,9 @@ dist-ssr
 
 # Vendored third-party apps (rebuilt by scripts/vendor-*.sh)
 /public/vendor/
+!/public/vendor/
+!/public/vendor/miniPaint/
+!/public/vendor/miniPaint/**
 
 # vscode-ext build output + packaged extension
 vscode-ext/out

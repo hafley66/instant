@@ -1,7 +1,7 @@
-// Meme panel's thumbs tree: FileTree (src/fileTree.tsx) specialized for image
+// Meme panel's thumbs tree: FileTree (src/plugins/files/1_FileTree.tsx) specialized for image
 // files. Kept as its own module with the original props so meme.tsx's import
 // and render sites are untouched.
-import { FileTree, type FileTreeRow } from "./fileTree";
+import { FileTree, type FileTreeRow } from "./plugins/files/1_FileTree";
 import type { FsEntry } from "./state";
 
 const IMAGE_EXTS = new Set([
