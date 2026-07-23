@@ -21,7 +21,7 @@ import { fileGlyph } from "./core";
 import { openPreviewPanel } from "./preview";
 import { openMarkdownPanel } from "./mdview/open";
 import { parseMdSections, type MdSection } from "./mdview/model";
-import { fileEntry, isCompaction, isMarkdown, isToolOnlyTurn, touchedFiles, turnOrder, turnReferences, visibleTurnWindows, type TouchedFile } from "./0_sessionSidebarModel";
+import { fileEntry, isCompaction, isMarkdown, isToolOnlyTurn, touchedFiles, turnOrder, turnPrimaryPreview, turnReferences, turnRoleLabel, visibleTurnWindows, type TouchedFile } from "./0_sessionSidebarModel";
 import {
   warmTurns,
   refreshTurns,
@@ -208,11 +208,11 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
       if (n.kind === "tools") return <span className="sidebar-turn-aggregate">Tools <small>{n.tools.length}</small></span>;
       if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
       if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.title}</span>;
-      if (n.kind === "tool") return <span className="sidebar-turn-ref"><span>tool</span> {n.turn.preview}</span>;
+      if (n.kind === "tool") return <span className="turn-copy"><span className="turn-preview">{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>;
       const on = isTurnFav(n.turn);
       return (
         <span className="turn-row">
-          <span className="turn-copy" onPointerEnter={(e) => showPreview(n.turn.text, e.currentTarget.getBoundingClientRect())} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{n.turn.preview}</span><small>{n.turn.role}</small></span>
+          <span className="turn-copy" onPointerEnter={(e) => showPreview(n.turn.text, e.currentTarget.getBoundingClientRect())} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>
           <button
             className="turn-action"
             data-no-row-click=""

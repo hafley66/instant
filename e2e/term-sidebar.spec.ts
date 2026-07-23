@@ -87,10 +87,11 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   await latest.locator(".tt-twisty").click();
   await expect(turns).toContainText("Files");
   await expect(turns).toContainText("Tools");
-  await expect(turns).not.toContainText("[Bash] inspect latest state");
+  await expect(turns).not.toContainText("inspect latest state");
   const tools = turns.locator(".dtable-row").filter({ hasText: "Tools" });
   await tools.locator(".tt-twisty").click();
-  await expect(turns).toContainText("[Bash] inspect latest state");
+  await expect(turns).toContainText("inspect latest state");
+  await expect(turns).toContainText("assistant · Bash");
 
   const touched = page.locator('[data-testid="sidebar-touched"]');
   await expect(touched).toContainText("README.md");
@@ -115,7 +116,22 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   await page.screenshot({ path: "test-results/term-turns-hover.png" });
 
   await turn.hover();
-  await turn.locator(".turn-action", { hasText: "↗" }).click();
+  const openAction = turn.locator(".turn-action", { hasText: "↗" });
+  const starAction = turn.locator(".turn-action", { hasText: "☆" });
+  await expect(openAction).toBeVisible();
+  await expect(starAction).toBeVisible();
+  const rowBox = await turn.boundingBox();
+  const openBox = await openAction.boundingBox();
+  const starBox = await starAction.boundingBox();
+  expect(rowBox).toBeTruthy();
+  expect(openBox).toBeTruthy();
+  expect(starBox).toBeTruthy();
+  expect(Math.abs(openBox!.width - openBox!.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(starBox!.width - starBox!.height)).toBeLessThanOrEqual(1);
+  expect(openBox!.height).toBeLessThanOrEqual(rowBox!.height);
+  expect(starBox!.height).toBeLessThanOrEqual(rowBox!.height);
+  await page.screenshot({ path: "test-results/term-turn-actions-hover.png" });
+  await openAction.click();
   await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-claude-1");
 
   await page.locator(".term-sidebar").screenshot({ path: "test-results/term-turns.png" });

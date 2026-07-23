@@ -28,6 +28,7 @@ import { wireContextMenu } from "../src/ctxmenu";
 // rows to render. Other commands (open_session/resize_pty/write_pty) resolve
 // undefined, which the app tolerates in e2e (all invokes are .catch'd).
 type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
+const NOW = Date.now();
 (window as E2eWindow).__instantE2eNativeResults = {
   cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
   list_dir: {
@@ -49,37 +50,37 @@ type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> 
   // read_ai_messages returns the ledger for the resolved claude session.
   read_ai_messages: [
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m1", seq: 1, role: "user", ts: 1784808000000,
+      editor: "claude", session_id: "e2e-claude-1", id: "m1", seq: 1, role: "user", ts: NOW - 3 * 86_400_000,
       preview: "fix the off-by-one in fitTerm",
       text: "fix the off-by-one in fitTerm so the rows stop drifting",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:1",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: 1784808060000,
+      editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: NOW - 25 * 3_600_000,
       preview: "moving chrome to .dv-host-term",
       text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host.",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:2",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m3", seq: 3, role: "assistant", ts: 1784808090000,
+      editor: "claude", session_id: "e2e-claude-1", id: "m3", seq: 3, role: "assistant", ts: NOW - 7 * 3_600_000,
       preview: "[Read] README.md and reactdock.tsx",
       text: "[Read] {\"file_path\":\"README.md\"} [Edit] {\"file_path\":\"src/reactdock.tsx\"}",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:3",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m4", seq: 4, role: "user", ts: 1784808120000,
+      editor: "claude", session_id: "e2e-claude-1", id: "m4", seq: 4, role: "user", ts: NOW - 2 * 3_600_000,
       preview: "/compact lets continue",
       text: "<command-name>/compact</command-name> /compact lets continue",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:4",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m5", seq: 5, role: "assistant", ts: 1784808180000,
+      editor: "claude", session_id: "e2e-claude-1", id: "m5", seq: 5, role: "assistant", ts: NOW - 15 * 60_000,
       preview: "latest visible answer",
       text: "The latest visible answer has a paired tool record after it.",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:5",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m6", seq: 6, role: "assistant", ts: 1784808240000,
+      editor: "claude", session_id: "e2e-claude-1", id: "m6", seq: 6, role: "assistant", ts: NOW - 14 * 60_000,
       preview: "[Bash] inspect latest state",
       text: "[Bash] {\"command\":\"git status --short\"}",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:6",

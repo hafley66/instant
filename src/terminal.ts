@@ -72,7 +72,12 @@ export function observeTerminalOutput(id: string, chunk: string) {
   tab.outputTail = trimOutputTail(tab.outputTail, chunk);
   const meta = tabMetaById(id);
   const live = store.get().sessions.find((s) => s.name === tab.name);
+  const previousHarness = tab.harness.id;
   tab.harness = detectHarness(meta?.command, live?.commands?.[0], tab.outputTail);
+  // The initial warm can happen before the terminal has printed its harness
+  // banner. Re-read exactly once when output resolves that runtime identity so
+  // a generic shell does not stay pinned to another editor's newest session.
+  if (tab.harness.id && tab.harness.id !== previousHarness) void warmTurns(id);
   tab.el.dataset.harness = tab.harness.id ?? "unknown";
   tab.el.dataset.harnessConfidence = tab.harness.confidence;
   tab.el.title = tab.harness.id
@@ -220,13 +225,13 @@ const QUICK_CMD: Record<string, string> = {
 // cd's then runs the agent inside a shell), so prefer the LIVE tmux pane cwd
 // (store.sessions[].paths) — that's where claude/opencode actually keyed their
 // session — and fall back to the launch cwd.
-export function tabMetaById(id: string): { cwd: string; command: string | null } | null {
+export function tabMetaById(id: string): { cwd: string; command: string | null; harness: HarnessObservation["id"] } | null {
   const t = tabs.get(id);
   if (!t) return null;
   const rec = store.get().openTabs.find((o) => o.name === t.name);
   const live = store.get().sessions.find((s) => s.name === t.name);
   const cwd = live?.paths?.[0] || rec?.cwd || null;
-  return cwd ? { cwd, command: rec?.command ?? null } : null;
+  return cwd ? { cwd, command: rec?.command ?? null, harness: t.harness.id } : null;
 }
 // Every candidate cwd for a tab's session lookup: each live tmux pane cwd, then
 // the recorded launch cwd. claude keys its ledger dir by the cwd it was launched
@@ -828,7 +833,7 @@ export function onTermClosed(id: string) {
 async function exitOrDetachTab(
   id: string,
   name: string,
-  meta: { cwd: string; command: string | null } | null,
+  meta: { cwd: string; command: string | null; harness: HarnessObservation["id"] } | null,
   proc: string,
   isGraphics = false,
 ) {
@@ -838,7 +843,7 @@ async function exitOrDetachTab(
     invoke("close_pty", { id }).catch(() => {});
     return;
   }
-  const sessions = meta ? await tabSessions(tabCwds(id), meta.command) : [];
+  const sessions = meta ? await tabSessions(tabCwds(id), meta.command, meta.harness) : [];
   const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
   // Agent when: the live foreground proc looks like one (claude's version title,
   // opencode.exe, node/bun), the launch command names one, or the proc was

@@ -26,8 +26,15 @@ export type ResolvedSession = { editor: HarnessId; sessionId: string; cwd: strin
 // and carry the cwd that resolved, because the ledger read needs it. The launch
 // command, when it names an agent, just orders the probe so the declared agent
 // wins ties.
-export async function tabSessions(cwds: string[], command: string | null): Promise<ResolvedSession[]> {
-  const order: HarnessId[] = harnessesForCommand(command);
+export async function tabSessions(
+  cwds: string[],
+  command: string | null,
+  liveHarness: HarnessId | null = null,
+): Promise<ResolvedSession[]> {
+  const fallback = harnessesForCommand(command);
+  const order: HarnessId[] = liveHarness
+    ? [liveHarness, ...fallback.filter((editor) => editor !== liveHarness)]
+    : fallback;
   const out: ResolvedSession[] = [];
   const seen = new Set<string>();
   for (const cwd of cwds) {
@@ -49,10 +56,13 @@ export async function tabSessions(cwds: string[], command: string | null): Promi
 // distinct session to resume. Probes both editors (declared agent first), each
 // newest-first, and returns the first unclaimed hit.
 export async function unclaimedSession(
-  meta: { cwd: string; command: string | null },
+  meta: { cwd: string; command: string | null; harness?: HarnessId | null },
   claimed: Set<string>,
 ): Promise<{ editor: HarnessId; sessionId: string } | null> {
-  const order: HarnessId[] = harnessesForCommand(meta.command);
+  const fallback = harnessesForCommand(meta.command);
+  const order: HarnessId[] = meta.harness
+    ? [meta.harness, ...fallback.filter((editor) => editor !== meta.harness)]
+    : fallback;
   for (const editor of order) {
     const ids = await harnessAdapter(editor).sessions(meta.cwd).catch(() => [] as string[]);
     for (const sid of ids) if (!claimed.has(sid)) return { editor, sessionId: sid };
@@ -90,7 +100,7 @@ export async function warmTurns(id: string) {
   // tabSessions is ordered by live cwd and the declared harness. A terminal
   // sidebar has one current transcript, so avoid loading fallback-cwd and
   // other-harness ledgers that cannot be presented in that panel.
-  const sessions = (await tabSessions(tabCwds(id), meta.command)).slice(0, 1);
+  const sessions = (await tabSessions(tabCwds(id), meta.command, meta.harness)).slice(0, 1);
   const all: AiMessage[] = [];
   for (const s of sessions) {
     ledgerCache.delete(`${s.editor}:${s.sessionId}`); // pick up new turns
@@ -106,7 +116,7 @@ export async function warmTurns(id: string) {
 export async function refreshTurns(id: string) {
   const meta = tabMetaById(id);
   if (!meta) return;
-  const sessions = (await tabSessions(tabCwds(id), meta.command)).slice(0, 1);
+  const sessions = (await tabSessions(tabCwds(id), meta.command, meta.harness)).slice(0, 1);
   const all: AiMessage[] = [];
   for (const s of sessions) {
     const key = `${s.editor}:${s.sessionId}`;
@@ -311,7 +321,7 @@ export async function favoriteCurrentTurn() {
     flashStatus("no folder for this tab");
     return;
   }
-  const sessions = await tabSessions(tabCwds(id), meta.command);
+  const sessions = await tabSessions(tabCwds(id), meta.command, meta.harness);
   if (!sessions.length) {
     flashStatus("no AI session for this folder");
     return;

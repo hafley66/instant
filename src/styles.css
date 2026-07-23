@@ -871,7 +871,7 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
 .turn-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   min-width: 0;
   width: 100%;
   position: relative;
@@ -908,10 +908,16 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   font-size: 18px;
 }
 .turn-action {
+  --turn-action-size: 26px;
   display: none;
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
+  flex: 0 0 var(--turn-action-size);
+  align-self: center;
+  width: var(--turn-action-size);
+  height: var(--turn-action-size);
+  min-width: var(--turn-action-size) !important;
+  min-height: var(--turn-action-size) !important;
+  max-width: var(--turn-action-size);
+  max-height: var(--turn-action-size);
   padding: 0;
   margin: 0;
   box-sizing: border-box;
@@ -923,7 +929,7 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   font: 18px/1 inherit;
 }
 .dtable-row:hover .turn-action,
-.turn-action:focus { display: inline-flex; align-items: center; justify-content: center; }
+.turn-action:focus { display: grid; place-items: center; }
 .turn-action:hover { background: var(--row-hover); }
 .sidebar-file {
   display: flex;

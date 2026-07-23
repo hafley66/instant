@@ -103,6 +103,31 @@ export function isToolOnlyTurn(turn: AiMessage): boolean {
   return /^\s*\[[^\]]+\]\s*(?:\{|\[|$)/.test(turn.text);
 }
 
+const SPECIAL_SUBTYPE = /^\s*\[([^\]\r\n]+)\]\s*/;
+
+// Tool/thinking records preserve their author (`role`) on the wire. The
+// bracketed producer name is presentation metadata, so keep it out of the
+// clipped primary text and render it beside the role instead.
+export function turnSubtype(turn: AiMessage): string | null {
+  return SPECIAL_SUBTYPE.exec(turn.preview)?.[1]?.trim()
+    ?? SPECIAL_SUBTYPE.exec(turn.text)?.[1]?.trim()
+    ?? null;
+}
+
+export function turnPrimaryPreview(turn: AiMessage): string {
+  const source = SPECIAL_SUBTYPE.test(turn.preview)
+    ? turn.preview
+    : SPECIAL_SUBTYPE.test(turn.text)
+      ? turn.text
+      : (turn.preview || turn.text);
+  return source.replace(SPECIAL_SUBTYPE, "").trim() || source;
+}
+
+export function turnRoleLabel(turn: AiMessage): string {
+  const subtype = turnSubtype(turn);
+  return subtype ? `${turn.role} · ${subtype}` : turn.role;
+}
+
 export interface TurnWindow {
   turn: AiMessage;
   tools: AiMessage[];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isToolOnlyTurn, touchedFiles, turnReferences, visibleTurnWindows } from "./0_sessionSidebarModel";
+import { isToolOnlyTurn, touchedFiles, turnPrimaryPreview, turnReferences, turnRoleLabel, visibleTurnWindows } from "./0_sessionSidebarModel";
 import type { AiMessage } from "./state";
 
 const turn = (id: string, seq: number, text: string): AiMessage => ({
@@ -121,6 +121,13 @@ describe("session sidebar model", () => {
             "tool-1",
           ],
         ],
+      ]
+    `);
+    const tool = turn("tool", 5, '[Bash] {"command":"git status"}');
+    expect([turnPrimaryPreview(tool), turnRoleLabel(tool)]).toMatchInlineSnapshot(`
+      [
+        "{\"command\":\"git status\"}",
+        "assistant · Bash",
       ]
     `);
   });
