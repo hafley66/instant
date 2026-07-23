@@ -100,5 +100,33 @@ export function isCompaction(turn: AiMessage): boolean {
 }
 
 export function isToolOnlyTurn(turn: AiMessage): boolean {
-  return /^\s*(?:\[[^\]]+\]\s*)+(?:\{|$)/.test(turn.text);
+  return /^\s*\[[^\]]+\]\s*(?:\{|\[|$)/.test(turn.text);
+}
+
+export interface TurnWindow {
+  turn: AiMessage;
+  tools: AiMessage[];
+}
+
+// The transcript is read oldest-first to assign every tool-only record to its
+// immediately preceding visible record, then presented newest-first. Tool
+// records before any visible record have no owner and remain out of the
+// visible-text projection.
+export function visibleTurnWindows(turns: AiMessage[]): TurnWindow[] {
+  const chronological = [...turns].sort((a, b) => a.seq - b.seq);
+  const windows: TurnWindow[] = [];
+  let current: TurnWindow | undefined;
+  for (const turn of chronological) {
+    if (isToolOnlyTurn(turn)) {
+      current?.tools.push(turn);
+      continue;
+    }
+    current = { turn, tools: [] };
+    windows.push(current);
+  }
+  return windows.sort((a, b) => turnOrder(b.turn) - turnOrder(a.turn));
+}
+
+export function turnOrder(turn: AiMessage): number {
+  return turn.ts >= 10_000_000_000 ? turn.ts : turn.seq;
 }

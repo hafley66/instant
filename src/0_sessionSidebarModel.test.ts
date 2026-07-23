@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { touchedFiles, turnReferences } from "./0_sessionSidebarModel";
+import { isToolOnlyTurn, touchedFiles, turnReferences, visibleTurnWindows } from "./0_sessionSidebarModel";
 import type { AiMessage } from "./state";
 
 const turn = (id: string, seq: number, text: string): AiMessage => ({
@@ -97,5 +97,31 @@ describe("session sidebar model", () => {
       ]
     `);
     expect(turnReferences(turn("x", 3, '[Read] {"file_path":"a.ts"}'), "/repo")[0].action).toBe("read");
+  });
+
+  it("projects visible rows newest-first and nests paired tool records", () => {
+    const windows = visibleTurnWindows([
+      turn("visible-1", 1, "first visible"),
+      turn("tool-1", 2, '[Read] {"file_path":"src/a.ts"}'),
+      turn("visible-2", 3, "second visible"),
+      turn("tool-2", 4, '[Bash] {"command":"git status"}'),
+    ]);
+    expect(isToolOnlyTurn(turn("tool-1", 2, '[Read] {"file_path":"src/a.ts"}'))).toBe(true);
+    expect(windows.map(({ turn, tools }) => [turn.id, tools.map((tool) => tool.id)])).toMatchInlineSnapshot(`
+      [
+        [
+          "visible-2",
+          [
+            "tool-2",
+          ],
+        ],
+        [
+          "visible-1",
+          [
+            "tool-1",
+          ],
+        ],
+      ]
+    `);
   });
 });

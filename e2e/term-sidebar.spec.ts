@@ -69,13 +69,22 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   // Turns is the default source and remains the left tab.
   await expect(page.locator('[data-testid="sidebar-turns"]')).toBeVisible();
 
-  // One transcript node (labeled by cwd) over its turns (default-expanded) +
-  // the assistant turn's referenced file as a child. Turns default newest-first.
+  // One current transcript node opens to visible rows only. The fixture has two
+  // visible/tool pairs; visible rows are newest-first and tool records remain
+  // beneath their owning visible row until that row is expanded.
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("current · claude");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("fix the off-by-one");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("moving chrome");
-  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("reactdock.tsx");
+  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("latest visible answer");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("compaction");
+  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).not.toContainText("[Bash] inspect latest state");
+
+  const turns = page.locator('[data-testid="sidebar-turns"]');
+  await turns.getByLabel("turn content filter").selectOption("visible");
+  await expect(turns).not.toContainText("[Read] README.md and reactdock.tsx");
+  const latest = turns.locator(".dtable-row").filter({ hasText: "latest visible answer" });
+  await latest.locator(".tt-twisty").click();
+  await expect(turns).toContainText("[Bash] inspect latest state");
 
   const touched = page.locator('[data-testid="sidebar-touched"]');
   await expect(touched).toContainText("README.md");

@@ -71,6 +71,7 @@ export interface TreeTableProps<T> {
   // order — including pinning — is final.
   serverSort?: boolean;
   defaultExpandedAll?: boolean;
+  defaultExpanded?: ExpandedState;
   // Controlled expansion (persist in the store). Omit to let the table own it.
   expanded?: ExpandedState;
   onExpandedChange?: (e: ExpandedState) => void;
@@ -120,6 +121,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     getSubRows,
     getRowId,
     defaultExpandedAll,
+    defaultExpanded,
     onRowClick,
     onRowDoubleClick,
     onRowContextMenu,
@@ -136,7 +138,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     props.onSortingChange?.(s);
     if (!props.sorting) setOwnSorting(s);
   };
-  const [ownExpanded, setOwnExpanded] = useState<ExpandedState>(defaultExpandedAll ? true : {});
+  const [ownExpanded, setOwnExpanded] = useState<ExpandedState>(defaultExpanded ?? (defaultExpandedAll ? true : {}));
   const expanded = props.expanded ?? ownExpanded;
   const [ownSizing, setOwnSizing] = useState<ColumnSizingState>({});
   const columnSizing = props.columnSizing ?? ownSizing;

@@ -87,7 +87,10 @@ async function turnsFor(
 export async function warmTurns(id: string) {
   const meta = tabMetaById(id);
   if (!meta) return;
-  const sessions = await tabSessions(tabCwds(id), meta.command);
+  // tabSessions is ordered by live cwd and the declared harness. A terminal
+  // sidebar has one current transcript, so avoid loading fallback-cwd and
+  // other-harness ledgers that cannot be presented in that panel.
+  const sessions = (await tabSessions(tabCwds(id), meta.command)).slice(0, 1);
   const all: AiMessage[] = [];
   for (const s of sessions) {
     ledgerCache.delete(`${s.editor}:${s.sessionId}`); // pick up new turns
@@ -103,7 +106,7 @@ export async function warmTurns(id: string) {
 export async function refreshTurns(id: string) {
   const meta = tabMetaById(id);
   if (!meta) return;
-  const sessions = await tabSessions(tabCwds(id), meta.command);
+  const sessions = (await tabSessions(tabCwds(id), meta.command)).slice(0, 1);
   const all: AiMessage[] = [];
   for (const s of sessions) {
     const key = `${s.editor}:${s.sessionId}`;
