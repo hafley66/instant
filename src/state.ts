@@ -110,6 +110,7 @@ export interface AiMessage {
   id: string;
   seq: number;
   role: string;
+  subtype?: string;
   ts: number;
   preview: string;
   text: string;

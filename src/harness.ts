@@ -24,7 +24,7 @@ export type HarnessAdapter = {
 const adapters: HarnessAdapter[] = [
   {
     id: "claude", label: "Claude Code",
-    matchesCommand: (s) => /(?:^|[\\/\s])claude(?:\s|$)/i.test(s),
+    matchesCommand: (s) => /(?:^|[\\/\s])(?:claude|ccz)(?:\s|$)/i.test(s),
     matchesProcess: (s) => /^(?:claude|\d+\.\d+)$/.test(s),
     isAgentProcess: (s) => /^(?:claude|\d+\.\d+)$/.test(s),
     resumeFlag: "--resume", stableSessionIdFlag: "--session-id",
@@ -70,6 +70,20 @@ const adapters: HarnessAdapter[] = [
     latest: (sessionId, cwd) => invoke<AiMessage | null>("latest_ai_message", { editor: "codex", sessionId, cwd }),
     resume: (sessionId) => `codex resume ${sessionId}`,
     matchesOutput: (s) => /(?:^|\n)\s*(?:OpenAI Codex|╭─[^\n]*Codex)/.test(s),
+  },
+  {
+    id: "kimi", label: "Kimi Code",
+    matchesCommand: (s) => /(?:^|[\\/\s])kimi(?:\.exe)?(?:\s|$)/i.test(s),
+    matchesProcess: (s) => /^kimi(?:\.exe)?$/.test(s),
+    isAgentProcess: (s) => /^(?:kimi(?:\.exe)?|node|bun)$/.test(s),
+    resumeFlag: "--session",
+    hasExplicitSession: (s) => /\s--session\b/.test(s),
+    sessions: (cwd) => invoke<string[]>("harness_sessions", { tool: "kimi", cwd }),
+    resolve: (cwd) => invoke<string | null>("harness_session", { tool: "kimi", cwd }),
+    read: (sessionId, cwd, afterSeq = 0) => invoke<AiMessage[]>("read_ai_messages", { editor: "kimi", sessionId, cwd, afterSeq: afterSeq || null }),
+    latest: (sessionId, cwd) => invoke<AiMessage | null>("latest_ai_message", { editor: "kimi", sessionId, cwd }),
+    resume: (sessionId) => `kimi --session ${sessionId}`,
+    matchesOutput: (s) => /(?:^|\n)\s*(?:Kimi Code|Moonshot AI)/.test(s),
   },
 ];
 

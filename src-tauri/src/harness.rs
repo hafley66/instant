@@ -111,6 +111,30 @@ fn codex_sessions(cwd: &str) -> Vec<String> {
     items.into_iter().map(|(_, id)| id).collect()
 }
 
+// Kimi Code stores sessions as ~/.kimi-code/sessions/<workspace>/session_<id>/.
+// The state file carries the workspace and update timestamp; only its main-agent
+// wire.jsonl is read later by ledger.rs.
+fn kimi_sessions(cwd: &str) -> Vec<String> {
+    let Some(root) = home().map(|h| h.join(".kimi-code").join("sessions")) else { return vec![] };
+    let Ok(workspaces) = fs::read_dir(root) else { return vec![] };
+    let mut items = Vec::new();
+    for workspace in workspaces.flatten() {
+        let Ok(sessions) = fs::read_dir(workspace.path()) else { continue };
+        for session in sessions.flatten() {
+            let state = session.path().join("state.json");
+            let Ok(text) = fs::read_to_string(&state) else { continue };
+            let Ok(meta) = serde_json::from_str::<Value>(&text) else { continue };
+            if meta.get("workDir").and_then(Value::as_str) != Some(cwd) { continue; }
+            let name = session.file_name().to_string_lossy().strip_prefix("session_").map(str::to_string);
+            let Some(name) = name else { continue };
+            let mtime = fs::metadata(&state).ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
+            items.push((mtime, name));
+        }
+    }
+    items.sort_by(|a, b| b.0.cmp(&a.0));
+    items.into_iter().map(|(_, id)| id).collect()
+}
+
 fn collect_jsonl(dir: &PathBuf, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -131,6 +155,7 @@ pub fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
         "claude" => claude_sessions(&cwd),
         "opencode" => opencode_sessions(&cwd),
         "codex" => codex_sessions(&cwd),
+        "kimi" => kimi_sessions(&cwd),
         _ => vec![],
     }
 }

@@ -73,7 +73,7 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   // visible/tool pairs; visible rows are newest-first. Each visible turn owns
   // collapsed Files and Tools aggregate rows, keeping raw tool events out of
   // the default scan while retaining them for recovery.
-  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("current · claude");
+  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("current · codex");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("fix the off-by-one");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("moving chrome");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("latest visible answer");
@@ -91,7 +91,7 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   const tools = turns.locator(".dtable-row").filter({ hasText: "Tools" });
   await tools.locator(".tt-twisty").click();
   await expect(turns).toContainText("inspect latest state");
-  await expect(turns).toContainText("assistant · Bash");
+  await expect(turns).toContainText("assistant · exec");
 
   const touched = page.locator('[data-testid="sidebar-touched"]');
   await expect(touched).toContainText("README.md");
@@ -132,7 +132,21 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   expect(starBox!.height).toBeLessThanOrEqual(rowBox!.height);
   await page.screenshot({ path: "test-results/term-turn-actions-hover.png" });
   await openAction.click();
-  await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-claude-1");
+  await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-codex-1");
 
   await page.locator(".term-sidebar").screenshot({ path: "test-results/term-turns.png" });
+});
+
+test("session sidebar Turns view: Kimi support interval rolls into its response", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1&harness=kimi");
+  await page.getByTestId("open-term").click();
+  const turns = page.locator('[data-testid="sidebar-turns"]');
+  await expect(turns).toContainText("current · kimi");
+  const latest = turns.locator(".dtable-row").filter({ hasText: "latest visible answer" });
+  await latest.locator(".tt-twisty").click();
+  await expect(turns).toContainText("Tools");
+  const tools = turns.locator(".dtable-row").filter({ hasText: "Tools" });
+  await tools.locator(".tt-twisty").click();
+  await expect(turns).toContainText("assistant · Bash");
+  await page.locator(".term-sidebar").screenshot({ path: "test-results/term-kimi-rollup.png" });
 });

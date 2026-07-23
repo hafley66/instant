@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { isToolOnlyTurn, touchedFiles, turnPrimaryPreview, turnReferences, turnRoleLabel, visibleTurnWindows } from "./0_sessionSidebarModel";
 import type { AiMessage } from "./state";
 
-const turn = (id: string, seq: number, text: string): AiMessage => ({
-  editor: "claude", session_id: "s", id, seq, role: "assistant", ts: 1_784_808_000_000 + seq,
+const turn = (id: string, seq: number, text: string, editor: AiMessage["editor"] = "claude", subtype?: string): AiMessage => ({
+  editor, session_id: "s", id, seq, role: "assistant", ...(subtype ? { subtype } : {}), ts: 1_784_808_000_000 + seq,
   preview: id, text, locator: id,
 });
 
@@ -128,6 +128,32 @@ describe("session sidebar model", () => {
       [
         "{\"command\":\"git status\"}",
         "assistant · Bash",
+      ]
+    `);
+  });
+
+  it("attaches Codex's pre-response tool interval to its assistant response", () => {
+    const windows = visibleTurnWindows([
+      { ...turn("user", 1, "check the reader", "codex"), role: "user" },
+      turn("thought", 2, "reasoning trace", "codex", "reasoning"),
+      turn("call", 3, "cargo check", "codex", "exec"),
+      turn("result", 4, "Finished dev profile", "codex", "exec result"),
+      turn("answer", 5, "reader updated", "codex"),
+    ]);
+    expect(windows.map(({ turn, tools }) => [turn.id, tools.map((tool) => tool.subtype)])).toMatchInlineSnapshot(`
+      [
+        [
+          "answer",
+          [
+            "reasoning",
+            "exec",
+            "exec result",
+          ],
+        ],
+        [
+          "user",
+          [],
+        ],
       ]
     `);
   });

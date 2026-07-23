@@ -100,7 +100,7 @@ export function isCompaction(turn: AiMessage): boolean {
 }
 
 export function isToolOnlyTurn(turn: AiMessage): boolean {
-  return /^\s*\[[^\]]+\]\s*(?:\{|\[|$)/.test(turn.text);
+  return Boolean(turn.subtype) || /^\s*\[[^\]]+\]\s*(?:\{|\[|$)/.test(turn.text);
 }
 
 const SPECIAL_SUBTYPE = /^\s*\[([^\]\r\n]+)\]\s*/;
@@ -109,7 +109,8 @@ const SPECIAL_SUBTYPE = /^\s*\[([^\]\r\n]+)\]\s*/;
 // bracketed producer name is presentation metadata, so keep it out of the
 // clipped primary text and render it beside the role instead.
 export function turnSubtype(turn: AiMessage): string | null {
-  return SPECIAL_SUBTYPE.exec(turn.preview)?.[1]?.trim()
+  return turn.subtype
+    ?? SPECIAL_SUBTYPE.exec(turn.preview)?.[1]?.trim()
     ?? SPECIAL_SUBTYPE.exec(turn.text)?.[1]?.trim()
     ?? null;
 }
@@ -141,14 +142,20 @@ export function visibleTurnWindows(turns: AiMessage[]): TurnWindow[] {
   const chronological = [...turns].sort((a, b) => a.seq - b.seq);
   const windows: TurnWindow[] = [];
   let current: TurnWindow | undefined;
+  let codexPending: AiMessage[] = [];
   for (const turn of chronological) {
     if (isToolOnlyTurn(turn)) {
-      current?.tools.push(turn);
+      if (turn.editor === "codex" || turn.editor === "kimi") codexPending.push(turn);
+      else current?.tools.push(turn);
       continue;
     }
-    current = { turn, tools: [] };
+    current = {
+      turn,
+      tools: (turn.editor === "codex" || turn.editor === "kimi") && turn.role === "assistant" ? codexPending.splice(0) : [],
+    };
     windows.push(current);
   }
+  if (codexPending.length) current?.tools.push(...codexPending);
   return windows.sort((a, b) => turnOrder(b.turn) - turnOrder(a.turn));
 }
 

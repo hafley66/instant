@@ -29,6 +29,7 @@ import { wireContextMenu } from "../src/ctxmenu";
 // undefined, which the app tolerates in e2e (all invokes are .catch'd).
 type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
 const NOW = Date.now();
+const E2E_HARNESS = new URLSearchParams(window.location.search).get("harness") === "kimi" ? "kimi" : "codex";
 (window as E2eWindow).__instantE2eNativeResults = {
   cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
   list_dir: {
@@ -42,48 +43,49 @@ const NOW = Date.now();
     ],
   },
   // harness_session resolves a session id for a (tool, cwd) probe. The Turns
-  // pane resolver probes every editor; return one only for claude so a single
-  // clean transcript node renders (ccz shares claude storage). A function
+  // pane resolver probes every editor; return one only for Codex so a single
+  // transcript node renders. A function
   // fixture uses the args-aware path in nativeTransport's e2e branch.
   harness_session: (args: Record<string, unknown> | undefined) =>
-    args?.tool === "claude" ? "e2e-claude-1" : undefined,
-  // read_ai_messages returns the ledger for the resolved claude session.
+    args?.tool === E2E_HARNESS ? `e2e-${E2E_HARNESS}-1` : undefined,
+  // Codex writes support records before the visible assistant response. The
+  // fixture preserves that sequence so its expanded response proves the rollup.
   read_ai_messages: [
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m1", seq: 1, role: "user", ts: NOW - 3 * 86_400_000,
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m1", seq: 1, role: "user", ts: NOW - 3 * 86_400_000,
       preview: "fix the off-by-one in fitTerm",
       text: "fix the off-by-one in fitTerm so the rows stop drifting",
-      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:1",
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L1",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: NOW - 25 * 3_600_000,
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m2", seq: 2, role: "assistant", subtype: E2E_HARNESS === "kimi" ? "thinking" : "read", ts: NOW - 25 * 3_600_000,
+      preview: "README.md and reactdock.tsx",
+      text: "[Read] {\"file_path\":\"README.md\"} [Edit] {\"file_path\":\"src/reactdock.tsx\"}",
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L2",
+    },
+    {
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m3", seq: 3, role: "assistant", ts: NOW - 7 * 3_600_000,
       preview: "moving chrome to .dv-host-term",
       text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host.",
-      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:2",
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L3",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m3", seq: 3, role: "assistant", ts: NOW - 7 * 3_600_000,
-      preview: "[Read] README.md and reactdock.tsx",
-      text: "[Read] {\"file_path\":\"README.md\"} [Edit] {\"file_path\":\"src/reactdock.tsx\"}",
-      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:3",
-    },
-    {
-      editor: "claude", session_id: "e2e-claude-1", id: "m4", seq: 4, role: "user", ts: NOW - 2 * 3_600_000,
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m4", seq: 4, role: "user", ts: NOW - 2 * 3_600_000,
       preview: "/compact lets continue",
       text: "<command-name>/compact</command-name> /compact lets continue",
-      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:4",
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L4",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m5", seq: 5, role: "assistant", ts: NOW - 15 * 60_000,
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m5", seq: 5, role: "assistant", subtype: E2E_HARNESS === "kimi" ? "Bash" : "exec", ts: NOW - 15 * 60_000,
+      preview: "inspect latest state",
+      text: "git status --short",
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L5",
+    },
+    {
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m6", seq: 6, role: "assistant", ts: NOW - 14 * 60_000,
       preview: "latest visible answer",
-      text: "The latest visible answer has a paired tool record after it.",
-      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:5",
-    },
-    {
-      editor: "claude", session_id: "e2e-claude-1", id: "m6", seq: 6, role: "assistant", ts: NOW - 14 * 60_000,
-      preview: "[Bash] inspect latest state",
-      text: "[Bash] {\"command\":\"git status --short\"}",
-      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:6",
+      text: "The latest visible answer has a paired tool record before it.",
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L6",
     },
   ],
   read_text: "# Terminal\n\n## Sidebar UX\n\nA heading target.\n",

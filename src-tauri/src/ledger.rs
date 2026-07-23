@@ -9,6 +9,7 @@
 // `harness.rs` already resolves the latest session id per cwd; this reads the
 // turns inside one.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ pub enum Editor {
     Claude,
     Opencode,
     Codex,
+    Kimi,
 }
 
 impl Editor {
@@ -36,6 +38,7 @@ impl Editor {
             "claude" => Some(Editor::Claude),
             "opencode" => Some(Editor::Opencode),
             "codex" => Some(Editor::Codex),
+            "kimi" => Some(Editor::Kimi),
             _ => None,
         }
     }
@@ -44,6 +47,7 @@ impl Editor {
             Editor::Claude => "claude",
             Editor::Opencode => "opencode",
             Editor::Codex => "codex",
+            Editor::Kimi => "kimi",
         }
     }
 }
@@ -65,6 +69,8 @@ pub struct AiMessage {
     pub id: String, // uuid (claude) / message.id (opencode) — stable identity
     pub seq: u64,   // order key: line index (claude) / time_created (opencode)
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtype: Option<String>,
     pub ts: u64, // unix ms
     pub preview: String,
     pub text: String,    // full extracted plain text (for cache/copy)
@@ -126,27 +132,122 @@ fn codex_session_path(session_id: &str) -> Option<PathBuf> {
     walk(&home()?.join(".codex").join("sessions"), session_id)
 }
 
+fn kimi_session_path(session_id: &str) -> Option<PathBuf> {
+    let root = home()?.join(".kimi-code").join("sessions");
+    for workspace in fs::read_dir(root).ok()?.flatten() {
+        let path = workspace.path().join(format!("session_{session_id}")).join("agents").join("main").join("wire.jsonl");
+        if path.is_file() { return Some(path); }
+    }
+    None
+}
+
 fn read_codex(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
     let Some(path) = codex_session_path(session_id) else { return Vec::new() };
     let Ok(file) = fs::File::open(&path) else { return Vec::new() };
     let mut out = Vec::new();
+    let mut tool_names = HashMap::<String, String>::new();
     for (seq, line) in BufReader::new(file).lines().enumerate() {
         let seq = seq as u64;
         if after_seq.is_some_and(|n| seq <= n) { continue; }
         let Ok(v) = line.ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).ok_or(()) else { continue };
         let Some(payload) = v.get("payload") else { continue };
-        if payload.get("type").and_then(Value::as_str) != Some("message") { continue; }
-        let Some(role) = payload.get("role").and_then(Value::as_str) else { continue };
-        if role != "user" && role != "assistant" { continue; }
-        let text = payload.get("content").and_then(|c| c.as_array()).map(|parts| {
-            parts.iter().filter_map(|part| part.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n")
-        }).unwrap_or_default();
-        if text.trim().is_empty() { continue; }
-        let id = payload.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        let kind = payload.get("type").and_then(Value::as_str).unwrap_or("");
+        let (id, role, subtype, text) = match kind {
+            "message" => {
+                let Some(role) = payload.get("role").and_then(Value::as_str) else { continue; };
+                if role != "user" && role != "assistant" { continue; }
+                let text = payload.get("content").and_then(|c| c.as_array()).map(|parts| {
+                    parts.iter().filter_map(|part| part.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n")
+                }).unwrap_or_default();
+                if text.trim().is_empty() { continue; }
+                (payload.get("id").and_then(Value::as_str).unwrap_or("").to_string(), role.to_string(), None, text)
+            }
+            "custom_tool_call" | "function_call" => {
+                let name = payload.get("name").and_then(Value::as_str).unwrap_or("tool").to_string();
+                if let Some(call_id) = payload.get("call_id").and_then(Value::as_str) { tool_names.insert(call_id.to_string(), name.clone()); }
+                let key = if kind == "custom_tool_call" { "input" } else { "arguments" };
+                let input = payload.get(key).map(codex_value_text).unwrap_or_default();
+                (payload.get("id").and_then(Value::as_str).unwrap_or("").to_string(), "assistant".to_string(), Some(name), cap(&input, 400))
+            }
+            "custom_tool_call_output" | "function_call_output" => {
+                let call_id = payload.get("call_id").and_then(Value::as_str).unwrap_or("");
+                let subtype = tool_names.get(call_id).map(|name| format!("{name} result")).unwrap_or_else(|| "tool result".to_string());
+                let output = payload.get("output").map(codex_value_text).unwrap_or_default();
+                (String::new(), "assistant".to_string(), Some(subtype), cap(&output, 400))
+            }
+            "reasoning" => (payload.get("id").and_then(Value::as_str).unwrap_or("").to_string(), "assistant".to_string(), Some("reasoning".to_string()), "reasoning trace".to_string()),
+            _ => continue,
+        };
         let id = if id.is_empty() { format!("codex-{seq}") } else { id };
+        // Codex timestamps its JSONL envelope, rather than the message payload.
+        // Preserve that wall-clock value so the sidebar does not fall back to
+        // its sequence number (`#2897`) as a synthetic time.
+        let ts = v.get("timestamp").and_then(Value::as_str).map(iso_to_ms).unwrap_or(0);
         out.push(AiMessage { editor: Editor::Codex, session_id: session_id.to_string(), id,
-            seq, role: role.to_string(), ts: 0, preview: cap(&text, 180), text,
+            seq, role, subtype, ts, preview: cap(&text, 180), text,
             locator: format!("codex:{}#L{}", path.display(), seq + 1) });
+    }
+    out
+}
+
+fn codex_value_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items.iter().filter_map(|item| {
+            item.get("text").and_then(Value::as_str).map(str::to_string)
+                .or_else(|| item.as_str().map(str::to_string))
+        }).collect::<Vec<_>>().join("\n"),
+        _ => value.to_string(),
+    }
+}
+
+fn read_kimi(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
+    let Some(path) = kimi_session_path(session_id) else { return Vec::new() };
+    let Ok(file) = fs::File::open(&path) else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut tool_names = HashMap::<String, String>::new();
+    for (seq, line) in BufReader::new(file).lines().enumerate() {
+        let seq = seq as u64;
+        if after_seq.is_some_and(|n| seq <= n) { continue; }
+        let Ok(v) = line.ok().and_then(|line| serde_json::from_str::<Value>(&line).ok()).ok_or(()) else { continue };
+        let ts = v.get("time").and_then(Value::as_u64).unwrap_or(0);
+        let (id, role, subtype, text) = match v.get("type").and_then(Value::as_str) {
+            Some("turn.prompt") => {
+                let text = v.get("input").and_then(Value::as_array).map(|items| items.iter()
+                    .filter_map(|item| item.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+                if text.is_empty() { continue; }
+                (String::new(), "user".to_string(), None, text)
+            }
+            Some("context.append_loop_event") => {
+                let Some(event) = v.get("event") else { continue };
+                match event.get("type").and_then(Value::as_str) {
+                    Some("content.part") => {
+                        let Some(part) = event.get("part") else { continue };
+                        match part.get("type").and_then(Value::as_str) {
+                            Some("text") => (part.get("uuid").and_then(Value::as_str).unwrap_or("").to_string(), "assistant".to_string(), None, part.get("text").and_then(Value::as_str).unwrap_or("").to_string()),
+                            Some("think") => (part.get("uuid").and_then(Value::as_str).unwrap_or("").to_string(), "assistant".to_string(), Some("thinking".to_string()), cap(part.get("think").and_then(Value::as_str).unwrap_or("thinking trace"), 600)),
+                            _ => continue,
+                        }
+                    }
+                    Some("tool.call") => {
+                        let name = event.get("name").and_then(Value::as_str).unwrap_or("tool").to_string();
+                        if let Some(call_id) = event.get("toolCallId").and_then(Value::as_str) { tool_names.insert(call_id.to_string(), name.clone()); }
+                        (event.get("uuid").and_then(Value::as_str).unwrap_or("").to_string(), "assistant".to_string(), Some(name), cap(&event.get("args").map(codex_value_text).unwrap_or_default(), 400))
+                    }
+                    Some("tool.result") => {
+                        let call_id = event.get("toolCallId").and_then(Value::as_str).unwrap_or("");
+                        let subtype = tool_names.get(call_id).map(|name| format!("{name} result")).unwrap_or_else(|| "tool result".to_string());
+                        let text = event.get("result").map(codex_value_text).unwrap_or_default();
+                        (event.get("uuid").and_then(Value::as_str).unwrap_or("").to_string(), "assistant".to_string(), Some(subtype), cap(&text, 400))
+                    }
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        };
+        if text.trim().is_empty() { continue; }
+        let id = if id.is_empty() { format!("kimi-{seq}") } else { id };
+        out.push(AiMessage { editor: Editor::Kimi, session_id: session_id.to_string(), id, seq, role, subtype, ts, preview: cap(&text, 180), text, locator: format!("kimi:{}#L{}", path.display(), seq + 1) });
     }
     out
 }
@@ -337,6 +438,7 @@ fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<
             id,
             seq,
             role: role.to_string(),
+            subtype: None,
             ts,
             preview,
             text,
@@ -456,6 +558,7 @@ fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
             id: id.clone(),
             seq: time_created as u64,
             role,
+            subtype: None,
             ts: time_created as u64,
             preview,
             text: ex.full,
@@ -482,6 +585,7 @@ pub fn read_ai_messages(
         }
         Editor::Opencode => Ok(read_opencode(&session_id, after_seq)),
         Editor::Codex => Ok(read_codex(&session_id, after_seq)),
+        Editor::Kimi => Ok(read_kimi(&session_id, after_seq)),
     }
 }
 
@@ -504,6 +608,7 @@ pub fn list_ai_sessions(editor: String, cwd: Option<String>) -> Result<Vec<AiSes
         Editor::Claude => Ok(list_claude_sessions(cwd)),
         Editor::Opencode => Ok(list_opencode_sessions(cwd)),
         Editor::Codex => Ok(Vec::new()),
+        Editor::Kimi => Ok(Vec::new()),
     }
 }
 
