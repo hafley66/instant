@@ -878,6 +878,10 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
 }
 .turn-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .turn-copy small { color: var(--muted, #888); font-size: 9px; line-height: 1; text-transform: uppercase; }
+.turn-copy[data-role="user"] .turn-preview,
+.turn-copy[data-role="user"] small { color: var(--row-active-bg); opacity: 1; }
+body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] .turn-preview,
+body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { color: #4ec9b0; }
 .turn-preview-popover {
   position: fixed;
   z-index: 9999;

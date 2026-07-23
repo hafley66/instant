@@ -208,11 +208,11 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
       if (n.kind === "tools") return <span className="sidebar-turn-aggregate">Tools <small>{n.tools.length}</small></span>;
       if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
       if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.title}</span>;
-      if (n.kind === "tool") return <span className="turn-copy"><span className="turn-preview">{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>;
+      if (n.kind === "tool") return <span className="turn-copy" data-role={n.turn.role}><span className="turn-preview">{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>;
       const on = isTurnFav(n.turn);
       return (
         <span className="turn-row">
-          <span className="turn-copy" onPointerEnter={(e) => showPreview(n.turn.text, e.currentTarget.getBoundingClientRect())} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>
+          <span className="turn-copy" data-role={n.turn.role} onPointerEnter={(e) => showPreview(n.turn.text, e.currentTarget.getBoundingClientRect())} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>
           <button
             className="turn-action"
             data-no-row-click=""
@@ -234,7 +234,6 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
     },
   },
   { id: "time", header: "Time", size: 126, minSize: 90, sortValue: (n) => n.kind === "turn" || n.kind === "tool" ? turnOrder(n.turn) : n.kind === "session" ? Math.max(...n.turns.map(turnOrder)) : 0, cell: (n) => n.kind === "turn" ? isCompaction(n.turn) ? <span className="turn-boundary-time"><small>start {formatTurnTime(n.compactionStart ?? turnOrder(n.turn))}</small><small>last {formatTurnTime(turnOrder(n.turn))}</small></span> : formatTurnTime(turnOrder(n.turn)) : n.kind === "tool" ? formatTurnTime(turnOrder(n.turn)) : n.kind === "session" ? formatTurnTime(Math.max(...n.turns.map(turnOrder))) : "" },
-  { id: "files", header: "Files", size: 42, minSize: 36, sortValue: (n) => n.kind === "turn" || n.kind === "tool" ? n.files.length : 0, cell: (n) => n.kind === "turn" || n.kind === "tool" ? String(n.files.length) : "" },
   ];
 }
 
