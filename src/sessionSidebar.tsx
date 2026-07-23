@@ -91,6 +91,8 @@ const TOUCHED_COLS: TreeColumn<TouchedNode>[] = [
 type TurnNode =
   | { kind: "session"; path: string; editor: HarnessId; sessionId: string; cwd: string; current: boolean; label: string; turns: AiMessage[] }
   | { kind: "turn"; path: string; turn: AiMessage; files: Entry[]; tools: AiMessage[]; compactionStart?: number }
+  | { kind: "files"; path: string; entries: Entry[] }
+  | { kind: "tools"; path: string; tools: AiMessage[] }
   | { kind: "tool"; path: string; turn: AiMessage; files: Entry[] }
   | { kind: "file"; path: string; entry: Entry }
   | { kind: "heading"; path: string; entry: Entry; heading: MdSection };
@@ -167,6 +169,15 @@ function turnFileChildren(turn: AiMessage): Entry[] {
   return turnReferences(turn, cwd).map((ref) => fileEntry(ref.path));
 }
 
+function windowFileChildren(turn: AiMessage, tools: AiMessage[]): Entry[] {
+  const cwd = turnCwd.get(`${turn.editor}:${turn.session_id}`) ?? "";
+  const paths = new Set<string>();
+  for (const message of [turn, ...tools]) {
+    for (const reference of turnReferences(message, cwd)) paths.add(reference.path);
+  }
+  return [...paths].map(fileEntry);
+}
+
 function compactionStart(turns: AiMessage[], turn: AiMessage): number | undefined {
   if (!isCompaction(turn)) return undefined;
   const older = turns.filter((candidate) => candidate.seq < turn.seq && !isCompaction(candidate));
@@ -193,6 +204,8 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
     sortValue: (n) => n.kind === "turn" || n.kind === "tool" ? turnOrder(n.turn) : n.kind === "session" ? Math.max(...n.turns.map(turnOrder)) : 0,
     cell: (n) => {
       if (n.kind === "session") return <span className="turn-sess"><span>{n.label}</span><small>{n.cwd}</small></span>;
+      if (n.kind === "files") return <span className="sidebar-turn-aggregate">Files <small>{n.entries.length}</small></span>;
+      if (n.kind === "tools") return <span className="sidebar-turn-aggregate">Tools <small>{n.tools.length}</small></span>;
       if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
       if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.title}</span>;
       if (n.kind === "tool") return <span className="sidebar-turn-ref"><span>tool</span> {n.turn.preview}</span>;
@@ -241,8 +254,10 @@ export function SessionSidebar(props: {
   const [, bump] = useState(0);
   const [root, setRoot] = useState<string | null>(() => getCwd());
   const [turns, setTurns] = useState<AiMessage[]>([]);
+  const [cass, setCass] = useState<{ available: boolean; path: string | null } | null>(null);
+  const [cassCopied, setCassCopied] = useState(false);
   const [headings, setHeadings] = useState<Record<string, MdSection[]>>({});
-  const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("all");
+  const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("visible");
   const [turnPreview, setTurnPreview] = useState<{ text: string; rect: DOMRect } | null>(null);
   const [turnExpanded, setTurnExpanded] = useState<ExpandedState>({});
   const turnColumns = useMemo(
@@ -285,6 +300,13 @@ export function SessionSidebar(props: {
     };
   }, [sid]);
   useEffect(() => loadTurns(), [loadTurns]);
+  useEffect(() => {
+    let alive = true;
+    void invoke<{ available: boolean; path: string | null }>("cass_status")
+      .then((status) => { if (alive) setCass(status); })
+      .catch(() => { if (alive) setCass({ available: false, path: null }); });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => {
       void refreshTurns(sid).then(() => setTurns(tabTurns.get(sid) ?? [])).catch((e: unknown) => console.error("refreshTurns:", e));
@@ -378,7 +400,21 @@ export function SessionSidebar(props: {
             data-testid={source === "turns" ? "sidebar-turns" : "sidebar-files"}
           >
             {source === "turns" ? (
-              turnData.length ? (
+              cass?.available === false ? (
+                <div className="term-sidebar-cass-install" data-testid="cass-install">
+                  <strong>CASS is not installed</strong>
+                  <span>Install it to browse cross-harness session turns.</span>
+                  <code>brew install dicklesworthstone/tap/cass</code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText("brew install dicklesworthstone/tap/cass").then(() => setCassCopied(true)).catch(() => {});
+                    }}
+                  >
+                    {cassCopied ? "copied" : "copy install command"}
+                  </button>
+                </div>
+              ) : turnData.length ? (
                 <TreeTable<TurnNode>
                   key="turns"
                   columns={turnColumns}
@@ -401,7 +437,7 @@ export function SessionSidebar(props: {
                         kind: "turn" as const,
                         path: `turn:${turn.editor}:${turn.session_id}:${turn.id}`,
                         turn,
-                        files: turnFileChildren(turn),
+                        files: windowFileChildren(turn, tools),
                         tools,
                         compactionStart: compactionStart(n.turns, turn),
                       }));
@@ -409,25 +445,35 @@ export function SessionSidebar(props: {
                     if (n.kind === "turn") {
                       if (!isTurnExpanded(n.path)) return [];
                       return [
-                        ...n.tools.map((turn) => ({
-                          kind: "tool" as const,
-                          path: `tool:${n.path}:${turn.id}`,
-                          turn,
-                          files: turnFileChildren(turn),
-                        })),
-                        ...n.files.map((f, i) => ({
+                        ...(n.files.length ? [{ kind: "files" as const, path: `files:${n.path}`, entries: n.files }] : []),
+                        ...(n.tools.length ? [{ kind: "tools" as const, path: `tools:${n.path}`, tools: n.tools }] : []),
+                      ];
+                    }
+                    if (n.kind === "files") {
+                      return isTurnExpanded(n.path) ? n.entries.map((entry, i) => ({
+                        kind: "file" as const,
+                        path: `file:${n.path}:${i}:${entry.path}`,
+                        entry,
+                      })) : [];
+                    }
+                    if (n.kind === "tools") {
+                      return isTurnExpanded(n.path) ? n.tools.map((turn) => ({
+                        kind: "tool" as const,
+                        path: `tool:${n.path}:${turn.id}`,
+                        turn,
+                        files: turnFileChildren(turn),
+                      })) : [];
+                    }
+                    if (n.kind === "tool") return isTurnExpanded(n.path) ? n.files.map((f, i) => ({
                         kind: "file" as const,
                         path: `file:${n.path}:${i}:${f.path}`,
                         entry: f,
-                        })),
-                      ];
-                    }
-                    if (n.kind === "tool") return isTurnExpanded(n.path) ? n.files.map((f, i) => ({ kind: "file" as const, path: `file:${n.path}:${i}:${f.path}`, entry: f })) : [];
+                      })) : [];
                     if (n.kind === "file") return isTurnExpanded(n.path) ? flatHeadings(headings[n.entry.path] ?? []).map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, entry: n.entry, heading })) : [];
                     return undefined;
                   }}
                   getRowCanExpand={(n) =>
-                    n.kind === "session" ? true : n.kind === "turn" ? n.tools.length > 0 || n.files.length > 0 : n.kind === "tool" ? n.files.length > 0 : n.kind === "file" ? isMarkdown(n.entry) : false
+                    n.kind === "session" ? true : n.kind === "turn" ? n.tools.length > 0 || n.files.length > 0 : n.kind === "files" ? n.entries.length > 0 : n.kind === "tools" ? n.tools.length > 0 : n.kind === "tool" ? n.files.length > 0 : n.kind === "file" ? isMarkdown(n.entry) : false
                   }
                   onToggleExpand={(n, willExpand) => { if (willExpand && n.kind === "file") loadHeadings(n.entry); }}
                   toggleOnDoubleClick={(n) => n.kind === "session" || n.kind === "turn" || n.kind === "tool"}
@@ -445,7 +491,11 @@ export function SessionSidebar(props: {
                     const hay =
                       n.kind === "turn" || n.kind === "tool"
                         ? `${n.turn.role} ${n.turn.preview}`
-                        : n.kind === "file"
+                        : n.kind === "files"
+                          ? "files"
+                          : n.kind === "tools"
+                            ? "tools"
+                            : n.kind === "file"
                           ? n.entry.name
                           : n.kind === "heading"
                             ? n.heading.title

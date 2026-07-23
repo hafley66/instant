@@ -70,8 +70,9 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   await expect(page.locator('[data-testid="sidebar-turns"]')).toBeVisible();
 
   // One current transcript node opens to visible rows only. The fixture has two
-  // visible/tool pairs; visible rows are newest-first and tool records remain
-  // beneath their owning visible row until that row is expanded.
+  // visible/tool pairs; visible rows are newest-first. Each visible turn owns
+  // collapsed Files and Tools aggregate rows, keeping raw tool events out of
+  // the default scan while retaining them for recovery.
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("current · claude");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("fix the off-by-one");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("moving chrome");
@@ -84,6 +85,11 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   await expect(turns).not.toContainText("[Read] README.md and reactdock.tsx");
   const latest = turns.locator(".dtable-row").filter({ hasText: "latest visible answer" });
   await latest.locator(".tt-twisty").click();
+  await expect(turns).toContainText("Files");
+  await expect(turns).toContainText("Tools");
+  await expect(turns).not.toContainText("[Bash] inspect latest state");
+  const tools = turns.locator(".dtable-row").filter({ hasText: "Tools" });
+  await tools.locator(".tt-twisty").click();
   await expect(turns).toContainText("[Bash] inspect latest state");
 
   const touched = page.locator('[data-testid="sidebar-touched"]');

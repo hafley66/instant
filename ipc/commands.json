@@ -8,7 +8,7 @@
   "config": ["config_get", "config_set", "config_reload", "config_open"],
   "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "search_files", "read_image", "read_text", "save_text", "delete_file", "fs_watch_claim", "fs_watch_release"],
   "harness": ["harness_session", "harness_sessions"],
-  "ledger": ["list_ai_sessions", "read_ai_messages", "latest_ai_message"],
+  "ledger": ["list_ai_sessions", "read_ai_messages", "latest_ai_message", "cass_status"],
   "meme": ["make_slack_emoji", "magick_available", "install_imagemagick", "save_meme", "copy_meme_image"],
   "favorites": ["fav_add", "fav_remove", "fav_list"],
   "sprefa": ["sprefa_schema", "sprefa_ping", "sprefa_eval", "sprefa_query_sql", "sprefa_rel_source"],

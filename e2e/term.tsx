@@ -29,6 +29,7 @@ import { wireContextMenu } from "../src/ctxmenu";
 // undefined, which the app tolerates in e2e (all invokes are .catch'd).
 type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
 (window as E2eWindow).__instantE2eNativeResults = {
+  cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
   list_dir: {
     path: "/tmp/term-e2e",
     parent: "/tmp",

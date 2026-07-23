@@ -723,6 +723,41 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 .term-sidebar-resize:hover { background: rgba(127, 127, 127, .3); }
 .term-sidebar-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .term-sidebar-empty { padding: 8px; color: var(--muted, #666); font-size: 11px; }
+.term-sidebar-cass-install {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  color: var(--panel-fg);
+  font-size: 11px;
+}
+.term-sidebar-cass-install strong { font-size: 13px; }
+.term-sidebar-cass-install span { opacity: 0.72; }
+.term-sidebar-cass-install code {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 6px;
+  border: 1px solid var(--frame);
+  background: var(--input-bg);
+  color: var(--panel-fg);
+}
+.term-sidebar-cass-install button {
+  min-height: 26px;
+  border: 1px solid var(--frame);
+  background: var(--head-bg);
+  color: var(--panel-fg);
+  cursor: pointer;
+}
+.term-sidebar-cass-install button:hover { background: var(--row-hover); }
+.sidebar-turn-aggregate { opacity: 0.82; }
+.sidebar-turn-aggregate small { margin-left: 4px; opacity: 0.72; }
 
 /* Vertical stack of sidebar panes (Files | Touched, later turns/referenced).
    react-resizable-panels drives the flex sizing itself; we only give the group

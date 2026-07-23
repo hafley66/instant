@@ -71,6 +71,37 @@ pub struct AiMessage {
     pub locator: String, // "claude:<path>#L<n>" | "opencode:#msg=<id>"
 }
 
+/// Discovery only. The UI can offer the exact local install command when CASS
+/// is absent, but it never installs or indexes on the user's behalf.
+#[derive(Serialize)]
+pub struct CassStatus {
+    pub available: bool,
+    pub path: Option<String>,
+}
+
+fn cass_path() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(paths) = std::env::var_os("PATH") {
+        candidates.extend(std::env::split_paths(&paths).map(|dir| dir.join("cass")));
+    }
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/bin/cass"),
+        PathBuf::from("/usr/local/bin/cass"),
+        home()?.join(".cargo/bin/cass"),
+        home()?.join(".local/bin/cass"),
+    ]);
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+#[tauri::command]
+pub fn cass_status() -> CassStatus {
+    let path = cass_path();
+    CassStatus {
+        available: path.is_some(),
+        path: path.map(|path| path.to_string_lossy().into_owned()),
+    }
+}
+
 fn claude_dir(cwd: &str) -> Option<PathBuf> {
     Some(
         home()?
