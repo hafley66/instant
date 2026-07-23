@@ -48,18 +48,25 @@ type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> 
   // read_ai_messages returns the ledger for the resolved claude session.
   read_ai_messages: [
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m1", seq: 1, role: "user", ts: 0,
+      editor: "claude", session_id: "e2e-claude-1", id: "m1", seq: 1, role: "user", ts: 1784808000000,
       preview: "fix the off-by-one in fitTerm",
       text: "fix the off-by-one in fitTerm so the rows stop drifting",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:1",
     },
     {
-      editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: 0,
+      editor: "claude", session_id: "e2e-claude-1", id: "m2", seq: 2, role: "assistant", ts: 1784808060000,
       preview: "moving chrome to .dv-host-term",
-      text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host. [Edit] {\"file_path\":\"src/reactdock.tsx\"}",
+      text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host. [Read] {\"file_path\":\"README.md\"} [Edit] {\"file_path\":\"src/reactdock.tsx\"}",
       locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:2",
     },
+    {
+      editor: "claude", session_id: "e2e-claude-1", id: "m3", seq: 3, role: "user", ts: 1784808120000,
+      preview: "/compact lets continue",
+      text: "<command-name>/compact</command-name> /compact lets continue",
+      locator: "~/.claude/projects/-tmp-term-e2e/e2e-claude-1.jsonl:3",
+    },
   ],
+  read_text: "# Terminal\n\n## Sidebar UX\n\nA heading target.\n",
 };
 
 function SessionsPanel(_props: IDockviewPanelProps) {
@@ -100,13 +107,13 @@ installKeymap([
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
   openTab("e2e", { cwd: "/tmp/term-e2e" });
   // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
-  // Seed the pane split. Touched is derived from the session transcript, not
-  // seeded. Default source is Files.
+  // Seed the pane split. Touched is derived from the session transcript; Turns
+  // is the initial source.
   const sid = sessionId("e2e");
   store.set({
     termSidebar: {
       ...store.get().termSidebar,
-      [sid]: { open: true, width: 300, sizes: [55, 45] },
+      [sid]: { open: true, width: 460, source: "turns", sizes: [55, 45] },
     },
   });
 };

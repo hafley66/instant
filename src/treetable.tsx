@@ -97,6 +97,13 @@ export interface TreeTableProps<T> {
   // Render a controls bar above the table: a search box (when `filter` is given)
   // plus collapse-all / expand-all buttons. Self-contained + reusable.
   controls?: boolean;
+  // Controlled search state follows the same persistence pattern as sorting and
+  // sizing. Sidebar views use this to restore their independent filters.
+  query?: string;
+  onQueryChange?: (query: string) => void;
+  // Optional host reset for persisted table state.
+  onResetView?: () => void;
+  toolbar?: ReactNode;
   // Predicate for the search box: return true to keep a row. A row is shown when
   // it matches OR any descendant matches (filterFromLeafRows keeps ancestors).
   filter?: (row: T, q: string) => boolean;
@@ -139,7 +146,12 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
   };
   // Search query for the controls bar. A non-empty query forces every branch
   // open so matches buried under collapsed ancestors are visible.
-  const [query, setQuery] = useState("");
+  const [ownQuery, setOwnQuery] = useState("");
+  const query = props.query ?? ownQuery;
+  const setQuery = (next: string) => {
+    props.onQueryChange?.(next);
+    if (props.query === undefined) setOwnQuery(next);
+  };
 
   const colDefs: ColumnDef<T>[] = columns.map((c) => ({
     id: c.id,
@@ -453,6 +465,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
   return (
     <div className="tt-host">
       <div className="tt-controls">
+        {props.toolbar}
         {props.filter ? (
           <input
             className="tt-search"
@@ -490,6 +503,9 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
         >
           ⊞
         </button>
+        {props.onResetView ? (
+          <button type="button" className="tt-ctl" title="reset view" onClick={props.onResetView}>↺</button>
+        ) : null}
         {q ? <span className="tt-match">{matches}</span> : null}
       </div>
       {host}

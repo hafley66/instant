@@ -688,6 +688,16 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
    flex row: .term-slot fills with the xterm host, .term-sidebar is a fixed-
    width resizable column persisted per session id. */
 .term-panel { flex-direction: row; }
+.term-panel[data-sidebar-placement="bottom"] { flex-direction: column; }
+.term-panel[data-sidebar-placement="bottom"] .term-sidebar {
+  width: 100% !important;
+  border-left: 0;
+  border-top: var(--frame-w) solid var(--frame);
+}
+.term-sidebar[data-placement="bottom"] .term-sidebar-resize {
+  top: 0; left: 0; right: 0; bottom: auto;
+  width: auto; height: 5px; cursor: ns-resize;
+}
 .term-slot { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .term-sidebar {
   flex: none;
@@ -823,18 +833,63 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   color: var(--row-active-bg);
 }
 body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
-.turn-preview { opacity: 0.85; }
-.turn-star {
-  display: inline-block;
-  width: 13px;
-  margin-right: 3px;
-  text-align: center;
-  color: var(--muted, #888);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  user-select: none;
+.turn-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
 }
+.turn-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.turn-copy small { color: var(--muted, #888); font-size: 9px; line-height: 1; text-transform: uppercase; }
+.turn-preview {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.dtable-row.turn-live > td { background: color-mix(in srgb, var(--row-active-bg) 12%, transparent); }
+.tt-turn-filter { flex: none; font-size: 10px; white-space: nowrap; }
+.tt-turn-filter select { max-width: 86px; font: inherit; }
+.turn-star {
+  font-size: 15px;
+}
+.turn-action {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--panel-fg);
+  cursor: pointer;
+  font: inherit;
+  opacity: 0;
+}
+.dtable-row:hover .turn-action,
+.turn-action:focus { opacity: 1; }
+.turn-action:hover { background: var(--row-hover); }
+.sidebar-file {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.sidebar-file > span,
+.sidebar-file > small,
+.sidebar-turn-ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-file small { color: var(--muted, #888); font-size: 9px; }
+.sidebar-heading { color: var(--row-active-bg); }
+.sidebar-turn-ref > span { color: var(--row-active-bg); text-transform: uppercase; font-size: 9px; }
+.term-sidebar .tt-tree { min-width: 0; }
+.term-sidebar .tt-tree > .turn-row,
+.term-sidebar .tt-tree > .sidebar-file,
+.term-sidebar .tt-tree > .sidebar-turn-ref { min-width: 0; flex: 1; }
 .turn-star[data-on="true"] { color: #e0a020; }
 .turn-star:hover { background: var(--row-hover); }
 .panel {
@@ -2222,28 +2277,28 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
 }
 .tt-tree {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 4px;
-  /* Fill the row so the twisty's hit-zone spans the full row height. */
-  min-height: 100%;
 }
-/* Fat twisty: full row-height clickable zone, ~22px wide, negative margins eat
-   the td's 4px/8px padding so the hit-box runs edge to edge with zero dead
-   margin. The glyph is centered + larger; the whole rectangle toggles. */
+/* Fixed square disclosure target. It participates in the same flow as text,
+   so depth padding moves the icon and its label together. */
 .tt-twisty {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  align-self: stretch;
-  width: 22px;
-  margin: -4px 4px -4px -8px;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   cursor: pointer;
   opacity: 0.7;
   font-size: 11px;
+  border: 1px solid transparent;
 }
 .tt-twisty:hover {
   opacity: 1;
   background: var(--row-hover);
+  border-color: var(--frame);
 }
 .tt-twisty.tt-leaf {
   cursor: default;

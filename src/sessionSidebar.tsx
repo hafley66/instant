@@ -14,11 +14,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { invoke } from "./generated/native";
-import { store, type FsEntry, type DirListing, type AiMessage } from "./state";
+import { store, type FsEntry, type DirListing, type AiMessage, type TermSidebarView } from "./state";
 import { fileGlyph, baseName } from "./core";
 import { openPreviewPanel } from "./preview";
+import { openMarkdownPanel } from "./mdview/open";
+import { parseMdSections, type MdSection } from "./mdview/model";
+import { fileEntry, isCompaction, isMarkdown, isToolOnlyTurn, touchedFiles, turnReferences, type TouchedFile } from "./0_sessionSidebarModel";
 import {
   warmTurns,
+  refreshTurns,
   tabTurns,
   turnCwd,
   isTurnFav,
@@ -31,6 +35,7 @@ import type { HarnessId } from "./harness";
 type Entry = FsEntry;
 type Sizes = [number, number];
 type Source = "files" | "turns";
+type Placement = "right" | "bottom";
 
 // A patch the host (TerminalPanel) merges into store.termSidebar[sid].
 type SidebarPatch = Partial<{
@@ -38,6 +43,8 @@ type SidebarPatch = Partial<{
   width: number;
   source: Source;
   sizes: Sizes;
+  placement: Placement;
+  views?: Partial<Record<"files" | "turns" | "touched", TermSidebarView>>;
 }>;
 
 // Explorer convention: folders before files, then alphabetical.
@@ -60,38 +67,21 @@ async function loadDir(path: string): Promise<void> {
   }
 }
 
-// --- Session file references (Touched + per-turn children share this). ---
-
-// tool_use input is serialized into the turn text (ledger.rs), so a tool's
-// file_path is recoverable as JSON — structured, not a free-text guess.
-const FILE_PATH_RE = /"file_path"\s*:\s*"([^"]+)"/g;
-function turnFiles(t: AiMessage): string[] {
-  const out: string[] = [];
-  for (const m of t.text.matchAll(FILE_PATH_RE)) {
-    const p = m[1];
-    if (p && !out.includes(p)) out.push(p);
-  }
-  return out;
-}
-// Resolve a referenced path against the session cwd: claude tool paths are
-// usually absolute, but tolerate relative ones by joining the ledger cwd.
-function resolveFile(raw: string, cwd: string): string {
-  if (raw.startsWith("~")) return raw;
-  if (raw.startsWith("/")) return raw;
-  return (cwd.replace(/\/$/, "") + "/" + raw).replace(/\/+/g, "/");
-}
-function fileEntry(raw: string, cwd: string): Entry {
-  const path = resolveFile(raw, cwd);
-  const name = path.split("/").pop() || path;
-  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
-  return { name, path, is_dir: false, size: 0, modified: 0, ext };
-}
-
 const FILES_COLS: TreeColumn<Entry>[] = [
   { id: "name", header: "Files", tree: true, cell: (e) => <>{fileGlyph(e)} {e.name}</> },
 ];
-const TOUCHED_COLS: TreeColumn<Entry>[] = [
-  { id: "name", header: "Touched", tree: true, cell: (e) => <>{fileGlyph(e)} {e.name}</> },
+const TOUCHED_COLS: TreeColumn<TouchedNode>[] = [
+  {
+    id: "file", header: "Touched", tree: true, size: 140, minSize: 108, sortValue: (n) => n.kind === "file" ? n.file.entry.name : n.kind === "turn" ? n.reference.turn.preview : n.heading.title,
+    cell: (n) => n.kind === "file" ? <span className="sidebar-file"><span>{fileGlyph(n.file.entry)} {n.file.entry.name}</span><small>{n.file.displayPath}</small></span>
+      : n.kind === "heading" ? <span className="sidebar-heading"># {n.heading.title}</span>
+        : <span className="sidebar-turn-ref"><span>{n.reference.turn.role}</span> {n.reference.turn.preview}</span>,
+  },
+  { id: "touches", header: "Uses", size: 36, minSize: 32, sortValue: (n) => n.kind === "file" ? n.file.touchCount : n.kind === "turn" ? n.reference.turn.seq : 0, cell: (n) => n.kind === "file" ? String(n.file.touchCount) : n.kind === "turn" ? n.reference.action : "" },
+  { id: "first", header: "First", size: 58, minSize: 50, sortValue: (n) => n.kind === "file" ? n.file.firstTouchedAt : n.kind === "turn" ? n.reference.turn.ts : 0, cell: (n) => n.kind === "file" ? formatWhen(n.file.firstTouchedAt) : n.kind === "turn" ? formatTurnTime(n.reference.turn.ts || n.reference.turn.seq) : "" },
+  { id: "last", header: "Last", size: 58, minSize: 50, sortValue: (n) => n.kind === "file" ? n.file.lastTouchedAt : 0, cell: (n) => n.kind === "file" ? formatWhen(n.file.lastTouchedAt) : n.kind === "turn" ? n.reference.turn.role : "" },
+  { id: "read", header: "Read", size: 58, minSize: 50, sortValue: (n) => n.kind === "file" ? n.file.lastReadAt : 0, cell: (n) => n.kind === "file" ? formatWhen(n.file.lastReadAt) : n.kind === "turn" ? String(turnReferences(n.reference.turn, turnCwd.get(`${n.reference.turn.editor}:${n.reference.turn.session_id}`) ?? "").length) : "" },
+  { id: "by", header: "By", size: 50, minSize: 44, sortValue: (n) => n.kind === "file" ? latestReference(n.file)?.turn.seq ?? 0 : 0, cell: (n) => n.kind === "file" ? `${latestReference(n.file)?.turn.role ?? ""} #${latestReference(n.file)?.turn.seq ?? ""}` : n.kind === "turn" ? `#${n.reference.turn.seq}` : "" },
 ];
 
 // --- Transcript tree (session -> turn -> referenced files). ---
@@ -99,7 +89,39 @@ const TOUCHED_COLS: TreeColumn<Entry>[] = [
 type TurnNode =
   | { kind: "session"; path: string; editor: HarnessId; sessionId: string; label: string; turns: AiMessage[] }
   | { kind: "turn"; path: string; turn: AiMessage; files: Entry[] }
-  | { kind: "file"; path: string; entry: Entry };
+  | { kind: "file"; path: string; entry: Entry }
+  | { kind: "heading"; path: string; entry: Entry; heading: MdSection };
+
+type TouchedNode =
+  | { kind: "file"; path: string; file: TouchedFile; headings: MdSection[] }
+  | { kind: "heading"; path: string; file: TouchedFile; heading: MdSection }
+  | { kind: "turn"; path: string; reference: TouchedFile["references"][number] };
+
+function formatWhen(value: number): string {
+  return formatRelativeTime(value);
+}
+
+function formatTurnTime(value: number): string {
+  return formatRelativeTime(value);
+}
+
+function formatRelativeTime(value: number): string {
+  if (!value) return "—";
+  if (value < 10_000_000_000) return `#${value}`;
+  const elapsed = Math.floor((Date.now() - value) / 1000);
+  if (elapsed >= 0 && elapsed < 60) return `${elapsed}s`;
+  if (elapsed >= 60 && elapsed < 3_600) return `${Math.floor(elapsed / 60)}m`;
+  if (elapsed >= 3_600 && elapsed < 86_400) return `${Math.floor(elapsed / 3_600)}h`;
+  return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function latestReference(file: TouchedFile) {
+  return file.references[file.references.length - 1];
+}
+
+function flatHeadings(headings: MdSection[]): MdSection[] {
+  return headings.flatMap((heading) => [heading, ...flatHeadings(heading.children)]);
+}
 
 // Newest turn first within a session (default desc). Sessions keep arrival order
 // (the resolver returns newest-first already).
@@ -133,7 +155,7 @@ function turnNodes(turns: AiMessage[]): TurnNode[] {
 // A turn's file children, resolved against its session cwd.
 function turnFileChildren(turn: AiMessage): Entry[] {
   const cwd = turnCwd.get(`${turn.editor}:${turn.session_id}`) ?? "";
-  return turnFiles(turn).map((raw) => fileEntry(raw, cwd));
+  return turnReferences(turn, cwd).map((ref) => fileEntry(ref.path));
 }
 
 // Favorite toggle for a turn row. cwd comes from turnCwd (where the session's
@@ -146,23 +168,29 @@ async function toggleTurnFav(t: AiMessage) {
 
 const TURN_COLS: TreeColumn<TurnNode>[] = [
   {
-    id: "turn",
-    header: "Turns",
+    id: "text",
+    header: "Turn",
     tree: true,
     // sortValue = recency: a session by its newest turn, a turn by its seq, a
     // file by 0 (stable under its parent). defaultSorting below sets desc.
-    sortValue: (n) =>
-      n.kind === "turn" ? n.turn.seq : n.kind === "session" ? Math.max(...n.turns.map((t) => t.seq)) : 0,
+    size: 240, minSize: 150,
+    sortValue: (n) => n.kind === "turn" ? n.turn.seq : n.kind === "session" ? Math.max(...n.turns.map((t) => t.seq)) : 0,
     cell: (n) => {
       if (n.kind === "session") return <span className="turn-sess">{n.label}</span>;
       if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
-      // turn: compact star (left) + role + preview, all inline spans — matches
-      // the favorites row layout, not a padded <button>.
+      if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.title}</span>;
       const on = isTurnFav(n.turn);
       return (
-        <>
-          <span
-            className="turn-star"
+        <span className="turn-row">
+          <span className="turn-copy"><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{n.turn.preview}</span><small>{n.turn.role}</small></span>
+          <button
+            className="turn-action"
+            data-no-row-click=""
+            title="open turn in new tab"
+            onClick={(e) => { e.stopPropagation(); openTurn(n.turn); }}
+          >↗</button>
+          <button
+            className="turn-action turn-star"
             data-on={on}
             data-no-row-click=""
             title="favorite turn"
@@ -170,15 +198,13 @@ const TURN_COLS: TreeColumn<TurnNode>[] = [
               e.stopPropagation();
               void toggleTurnFav(n.turn);
             }}
-          >
-            {on ? "★" : "☆"}
-          </span>
-          <span className="turn-role" data-role={n.turn.role}>{n.turn.role}</span>
-          <span className="turn-preview">{n.turn.preview}</span>
-        </>
+          >{on ? "★" : "☆"}</button>
+        </span>
       );
     },
   },
+  { id: "time", header: "Time", size: 94, minSize: 70, sortValue: (n) => n.kind === "turn" ? n.turn.ts || n.turn.seq : 0, cell: (n) => n.kind === "turn" ? formatTurnTime(n.turn.ts || n.turn.seq) : "" },
+  { id: "files", header: "Files", size: 42, minSize: 36, sortValue: (n) => n.kind === "turn" ? n.files.length : 0, cell: (n) => n.kind === "turn" ? String(n.files.length) : "" },
 ];
 
 export function SessionSidebar(props: {
@@ -187,14 +213,18 @@ export function SessionSidebar(props: {
   width: number;
   sizes: Sizes;
   source: Source;
+  placement: Placement;
+  views?: Partial<Record<"files" | "turns" | "touched", TermSidebarView>>;
   onWidth: (px: number) => void;
   onResizeEnd: () => void;
   onPatch: (p: SidebarPatch) => void;
 }) {
-  const { sid, getCwd, width, sizes, source, onWidth, onResizeEnd, onPatch } = props;
+  const { sid, getCwd, width, sizes, source, placement, views, onWidth, onResizeEnd, onPatch } = props;
   const [, bump] = useState(0);
   const [root, setRoot] = useState<string | null>(() => getCwd());
   const [turns, setTurns] = useState<AiMessage[]>([]);
+  const [headings, setHeadings] = useState<Record<string, MdSection[]>>({});
+  const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("all");
 
   // Re-render when shared listings or favorites change. Star state lives in
   // store.aiFavs; the turn rows re-read isTurnFav on each render.
@@ -227,24 +257,31 @@ export function SessionSidebar(props: {
     };
   }, [sid]);
   useEffect(() => loadTurns(), [loadTurns]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshTurns(sid).then(() => setTurns(tabTurns.get(sid) ?? [])).catch((e: unknown) => console.error("refreshTurns:", e));
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [sid]);
 
-  // Touched = the files the session's transcript references, unioned across
-  // turns (deduped by resolved path). Not what the user manually opened.
-  const touchedFiles = useMemo(() => {
-    const seen = new Set<string>();
-    const out: Entry[] = [];
-    for (const t of turns) {
-      const cwd = turnCwd.get(`${t.editor}:${t.session_id}`) ?? "";
-      for (const raw of turnFiles(t)) {
-        const e = fileEntry(raw, cwd);
-        if (!seen.has(e.path)) {
-          seen.add(e.path);
-          out.push(e);
-        }
-      }
-    }
-    return out;
-  }, [turns]);
+  const touched = useMemo(
+    () => touchedFiles(turns, (turn) => turnCwd.get(`${turn.editor}:${turn.session_id}`) ?? ""),
+    [turns],
+  );
+  const touchedData = useMemo<TouchedNode[]>(
+    () => touched.map((file) => ({ kind: "file", path: `touched:${file.entry.path}`, file, headings: headings[file.entry.path] ?? [] })),
+    [touched, headings],
+  );
+  const loadHeadings = (entry: Entry) => {
+    if (!isMarkdown(entry) || headings[entry.path]) return;
+    void invoke<string>("read_text", { path: entry.path })
+      .then((text) => setHeadings((prev) => ({ ...prev, [entry.path]: parseMdSections(text).tree })))
+      .catch(() => setHeadings((prev) => ({ ...prev, [entry.path]: [] })));
+  };
+  const patchView = (view: "files" | "turns" | "touched", patch: Partial<TermSidebarView>) =>
+    onPatch({ views: { ...views, [view]: { ...views?.[view], ...patch } } });
+  const resetView = (view: "files" | "turns" | "touched") =>
+    patchView(view, { sorting: view === "turns" ? [{ id: "text", desc: true }] : view === "touched" ? [{ id: "last", desc: true }] : [], columnSizing: {}, query: "" });
 
   // PanelGroup reports sizes continuously during a drag; persist only on drag
   // end so the store isn't hammered and the live drag never fights a re-render.
@@ -255,10 +292,10 @@ export function SessionSidebar(props: {
   // no xterm refit, since the slot width is unchanged.)
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
-    const startX = e.clientX;
+    const start = placement === "right" ? e.clientX : e.clientY;
     const startW = width;
     const move = (ev: PointerEvent) =>
-      onWidth(Math.max(160, Math.min(560, startW + (startX - ev.clientX))));
+      onWidth(Math.max(160, Math.min(560, startW + (start - (placement === "right" ? ev.clientX : ev.clientY)))));
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -270,23 +307,25 @@ export function SessionSidebar(props: {
 
   const fileData = root ? childrenOf(root) : [];
   const turnData = turnNodes(turns);
+  const activeTurn = turns.filter((turn) => !isCompaction(turn)).reduce<AiMessage | null>((latest, turn) => !latest || turn.seq > latest.seq ? turn : latest, null);
   return (
-    <aside className="term-sidebar" style={{ width }} data-sid={sid}>
+    <aside className="term-sidebar" data-placement={placement} style={placement === "right" ? { width } : { height: width }} data-sid={sid}>
       <div className="term-sidebar-resize" onPointerDown={startResize} title="drag to resize" />
       <div className="term-sidebar-tabs">
-        <button
-          className="term-sidebar-tab"
-          data-active={source === "files"}
-          onClick={() => onPatch({ source: "files" })}
-        >
-          Files
-        </button>
         <button
           className="term-sidebar-tab"
           data-active={source === "turns"}
           onClick={() => onPatch({ source: "turns" })}
         >
           Turns
+        </button>
+        <button className="term-sidebar-tab term-sidebar-place" title={placement === "right" ? "move to bottom" : "move to right"} onClick={() => onPatch({ placement: placement === "right" ? "bottom" : "right" })}>{placement === "right" ? "↓" : "→"}</button>
+        <button
+          className="term-sidebar-tab"
+          data-active={source === "files"}
+          onClick={() => onPatch({ source: "files" })}
+        >
+          Files
         </button>
       </div>
       <div className="term-sidebar-body">
@@ -312,6 +351,13 @@ export function SessionSidebar(props: {
                   data={turnData}
                   virtual
                   defaultExpandedAll
+                  sorting={views?.turns?.sorting}
+                  onSortingChange={(sorting) => patchView("turns", { sorting })}
+                  columnSizing={views?.turns?.columnSizing}
+                  onColumnSizingChange={(columnSizing) => patchView("turns", { columnSizing })}
+                  query={views?.turns?.query}
+                  onQueryChange={(query) => patchView("turns", { query })}
+                  onResetView={() => resetView("turns")}
                   getRowId={(n) => n.path}
                   getSubRows={(n) => {
                     if (n.kind === "session") {
@@ -329,26 +375,37 @@ export function SessionSidebar(props: {
                         entry: f,
                       }));
                     }
+                    if (n.kind === "file") return flatHeadings(headings[n.entry.path] ?? []).map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, entry: n.entry, heading }));
                     return undefined;
                   }}
                   getRowCanExpand={(n) =>
-                    n.kind === "session" ? true : n.kind === "turn" ? n.files.length > 0 : false
+                    n.kind === "session" ? true : n.kind === "turn" ? n.files.length > 0 : n.kind === "file" ? isMarkdown(n.entry) : false
                   }
-                  toggleOnDoubleClick={(n) => n.kind === "session"}
+                  onToggleExpand={(n, willExpand) => { if (willExpand && n.kind === "file") loadHeadings(n.entry); }}
+                  toggleOnDoubleClick={(n) => n.kind === "session" || n.kind === "turn"}
                   onRowDoubleClick={(n) => {
-                    if (n.kind === "turn") openTurn(n.turn);
-                    else if (n.kind === "file") openPreviewPanel(n.entry.path);
+                    if (n.kind === "file") openPreviewPanel(n.entry.path);
+                    else if (n.kind === "heading") openMarkdownPanel(n.entry.path, n.heading.id);
                   }}
                   controls
                   filter={(n, q) => {
+                    if (n.kind === "turn") {
+                      if (turnFilter === "visible" && isToolOnlyTurn(n.turn)) return false;
+                      if (turnFilter === "user" && n.turn.role !== "user") return false;
+                      if (turnFilter === "tools" && !isToolOnlyTurn(n.turn)) return false;
+                    }
                     const hay =
                       n.kind === "turn"
                         ? `${n.turn.role} ${n.turn.preview}`
                         : n.kind === "file"
                           ? n.entry.name
-                          : n.label;
+                          : n.kind === "heading"
+                            ? n.heading.title
+                            : n.label;
                     return hay.toLowerCase().includes(q.toLowerCase());
                   }}
+                  rowClass={(n) => n.kind === "turn" && n.turn.id === activeTurn?.id ? "turn-live" : undefined}
+                  toolbar={<label className="tt-turn-filter">show <select aria-label="turn content filter" value={turnFilter} onChange={(event) => setTurnFilter(event.target.value as typeof turnFilter)}><option value="all">all</option><option value="visible">visible text</option><option value="user">user</option><option value="tools">tool-only</option></select></label>}
                   searchPlaceholder="filter turns…"
                 />
               ) : (
@@ -359,6 +416,13 @@ export function SessionSidebar(props: {
                 key="files"
                 columns={FILES_COLS}
                 data={fileData}
+                sorting={views?.files?.sorting}
+                onSortingChange={(sorting) => patchView("files", { sorting })}
+                columnSizing={views?.files?.columnSizing}
+                onColumnSizingChange={(columnSizing) => patchView("files", { columnSizing })}
+                query={views?.files?.query}
+                onQueryChange={(query) => patchView("files", { query })}
+                onResetView={() => resetView("files")}
                 getRowId={(e) => e.path}
                 getSubRows={(e) => (e.is_dir ? childrenOf(e.path) : undefined)}
                 getRowCanExpand={(e) => e.is_dir}
@@ -384,12 +448,38 @@ export function SessionSidebar(props: {
             className="term-sidebar-panel"
             data-testid="sidebar-touched"
           >
-            {touchedFiles.length ? (
-              <TreeTable<Entry>
+            {touchedData.length ? (
+              <TreeTable<TouchedNode>
                 columns={TOUCHED_COLS}
-                data={touchedFiles}
-                getRowId={(e) => e.path}
-                onRowDoubleClick={(e) => openPreviewPanel(e.path)}
+                data={touchedData}
+                sorting={views?.touched?.sorting}
+                onSortingChange={(sorting) => patchView("touched", { sorting })}
+                columnSizing={views?.touched?.columnSizing}
+                onColumnSizingChange={(columnSizing) => patchView("touched", { columnSizing })}
+                query={views?.touched?.query}
+                onQueryChange={(query) => patchView("touched", { query })}
+                onResetView={() => resetView("touched")}
+                getRowId={(n) => n.path}
+                getSubRows={(n) => n.kind === "file"
+                  ? [
+                      ...flatHeadings(n.headings).map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, file: n.file, heading })),
+                      ...n.file.references.slice().sort((a, b) => b.turn.seq - a.turn.seq).map((reference) => ({ kind: "turn" as const, path: `${n.path}:turn:${reference.turn.id}`, reference })),
+                    ]
+                  : undefined}
+                getRowCanExpand={(n) => n.kind === "file" && (n.file.references.length > 0 || isMarkdown(n.file.entry))}
+                onToggleExpand={(n, willExpand) => { if (willExpand && n.kind === "file") loadHeadings(n.file.entry); }}
+                onRowDoubleClick={(n) => {
+                  if (n.kind === "file") openPreviewPanel(n.file.entry.path);
+                  else if (n.kind === "heading") openMarkdownPanel(n.file.entry.path, n.heading.id);
+                  else openTurn(n.reference.turn);
+                }}
+                controls
+                defaultSorting={[{ id: "last", desc: true }]}
+                filter={(n, query) => {
+                  const hay = n.kind === "file" ? `${n.file.entry.name} ${n.file.entry.path}` : n.kind === "heading" ? n.heading.title : n.reference.turn.preview;
+                  return hay.toLowerCase().includes(query.toLowerCase());
+                }}
+                searchPlaceholder="filter touched…"
               />
             ) : (
               <div className="term-sidebar-empty term-sidebar-empty-touched">

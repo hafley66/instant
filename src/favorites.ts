@@ -97,6 +97,27 @@ export async function warmTurns(id: string) {
   tabTurns.set(id, all);
 }
 
+// Live sidebar polling reads only records after each harness's monotonic seq.
+// Claude/Codex use ledger line sequence; OpenCode uses time_created, all behind
+// the same HarnessAdapter.read(session, cwd, afterSeq) interface.
+export async function refreshTurns(id: string) {
+  const meta = tabMetaById(id);
+  if (!meta) return;
+  const sessions = await tabSessions(tabCwds(id), meta.command);
+  const all: AiMessage[] = [];
+  for (const s of sessions) {
+    const key = `${s.editor}:${s.sessionId}`;
+    turnCwd.set(key, s.cwd);
+    const prior = ledgerCache.get(key) ?? [];
+    const afterSeq = prior.reduce((latest, turn) => Math.max(latest, turn.seq), 0);
+    const fresh = await harnessAdapter(s.editor).read(s.sessionId, s.cwd, afterSeq).catch(() => [] as AiMessage[]);
+    const merged = [...prior, ...fresh.filter((turn) => !prior.some((old) => old.id === turn.id))];
+    ledgerCache.set(key, merged);
+    all.push(...merged);
+  }
+  tabTurns.set(id, all);
+}
+
 // --- on-screen turn identification (the alt-screen blocks text selection, so we
 // read the xterm buffer directly). Each harness marks turn boundaries visually:
 // claude prefixes assistant turns with a ⏺ bullet; opencode paints message blocks

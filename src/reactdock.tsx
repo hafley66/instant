@@ -199,7 +199,7 @@ export function setDockHooks(h: Partial<Hooks>) {
 // Default per-terminal sidebar entry: closed, 264px, Files/Touched split 62/38,
 // empty touched list. Used wherever a missing entry is read.
 function sbDefault() {
-  return { open: false, width: 264, source: "files" as const, sizes: [62, 38] as [number, number], touched: [] as string[] };
+  return { open: false, width: 420, source: "turns" as const, sizes: [62, 38] as [number, number], touched: [] as string[] };
 }
 
 function TerminalPanel(props: IDockviewPanelProps) {
@@ -217,7 +217,8 @@ function TerminalPanel(props: IDockviewPanelProps) {
   );
   const open = sb.open;
   const width = sb.width;
-  const source = sb.source ?? "files";
+  const source = sb.source ?? "turns";
+  const placement = sb.placement ?? "right";
   const sizes = sb.sizes ?? ([62, 38] as [number, number]);
 
   useEffect(() => {
@@ -238,7 +239,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
   // The drag handle refits on pointer-up via SessionSidebar's onResizeEnd.
   useEffect(() => { hooks.onTermLayout(sid); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patchSidebar = (patch: Partial<{ open: boolean; width: number; source: "files" | "turns"; sizes: [number, number]; touched: string[] }>) => {
+  const patchSidebar = (patch: Partial<typeof sb>) => {
     const cur = store.get().termSidebar[sid] ?? sbDefault();
     store.set({ termSidebar: { ...store.get().termSidebar, [sid]: { ...cur, ...patch } } });
   };
@@ -250,7 +251,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
   // counted as renderable area, rounding cols/rows one too large whenever the
   // panel height lands within ~6px of a cell boundary -> tmux/xterm row drift.
   return (
-    <div className="dv-host dv-host-term term-panel">
+    <div className="dv-host dv-host-term term-panel" data-sidebar-placement={placement}>
       <div className="term-slot" ref={slotRef} />
       {open && (
         <SessionSidebar
@@ -258,7 +259,9 @@ function TerminalPanel(props: IDockviewPanelProps) {
           getCwd={() => hooks.onTermCwd(sid)}
           width={width}
           source={source}
+          placement={placement}
           sizes={sizes}
+          views={sb.views}
           onWidth={(px) => patchSidebar({ width: px })}
           onResizeEnd={() => hooks.onTermLayout(sid)}
           onPatch={patchSidebar}

@@ -7,6 +7,8 @@ import { invoke, type CommandName } from "../../generated/native";
 import { type ExpandedState } from "@tanstack/react-table";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import type { FsEntry } from "../../state";
+import { isMarkdownPath, markdownHeadingRows, type MarkdownHeadingRow } from "../../0_markdownTree";
+import { openMarkdownPanel } from "../../mdview/open";
 import "./1_FileTree.css";
 
 export interface FileTreeRow {
@@ -17,6 +19,8 @@ export interface FileTreeRow {
   ext: string;
   children?: FileTreeRow[];
 }
+
+type TreeRow = FileTreeRow | MarkdownHeadingRow;
 
 function isExpanded(expanded: ExpandedState, path: string): boolean {
   return typeof expanded === "object" && Boolean((expanded as Record<string, boolean>)[path]);
@@ -75,6 +79,7 @@ export function FileTree({
 }: FileTreeProps) {
   const [fsChildren, setFsChildren] = useState<Record<string, FsEntry[]>>({});
   const [expanded, setExpanded] = useState<ExpandedState>({});
+  const [markdownChildren, setMarkdownChildren] = useState<Record<string, MarkdownHeadingRow[]>>({});
 
   // Reset loaded children/expansion when the root folder changes.
   useEffect(() => {
@@ -100,12 +105,20 @@ export function FileTree({
     }
   }
 
-  const columns: TreeColumn<FileTreeRow>[] = [
+  async function loadMarkdown(path: string) {
+    if (markdownChildren[path]) return;
+    try {
+      const text = await invoke<string>("read_text", { path });
+      setMarkdownChildren((prev) => ({ ...prev, [path]: markdownHeadingRows(path, text) }));
+    } catch { setMarkdownChildren((prev) => ({ ...prev, [path]: [] })); }
+  }
+
+  const columns: TreeColumn<TreeRow>[] = [
     {
       id: "name",
       header: "name",
       tree: true,
-      cell: (r) => (
+      cell: (r) => r.kind === "heading" ? <span className="sidebar-heading"># {r.label}</span> : (
         <span className="file-tree-cell">
           <span className="file-tree-glyph">{glyphFor(r)}</span>
           {r.label}
@@ -116,14 +129,15 @@ export function FileTree({
   ];
 
   return (
-    <TreeTable<FileTreeRow>
+    <TreeTable<TreeRow>
       columns={columns}
       data={rows}
       getRowId={(r) => r.path}
-      getSubRows={(r) => r.children}
-      getRowCanExpand={(r) => r.kind === "dir"}
+      getSubRows={(r) => r.kind === "file" && isMarkdownPath(r.path) ? markdownChildren[r.path] : r.kind === "dir" ? r.children : undefined}
+      getRowCanExpand={(r) => r.kind === "dir" || (r.kind === "file" && isMarkdownPath(r.path))}
       onToggleExpand={(r, willExpand) => {
         if (willExpand && r.kind === "dir") loadChildren(r.path);
+        if (willExpand && r.kind === "file" && isMarkdownPath(r.path)) void loadMarkdown(r.path);
       }}
       expanded={expanded}
       onExpandedChange={setExpanded}
@@ -138,9 +152,10 @@ export function FileTree({
       }}
       searchPlaceholder={searchPlaceholder}
       onRowClick={(r) => {
-        if (r.kind === "file") onSelect(r.path);
+        if (r.kind === "heading") openMarkdownPanel(r.path, r.headingId);
+        else if (r.kind === "file") onSelect(r.path);
       }}
-      toggleOnDoubleClick={(r) => r.kind === "dir"}
+      toggleOnDoubleClick={(r) => r.kind === "dir" || (r.kind === "file" && isMarkdownPath(r.path))}
       rowTitle={(r) => r.path}
       rowClass={(r) => (r.path === activePath ? "file-tree-active" : undefined)}
     />

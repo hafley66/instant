@@ -31,8 +31,9 @@ test("session sidebar Files view: explorer over session-derived Touched (resizab
   await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator(".term-sidebar")).toBeVisible({ timeout: 10_000 });
 
-  // Default source Files: top = filesystem explorer, bottom = Touched (derived
+  // Select Files: top = filesystem explorer, bottom = Touched (derived
   // from the session transcript, so the assistant turn's file_path shows here).
+  await page.getByRole("button", { name: "Files" }).click();
   await expect(page.locator(".term-sidebar .dtable")).toHaveCount(2);
   await expect(page.locator('[data-testid="sidebar-files"] .dtable')).toContainText("src");
   await expect(page.locator('[data-testid="sidebar-files"] .dtable')).toContainText("package.json");
@@ -60,13 +61,12 @@ test("session sidebar Files view: explorer over session-derived Touched (resizab
   await page.locator(".term-sidebar").screenshot({ path: "test-results/term-sidebar.png" });
 });
 
-test("session sidebar Turns view: transcript tree (session -> turn -> files), desc", async ({ page }) => {
+test("session sidebar Turns view: transcript tree and Touched metadata", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.getByTestId("open-term").click();
   await expect(page.locator(".term-sidebar")).toBeVisible({ timeout: 10_000 });
 
-  // Switch the top pane to Turns.
-  await page.locator(".term-sidebar-tab", { hasText: "Turns" }).click();
+  // Turns is the default source and remains the left tab.
   await expect(page.locator('[data-testid="sidebar-turns"]')).toBeVisible();
 
   // One transcript node (labeled by cwd) over its turns (default-expanded) +
@@ -75,12 +75,21 @@ test("session sidebar Turns view: transcript tree (session -> turn -> files), de
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("fix the off-by-one");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("moving chrome");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("reactdock.tsx");
+  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("compaction");
 
-  // Double-click a turn opens its record in a split-right preview tab.
-  await page
+  const touched = page.locator('[data-testid="sidebar-touched"]');
+  await expect(touched).toContainText("README.md");
+  await expect(touched).toContainText("Uses");
+  await touched.locator(".dtable-row", { hasText: "README.md" }).locator(".tt-twisty").click();
+  await expect(touched).toContainText("Sidebar UX");
+
+  // Double-click expands a turn; the hover action opens its record in a
+  // split-right preview tab.
+  const turn = page
     .locator('[data-testid="sidebar-turns"] .dtable-row')
-    .filter({ hasText: "moving chrome" })
-    .dblclick();
+    .filter({ hasText: "moving chrome" });
+  await turn.hover();
+  await turn.locator(".turn-action", { hasText: "↗" }).click();
   await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-claude-1");
 
   await page.locator(".term-sidebar").screenshot({ path: "test-results/term-turns.png" });
