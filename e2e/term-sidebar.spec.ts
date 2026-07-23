@@ -71,7 +71,7 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
 
   // One transcript node (labeled by cwd) over its turns (default-expanded) +
   // the assistant turn's referenced file as a child. Turns default newest-first.
-  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("term-e2e");
+  await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("current · claude");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("fix the off-by-one");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("moving chrome");
   await expect(page.locator('[data-testid="sidebar-turns"] .dtable')).toContainText("reactdock.tsx");
@@ -88,6 +88,17 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   const turn = page
     .locator('[data-testid="sidebar-turns"] .dtable-row')
     .filter({ hasText: "moving chrome" });
+  await turn.locator(".turn-copy").hover();
+  const preview = page.getByTestId("turn-preview-popover");
+  await expect(preview).toBeVisible();
+  const box = await preview.boundingBox();
+  expect(box).toBeTruthy();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await page.screenshot({ path: "test-results/term-turns-hover.png" });
+
   await turn.hover();
   await turn.locator(".turn-action", { hasText: "↗" }).click();
   await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-claude-1");

@@ -11,6 +11,7 @@
 // newest-first, with a per-turn favorite star). All harness data flows through
 // the generic HarnessAdapter. Source + sizes persist per session.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { invoke } from "./generated/native";
@@ -87,7 +88,7 @@ const TOUCHED_COLS: TreeColumn<TouchedNode>[] = [
 // --- Transcript tree (session -> turn -> referenced files). ---
 
 type TurnNode =
-  | { kind: "session"; path: string; editor: HarnessId; sessionId: string; label: string; turns: AiMessage[] }
+  | { kind: "session"; path: string; editor: HarnessId; sessionId: string; cwd: string; current: boolean; label: string; turns: AiMessage[] }
   | { kind: "turn"; path: string; turn: AiMessage; files: Entry[] }
   | { kind: "file"; path: string; entry: Entry }
   | { kind: "heading"; path: string; entry: Entry; heading: MdSection };
@@ -125,7 +126,7 @@ function flatHeadings(headings: MdSection[]): MdSection[] {
 
 // Newest turn first within a session (default desc). Sessions keep arrival order
 // (the resolver returns newest-first already).
-function turnNodes(turns: AiMessage[]): TurnNode[] {
+function turnNodes(turns: AiMessage[], currentCwd: string | null): TurnNode[] {
   const groups = new Map<string, AiMessage[]>();
   for (const t of turns) {
     const k = `${t.editor}:${t.session_id}`;
@@ -145,11 +146,17 @@ function turnNodes(turns: AiMessage[]): TurnNode[] {
       sessionId: head.session_id,
       // label by the folder the ledger actually lives in (turnCwd), not the
       // live pane cwd, which may be a subdir the session wasn't keyed under.
-      label: cwd ? baseName(cwd) : head.session_id.slice(0, 8),
+      cwd,
+      current: cwd === currentCwd,
+      label: cwd === currentCwd ? `current · ${head.editor} · ${head.session_id.slice(0, 8)}` : `${head.editor} · ${head.session_id.slice(0, 8)}`,
       turns: list,
     });
   }
-  return nodes;
+  nodes.sort((a, b) => Math.max(...b.turns.map((turn) => turn.ts || turn.seq)) - Math.max(...a.turns.map((turn) => turn.ts || turn.seq)));
+  // A terminal's live cwd is the default scope. Fallback ledgers remain only
+  // when no session resolved for that cwd, avoiding identical basename groups.
+  const current = nodes.filter((node) => node.current);
+  return current.length ? current.slice(0, 1) : nodes.slice(0, 1);
 }
 
 // A turn's file children, resolved against its session cwd.
@@ -166,7 +173,8 @@ async function toggleTurnFav(t: AiMessage) {
   else await favoriteTurn(t, cwd);
 }
 
-const TURN_COLS: TreeColumn<TurnNode>[] = [
+function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePreview: () => void): TreeColumn<TurnNode>[] {
+  return [
   {
     id: "text",
     header: "Turn",
@@ -176,13 +184,13 @@ const TURN_COLS: TreeColumn<TurnNode>[] = [
     size: 240, minSize: 150,
     sortValue: (n) => n.kind === "turn" ? n.turn.seq : n.kind === "session" ? Math.max(...n.turns.map((t) => t.seq)) : 0,
     cell: (n) => {
-      if (n.kind === "session") return <span className="turn-sess">{n.label}</span>;
+      if (n.kind === "session") return <span className="turn-sess"><span>{n.label}</span><small>{n.cwd}</small></span>;
       if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
       if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.title}</span>;
       const on = isTurnFav(n.turn);
       return (
         <span className="turn-row">
-          <span className="turn-copy" data-turn-preview={n.turn.text} title={n.turn.text}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{n.turn.preview}</span><small>{n.turn.role}</small></span>
+          <span className="turn-copy" onPointerEnter={(e) => showPreview(n.turn.text, e.currentTarget.getBoundingClientRect())} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{n.turn.preview}</span><small>{n.turn.role}</small></span>
           <button
             className="turn-action"
             data-no-row-click=""
@@ -203,9 +211,10 @@ const TURN_COLS: TreeColumn<TurnNode>[] = [
       );
     },
   },
-  { id: "time", header: "Time", size: 94, minSize: 70, sortValue: (n) => n.kind === "turn" ? n.turn.ts || n.turn.seq : 0, cell: (n) => n.kind === "turn" ? formatTurnTime(n.turn.ts || n.turn.seq) : "" },
+  { id: "time", header: "Time", size: 94, minSize: 70, sortValue: (n) => n.kind === "turn" ? n.turn.ts || n.turn.seq : n.kind === "session" ? Math.max(...n.turns.map((turn) => turn.ts || turn.seq)) : 0, cell: (n) => n.kind === "turn" ? formatTurnTime(n.turn.ts || n.turn.seq) : n.kind === "session" ? formatTurnTime(Math.max(...n.turns.map((turn) => turn.ts || turn.seq))) : "" },
   { id: "files", header: "Files", size: 42, minSize: 36, sortValue: (n) => n.kind === "turn" ? n.files.length : 0, cell: (n) => n.kind === "turn" ? String(n.files.length) : "" },
-];
+  ];
+}
 
 export function SessionSidebar(props: {
   sid: string;
@@ -225,6 +234,15 @@ export function SessionSidebar(props: {
   const [turns, setTurns] = useState<AiMessage[]>([]);
   const [headings, setHeadings] = useState<Record<string, MdSection[]>>({});
   const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("all");
+  const [turnPreview, setTurnPreview] = useState<{ text: string; rect: DOMRect } | null>(null);
+  const turnColumns = useMemo(
+    () => turnCols((text, rect) => setTurnPreview({ text, rect }), () => setTurnPreview(null)),
+    [],
+  );
+  const previewStyle = turnPreview ? {
+    left: Math.max(8, Math.min(turnPreview.rect.left, window.innerWidth - Math.min(520, window.innerWidth - 16))),
+    top: turnPreview.rect.bottom + 4 > window.innerHeight - 188 ? Math.max(8, turnPreview.rect.top - 188) : turnPreview.rect.bottom + 4,
+  } : undefined;
 
   // Re-render when shared listings or favorites change. Star state lives in
   // store.aiFavs; the turn rows re-read isTurnFav on each render.
@@ -306,9 +324,9 @@ export function SessionSidebar(props: {
   };
 
   const fileData = root ? childrenOf(root) : [];
-  const turnData = turnNodes(turns);
-  const activeTurn = turns.filter((turn) => !isCompaction(turn)).reduce<AiMessage | null>((latest, turn) => !latest || turn.seq > latest.seq ? turn : latest, null);
-  return (
+  const turnData = turnNodes(turns, getCwd());
+  const activeTurn = (turnData[0]?.turns ?? []).filter((turn) => !isCompaction(turn)).reduce<AiMessage | null>((latest, turn) => !latest || turn.seq > latest.seq ? turn : latest, null);
+  return (<>
     <aside className="term-sidebar" data-placement={placement} style={placement === "right" ? { width } : { height: width }} data-sid={sid}>
       <div className="term-sidebar-resize" onPointerDown={startResize} title="drag to resize" />
       <div className="term-sidebar-tabs">
@@ -347,7 +365,7 @@ export function SessionSidebar(props: {
               turnData.length ? (
                 <TreeTable<TurnNode>
                   key="turns"
-                  columns={TURN_COLS}
+                  columns={turnColumns}
                   data={turnData}
                   virtual
                   defaultExpandedAll
@@ -490,5 +508,6 @@ export function SessionSidebar(props: {
         </PanelGroup>
       </div>
     </aside>
-  );
+    {turnPreview ? createPortal(<div className="turn-preview-popover" data-testid="turn-preview-popover" style={previewStyle}>{turnPreview.text}</div>, document.body) : null}
+  </>);
 }
