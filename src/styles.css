@@ -875,8 +875,8 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   font-size: 15px;
 }
 .turn-action {
-  position: absolute;
-  top: 0;
+  display: none;
+  flex: 0 0 22px;
   width: 22px;
   height: 22px;
   padding: 0;
@@ -885,12 +885,9 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   color: var(--panel-fg);
   cursor: pointer;
   font: inherit;
-  opacity: 0;
 }
-.turn-action[title="open turn in new tab"] { right: 22px; }
-.turn-action.turn-star { right: 0; }
 .dtable-row:hover .turn-action,
-.turn-action:focus { opacity: 1; }
+.turn-action:focus { display: inline-block; }
 .turn-action:hover { background: var(--row-hover); }
 .sidebar-file {
   display: flex;
