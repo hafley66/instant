@@ -89,7 +89,7 @@ const TOUCHED_COLS: TreeColumn<TouchedNode>[] = [
 
 type TurnNode =
   | { kind: "session"; path: string; editor: HarnessId; sessionId: string; cwd: string; current: boolean; label: string; turns: AiMessage[] }
-  | { kind: "turn"; path: string; turn: AiMessage; files: Entry[] }
+  | { kind: "turn"; path: string; turn: AiMessage; files: Entry[]; compactionStart?: number }
   | { kind: "file"; path: string; entry: Entry }
   | { kind: "heading"; path: string; entry: Entry; heading: MdSection };
 
@@ -165,6 +165,12 @@ function turnFileChildren(turn: AiMessage): Entry[] {
   return turnReferences(turn, cwd).map((ref) => fileEntry(ref.path));
 }
 
+function compactionStart(turns: AiMessage[], turn: AiMessage): number | undefined {
+  if (!isCompaction(turn)) return undefined;
+  const older = turns.filter((candidate) => candidate.seq < turn.seq && !isCompaction(candidate));
+  return older.length ? older.reduce((latest, candidate) => candidate.seq > latest.seq ? candidate : latest).ts : turn.ts;
+}
+
 // Favorite toggle for a turn row. cwd comes from turnCwd (where the session's
 // ledger lives) so a favorite resumes in the right folder.
 async function toggleTurnFav(t: AiMessage) {
@@ -211,7 +217,7 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
       );
     },
   },
-  { id: "time", header: "Time", size: 94, minSize: 70, sortValue: (n) => n.kind === "turn" ? n.turn.ts || n.turn.seq : n.kind === "session" ? Math.max(...n.turns.map((turn) => turn.ts || turn.seq)) : 0, cell: (n) => n.kind === "turn" ? formatTurnTime(n.turn.ts || n.turn.seq) : n.kind === "session" ? formatTurnTime(Math.max(...n.turns.map((turn) => turn.ts || turn.seq))) : "" },
+  { id: "time", header: "Time", size: 126, minSize: 90, sortValue: (n) => n.kind === "turn" ? n.turn.ts || n.turn.seq : n.kind === "session" ? Math.max(...n.turns.map((turn) => turn.ts || turn.seq)) : 0, cell: (n) => n.kind === "turn" ? isCompaction(n.turn) ? <span className="turn-boundary-time"><small>start {formatTurnTime(n.compactionStart ?? n.turn.ts)}</small><small>last {formatTurnTime(n.turn.ts || n.turn.seq)}</small></span> : formatTurnTime(n.turn.ts || n.turn.seq) : n.kind === "session" ? formatTurnTime(Math.max(...n.turns.map((turn) => turn.ts || turn.seq))) : "" },
   { id: "files", header: "Files", size: 42, minSize: 36, sortValue: (n) => n.kind === "turn" ? n.files.length : 0, cell: (n) => n.kind === "turn" ? String(n.files.length) : "" },
   ];
 }
@@ -384,6 +390,7 @@ export function SessionSidebar(props: {
                         path: `turn:${t.editor}:${t.session_id}:${t.id}`,
                         turn: t,
                         files: turnFileChildren(t),
+                        compactionStart: compactionStart(n.turns, t),
                       }));
                     }
                     if (n.kind === "turn") {
