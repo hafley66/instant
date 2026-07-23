@@ -838,9 +838,28 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   align-items: center;
   min-width: 0;
   width: 100%;
+  position: relative;
 }
 .turn-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .turn-copy small { color: var(--muted, #888); font-size: 9px; line-height: 1; text-transform: uppercase; }
+.turn-copy:hover::after {
+  content: attr(data-turn-preview);
+  position: absolute;
+  z-index: 4;
+  left: 0;
+  top: calc(100% + 3px);
+  width: min(520px, 80vw);
+  max-height: 180px;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid var(--frame);
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  white-space: pre-wrap;
+  font: 11px/1.35 "Menlo", "Consolas", monospace;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, .32);
+  pointer-events: none;
+}
 .turn-preview {
   min-width: 0;
   flex: 1;
@@ -856,7 +875,8 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   font-size: 15px;
 }
 .turn-action {
-  flex: 0 0 22px;
+  position: absolute;
+  top: 0;
   width: 22px;
   height: 22px;
   padding: 0;
@@ -867,6 +887,8 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
   font: inherit;
   opacity: 0;
 }
+.turn-action[title="open turn in new tab"] { right: 22px; }
+.turn-action.turn-star { right: 0; }
 .dtable-row:hover .turn-action,
 .turn-action:focus { opacity: 1; }
 .turn-action:hover { background: var(--row-hover); }

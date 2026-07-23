@@ -182,7 +182,7 @@ const TURN_COLS: TreeColumn<TurnNode>[] = [
       const on = isTurnFav(n.turn);
       return (
         <span className="turn-row">
-          <span className="turn-copy"><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{n.turn.preview}</span><small>{n.turn.role}</small></span>
+          <span className="turn-copy" data-turn-preview={n.turn.text} title={n.turn.text}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{n.turn.preview}</span><small>{n.turn.role}</small></span>
           <button
             className="turn-action"
             data-no-row-click=""
