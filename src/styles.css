@@ -715,7 +715,7 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 }
 .term-sidebar-resize {
   position: absolute;
-  left: -5px; top: 0; bottom: 0;
+  left: 0; top: 0; bottom: 0;
   width: 5px;
   cursor: ew-resize;
   z-index: 5;
