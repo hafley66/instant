@@ -39,6 +39,17 @@ test("session sidebar Files view: explorer over session-derived Touched (resizab
   await expect(page.locator('[data-testid="sidebar-files"] .dtable')).toContainText("package.json");
   await expect(page.locator('[data-testid="sidebar-touched"] .dtable')).toContainText("reactdock.tsx");
 
+  // Markdown headings use the shared row model in Files and Touched. Repeated
+  // expand activation preserves one materialized set of heading rows instead
+  // of toggling the Markdown file closed or duplicating the child set.
+  const files = page.locator('[data-testid="sidebar-files"]');
+  const readme = files.locator(".dtable-row", { hasText: "README.md" });
+  await readme.locator(".tt-twisty").click();
+  await expect(files).toContainText("Sidebar UX");
+  await readme.locator(".tt-twisty").click();
+  await readme.dblclick();
+  await expect(files.getByText("Sidebar UX", { exact: false })).toHaveCount(1);
+
   // The sash between them resizes (Touched grows when dragged up).
   const sash = page.locator(".term-sidebar-sash");
   await expect(sash).toBeVisible();

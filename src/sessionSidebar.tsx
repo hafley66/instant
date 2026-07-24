@@ -20,7 +20,7 @@ import { store, type FsEntry, type DirListing, type AiMessage, type TermSidebarV
 import { fileGlyph } from "./core";
 import { openPreviewPanel } from "./preview";
 import { openMarkdownPanel } from "./mdview/open";
-import { parseMdSections, type MdSection } from "./mdview/model";
+import { markdownHeadingRows, type MarkdownHeadingRow } from "./0_markdownTree";
 import { fileEntry, isCompaction, isMarkdown, isToolOnlyTurn, touchedFiles, turnOrder, turnPrimaryPreview, turnReferences, turnRoleLabel, visibleTurnWindows, type TouchedFile } from "./0_sessionSidebarModel";
 import {
   warmTurns,
@@ -35,6 +35,7 @@ import {
 import type { HarnessId } from "./harness";
 
 type Entry = FsEntry;
+type SessionFileNode = { kind: "file"; path: string; entry: Entry } | MarkdownHeadingRow;
 type Sizes = [number, number];
 type Source = "files" | "turns";
 type Placement = "right" | "bottom";
@@ -57,6 +58,10 @@ function childrenOf(path: string): Entry[] {
   return (store.get().fsChildren[path] ?? []).slice().sort(dirsFirst);
 }
 
+function sessionFileRows(entries: Entry[]): SessionFileNode[] {
+  return entries.map((entry) => ({ kind: "file", path: entry.path, entry }));
+}
+
 // Lazy readdir into the shared fsChildren cache (the worktrees tree uses the
 // same cache, so listings are shared, not re-fetched).
 async function loadDir(path: string): Promise<void> {
@@ -69,14 +74,20 @@ async function loadDir(path: string): Promise<void> {
   }
 }
 
-const FILES_COLS: TreeColumn<Entry>[] = [
-  { id: "name", header: "Files", tree: true, cell: (e) => <>{fileGlyph(e)} {e.name}</> },
+const FILES_COLS: TreeColumn<SessionFileNode>[] = [
+  {
+    id: "name",
+    header: "Files",
+    tree: true,
+    cell: (n) => n.kind === "heading" ? <span className="sidebar-heading"># {n.label}</span> : <>{fileGlyph(n.entry)} {n.entry.name}</>,
+    sortValue: (n) => n.kind === "heading" ? n.label : n.entry.name,
+  },
 ];
 const TOUCHED_COLS: TreeColumn<TouchedNode>[] = [
   {
-    id: "file", header: "Touched", tree: true, size: 140, minSize: 108, sortValue: (n) => n.kind === "file" ? n.file.entry.name : n.kind === "turn" ? n.reference.turn.preview : n.heading.title,
+    id: "file", header: "Touched", tree: true, size: 140, minSize: 108, sortValue: (n) => n.kind === "file" ? n.file.entry.name : n.kind === "turn" ? n.reference.turn.preview : n.heading.label,
     cell: (n) => n.kind === "file" ? <span className="sidebar-file"><span>{fileGlyph(n.file.entry)} {n.file.entry.name}</span><small>{n.file.displayPath}</small></span>
-      : n.kind === "heading" ? <span className="sidebar-heading"># {n.heading.title}</span>
+      : n.kind === "heading" ? <span className="sidebar-heading"># {n.heading.label}</span>
         : <span className="sidebar-turn-ref"><span>{n.reference.turn.role}</span> {n.reference.turn.preview}</span>,
   },
   { id: "touches", header: "Uses", size: 36, minSize: 32, sortValue: (n) => n.kind === "file" ? n.file.touchCount : n.kind === "turn" ? n.reference.turn.seq : 0, cell: (n) => n.kind === "file" ? String(n.file.touchCount) : n.kind === "turn" ? n.reference.action : "" },
@@ -95,11 +106,11 @@ type TurnNode =
   | { kind: "tools"; path: string; tools: AiMessage[] }
   | { kind: "tool"; path: string; turn: AiMessage; files: Entry[] }
   | { kind: "file"; path: string; entry: Entry }
-  | { kind: "heading"; path: string; entry: Entry; heading: MdSection };
+  | { kind: "heading"; path: string; entry: Entry; heading: MarkdownHeadingRow };
 
 type TouchedNode =
-  | { kind: "file"; path: string; file: TouchedFile; headings: MdSection[] }
-  | { kind: "heading"; path: string; file: TouchedFile; heading: MdSection }
+  | { kind: "file"; path: string; file: TouchedFile; headings: MarkdownHeadingRow[] }
+  | { kind: "heading"; path: string; file: TouchedFile; heading: MarkdownHeadingRow }
   | { kind: "turn"; path: string; reference: TouchedFile["references"][number] };
 
 function formatWhen(value: number): string {
@@ -122,10 +133,6 @@ function formatRelativeTime(value: number): string {
 
 function latestReference(file: TouchedFile) {
   return file.references[file.references.length - 1];
-}
-
-function flatHeadings(headings: MdSection[]): MdSection[] {
-  return headings.flatMap((heading) => [heading, ...flatHeadings(heading.children)]);
 }
 
 // Newest turn first within a session (default desc). Sessions keep arrival order
@@ -207,7 +214,7 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
       if (n.kind === "files") return <span className="sidebar-turn-aggregate">Files <small>{n.entries.length}</small></span>;
       if (n.kind === "tools") return <span className="sidebar-turn-aggregate">Tools <small>{n.tools.length}</small></span>;
       if (n.kind === "file") return <>{fileGlyph(n.entry)} {n.entry.name}</>;
-      if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.title}</span>;
+      if (n.kind === "heading") return <span className="sidebar-heading"># {n.heading.label}</span>;
       if (n.kind === "tool") return <span className="turn-copy" data-role={n.turn.role}><span className="turn-preview">{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>;
       const on = isTurnFav(n.turn);
       return (
@@ -255,7 +262,7 @@ export function SessionSidebar(props: {
   const [turns, setTurns] = useState<AiMessage[]>([]);
   const [cass, setCass] = useState<{ available: boolean; path: string | null } | null>(null);
   const [cassCopied, setCassCopied] = useState(false);
-  const [headings, setHeadings] = useState<Record<string, MdSection[]>>({});
+  const [headings, setHeadings] = useState<Record<string, MarkdownHeadingRow[]>>({});
   const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("visible");
   const [turnPreview, setTurnPreview] = useState<{ text: string; rect: DOMRect } | null>(null);
   const [turnExpanded, setTurnExpanded] = useState<ExpandedState>({});
@@ -324,7 +331,7 @@ export function SessionSidebar(props: {
   const loadHeadings = (entry: Entry) => {
     if (!isMarkdown(entry) || headings[entry.path]) return;
     void invoke<string>("read_text", { path: entry.path })
-      .then((text) => setHeadings((prev) => ({ ...prev, [entry.path]: parseMdSections(text).tree })))
+      .then((text) => setHeadings((prev) => ({ ...prev, [entry.path]: markdownHeadingRows(entry.path, text) })))
       .catch(() => setHeadings((prev) => ({ ...prev, [entry.path]: [] })));
   };
   const patchView = (view: "files" | "turns" | "touched", patch: Partial<TermSidebarView>) =>
@@ -354,7 +361,7 @@ export function SessionSidebar(props: {
     window.addEventListener("pointerup", up);
   };
 
-  const fileData = root ? childrenOf(root) : [];
+  const fileData = root ? sessionFileRows(childrenOf(root)) : [];
   const turnData = turnNodes(turns, getCwd());
   const sessionData = turnData.filter((node): node is Extract<TurnNode, { kind: "session" }> => node.kind === "session");
   const activeTurn = (sessionData[0]?.turns ?? []).filter((turn) => !isCompaction(turn) && !isToolOnlyTurn(turn)).reduce<AiMessage | null>((latest, turn) => !latest || turnOrder(turn) > turnOrder(latest) ? turn : latest, null);
@@ -468,7 +475,7 @@ export function SessionSidebar(props: {
                         path: `file:${n.path}:${i}:${f.path}`,
                         entry: f,
                       })) : [];
-                    if (n.kind === "file") return isTurnExpanded(n.path) ? flatHeadings(headings[n.entry.path] ?? []).map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, entry: n.entry, heading })) : [];
+                    if (n.kind === "file") return isTurnExpanded(n.path) ? (headings[n.entry.path] ?? []).map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, entry: n.entry, heading })) : [];
                     return undefined;
                   }}
                   getRowCanExpand={(n) =>
@@ -476,9 +483,10 @@ export function SessionSidebar(props: {
                   }
                   onToggleExpand={(n, willExpand) => { if (willExpand && n.kind === "file") loadHeadings(n.entry); }}
                   toggleOnDoubleClick={(n) => n.kind === "session" || n.kind === "turn" || n.kind === "tool"}
+                  ensureExpanded={(n) => n.kind === "file" && isMarkdown(n.entry)}
                   onRowDoubleClick={(n) => {
                     if (n.kind === "file") openPreviewPanel(n.entry.path);
-                    else if (n.kind === "heading") openMarkdownPanel(n.entry.path, n.heading.id);
+                    else if (n.kind === "heading") openMarkdownPanel(n.entry.path, n.heading.headingId);
                   }}
                   controls
                   filter={(n, q) => {
@@ -497,7 +505,7 @@ export function SessionSidebar(props: {
                             : n.kind === "file"
                           ? n.entry.name
                           : n.kind === "heading"
-                            ? n.heading.title
+                            ? n.heading.label
                             : n.label;
                     return hay.toLowerCase().includes(q.toLowerCase());
                   }}
@@ -509,7 +517,7 @@ export function SessionSidebar(props: {
                 <div className="term-sidebar-empty">no AI session for this folder</div>
               )
             ) : root ? (
-              <TreeTable<Entry>
+              <TreeTable<SessionFileNode>
                 key="files"
                 columns={FILES_COLS}
                 data={fileData}
@@ -520,18 +528,22 @@ export function SessionSidebar(props: {
                 query={views?.files?.query}
                 onQueryChange={(query) => patchView("files", { query })}
                 onResetView={() => resetView("files")}
-                getRowId={(e) => e.path}
-                getSubRows={(e) => (e.is_dir ? childrenOf(e.path) : undefined)}
-                getRowCanExpand={(e) => e.is_dir}
-                onToggleExpand={(e, will) => {
-                  if (will && e.is_dir) void loadDir(e.path);
+                getRowId={(n) => n.kind === "heading" ? n.id : n.path}
+                getSubRows={(n) => n.kind === "heading" ? undefined : n.entry.is_dir ? sessionFileRows(childrenOf(n.entry.path)) : headings[n.entry.path]}
+                getRowCanExpand={(n) => n.kind === "file" && (n.entry.is_dir || isMarkdown(n.entry))}
+                onToggleExpand={(n, will) => {
+                  if (!will || n.kind === "heading") return;
+                  if (n.entry.is_dir) void loadDir(n.entry.path);
+                  else loadHeadings(n.entry);
                 }}
-                onRowDoubleClick={(e) => {
-                  if (!e.is_dir) openPreviewPanel(e.path);
+                ensureExpanded={(n) => n.kind === "file" && isMarkdown(n.entry)}
+                onRowDoubleClick={(n) => {
+                  if (n.kind === "heading") openMarkdownPanel(n.path, n.headingId);
+                  else if (!n.entry.is_dir) openPreviewPanel(n.entry.path);
                 }}
-                toggleOnDoubleClick={(e) => e.is_dir}
+                toggleOnDoubleClick={(n) => n.kind === "file" && n.entry.is_dir}
                 controls
-                filter={(e, q) => e.name.toLowerCase().includes(q.toLowerCase())}
+                filter={(n, q) => (n.kind === "heading" ? n.label : `${n.entry.name} ${n.entry.path}`).toLowerCase().includes(q.toLowerCase())}
                 searchPlaceholder="filter files…"
               />
             ) : (
@@ -559,21 +571,22 @@ export function SessionSidebar(props: {
                 getRowId={(n) => n.path}
                 getSubRows={(n) => n.kind === "file"
                   ? [
-                      ...flatHeadings(n.headings).map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, file: n.file, heading })),
+                      ...n.headings.map((heading) => ({ kind: "heading" as const, path: `${n.path}:heading:${heading.id}`, file: n.file, heading })),
                       ...n.file.references.slice().sort((a, b) => b.turn.seq - a.turn.seq).map((reference) => ({ kind: "turn" as const, path: `${n.path}:turn:${reference.turn.id}`, reference })),
                     ]
                   : undefined}
                 getRowCanExpand={(n) => n.kind === "file" && (n.file.references.length > 0 || isMarkdown(n.file.entry))}
                 onToggleExpand={(n, willExpand) => { if (willExpand && n.kind === "file") loadHeadings(n.file.entry); }}
+                ensureExpanded={(n) => n.kind === "file" && isMarkdown(n.file.entry)}
                 onRowDoubleClick={(n) => {
                   if (n.kind === "file") openPreviewPanel(n.file.entry.path);
-                  else if (n.kind === "heading") openMarkdownPanel(n.file.entry.path, n.heading.id);
+                  else if (n.kind === "heading") openMarkdownPanel(n.file.entry.path, n.heading.headingId);
                   else openTurn(n.reference.turn);
                 }}
                 controls
                 defaultSorting={[{ id: "last", desc: true }]}
                 filter={(n, query) => {
-                  const hay = n.kind === "file" ? `${n.file.entry.name} ${n.file.entry.path}` : n.kind === "heading" ? n.heading.title : n.reference.turn.preview;
+                  const hay = n.kind === "file" ? `${n.file.entry.name} ${n.file.entry.path}` : n.kind === "heading" ? n.heading.label : n.reference.turn.preview;
                   return hay.toLowerCase().includes(query.toLowerCase());
                 }}
                 searchPlaceholder="filter touched…"

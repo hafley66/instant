@@ -20,6 +20,7 @@ export function TableRow<T>(props: {
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
   onToggleExpand?: (row: T, willExpand: boolean) => void;
   toggleOnDoubleClick?: (row: T) => boolean;
+  ensureExpanded?: (row: T) => boolean;
   rowClass?: (row: T) => string | undefined;
   rowTitle?: (row: T) => string;
   rowEntity?: (row: T) => { kind: string; value: string } | undefined;
@@ -36,6 +37,12 @@ export function TableRow<T>(props: {
   const cls = ["dtable-row", props.active ? "kbd-active" : "", props.rowClass?.(data)]
     .filter(Boolean)
     .join(" ");
+  const ensureExpanded = props.ensureExpanded?.(data) && row.getCanExpand();
+  const expand = () => {
+    if (row.getIsExpanded()) return;
+    props.onToggleExpand?.(data, true);
+    row.toggleExpanded();
+  };
   return (
     <tr
       className={cls}
@@ -56,7 +63,12 @@ export function TableRow<T>(props: {
           : undefined
       }
       onDoubleClick={
-        props.toggleOnDoubleClick?.(data) && row.getCanExpand()
+        ensureExpanded
+          ? (e) => {
+              if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
+              expand();
+            }
+          : props.toggleOnDoubleClick?.(data) && row.getCanExpand()
           ? (e) => {
               if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
               props.onToggleExpand?.(data, !row.getIsExpanded());
@@ -112,6 +124,10 @@ export function TableRow<T>(props: {
                     className="tt-twisty"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (ensureExpanded) {
+                        expand();
+                        return;
+                      }
                       props.onToggleExpand?.(data, !row.getIsExpanded());
                       row.toggleExpanded();
                     }}

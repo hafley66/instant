@@ -112,6 +112,9 @@ export interface TreeTableProps<T> {
   // When set and a row can expand, a double-click on the row toggles it instead
   // of firing onRowDoubleClick — for rows with no primary action (org/dir nodes).
   toggleOnDoubleClick?: (row: T) => boolean;
+  // Expansion-only rows preserve their materialized children on repeat click.
+  // Keyboard Left and collapse-all remain available for deliberate collapse.
+  ensureExpanded?: (row: T) => boolean;
 }
 
 export function TreeTable<T>(props: TreeTableProps<T>) {
@@ -337,6 +340,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       onRowContextMenu={onRowContextMenu}
       onToggleExpand={onToggleExpand}
       toggleOnDoubleClick={props.toggleOnDoubleClick}
+      ensureExpanded={props.ensureExpanded}
       rowClass={rowClass}
       rowTitle={rowTitle}
       rowEntity={rowEntity}

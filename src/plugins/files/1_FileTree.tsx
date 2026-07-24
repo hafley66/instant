@@ -1,7 +1,8 @@
 // Generic lazy filesystem tree on the canonical TreeTable (AGENTS: no bespoke
 // tree UIs). Extracted from memeTree.tsx so panels (meme thumbs, mdview
 // explorer) share one implementation. Dirs lazy-load on first expand via the
-// given native list command; double-click toggles a dir, file-explorer style.
+// given native list command. Markdown files expand idempotently so repeated
+// activation retains their already-materialized heading children.
 import { useEffect, useMemo, useState } from "react";
 import { invoke, type CommandName } from "../../generated/native";
 import { type ExpandedState } from "@tanstack/react-table";
@@ -132,7 +133,7 @@ export function FileTree({
     <TreeTable<TreeRow>
       columns={columns}
       data={rows}
-      getRowId={(r) => r.path}
+      getRowId={(r) => r.kind === "heading" ? r.id : r.path}
       getSubRows={(r) => r.kind === "file" && isMarkdownPath(r.path) ? markdownChildren[r.path] : r.kind === "dir" ? r.children : undefined}
       getRowCanExpand={(r) => r.kind === "dir" || (r.kind === "file" && isMarkdownPath(r.path))}
       onToggleExpand={(r, willExpand) => {
@@ -155,7 +156,8 @@ export function FileTree({
         if (r.kind === "heading") openMarkdownPanel(r.path, r.headingId);
         else if (r.kind === "file") onSelect(r.path);
       }}
-      toggleOnDoubleClick={(r) => r.kind === "dir" || (r.kind === "file" && isMarkdownPath(r.path))}
+      toggleOnDoubleClick={(r) => r.kind === "dir"}
+      ensureExpanded={(r) => r.kind === "file" && isMarkdownPath(r.path)}
       rowTitle={(r) => r.path}
       rowClass={(r) => (r.path === activePath ? "file-tree-active" : undefined)}
     />
