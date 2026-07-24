@@ -147,6 +147,11 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   await openAction.click();
   await expect(page.locator(".fs-preview .code-plain")).toContainText("e2e-codex-1");
 
+  await turn.locator(".turn-copy").hover();
+  await expect(preview).toBeVisible();
+  await page.locator("#sessions-toggle").click({ force: true });
+  await expect(preview).toHaveCount(0);
+
   await page.locator(".term-sidebar").screenshot({ path: "test-results/term-turns.png" });
 });
 

@@ -199,7 +199,7 @@ async function toggleTurnFav(t: AiMessage) {
   else await favoriteTurn(t, cwd);
 }
 
-function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePreview: () => void): TreeColumn<TurnNode>[] {
+function turnCols(showPreview: (path: string, text: string, target: HTMLElement) => void, hidePreview: () => void, previewPath: string | null): TreeColumn<TurnNode>[] {
   return [
   {
     id: "text",
@@ -219,7 +219,7 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
       const on = isTurnFav(n.turn);
       return (
         <span className="turn-row">
-          <span className="turn-copy" data-role={n.turn.role} onPointerEnter={(e) => showPreview(n.turn.text, e.currentTarget.getBoundingClientRect())} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>
+          <span className="turn-copy" data-role={n.turn.role} data-preview-anchor={previewPath === n.path || undefined} onPointerEnter={(event) => showPreview(n.path, n.turn.text, event.currentTarget)} onPointerLeave={hidePreview}><span className="turn-preview">{isCompaction(n.turn) ? "↯ compaction  " : ""}{turnPrimaryPreview(n.turn)}</span><small>{turnRoleLabel(n.turn)}</small></span>
           <button
             className="turn-action"
             data-no-row-click=""
@@ -264,16 +264,28 @@ export function SessionSidebar(props: {
   const [cassCopied, setCassCopied] = useState(false);
   const [headings, setHeadings] = useState<Record<string, MarkdownHeadingRow[]>>({});
   const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("visible");
-  const [turnPreview, setTurnPreview] = useState<{ text: string; rect: DOMRect } | null>(null);
+  const [turnPreview, setTurnPreview] = useState<{ path: string; text: string; fallbackRect: DOMRect | null } | null>(null);
   const [turnExpanded, setTurnExpanded] = useState<ExpandedState>({});
   const turnColumns = useMemo(
-    () => turnCols((text, rect) => setTurnPreview({ text, rect }), () => setTurnPreview(null)),
-    [],
+    () => turnCols((path, text, target) => {
+      const anchored = CSS.supports("anchor-name: --turn-preview-anchor") && CSS.supports("top: anchor(--turn-preview-anchor bottom)");
+      setTurnPreview({ path, text, fallbackRect: anchored ? null : target.getBoundingClientRect() });
+    }, () => setTurnPreview(null), turnPreview?.path ?? null),
+    [turnPreview?.path],
   );
-  const previewStyle = turnPreview ? {
-    left: Math.max(8, Math.min(turnPreview.rect.left, window.innerWidth - Math.min(520, window.innerWidth - 16))),
-    top: turnPreview.rect.bottom + 4 > window.innerHeight - 188 ? Math.max(8, turnPreview.rect.top - 188) : turnPreview.rect.bottom + 4,
+  const previewStyle = turnPreview?.fallbackRect ? {
+    left: Math.max(8, Math.min(turnPreview.fallbackRect.left, window.innerWidth - Math.min(520, window.innerWidth - 16))),
+    top: turnPreview.fallbackRect.bottom + 4 > window.innerHeight - 188 ? Math.max(8, turnPreview.fallbackRect.top - 188) : turnPreview.fallbackRect.bottom + 4,
   } : undefined;
+  useEffect(() => {
+    if (!turnPreview) return;
+    const closePreview = (event: PointerEvent) => {
+      if ((event.target as HTMLElement).closest(".turn-copy")) return;
+      setTurnPreview(null);
+    };
+    window.addEventListener("pointerdown", closePreview, true);
+    return () => window.removeEventListener("pointerdown", closePreview, true);
+  }, [turnPreview]);
 
   // Re-render when shared listings or favorites change. Star state lives in
   // store.aiFavs; the turn rows re-read isTurnFav on each render.
@@ -600,6 +612,6 @@ export function SessionSidebar(props: {
         </PanelGroup>
       </div>
     </aside>
-    {turnPreview ? createPortal(<div className="turn-preview-popover" data-testid="turn-preview-popover" style={previewStyle}>{turnPreview.text}</div>, document.body) : null}
+    {turnPreview ? createPortal(<div className="turn-preview-popover" data-testid="turn-preview-popover" data-anchor-positioned={turnPreview.fallbackRect ? undefined : "true"} role="tooltip" style={previewStyle}>{turnPreview.text}</div>, document.body) : null}
   </>);
 }
