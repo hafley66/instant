@@ -68,7 +68,7 @@ export function TableRow<T>(props: {
               if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
               expand();
             }
-          : props.toggleOnDoubleClick?.(data) && row.getCanExpand()
+          : (props.toggleOnDoubleClick?.(data) ?? row.getCanExpand()) && row.getCanExpand()
           ? (e) => {
               if ((e.target as HTMLElement).closest("[data-no-row-click]")) return;
               props.onToggleExpand?.(data, !row.getIsExpanded());
@@ -108,6 +108,19 @@ export function TableRow<T>(props: {
             key={c.id}
             className={c.cellClass?.(data)}
             data-no-row-click={c.noRowClick || editable ? "" : undefined}
+            onClick={
+              c.toggleExpand && row.getCanExpand()
+                ? (e) => {
+                    e.stopPropagation();
+                    if (ensureExpanded) {
+                      expand();
+                      return;
+                    }
+                    props.onToggleExpand?.(data, !row.getIsExpanded());
+                    row.toggleExpanded();
+                  }
+                : undefined
+            }
             onDoubleClick={
               editable
                 ? (e) => {
@@ -120,8 +133,11 @@ export function TableRow<T>(props: {
             {c.tree ? (
               <span className="tt-tree" style={{ paddingLeft: `${row.depth * 12}px` }}>
                 {row.getCanExpand() ? (
-                  <span
+                  <button
+                    type="button"
                     className="tt-twisty"
+                    aria-label={row.getIsExpanded() ? "collapse row" : "expand row"}
+                    title={row.getIsExpanded() ? "collapse row" : "expand row"}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (ensureExpanded) {
@@ -133,7 +149,7 @@ export function TableRow<T>(props: {
                     }}
                   >
                     {row.getIsExpanded() ? "▾" : "▸"}
-                  </span>
+                  </button>
                 ) : (
                   <span className="tt-twisty tt-leaf" />
                 )}

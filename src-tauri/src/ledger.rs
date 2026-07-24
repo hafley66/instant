@@ -108,6 +108,28 @@ pub fn cass_status() -> CassStatus {
     }
 }
 
+/// Read CASS's bounded, redacted swarm status snapshot for one workspace. CASS
+/// owns provider discovery and redaction; Instant only transports its JSON.
+#[tauri::command]
+pub fn cass_swarm_status(cwd: String) -> Result<Value, String> {
+    let cass = cass_path().ok_or("cass is not installed")?;
+    let output = std::process::Command::new(cass)
+        .args(["swarm", "status", "--robot-format", "json"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|error| format!("failed to run cass swarm status: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("cass swarm status exited with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("cass swarm status returned invalid JSON: {error}"))
+}
+
 fn claude_dir(cwd: &str) -> Option<PathBuf> {
     Some(
         home()?

@@ -34,6 +34,9 @@ export interface TreeColumn<T> {
   sortValue?: (row: T) => string | number | null | undefined;
   // The one column that carries the tree twisty + depth indent (tree tables).
   tree?: boolean;
+  // Make any cell in this column toggle its expandable row. The tree twisty
+  // remains available for keyboard and precise-pointer use.
+  toggleExpand?: boolean;
   // Action cells (pin, star): clicks here must NOT trigger the row's onClick.
   noRowClick?: boolean;
   // Inline editing: opt a column in with an editor kind + a string projection of
@@ -109,8 +112,8 @@ export interface TreeTableProps<T> {
   // it matches OR any descendant matches (filterFromLeafRows keeps ancestors).
   filter?: (row: T, q: string) => boolean;
   searchPlaceholder?: string;
-  // When set and a row can expand, a double-click on the row toggles it instead
-  // of firing onRowDoubleClick — for rows with no primary action (org/dir nodes).
+  // Expandable rows toggle on double-click by default. Return false for a
+  // row-kind whose double-click has a primary action instead.
   toggleOnDoubleClick?: (row: T) => boolean;
   // Expansion-only rows preserve their materialized children on repeat click.
   // Keyboard Left and collapse-all remain available for deliberate collapse.

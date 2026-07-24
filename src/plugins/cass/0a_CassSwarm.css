@@ -1,0 +1,25 @@
+.cass-swarm-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cass-swarm-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 5px 8px;
+  border-bottom: var(--frame-w) solid var(--frame);
+  font-size: 11px;
+}
+
+.cass-swarm-table {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.cass-swarm-table > .tt-host {
+  flex: 1;
+  min-height: 0;
+}

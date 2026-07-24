@@ -878,6 +878,7 @@ pub fn run() {
             ledger::read_ai_messages,
             ledger::latest_ai_message,
             ledger::cass_status,
+            ledger::cass_swarm_status,
             meme::make_slack_emoji,
             meme::magick_available,
             meme::install_imagemagick,

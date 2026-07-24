@@ -56,6 +56,7 @@ export type CommandName =
   | "read_ai_messages"
   | "latest_ai_message"
   | "cass_status"
+  | "cass_swarm_status"
   | "make_slack_emoji"
   | "magick_available"
   | "install_imagemagick"
@@ -165,6 +166,7 @@ export namespace commands {
     export const readAiMessages = "read_ai_messages";
     export const latestAiMessage = "latest_ai_message";
     export const cassStatus = "cass_status";
+    export const cassSwarmStatus = "cass_swarm_status";
   }
 
   export namespace meme {

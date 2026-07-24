@@ -95,14 +95,14 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   await turns.getByLabel("turn content filter").selectOption("visible");
   await expect(turns).not.toContainText("[Read] README.md and reactdock.tsx");
   const latest = turns.locator(".dtable-row").filter({ hasText: "latest visible answer" });
-  await latest.locator(".tt-twisty").click();
+  await latest.dblclick();
   await expect(turns).toContainText("Tools");
   await expect(turns).not.toContainText("inspect latest state");
   const moving = turns.locator(".dtable-row").filter({ hasText: "moving chrome" });
   await moving.locator(".tt-twisty").click();
   await expect(turns).toContainText("Files");
   const tools = turns.locator(".dtable-row").filter({ hasText: "Tools" }).first();
-  await tools.locator(".tt-twisty").click();
+  await tools.dblclick();
   await expect(turns).toContainText("inspect latest state");
   await expect(turns).toContainText("assistant · exec");
 

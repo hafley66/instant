@@ -20,6 +20,7 @@ import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
+import { registerCassPlugin } from "./plugins/cass";
 import { registerFilesPlugin } from "./plugins/files";
 import { registerMdview } from "./mdview";
 import { registerPaint } from "./paintPanel";
@@ -223,6 +224,7 @@ async function main() {
   registerBuiltin();
   registerRulesPlugin();
   registerMetricsPlugin();
+  registerCassPlugin();
   registerFilesPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.
   void registerSprefa;

@@ -2351,23 +2351,30 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   margin: 0;
+  appearance: none;
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.9;
   font-size: 11px;
-  border: 1px solid transparent;
+  line-height: 1;
+  color: inherit;
+  background: color-mix(in srgb, var(--row-hover) 40%, transparent);
+  border: 1px solid var(--frame);
+  border-radius: 0;
 }
 .tt-twisty:hover {
   opacity: 1;
   background: var(--row-hover);
-  border-color: var(--frame);
 }
 .tt-twisty.tt-leaf {
   cursor: default;
   opacity: 0;
+  background: none;
+  border-color: transparent;
 }
 .tt-twisty.tt-leaf:hover {
   background: none;
