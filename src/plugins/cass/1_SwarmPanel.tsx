@@ -10,9 +10,9 @@ import "./0a_CassSwarm.css";
 type SwarmView = CassSwarmRow["kind"];
 
 const COLUMNS: TreeColumn<CassSwarmRow>[] = [
-  { id: "status", header: "status", size: 112, sortValue: (row) => row.status, cell: (row) => row.status, toggleExpand: true },
-  { id: "title", header: "name", size: 190, sortValue: (row) => row.title, cell: (row) => row.title, tree: true, toggleExpand: true },
-  { id: "detail", header: "detail", sortValue: (row) => row.detail, cell: (row) => row.detail, toggleExpand: true },
+  { id: "status", header: "status", size: 112, sortValue: (row) => row.status, cell: (row) => row.status },
+  { id: "title", header: "name", size: 190, sortValue: (row) => row.title, cell: (row) => row.title, tree: true },
+  { id: "detail", header: "detail", sortValue: (row) => row.detail, cell: (row) => row.detail },
 ];
 
 function workspaceCwd(active: string | null, sessions: ReturnType<typeof useApp>["sessions"], worktrees: ReturnType<typeof useApp>["worktrees"]): string | null {

@@ -51,7 +51,7 @@ test("CASS swarm renders subagent coordination data", async ({ page }) => {
   await expect(panel).toContainText("agents 2");
   expect(await page.evaluate(() => (window as Window & { __instantE2eNativeCalls?: string[] }).__instantE2eNativeCalls ?? [])).toEqual(["cass_swarm_status"]);
 
-  await panel.locator("tr").filter({ hasText: "agent-ui" }).locator("td").nth(1).click();
+  await panel.locator("tr").filter({ hasText: "agent-ui" }).dblclick();
   await expect(panel).toContainText("Rendering the CASS panel");
   await expect(panel).toContainText("exec_command");
 

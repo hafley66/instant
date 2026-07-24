@@ -371,13 +371,13 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       <>
         {before > 0 && (
           <tr className="dtable-spacer">
-            <td colSpan={columns.length} style={{ height: before, padding: 0, border: 0 }} />
+            <td colSpan={columns.length + (columns.some((column) => column.tree) ? 1 : 0)} style={{ height: before, padding: 0, border: 0 }} />
           </tr>
         )}
         {items.map((it) => renderRow(modelRows[it.index], it.index))}
         {after > 0 && (
           <tr className="dtable-spacer">
-            <td colSpan={columns.length} style={{ height: after, padding: 0, border: 0 }} />
+            <td colSpan={columns.length + (columns.some((column) => column.tree) ? 1 : 0)} style={{ height: after, padding: 0, border: 0 }} />
           </tr>
         )}
       </>
@@ -400,9 +400,11 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     sizeById,
   );
   const cols = table.getHeaderGroups()[0].headers;
+  const hasTreeColumn = columns.some((column) => column.tree);
   const tableEl = (
     <table className={"dtable" + (sized ? " dtable-sized" : "")}>
       <colgroup>
+        {hasTreeColumn ? <col className="tt-expand-col" style={{ width: 24 }} /> : null}
         {cols.map((h) => {
           const w = hasWidthSignal(h.column.id, columnSizing, sizeById[h.column.id])
             ? h.column.getSize()
@@ -412,6 +414,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       </colgroup>
       <thead>
         <tr>
+          {hasTreeColumn ? <th className="tt-expand-head" aria-label="expand" /> : null}
           {cols.map((h) => {
             const sortable = h.column.getCanSort();
             const dir = h.column.getIsSorted(); // false | "asc" | "desc"

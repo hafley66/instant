@@ -38,6 +38,7 @@ export function TableRow<T>(props: {
     .filter(Boolean)
     .join(" ");
   const ensureExpanded = props.ensureExpanded?.(data) && row.getCanExpand();
+  const treeColumn = columns.some((column) => column.tree);
   const expand = () => {
     if (row.getIsExpanded()) return;
     props.onToggleExpand?.(data, true);
@@ -88,6 +89,29 @@ export function TableRow<T>(props: {
           : undefined
       }
     >
+      {treeColumn ? (
+        <td className="tt-expand-cell">
+          {row.getCanExpand() ? (
+            <button
+              type="button"
+              className="tt-twisty"
+              aria-label={row.getIsExpanded() ? "collapse row" : "expand row"}
+              title={row.getIsExpanded() ? "collapse row" : "expand row"}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (ensureExpanded) {
+                  expand();
+                  return;
+                }
+                props.onToggleExpand?.(data, !row.getIsExpanded());
+                row.toggleExpanded();
+              }}
+            >
+              {row.getIsExpanded() ? "▾" : "▸"}
+            </button>
+          ) : null}
+        </td>
+      ) : null}
       {columns.map((c) => {
         const editable = !!(c.edit && c.getEditValue && props.onCommitEdit);
         const isEditing = editable && props.editingCol === c.id;
@@ -107,6 +131,7 @@ export function TableRow<T>(props: {
           <td
             key={c.id}
             className={c.cellClass?.(data)}
+            style={c.tree ? { paddingLeft: `${8 + row.depth * 14}px` } : undefined}
             data-no-row-click={c.noRowClick || editable ? "" : undefined}
             onClick={
               c.toggleExpand && row.getCanExpand()
@@ -130,34 +155,7 @@ export function TableRow<T>(props: {
                 : undefined
             }
           >
-            {c.tree ? (
-              <span className="tt-tree" style={{ paddingLeft: `${row.depth * 12}px` }}>
-                {row.getCanExpand() ? (
-                  <button
-                    type="button"
-                    className="tt-twisty"
-                    aria-label={row.getIsExpanded() ? "collapse row" : "expand row"}
-                    title={row.getIsExpanded() ? "collapse row" : "expand row"}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (ensureExpanded) {
-                        expand();
-                        return;
-                      }
-                      props.onToggleExpand?.(data, !row.getIsExpanded());
-                      row.toggleExpanded();
-                    }}
-                  >
-                    {row.getIsExpanded() ? "▾" : "▸"}
-                  </button>
-                ) : (
-                  <span className="tt-twisty tt-leaf" />
-                )}
-                {content}
-              </span>
-            ) : (
-              content
-            )}
+            {content}
           </td>
         );
       })}

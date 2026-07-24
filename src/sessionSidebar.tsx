@@ -79,14 +79,13 @@ const FILES_COLS: TreeColumn<SessionFileNode>[] = [
     id: "name",
     header: "Files",
     tree: true,
-    toggleExpand: true,
     cell: (n) => n.kind === "heading" ? <span className="sidebar-heading"># {n.label}</span> : <>{fileGlyph(n.entry)} {n.entry.name}</>,
     sortValue: (n) => n.kind === "heading" ? n.label : n.entry.name,
   },
 ];
 const TOUCHED_COLS: TreeColumn<TouchedNode>[] = [
   {
-    id: "file", header: "Touched", tree: true, toggleExpand: true, size: 140, minSize: 108, sortValue: (n) => n.kind === "file" ? n.file.entry.name : n.kind === "turn" ? n.reference.turn.preview : n.heading.label,
+    id: "file", header: "Touched", tree: true, size: 140, minSize: 108, sortValue: (n) => n.kind === "file" ? n.file.entry.name : n.kind === "turn" ? n.reference.turn.preview : n.heading.label,
     cell: (n) => n.kind === "file" ? <span className="sidebar-file"><span>{fileGlyph(n.file.entry)} {n.file.entry.name}</span><small>{n.file.displayPath}</small></span>
       : n.kind === "heading" ? <span className="sidebar-heading"># {n.heading.label}</span>
         : <span className="sidebar-turn-ref"><span>{n.reference.turn.role}</span> {n.reference.turn.preview}</span>,
@@ -206,7 +205,6 @@ function turnCols(showPreview: (text: string, rect: DOMRect) => void, hidePrevie
     id: "text",
     header: "Turn",
     tree: true,
-    toggleExpand: true,
     // sortValue = recency: a session by its newest turn, a turn by its seq, a
     // file by 0 (stable under its parent). defaultSorting below sets desc.
     size: 240, minSize: 150,
