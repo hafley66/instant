@@ -1,0 +1,13 @@
+/* Super XP applies Perfect DOS VGA directly to `pre`, `code`, and every code
+   descendant. Source renderers need an explicit later override for the Shiki
+   token spans, not only their containing <pre>. */
+body.xp-pixel .code-body pre,
+body.xp-pixel .code-body pre *,
+body.xp-pixel .code-plain,
+body.xp-pixel .src-pre,
+body.xp-pixel .src-pre * {
+  font-family: "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco,
+    Consolas, monospace !important;
+  -webkit-font-smoothing: antialiased !important;
+  font-smooth: auto;
+}

@@ -5,6 +5,7 @@
 // todo(lifecycle): give every global event listener and interval runtime-owned teardown
 // todo(test): add a boot smoke test that asserts registration and teardown order
 import "xp.css";
+import "./0_sourceFonts.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";

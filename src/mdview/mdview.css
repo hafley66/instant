@@ -110,6 +110,35 @@
   font-style: italic;
 }
 
+/* Streamdown emits one direct code span per Shiki token line. Its renderer
+   supplies Tailwind utility class names, but this application does not load
+   Tailwind's generated utilities. Keep each token line block-level so fenced
+   blocks retain their source newlines, including unknown-language fallbacks. */
+.mdview-streamdown [data-streamdown="code-block-body"] {
+  overflow-x: auto;
+}
+
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] pre,
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] code,
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] code * {
+  margin: 0;
+  white-space: pre;
+  font: 12px/1.45 "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco,
+    Consolas, monospace !important;
+  -webkit-font-smoothing: antialiased !important;
+  font-smooth: auto;
+}
+
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] code,
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] code * {
+  margin: initial;
+  white-space: inherit;
+}
+
+.mdview-streamdown [data-streamdown="code-block-body"] code > span {
+  display: block;
+}
+
 /* List/item folding (VSCode-style). The twisty floats into the list gutter so
    it sits on the first line regardless of tight/loose list rendering. */
 .md-twisty {
