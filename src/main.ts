@@ -37,7 +37,7 @@ import {
   onDockChange,
 } from "./reactdock";
 import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, logLine } from "./core";
-import { initPreviewThemeSync } from "./preview";
+import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore } from "./preview";
 import { wireDomCmdClick } from "./clickrules";
 import {
   tabs,
@@ -183,6 +183,11 @@ async function main() {
   setHomeDir(await homeDir().catch(() => ""));
   // On theme flip, re-render open file/diff previews so syntax colors track.
   initPreviewThemeSync();
+  // Release fs watches for preview tabs the user has closed.
+  initPreviewWatch();
+  // Teach the dock how to rebuild a file preview from the saved layout. Must be
+  // set before mountReactDock, since the restore runs in dockview's onReady.
+  initPreviewRestore();
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);

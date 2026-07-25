@@ -23,6 +23,9 @@ function MdInstance(props: IDockviewPanelProps) {
     (p: string) => {
       sig.$(p);
       props.api.setTitle(baseName(p));
+      // Keep params in step with the signal so a reload restores the doc the
+      // user navigated to, not the one the tab was opened with.
+      props.api.updateParameters({ panelId: pid, path: p });
     },
     [pid, props.api, sig],
   );
@@ -48,6 +51,10 @@ export function registerMdview() {
       prefix: "md:",
       componentName: "mdview-instance",
       component: MdInstance,
+      // params.path is the whole state: the panel re-reads the doc on mount, so
+      // an open markdown tab comes back after a reload. A path that has since
+      // moved renders the load error in the tab (no wedged restore).
+      restorable: true,
     }],
     routes: [
       {

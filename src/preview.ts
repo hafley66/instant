@@ -6,7 +6,14 @@ import { invoke } from "./generated/native";
 import { codeToHtml } from "shiki";
 import { store } from "./state";
 import { routePath } from "./plugin";
-import { addPreviewPanel, isPreviewOpen, activatePreviewPanel } from "./reactdock";
+import {
+  addPreviewPanel,
+  isPreviewOpen,
+  activatePreviewPanel,
+  onDockChange,
+  setPreviewRehydration,
+} from "./reactdock";
+import { claimFsWatch } from "./fsWatch";
 import { baseName, escapeHtml, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
@@ -34,45 +41,161 @@ export function openPreviewPanel(
   line?: number,
   direction: "within" | "right" = "within",
 ) {
-  const name = path.split("/").pop() ?? path;
-  const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
   if (!line && routePath(path)) return;
-  let inst = previewInsts.get(path);
-  if (!inst) {
-    const el = document.createElement("div");
-    el.className = "fs-preview";
-    inst = { el, line };
-    previewInsts.set(path, inst);
-    // Delegated so it survives renderPathInto's innerHTML rewrites: "← back"
-    // returns to the originating panel (internal routing).
-    el.addEventListener("click", (e) => {
-      const t = e.target as HTMLElement;
-      const cp = t.closest<HTMLElement>(".fs-copy");
-      if (cp) {
-        const text = previewTextByNode.get(el);
-        if (text != null) {
-          navigator.clipboard.writeText(text).then(() => {
-            cp.textContent = "copied";
-            setTimeout(() => (cp.textContent = "copy"), 1200);
-          }).catch(console.error);
-        }
-        return;
-      }
-      const b = t.closest<HTMLElement>(".fs-back");
-      if (!b) return;
-      const origin = b.getAttribute("data-origin");
-      if (origin) activatePreviewPanel(origin);
-    });
-  } else {
-    inst.line = line;
-  }
-  addPreviewPanel(path, path.split("/").pop() ?? path, inst.el, direction);
+  const inst = ensureInst(path, line);
+  addPreviewPanel(path, path.split("/").pop() ?? path, inst.el, direction, {
+    ...(line ? { line } : {}),
+  });
+  watchPreview(path);
   renderPathInto(inst.el, path, line);
 }
+
+// The content node for `path`, created on first use. Also used by the restore
+// path, which rebuilds the node for a tab that came back from the saved layout.
+function ensureInst(path: string, line?: number): PreviewInst {
+  const existing = previewInsts.get(path);
+  if (existing) {
+    existing.line = line;
+    return existing;
+  }
+  const el = document.createElement("div");
+  el.className = "fs-preview";
+  const inst: PreviewInst = { el, line };
+  previewInsts.set(path, inst);
+  // Delegated so it survives renderPathInto's innerHTML rewrites: "← back"
+  // returns to the originating panel (internal routing).
+  el.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    const cp = t.closest<HTMLElement>(".fs-copy");
+    if (cp) {
+      const text = previewTextByNode.get(el);
+      if (text != null) {
+        navigator.clipboard.writeText(text).then(() => {
+          cp.textContent = "copied";
+          setTimeout(() => (cp.textContent = "copy"), 1200);
+        }).catch(console.error);
+      }
+      return;
+    }
+    const b = t.closest<HTMLElement>(".fs-back");
+    if (!b) return;
+    const origin = b.getAttribute("data-origin");
+    if (origin) activatePreviewPanel(origin);
+  });
+  return inst;
+}
+
+// ---- live reload ----
+// Every open preview tab claims an fs watch on its path, so an edit on disk
+// repaints the tab instead of waiting for an app reload. Claims are keyed by
+// preview path and released when the tab closes (reconciled off the dock's
+// change stream in initPreviewWatch, since dock panels can also be closed by
+// keybinding, layout restore, or the tab's own ✕).
+type PreviewWatch = {
+  release?: () => void;
+  timer?: ReturnType<typeof setTimeout>;
+  dead?: boolean;
+};
+const previewWatches = new Map<string, PreviewWatch>();
+// Editors write in bursts (truncate + write, or rename-over); coalesce so one
+// save is one re-render.
+const WATCH_DEBOUNCE_MS = 75;
+
+function watchPreview(path: string) {
+  if (previewWatches.has(path)) return;
+  const w: PreviewWatch = {};
+  previewWatches.set(path, w);
+  claimFsWatch(path, () => {
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => {
+      const inst = previewInsts.get(path);
+      if (!inst || !isPreviewOpen(path)) return;
+      void renderPathInto(inst.el, path, inst.line);
+    }, WATCH_DEBOUNCE_MS);
+  })
+    // The claim is async: if the tab closed while it was in flight, drop it now.
+    .then((release) => (w.dead ? release() : (w.release = release)))
+    .catch(console.error);
+}
+
+function releasePreviewWatch(path: string) {
+  const w = previewWatches.get(path);
+  if (!w) return;
+  previewWatches.delete(path);
+  w.dead = true;
+  clearTimeout(w.timer);
+  w.release?.();
+}
+
+// Release the watch for any preview whose tab is gone. Registered once at
+// startup from main.ts.
+export function initPreviewWatch() {
+  onDockChange(() => {
+    for (const path of [...previewWatches.keys()]) {
+      if (!isPreviewOpen(path)) releasePreviewWatch(path);
+    }
+  });
+}
+
+// ---- restore across reloads ----
+// A preview key is restorable when its content can be re-derived from the key
+// alone: a file path (re-read from disk) or `diff:<worktree>` (re-run git
+// diff). The other keys parked in this panel family — rg results, favorites,
+// ledger turns — were rendered from in-memory data by their own modules, so
+// they stay husks and the dock drops them.
+const DIFF = "diff:";
+function canRestore(key: string): boolean {
+  if (key.startsWith(DIFF)) return key.length > DIFF.length;
+  return key.startsWith("/") || key.startsWith("~/");
+}
+
+// Rebuild the content node for a restored tab and kick off its render. Called
+// by the dock when a preview panel mounts with no node (see PreviewPanel), so
+// the read happens when the tab is first shown, not for every tab at boot.
+function restorePreview(key: string, params: Record<string, unknown>): HTMLElement | null {
+  if (key.startsWith(DIFF)) {
+    const wtPath = key.slice(DIFF.length);
+    const inst = ensureDiffInst(key);
+    void renderDiffInto(inst.el, wtPath);
+    return inst.el;
+  }
+  if (!canRestore(key)) return null;
+  const rawLine = params.line;
+  const line = typeof rawLine === "number" && rawLine > 0 ? rawLine : undefined;
+  const inst = ensureInst(key, line);
+  watchPreview(key);
+  void renderPathInto(inst.el, key, line);
+  return inst.el;
+}
+
+// Registered once at startup from main.ts, before the dock mounts (the restore
+// runs inside dockview's onReady).
+export function initPreviewRestore() {
+  setPreviewRehydration({ canRestore, restore: restorePreview });
+}
+
+// Monotonic render token per content node. A watch fire and a theme flip can
+// both be mid-flight over the same node; only the newest render may write.
+const renderSeq = new WeakMap<HTMLElement, number>();
+// The pane itself is overflow:hidden — the inner body owns the single scroll.
+const SCROLLER = ".src-pre, .code-body, .code-plain";
 
 // Render `path` into `node`: images via read_image, markdown via marked, a
 // `line` request via the line-numbered source view, everything else via shiki.
 async function renderPathInto(node: HTMLElement, path: string, line?: number) {
+  const seq = (renderSeq.get(node) ?? 0) + 1;
+  renderSeq.set(node, seq);
+  const stale = () => renderSeq.get(node) !== seq;
+  // A re-render from a file change (or theme flip) must not yank the reader back
+  // to the top, so carry the scroll offset across the innerHTML rewrite.
+  const prevScroll = node.querySelector<HTMLElement>(SCROLLER)?.scrollTop ?? 0;
+  const restoreScroll = () => {
+    if (prevScroll <= 0) return false;
+    const el = node.querySelector<HTMLElement>(SCROLLER);
+    if (!el) return false;
+    el.scrollTop = prevScroll;
+    return true;
+  };
   const name = path.split("/").pop() ?? path;
   const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
   const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
@@ -93,8 +216,10 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   if (isImage) {
     try {
       const url = await invoke<string>("read_image", { path });
+      if (stale()) return;
       node.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
     } catch (e) {
+      if (stale()) return;
       node.innerHTML = meta + empty(String(e));
     }
     return;
@@ -104,9 +229,11 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   try {
     text = await invoke<string>("read_text", { path });
   } catch (e) {
+    if (stale()) return;
     node.innerHTML = meta + empty(String(e));
     return;
   }
+  if (stale()) return;
   previewTextByNode.set(node, text); // back the meta-bar copy button
 
   if (line) {
@@ -139,8 +266,11 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
       })
       .join("");
     const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} more lines</div>` : "";
+    if (stale()) return;
     node.innerHTML = meta + `<pre class="src-pre">${body}${tail}</pre>`;
-    node.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
+    // Only re-center on the target row for a fresh open; a refresh of a file the
+    // user has already scrolled keeps their position.
+    if (!restoreScroll()) node.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
     return;
   }
 
@@ -148,10 +278,13 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   const lang = SHIKI_LANG[ext] || SHIKI_LANG[name.toLowerCase()] || "text";
   try {
     const html = await codeToHtml(text, { lang, theme });
+    if (stale()) return;
     node.innerHTML = meta + `<div class="code-body">${html}</div>`;
   } catch {
+    if (stale()) return;
     node.innerHTML = meta + `<pre class="code-plain">${escapeHtml(text)}</pre>`;
   }
+  restoreScroll();
 }
 
 // ---- working-tree diff panels ----
@@ -159,15 +292,19 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
 // appended). Rendered with shiki's `diff` grammar in a split-right preview tab,
 // keyed so reopening re-renders fresh.
 const diffInsts = new Map<string, { el: HTMLElement }>();
-export function openDiffPanel(wtPath: string) {
-  if (!wtPath) return;
-  const key = `diff:${wtPath}`;
+function ensureDiffInst(key: string): { el: HTMLElement } {
   let inst = diffInsts.get(key);
   if (!inst) {
     inst = { el: document.createElement("div") };
     inst.el.className = "fs-preview diff-preview";
     diffInsts.set(key, inst);
   }
+  return inst;
+}
+export function openDiffPanel(wtPath: string) {
+  if (!wtPath) return;
+  const key = `${DIFF}${wtPath}`;
+  const inst = ensureDiffInst(key);
   addPreviewPanel(key, `diff · ${baseName(wtPath)}`, inst.el, "right");
   renderDiffInto(inst.el, wtPath);
 }

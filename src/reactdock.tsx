@@ -155,6 +155,21 @@ export const mdPanelId = (path: string) => MD + encodeURIComponent(path);
 // Both terminals and previews adopt a content node owned by JS (not in the dock
 // JSON), keyed by full panel id.
 const dynamicNodes = new Map<string, HTMLElement>();
+
+// A restored layout carries only the husk of a preview tab: the content node
+// lived in JS, not in the dock JSON. preview.ts registers a rehydrator that
+// rebuilds the node from the panel key (a file path, or `diff:<worktree>`) so
+// file tabs survive a reload. Keys it declines — rg results, favorites, ledger
+// turns, whose content only ever existed in memory — are dropped from the
+// restored layout instead of coming back empty.
+type PreviewRehydration = {
+  canRestore: (key: string) => boolean;
+  restore: (key: string, params: Record<string, unknown>) => HTMLElement | null;
+};
+let previewRehydration: PreviewRehydration | null = null;
+export function setPreviewRehydration(r: PreviewRehydration) {
+  previewRehydration = r;
+}
 interface ClosedPanel {
   id: string;
   component: string;
@@ -279,7 +294,14 @@ function PreviewPanel(props: IDockviewPanelProps) {
   const id = props.params.panelId as string;
 
   useEffect(() => {
-    const node = dynamicNodes.get(id);
+    // No node means this panel came back from a restored layout; ask the
+    // rehydrator to rebuild it from the key (lazy: a background tab only pays
+    // the re-read when it's first shown).
+    let node = dynamicNodes.get(id);
+    if (!node) {
+      node = previewRehydration?.restore(id.slice(PREVIEW.length), props.params ?? {}) ?? undefined;
+      if (node) dynamicNodes.set(id, node);
+    }
     if (node && ref.current) ref.current.appendChild(node);
     return () => {
       const pool = document.getElementById("panel-pool");
@@ -311,17 +333,24 @@ function buildDefault() {
   });
 }
 
-// Terminals and previews don't survive a reload (their content nodes live in
-// JS, not the dock JSON), so drop any husks restored from the saved layout. Md
-// viewer panels could re-read their file, but are stripped too so a stale path
-// in an old layout can never wedge a restore (same treatment as previews).
+// Drop the husks a restored layout can't bring back to life. Terminals always
+// go (a dead session can't be re-attached). A preview stays if the rehydrator
+// can rebuild it from its key — a file tab re-reads the file — and goes if it
+// can't. Instance panels (md, paint) stay when they declare `restorable`, since
+// their params carry everything the component needs to reload itself.
 function stripDynamicHusks() {
   if (!api) return;
   suppressClosedPanelCapture = true;
   try {
     for (const p of [...api.panels]) {
-      if (isTerm(p.id) || isPreview(p.id) || (panelInstanceForId(p.id) && !p.id.startsWith("paint:")))
+      if (isTerm(p.id)) {
         api.removePanel(p);
+      } else if (isPreview(p.id)) {
+        if (!previewRehydration?.canRestore(p.id.slice(PREVIEW.length))) api.removePanel(p);
+      } else {
+        const instance = panelInstanceForId(p.id);
+        if (instance && !instance.restorable) api.removePanel(p);
+      }
     }
   } finally {
     suppressClosedPanelCapture = false;
@@ -611,12 +640,18 @@ export function addPreviewPanel(
   title: string,
   el: HTMLElement,
   direction: "within" | "right" = "within",
+  // Extra params ride along in the dock JSON, so they survive a reload and are
+  // handed back to the rehydrator (preview.ts stores the `line` here).
+  extra: Record<string, unknown> = {},
 ) {
   if (!api) return;
   const pid = PREVIEW + path;
   dynamicNodes.set(pid, el);
   const existing = api.getPanel(pid);
   if (existing) {
+    // Reopening the same file at a different line must update what a restore
+    // would replay, not just focus the tab.
+    existing.api.updateParameters({ panelId: pid, ...extra });
     existing.api.setActive();
     return;
   }
@@ -636,7 +671,7 @@ export function addPreviewPanel(
   api.addPanel({
     id: pid,
     component: "preview-instance",
-    params: { panelId: pid },
+    params: { panelId: pid, ...extra },
     title: withOverride(pid, title),
     ...(position ? { position } : {}),
   });

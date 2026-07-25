@@ -210,6 +210,7 @@ export function registerPaint() {
         prefix: "paint:",
         componentName: "paint-instance",
         component: PaintInstance,
+        restorable: true,
         keepAlive: true,
         onDiscard: discardPaintSession,
       },

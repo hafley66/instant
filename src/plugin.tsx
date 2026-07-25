@@ -47,6 +47,11 @@ export interface PanelInstanceDef {
   prefix: string;
   componentName: string;
   component: ComponentType<IDockviewPanelProps>;
+  // Survives an app reload: the component rebuilds its content from the panel
+  // params alone (a path, a session id), so the dock keeps the restored tab
+  // instead of stripping it as a husk. Off by default — a panel whose state
+  // only lived in memory would come back blank.
+  restorable?: boolean;
   keepAlive?: boolean;
   onRemove?: (panelId: string) => void;
   onDiscard?: (panelId: string) => void;
