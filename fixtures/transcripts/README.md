@@ -25,6 +25,21 @@ the local username becomes `dev`, and emails, `sk-`/`ghp_`/`github_pat_`/`xox`/`
 over `--max-items` are cut with a `…[trimmed N]` marker, so a fixture never carries a full file
 body or a full tool-schema dump.
 
+Keys named for credentials (`*token*`, `*secret*`, `*api_key*`, `*password*`, `*authorization*`,
+`*cookie*`) and opaque `encrypted_*` values become `"[dropped]"`, since redacting inside ciphertext
+leaves a half-scrubbed blob and buys no coverage. Codex stores its reasoning as Fernet ciphertext
+under `encrypted_content`, which is where that rule earns its keep.
+
+Verify with:
+
+```
+node scripts/scan-secrets.mjs fixtures/transcripts
+```
+
+It fails on key formats (Anthropic, OpenAI, GitHub, AWS, Google, Slack, Stripe, npm, JWT, PEM, SSH),
+`Bearer` headers, credential-shaped assignments, emails, URL credentials, any `/Users/<name>` that
+is not `/Users/dev`, and any 40-plus-character mixed-case run that is not a path.
+
 ## Coverage
 
 `manifest.json` records, per fixture, the source line count, the record kinds kept, and which
@@ -38,6 +53,7 @@ feature groups they cover:
 | `skills` | injected skill bodies, which arrive as meta rows |
 | `thinking` | reasoning blocks |
 | `roles` | a typed user message, an assistant reply, and a tool result |
+| `injections` | lines the CLI writes as `type: "user"` without the user typing them: task notifications, compaction summaries, slash-command bodies |
 
 `claude/subagent.jsonl` is a separate sidechain transcript (`isSidechain: true` lines).
 

@@ -49,6 +49,12 @@ const SCRUB = [
   [/\b[A-Za-z0-9+/]{120,}={0,2}\b/g, "REDACTED_BLOB"],
 ];
 
+// Values that are opaque by construction, so redacting inside them would leave
+// a half-scrubbed blob and keeping them buys no test coverage. Codex stores its
+// reasoning as Fernet ciphertext under `encrypted_content`; the rest are the
+// field names credentials arrive under.
+const DROP_KEYS = /^(encrypted_\w+|\w*(token|secret|password|passwd|api_?key|access_key|credential|cookie|authorization)\w*)$/i;
+
 // The capturing machine's identity, replaced before anything else so a home
 // path inside a longer string still collapses.
 function deIdentify(s) {
@@ -76,7 +82,12 @@ function sanitize(value) {
   if (value && typeof value === "object") {
     // Keys carry paths too: Codex `turn_diff.changes` is keyed by absolute
     // file path, so de-identify the key without trimming it.
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [deIdentify(k), sanitize(v)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [
+        deIdentify(k),
+        DROP_KEYS.test(k) && v !== null ? "[dropped]" : sanitize(v),
+      ]),
+    );
   }
   return value;
 }
@@ -96,12 +107,15 @@ const CLASSIFY = {
       }
       if (!kinds.length) kinds.push("assistant:empty");
     } else if (type === "user") {
+      // Same order ledger.rs classifies in, so a kind names the branch it hits.
       const content = v.message?.content;
-      if (typeof content === "string") kinds.push(v.isMeta ? "user:meta-string" : "user:string");
-      else if (Array.isArray(content)) {
-        const blocks = [...new Set(content.map((b) => b?.type))].sort().join("+");
-        kinds.push(v.isMeta ? `user:meta-${blocks}` : `user:${blocks}`);
-      }
+      const blocks = Array.isArray(content) ? [...new Set(content.map((b) => b?.type))].sort() : null;
+      const shape = blocks ? blocks.join("+") : typeof content === "string" ? "string" : "empty";
+      if (blocks?.includes("tool_result")) kinds.push("user:tool_result");
+      else if (v.promptSource === "system") kinds.push(`user:system-${v.origin?.kind ?? "system"}`);
+      else if (v.isCompactSummary) kinds.push("user:compact-summary");
+      else if (v.isMeta) kinds.push(`user:meta-${shape}`);
+      else kinds.push(`user:${shape}`);
     } else if (type) {
       kinds.push(`line:${type}`);
     }
@@ -141,6 +155,13 @@ const FEATURES = {
     skills: ["tool:Skill", "user:meta-string", "user:meta-text"],
     thinking: ["assistant:thinking"],
     roles: ["user:string", "assistant:text", "user:tool_result"],
+    injections: [
+      "user:system-task-notification",
+      "user:system-peer",
+      "user:compact-summary",
+      "user:meta-string",
+      "user:meta-text",
+    ],
   },
   codex: {
     files: ["call:apply_patch", "payload:patch_apply_end"],

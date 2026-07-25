@@ -421,15 +421,70 @@ fn content_has_tool_result(content: &Value) -> bool {
     })
 }
 
+// Sessions written before `promptSource` existed leave only the tag the CLI
+// wraps injected content in. Each of these is a whole message on its own, never
+// a prefix on something the user typed.
+const INJECTED_TAGS: [&str; 9] = [
+    "command-name",
+    "command-message",
+    "command-args",
+    "local-command-stdout",
+    "local-command-stderr",
+    "bash-input",
+    "bash-stdout",
+    "bash-stderr",
+    "system-reminder",
+];
+
+fn first_text(content: &Value) -> Option<&str> {
+    if let Some(s) = content.as_str() {
+        return Some(s);
+    }
+    content.as_array()?.iter().find_map(|b| {
+        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+            b.get("text").and_then(|t| t.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+fn injected_tag(content: &Value) -> Option<String> {
+    let (tag, _) = first_text(content)?.trim_start().strip_prefix('<')?.split_once('>')?;
+    INJECTED_TAGS
+        .contains(&tag)
+        .then(|| tag.to_string())
+}
+
 fn classify_user_line(v: &Value, content: &Value) -> (String, Option<String>) {
     if content_has_tool_result(content) {
         return ("tool".to_string(), Some("tool_result".to_string()));
     }
-    let is_meta = v.get("isMeta").and_then(|m| m.as_bool()).unwrap_or(false);
-    if is_meta {
-        // No subtype: the role already says what this row is, and the sidebar
-        // label is `role · subtype`, which would read "meta · meta".
-        return ("meta".to_string(), None);
+    let flag = |key: &str| v.get(key).and_then(|b| b.as_bool()).unwrap_or(false);
+    let origin = v
+        .get("origin")
+        .and_then(|o| o.get("kind"))
+        .and_then(|k| k.as_str());
+    // The CLI stamps everything it writes on the user's behalf: task
+    // notifications, compaction summaries, slash-command bodies, hook output.
+    // None of it was typed, so none of it is a user row. `promptSource` is
+    // "typed" or "queued" for real input and "system" for injections.
+    if v.get("promptSource").and_then(|p| p.as_str()) == Some("system") {
+        return ("meta".to_string(), Some(origin.unwrap_or("system").to_string()));
+    }
+    if flag("isCompactSummary") {
+        return ("meta".to_string(), Some("compact-summary".to_string()));
+    }
+    if flag("isMeta") {
+        // Subtype stays None when nothing names the injection: the sidebar
+        // label is `role · subtype`, which would otherwise read "meta · meta".
+        return (
+            "meta".to_string(),
+            origin.map(str::to_string).or_else(|| injected_tag(content)),
+        );
+    }
+    if let Some(tag) = injected_tag(content) {
+        return ("meta".to_string(), Some(tag));
     }
     // Includes "[Request interrupted by user]": that's something the user
     // actually did, so it stays a user row on purpose.
@@ -820,7 +875,69 @@ mod tests {
         let out = read_claude(&path, "s", None);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "meta");
-        assert_eq!(out[0].subtype, None);
+        assert_eq!(out[0].subtype.as_deref(), Some("command-name"));
+    }
+
+    #[test]
+    fn task_notification_is_a_meta_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u6","timestamp":"2026-07-20T10:00:06.000Z","promptSource":"system","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<task-id>a06c1e6</task-id>\n<status>completed</status>\n</task-notification>"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "meta");
+        assert_eq!(out[0].subtype.as_deref(), Some("task-notification"));
+    }
+
+    #[test]
+    fn compact_summary_is_a_meta_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u7","timestamp":"2026-07-20T10:00:07.000Z","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"role":"user","content":"This session is being continued from a previous conversation…"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "meta");
+        assert_eq!(out[0].subtype.as_deref(), Some("compact-summary"));
+    }
+
+    // Sessions written before `promptSource` existed carry no flag at all, so
+    // the wrapper tag is the only marker left.
+    #[test]
+    fn legacy_command_body_is_a_meta_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u8","timestamp":"2026-07-20T10:00:08.000Z","message":{"role":"user","content":[{"type":"text","text":"<command-name>/compact</command-name>\n<command-message>compact</command-message>"}]}}"#,
+            r#"{"type":"user","uuid":"u9","timestamp":"2026-07-20T10:00:09.000Z","message":{"role":"user","content":[{"type":"text","text":"<local-command-stdout>Compacted</local-command-stdout>"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].role, "meta");
+        assert_eq!(out[0].subtype.as_deref(), Some("command-name"));
+        assert_eq!(out[1].role, "meta");
+        assert_eq!(out[1].subtype.as_deref(), Some("local-command-stdout"));
+    }
+
+    #[test]
+    fn typed_and_queued_input_stay_user_rows() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"ua","timestamp":"2026-07-20T10:00:10.000Z","promptSource":"typed","origin":{"kind":"human"},"message":{"role":"user","content":"ship it"}}"#,
+            r#"{"type":"user","uuid":"ub","timestamp":"2026-07-20T10:00:11.000Z","promptSource":"queued","origin":{"kind":"human"},"message":{"role":"user","content":"and then this"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 2);
+        let roles: Vec<&str> = out.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, ["user", "user"]);
+    }
+
+    // A message that merely mentions a tag is not an injection: the wrapper has
+    // to open the message.
+    #[test]
+    fn prose_about_a_tag_stays_a_user_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"uc","timestamp":"2026-07-20T10:00:12.000Z","message":{"role":"user","content":"why does <command-name> show up in the sidebar"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "user");
     }
 
     #[test]
@@ -918,10 +1035,18 @@ mod tests {
                 .and_then(|m| m.get("content"))
                 .cloned()
                 .unwrap_or(Value::Null);
+            let tagged = first_text(&content).is_some_and(|t| {
+                let t = t.trim_start();
+                INJECTED_TAGS.iter().any(|tag| t.starts_with(&format!("<{tag}>")))
+            });
+            let injected = tagged
+                || v.get("isMeta").and_then(|m| m.as_bool()).unwrap_or(false)
+                || v.get("isCompactSummary").and_then(|m| m.as_bool()).unwrap_or(false)
+                || v.get("promptSource").and_then(|p| p.as_str()) == Some("system");
             if content_has_tool_result(&content) {
                 assert_eq!(row.role, "tool", "line {} carries tool output", i + 1);
                 tool += 1;
-            } else if v.get("isMeta").and_then(|m| m.as_bool()).unwrap_or(false) {
+            } else if injected {
                 assert_eq!(row.role, "meta", "line {} is injected", i + 1);
                 meta += 1;
             } else {
