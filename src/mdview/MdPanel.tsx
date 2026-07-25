@@ -7,9 +7,8 @@ import type { StreamdownProps } from "streamdown";
 import { SignalReact } from "@hafley66/signals/react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { invoke } from "../generated/native";
-import { useApp } from "../useStore";
-import { baseName } from "../core";
+import { getMdviewHost } from "./ports";
+import { baseName } from "./local/core";
 import {
   expandChain,
   resolveMdLink,
@@ -37,7 +36,6 @@ import {
   type StrSignal,
 } from "./signals";
 import { setPendingFrag, takePendingFrag } from "./open";
-import { resetPanelZoom } from "../panelZoom";
 import { MdExplorer } from "./MdExplorer";
 import { useFsWatch } from "./0_watch";
 import "./mdview.css";
@@ -62,7 +60,7 @@ function MdImg({ src, alt, base }: { src?: string; alt?: string; base: string })
     }
     let dead = false;
     const abs = s.startsWith("/") || s.startsWith("~") ? s : `${dirOf(base)}/${s}`;
-    invoke<string>("read_image", { path: abs })
+    getMdviewHost().readImage(abs)
       .then((u) => {
         if (!dead) setUrl(u);
       })
@@ -199,8 +197,9 @@ export const MdPanel = SignalReact(function MdPanel({
   pathSig: StrSignal;
   onNavigate: (path: string) => void;
 }) {
-  const app = useApp();
-  const dark = app.mode === "dark";
+  const host = getMdviewHost();
+  const appState = host.useAppState();
+  const dark = appState.dark;
   const path = pathSig.$();
   const state = mdDocs.$()[path];
   const ui = mdUi.$();
@@ -208,7 +207,7 @@ export const MdPanel = SignalReact(function MdPanel({
   // Per-tab content zoom (generic panelZoom registry; ⌘+/-/0 when active).
   // Applied to the reading pane only — the explorer is UI chrome, and a CSS
   // zoom on the PanelGroup would skew its sash pointer math.
-  const zoom = app.panelZoom[pid] ?? 1;
+  const zoom = appState.panelZoom[pid] ?? 1;
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -459,7 +458,7 @@ export const MdPanel = SignalReact(function MdPanel({
           fold on open
         </label>
         {zoom !== 1 ? (
-          <button type="button" onClick={() => resetPanelZoom(pid)} title="content zoom — reset (⌘0)">
+          <button type="button" onClick={() => host.resetPanelZoom(pid)} title="content zoom — reset (⌘0)">
             {Math.round(zoom * 100)}%
           </button>
         ) : null}

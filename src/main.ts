@@ -15,26 +15,34 @@ import { homeDir } from "@tauri-apps/api/path";
 // `anchor-name`/`position-anchor`/`anchor()`/`position-area` so tooltips and
 // menus can be authored in native CSS. No-ops where the browser supports it.
 import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
-import { store, type CaptureStatus, type Event, type Fav } from "./state";
-import { allPanels, pluginCommands } from "./plugin";
+import { store, type CaptureStatus, type Event, type Fav, type FsEntry } from "./state";
+import { allPanels, pluginCommands, registerPlugin } from "./plugin";
 import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerCassPlugin } from "./plugins/cass";
 import { registerFilesPlugin } from "./plugins/files";
+import { FileTree } from "./plugins/files/1_FileTree";
 import { registerMdview } from "./mdview";
+import { installMdviewHost } from "./mdview/ports";
 import { registerPaint } from "./paintPanel";
 import { isFilePickerOpen } from "./overlayGuard";
 import { installKeymap, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
 import { type GraphicsFrame } from "./graphics";
 import { cdpPerf } from "./cdp";
+import { claimFsWatch } from "./fsWatch";
+import { registerZoomKind, resetPanelZoom } from "./panelZoom";
+import { readPluginState, savePluginState } from "./pluginState";
+import { useApp } from "./useStore";
 import {
   mountReactDock,
   togglePanel,
   setDockHooks,
   onDockChange,
+  addMdPanel,
+  mdPanelId,
 } from "./reactdock";
 import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, logLine } from "./core";
 import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore } from "./preview";
@@ -236,6 +244,26 @@ async function main() {
   void registerSprefa;
   // registerSprefa();
   registerNav();
+  // mdview (src/mdview/) has no `../` imports of its own; every app coupling
+  // it needs flows through this one host object (src/mdview/ports.ts).
+  installMdviewHost({
+    readText: (path) => invoke<string>("read_text", { path }),
+    readImage: (path) => invoke<string>("read_image", { path }),
+    listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
+    watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
+    FileTree,
+    registerZoomKind,
+    resetPanelZoom,
+    readPluginState,
+    savePluginState,
+    useAppState: () => {
+      const app = useApp();
+      return { dark: app.mode === "dark", panelZoom: app.panelZoom };
+    },
+    openMdPanel: addMdPanel,
+    mdPanelId,
+    registerPlugin,
+  });
   registerMdview(); // md panels open via routing (preview/clickrules), no rail button
   registerPaint();
   registerV2Bridges();

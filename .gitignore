@@ -32,3 +32,7 @@ vscode-ext/out
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright run artifacts (traces, actual/diff images). Snapshot baselines
+# live next to their spec in e2e/*-snapshots/ and stay tracked.
+/test-results/

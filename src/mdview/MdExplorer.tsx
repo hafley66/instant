@@ -3,10 +3,8 @@
 // Selecting a doc navigates the panel in place; folders toggle on double-click
 // (FileTree, the shared lazy TreeTable explorer).
 import { useEffect, useState } from "react";
-import { invoke } from "../generated/native";
-import { FileTree } from "../plugins/files/1_FileTree";
-import { MD_EXTS } from "../core";
-import type { FsEntry } from "../state";
+import { getMdviewHost, type MdviewFsEntry } from "./ports";
+import { MD_EXTS } from "./local/core";
 import { useFsWatch } from "./0_watch";
 
 function dirOf(p: string): string {
@@ -22,8 +20,9 @@ export function MdExplorer({
   onNavigate: (path: string) => void;
 }) {
   const [root, setRoot] = useState(() => dirOf(docPath));
-  const [entries, setEntries] = useState<FsEntry[]>([]);
+  const [entries, setEntries] = useState<MdviewFsEntry[]>([]);
   const [revision, setRevision] = useState(0);
+  const host = getMdviewHost();
 
   // Follow the document: navigating resets the root to the new doc's folder.
   useEffect(() => {
@@ -32,7 +31,7 @@ export function MdExplorer({
 
   useEffect(() => {
     let dead = false;
-    invoke<{ entries: FsEntry[] }>("list_dir", { path: root })
+    host.listDir(root)
       .then((l) => {
         if (dead) return;
         setEntries(
@@ -64,7 +63,7 @@ export function MdExplorer({
           {root}
         </span>
       </div>
-      <FileTree
+      <host.FileTree
         rootPath={root}
         rootEntries={entries}
         activePath={docPath}

@@ -2,8 +2,8 @@
 // through (preview interception, click-rule interception, in-viewer links).
 // Kept separate from index.ts so callers don't pull the React panel into
 // their module graph.
-import { addMdPanel, mdPanelId } from "../reactdock";
-import { baseName } from "../core";
+import { getMdviewHost } from "./ports";
+import { baseName } from "./local/core";
 
 // A #frag requested with the next open, consumed by the panel once its doc is
 // ready (value "" = no frag). One-shot so reactivating an already-open panel
@@ -23,9 +23,10 @@ export function registerMdNav(pid: string, fn: (path: string) => void): () => vo
 }
 
 export function openMarkdownPanel(path: string, frag?: string): void {
+  const host = getMdviewHost();
   setPendingFrag(path, frag);
-  addMdPanel(path, baseName(path));
-  panelNav.get(mdPanelId(path))?.(path);
+  host.openMdPanel(path, baseName(path));
+  panelNav.get(host.mdPanelId(path))?.(path);
 }
 
 // In-place navigation (explorer clicks, in-doc links) uses this so a #frag is

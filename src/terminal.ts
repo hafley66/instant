@@ -27,7 +27,9 @@ import {
   activePanelId,
   termPanelId,
 } from "./reactdock";
-import { dispatchClick, quotedSpanAt, clickIntent, resolveReference } from "./clickrules";
+import { dispatchClick, clickIntent, resolveReference } from "./clickrules";
+import { scanLineTokens, tokenAtColumn } from "./termTokens";
+import { resolveRef } from "./refResolve";
 import {
   registerZoomKind,
   setZoomTargetResolver,
@@ -290,10 +292,27 @@ export function zoomResetGesture() {
   panelZoomResetGesture();
 }
 
-// The word/path token under the pointer, for a ⌘-click miss (no link hit). Uses
-// the screen-cell geometry to map clientX/Y to a buffer cell, then expands to the
-// surrounding non-whitespace run and strips wrapping punctuation. A quoted span
-// under the cursor wins (so spaces inside quotes stay together).
+// Harness support for the browser e2e run, which has no PTY behind a terminal:
+// write bytes straight into the emulator, and map a buffer cell to the viewport
+// point Playwright must move the mouse to. Both mirror what wordAt does, so a
+// test hovering (row, col) lands on the cell it names.
+export function writeTerm(id: string, data: string): void {
+  tabs.get(id)?.term.write(data);
+}
+export function termCellPoint(id: string, row: number, col: number): { x: number; y: number } | null {
+  const t = tabs.get(id);
+  if (!t) return null;
+  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
+  const rect = screen.getBoundingClientRect();
+  const cellH = rect.height / t.term.rows || 1;
+  const cellW = rect.width / t.term.cols || 1;
+  return { x: rect.left + (col + 0.5) * cellW, y: rect.top + (row + 0.5) * cellH };
+}
+
+// The word/path token under the pointer, for a ⌘-click miss (no link hit) and
+// for the hover card. Maps clientX/Y to a buffer cell through the screen-cell
+// geometry, then hands the row to the same scanner the link provider uses, so
+// the card names exactly the characters the underline covers.
 function wordAt(id: string, clientX: number, clientY: number): string {
   const t = tabs.get(id);
   if (!t) return "";
@@ -306,18 +325,7 @@ function wordAt(id: string, clientX: number, clientY: number): string {
   const buf = t.term.buffer.active;
   const line = buf.getLine(buf.viewportY + row);
   if (!line) return "";
-  const text = line.translateToString(true);
-  const quoted = quotedSpanAt(text, col);
-  if (quoted) return quoted;
-  if (col >= text.length || /\s/.test(text[col] ?? "")) return "";
-  let lo = col;
-  let hi = col;
-  while (lo > 0 && !/\s/.test(text[lo - 1])) lo--;
-  while (hi < text.length - 1 && !/\s/.test(text[hi + 1])) hi++;
-  return text
-    .slice(lo, hi + 1)
-    .replace(/^[('"<[{]+/, "")
-    .replace(/[.,;:)\]}>'"]+$/, "");
+  return tokenAtColumn(line.translateToString(true), col)?.text ?? "";
 }
 
 // opts let a Space override the agent command and launch cwd; plain sessions
@@ -488,43 +496,21 @@ export function openTab(
       const line = term.buffer.active.getLine(y - 1); // y is 1-based absolute row
       if (!line) return cb(undefined);
       const text = line.translateToString(true);
-      const links: ILink[] = [];
       const activate = (e: MouseEvent, t: string) => {
         if (!e.metaKey) return; // ⌘ required; plain click stays with the app
         dispatchClick(t, tabMetaById(id)?.cwd ?? "");
       };
-      // Quoted spans first: '…'/"…"/`…` is one openable unit (paths with spaces).
-      // Record the quote columns so the \S+ pass below skips the fragments inside.
-      const spans: Array<{ o: number; c: number }> = [];
-      for (const m of text.matchAll(/(['"`])(.+?)\1/g)) {
-        const inner = m[2];
-        if (!inner.trim()) continue;
-        const o = m.index ?? 0; // opening-quote col
-        const c = o + m[0].length - 1; // closing-quote col
-        spans.push({ o, c });
-        const start = o + 1; // inner content col (0-based)
-        links.push({
-          text: inner,
-          range: { start: { x: start + 1, y }, end: { x: start + inner.length, y } },
+      // One scanner owns the span boundaries (see termTokens.ts), so the
+      // underline covers the path and stops there: hovering `Update(src/x.ts)`
+      // highlights `src/x.ts`, never the call envelope around it.
+      const links: ILink[] = scanLineTokens(text)
+        .filter((span) => looksOpenable(span.text))
+        .map((span) => ({
+          text: span.text,
+          // xterm columns are 1-based and its range end is inclusive.
+          range: { start: { x: span.start + 1, y }, end: { x: span.end, y } },
           activate,
-        });
-      }
-      for (const m of text.matchAll(/\S+/g)) {
-        const idx0 = m.index ?? 0;
-        if (spans.some((s) => idx0 >= s.o && idx0 <= s.c)) continue; // inside a quoted span
-        const raw = m[0];
-        // Strip wrapping punctuation, tracking the offset for column math.
-        const lead = raw.match(/^[('"<[{]+/)?.[0].length ?? 0;
-        const trail = raw.match(/[.,;:)\]}>'"]+$/)?.[0].length ?? 0;
-        const tok = raw.slice(lead, raw.length - trail);
-        if (!tok || !looksOpenable(tok)) continue;
-        const start = idx0 + lead; // 0-based col
-        links.push({
-          text: tok,
-          range: { start: { x: start + 1, y }, end: { x: start + tok.length, y } },
-          activate,
-        });
-      }
+        }));
       cb(links);
     },
   });
@@ -548,34 +534,50 @@ export function openTab(
       // Once the card is open, keep its anchor stable while the pointer travels
       // from the terminal token into the card. Reposition only for a new token.
       if (inspector.dataset.token === token) return;
-      const ref = resolveReference(token, cwd);
+      // First paint uses the cheap guess (cwd-joined) so the card appears with
+      // the pointer; the resolver then replaces the path with the file it
+      // actually found, which for agent output is often under the repo root
+      // rather than the shell's directory.
+      const guess = resolveReference(token, cwd);
       inspectorToken = token;
       inspectorCwd = cwd;
-      inspectorRef = ref;
+      inspectorRef = guess;
       inspector.dataset.token = token;
       const request = ++inspectorRequest;
-      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref?.path ?? (cwd || "home"))}</small>`;
+      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(guess?.path ?? (cwd || "home"))}</small>`;
       const inspectorW = Math.min(620, window.innerWidth - 16);
       const inspectorH = Math.min(260, window.innerHeight - 16);
       inspector.style.left = `${Math.max(8, Math.min(e.clientX + 12, window.innerWidth - inspectorW - 8))}px`;
       inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
-      if (ref) {
-        const read = inspectorTextCache.get(ref.path)
-          ? Promise.resolve(inspectorTextCache.get(ref.path)!)
+      void resolveRef(token, cwd).then((result) => {
+        if (request !== inspectorRequest) return;
+        if (result.kind === "choices") {
+          inspectorRef = null;
+          inspector.innerHTML =
+            `<strong>${escapeHtml(token)}</strong><span>${result.paths.length} files match</span>` +
+            `<small>${escapeHtml(result.paths[0])}</small>`;
+          return;
+        }
+        const ref = result.kind === "hit" ? { path: result.ref.path, line: result.ref.line } : null;
+        inspectorRef = ref;
+        if (!ref) return;
+        const cached = inspectorTextCache.get(ref.path);
+        const read = cached
+          ? Promise.resolve(cached)
           : invoke<string>("read_text", { path: ref.path }).then((text) => {
               if (inspectorTextCache.size > 100) inspectorTextCache.delete(inspectorTextCache.keys().next().value!);
               inspectorTextCache.set(ref.path, text);
               return text;
             });
-        void read.then((text) => {
+        return read.then((text) => {
           if (request !== inspectorRequest) return;
-          void inlineSnippetHtml(ref.path, text, store.get().mode === "dark").then((html) => {
+          return inlineSnippetHtml(ref.path, text, store.get().mode === "dark").then((html) => {
             if (request !== inspectorRequest) return;
-            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token, cwd))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button></div>`;
+            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button></div>`;
           });
-        }).catch(() => {});
-      }
+        });
+      }).catch(() => {});
     },
     { capture: true },
   );

@@ -4,8 +4,7 @@
 // reads it; mutations go through the helpers so signal + pluginState stay in
 // sync no matter where they're toggled from.
 import { Signal, type Signal$ } from "@hafley66/signals";
-import { invoke } from "../generated/native";
-import { readPluginState, savePluginState } from "../pluginState";
+import { getMdviewHost } from "./ports";
 import { allSectionIds, parseMdSections, type MdDoc } from "./model";
 
 const PLUGIN_ID = "md";
@@ -19,14 +18,19 @@ export interface MdUi {
 
 const DEFAULT_UI: MdUi = { startFolded: true, layout: null, layouts: {}, explorerHidden: false };
 
-export const mdUi = Signal<MdUi>({
-  ...DEFAULT_UI,
-  ...readPluginState<Partial<MdUi>>(PLUGIN_ID, {}),
-});
+// Seeded with defaults at module load (before a host may exist); the real
+// persisted values are applied by loadPersistedMdUi(), which registerMdview()
+// calls once a host is installed and before any panel can read this signal.
+export const mdUi = Signal<MdUi>(DEFAULT_UI);
+
+export function loadPersistedMdUi(): void {
+  const saved = getMdviewHost().readPluginState<Partial<MdUi>>(PLUGIN_ID, {});
+  mdUi.$({ ...mdUi.$(), ...saved });
+}
 
 export function setMdUi(patch: Partial<MdUi>): void {
   mdUi.$({ ...mdUi.$(), ...patch });
-  savePluginState<MdUi>(PLUGIN_ID, patch);
+  getMdviewHost().savePluginState<MdUi>(PLUGIN_ID, patch);
 }
 
 const FALLBACK_LAYOUT = [26, 74];
@@ -72,7 +76,7 @@ export async function loadMdDoc(path: string): Promise<void> {
   if (cur && cur.status !== "error") return;
   mdDocs.$({ ...mdDocs.$(), [path]: { status: "loading" } });
   try {
-    const text = await invoke<string>("read_text", { path });
+    const text = await getMdviewHost().readText(path);
     mdDocs.$({ ...mdDocs.$(), [path]: { status: "ready", text, doc: parseMdSections(text) } });
   } catch (e) {
     mdDocs.$({ ...mdDocs.$(), [path]: { status: "error", error: String(e) } });
@@ -81,7 +85,7 @@ export async function loadMdDoc(path: string): Promise<void> {
 
 export async function reloadMdDoc(path: string): Promise<void> {
   try {
-    const text = await invoke<string>("read_text", { path });
+    const text = await getMdviewHost().readText(path);
     mdDocs.$({ ...mdDocs.$(), [path]: { status: "ready", text, doc: parseMdSections(text) } });
   } catch (e) {
     mdDocs.$({ ...mdDocs.$(), [path]: { status: "error", error: String(e) } });

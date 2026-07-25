@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { claimFsWatch } from "../fsWatch";
+import { getMdviewHost } from "./ports";
 
 export function useFsWatch(path: string, onChange: () => void, recursive = false): void {
   const onChangeRef = useRef(onChange);
@@ -10,7 +10,7 @@ export function useFsWatch(path: string, onChange: () => void, recursive = false
     let release: (() => void) | undefined;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
-    claimFsWatch(path, () => {
+    getMdviewHost().watchFile(path, () => {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => onChangeRef.current(), 75);
     }, recursive).then((stop) => {

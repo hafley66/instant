@@ -5,6 +5,10 @@
 // (see src/reactive/nativeTransport.ts), so this runs in headless Chrome with
 // no Rust backend.
 import "xp.css";
+// xterm's own stylesheet positions .xterm-screen over .xterm-viewport. Without
+// it the screen element flows below the host and every cell-to-pixel mapping
+// (hover, ⌘-click hit testing) points offscreen.
+import "@xterm/xterm/css/xterm.css";
 import "../src/styles.css";
 import { createElement } from "react";
 import type { IDockviewPanelProps } from "dockview";
@@ -18,6 +22,8 @@ import {
   fitTerm,
   tabMetaById,
   getFocusedTermId,
+  writeTerm,
+  termCellPoint,
 } from "../src/terminal";
 import { setHomeDir, sessionId } from "../src/core";
 import { store } from "../src/state";
@@ -30,18 +36,48 @@ import { wireContextMenu } from "../src/ctxmenu";
 type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
 const NOW = Date.now();
 const E2E_HARNESS = new URLSearchParams(window.location.search).get("harness") === "kimi" ? "kimi" : "codex";
+const ROOT = "/tmp/term-e2e";
+const entry = (path: string, is_dir = false) => ({
+  name: path.split("/").pop()!,
+  path,
+  is_dir,
+  size: is_dir ? 0 : 64,
+  modified: 0,
+  ext: is_dir ? "" : path.split(".").pop()!,
+});
+// The directories the ⌘-hover resolver probes. Only the root listing feeds the
+// sidebar explorer; the rest exist so a repo-relative token (`src/main.ts`
+// hovered from a shell sitting in the root) resolves to a real file.
+const DIRS: Record<string, string[]> = {
+  [ROOT]: [`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/README.md`, `${ROOT}/package.json`],
+  [`${ROOT}/src`]: [`${ROOT}/src/main.ts`, `${ROOT}/src/preview.ts`, `${ROOT}/src/mdview`],
+  [`${ROOT}/src/mdview`]: [`${ROOT}/src/mdview/MdPanel.tsx`],
+  [`${ROOT}/e2e`]: [`${ROOT}/e2e/MdPanel.tsx`],
+};
+const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`]);
+
 (window as E2eWindow).__instantE2eNativeResults = {
   cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
-  list_dir: {
-    path: "/tmp/term-e2e",
-    parent: "/tmp",
-    entries: [
-      { name: "src", path: "/tmp/term-e2e/src", is_dir: true, size: 0, modified: 0, ext: "" },
-      { name: "e2e", path: "/tmp/term-e2e/e2e", is_dir: true, size: 0, modified: 0, ext: "" },
-      { name: "README.md", path: "/tmp/term-e2e/README.md", is_dir: false, size: 64, modified: 0, ext: "md" },
-      { name: "package.json", path: "/tmp/term-e2e/package.json", is_dir: false, size: 32, modified: 0, ext: "json" },
-    ],
+  list_dir: (args: Record<string, unknown> | undefined) => {
+    const path = String(args?.path ?? ROOT);
+    const children = DIRS[path];
+    if (!children) return { path, parent: ROOT, entries: [] };
+    return {
+      path,
+      parent: path.slice(0, path.lastIndexOf("/")) || "/",
+      entries: children.map((c) => entry(c, DIR_SET.has(c))),
+    };
   },
+  // The repo root a cwd belongs to, and the gitignore-aware file list under it.
+  // Two MdPanel.tsx copies make a bare filename ambiguous on purpose, which is
+  // what puts the resolver into its picker branch.
+  worktree_at: { worktree: ROOT, branch: "main", head: "e2e", is_main: true },
+  search_files: [
+    entry(`${ROOT}/src/main.ts`),
+    entry(`${ROOT}/src/preview.ts`),
+    entry(`${ROOT}/src/mdview/MdPanel.tsx`),
+    entry(`${ROOT}/e2e/MdPanel.tsx`),
+  ],
   // harness_session resolves a session id for a (tool, cwd) probe. The Turns
   // pane resolver probes every editor; return one only for Codex so a single
   // transcript node renders. A function
@@ -126,8 +162,16 @@ installKeymap([
   },
 ]);
 
+// Terminal test hooks: the headless run has no PTY, so the spec writes fixture
+// lines into the emulator itself and asks for the viewport point of a cell.
+type TermHooks = { write: (data: string) => void; point: (row: number, col: number) => { x: number; y: number } | null };
+(window as Window & { __term?: TermHooks }).__term = {
+  write: (data) => writeTerm(sessionId("e2e"), data),
+  point: (row, col) => termCellPoint(sessionId("e2e"), row, col),
+};
+
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
-  openTab("e2e", { cwd: "/tmp/term-e2e" });
+  openTab("e2e", { cwd: ROOT });
   // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
   // Seed the pane split. Touched is derived from the session transcript; Turns
   // is the initial source.

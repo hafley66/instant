@@ -9,6 +9,8 @@ import { escapeHtml, shQuote, MD_EXTS } from "./core";
 import { openPreviewPanel, previewOrigin } from "./preview";
 import { openMarkdownPanel } from "./mdview/open";
 import { getFocusedTermId, tabMetaById } from "./terminal";
+import { splitLineRef, tokenAtColumn } from "./termTokens";
+import { looksLikePath, resolveRef } from "./refResolve";
 
 const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
 
@@ -19,21 +21,21 @@ export function clickRuleFor(rawToken: string): ClickRule | null {
   }) ?? null;
 }
 
-export function clickIntent(rawToken: string, cwd: string): string {
+export function clickIntent(rawToken: string): string {
   const token = rawToken.trim();
   if (/^(?:https?:\/\/|www\.)/i.test(token)) return "open URL";
-  if (/^(?:\/|~\/|\.\.?\/)/.test(token) || (cwd && /\//.test(token))) return "open/preview file";
+  if (looksLikePath(token)) return "open/preview file";
   return clickRuleFor(token) ? "run configured action from terminal cwd" : "search from terminal cwd";
 }
 
+// The immediate guess for a token: cwd-joined, no filesystem access. The hover
+// card paints this while resolveRef (which does touch the filesystem, and finds
+// repo-relative and bare filenames) settles.
 export function resolveReference(rawToken: string, cwd: string): { path: string; line?: number } | null {
   const token = rawToken.trim().replace(/^['"`]|['"`]$/g, "");
-  if (!token || /^(?:https?:\/\/|www\.)/i.test(token)) return null;
-  const match = token.match(/^(.*?):(\d+)(?::\d+)?$/);
-  const bare = match?.[1] ?? token;
-  const line = match ? Number(match[2]) : undefined;
-  const fileish = /^\/?(?:~\/|\.\.?\/|[^\s:]+\/)/.test(bare) || /\.[A-Za-z0-9]{1,16}$/.test(bare);
-  if (!fileish) return null;
+  if (!token || !looksLikePath(token)) return null;
+  const { path: bare, line } = splitLineRef(token);
+  if (!bare) return null;
   if (bare.startsWith("/") || bare.startsWith("~/")) return { path: bare, line };
   return { path: cwd ? `${cwd.replace(/\/$/, "")}/${bare}` : bare, line };
 }
@@ -41,18 +43,24 @@ export function resolveReference(rawToken: string, cwd: string): { path: string;
 export async function dispatchClick(rawToken: string, cwd: string) {
   const token = rawToken.trim();
   if (!token) return;
-  // Markdown paths route to the mdview panel instead of the shell rule — the
-  // default catch-all would otherwise `code -g` them (shelling out to the OS
-  // editor is exactly what the viewer replaces).
-  const ref = resolveReference(token, cwd);
-  if (ref) {
-    const name = ref.path.split("/").pop() ?? ref.path;
+  // A path-shaped token goes to the resolver, which checks the cwd, the repo
+  // root, and finally a filename search: agent output prints repo-relative
+  // paths and bare filenames that do not exist under the shell's directory.
+  const result = await resolveRef(token, cwd);
+  if (result.kind === "choices") {
+    openRefChoices(token, result.paths, result.line, cwd);
+    return;
+  }
+  // A file we located opens in Instant: markdown in the mdview tab, everything
+  // else in the preview tab (which scrolls to the line and live-reloads). The
+  // click rules still own what is left: urls, and tokens that name no file.
+  if (result.kind === "hit") {
+    const { path, line } = result.ref;
+    const name = path.split("/").pop() ?? path;
     const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
-    if (MD_EXTS.has(ext)) {
-      if (ref.line) openPreviewPanel(ref.path, ref.line);
-      else openMarkdownPanel(ref.path);
-      return;
-    }
+    if (MD_EXTS.has(ext) && !line) openMarkdownPanel(path);
+    else openPreviewPanel(path, line);
+    return;
   }
   const rule = clickRuleFor(token);
   if (!rule) return;
@@ -74,22 +82,14 @@ const activeCwd = (): string => {
   return id ? tabMetaById(id)?.cwd ?? "" : "";
 };
 
-// The word under a viewport point in DOM text (preview / rg panels). Mirrors the
-// terminal's wordAt: expands to whitespace, trimming the wrapping punctuation the
-// clickRules grep would choke on otherwise.
+// The word under a viewport point in DOM text (preview / rg panels). Uses the
+// terminal's scanner, so a token clicked in a panel and the same token clicked
+// in the terminal produce identical text.
 function domWordAt(x: number, y: number): string {
   const range = document.caretRangeFromPoint?.(x, y);
   const node = range?.startContainer;
   if (!range || !node || node.nodeType !== Node.TEXT_NODE) return "";
-  const text = node.nodeValue ?? "";
-  const quoted = quotedSpanAt(text, range.startOffset);
-  if (quoted) return quoted;
-  const isWord = (c: string | undefined) => !!c && /\S/.test(c) && !/['"<>(){}\[\],;:]/.test(c);
-  let a = range.startOffset;
-  let b = range.startOffset;
-  while (a > 0 && isWord(text[a - 1])) a--;
-  while (b < text.length && isWord(text[b])) b++;
-  return text.slice(a, b).trim();
+  return tokenAtColumn(node.nodeValue ?? "", range.startOffset)?.text ?? "";
 }
 
 // ⌘-click on free text inside a preview / rg panel runs the same clickRules
@@ -114,6 +114,26 @@ export function wireDomCmdClick() {
     },
     { capture: true },
   );
+}
+
+// A token that named several files (a bare `MdPanel.tsx`, a tail that repeats
+// across packages) opens the same results panel a search would, one row per
+// candidate, ranked closest first. Rows carry the token's line number so the
+// preview lands on the right row whichever file the user picks.
+function openRefChoices(token: string, paths: string[], line: number | undefined, cwd: string) {
+  const output = paths.map((p) => `${p}:${line ?? 1}:${dirOf(p, cwd)}`).join("\n");
+  openClickPanel(token, output, cwd, {
+    pattern: "",
+    command: `resolve ${token} (${paths.length} candidates)`,
+  });
+}
+
+// The directory a candidate lives in, relative to the terminal cwd when it sits
+// underneath it, so the picker rows read as locations instead of full paths.
+function dirOf(path: string, cwd: string): string {
+  const dir = path.slice(0, path.lastIndexOf("/")) || "/";
+  const base = cwd.replace(/\/$/, "");
+  return base && dir.startsWith(`${base}/`) ? dir.slice(base.length + 1) : dir;
 }
 
 const clickPanelEls = new Map<string, HTMLElement>();
@@ -302,22 +322,4 @@ function renderClickConfig(el: HTMLElement) {
     ta.value = JSON.stringify(DEFAULT_CLICK_RULES, null, 2);
     msg.textContent = "reset";
   });
-}
-
-// If `col` (0-based) sits inside a '…' / "…" / `…` span, return the unquoted
-// contents — spaces and all — so ⌘-click treats a quoted path (e.g. a screenshot
-// path with spaces) as one token instead of splitting on whitespace.
-export function quotedSpanAt(text: string, col: number): string | null {
-  for (const q of ["'", '"', "`"]) {
-    let from = 0;
-    for (;;) {
-      const open = text.indexOf(q, from);
-      if (open < 0) break;
-      const close = text.indexOf(q, open + 1);
-      if (close < 0) break;
-      if (col > open && col < close) return text.slice(open + 1, close);
-      from = close + 1;
-    }
-  }
-  return null;
 }
