@@ -1,0 +1,201 @@
+{
+  "captured": "2026-07-25",
+  "perKind": 2,
+  "maxChars": 600,
+  "note": "Sanitized slices of real harness sessions. Home paths, emails, and tokens are scrubbed; every string is trimmed. Kinds mirror what src-tauri/src/ledger.rs branches on.",
+  "fixtures": [
+    {
+      "harness": "claude",
+      "file": "fixtures/transcripts/claude/session.jsonl",
+      "discovery": "cass",
+      "records": 46,
+      "sourceLines": 668,
+      "bytes": 45218,
+      "sourceHash": "f275753cde07",
+      "kinds": {
+        "assistant:text": 2,
+        "assistant:thinking": 2,
+        "line:ai-title": 2,
+        "line:attachment": 2,
+        "line:file-history-delta": 2,
+        "line:file-history-snapshot": 2,
+        "line:last-prompt": 2,
+        "line:mode": 2,
+        "line:queue-operation": 2,
+        "line:relocated": 2,
+        "line:system": 2,
+        "line:worktree-state": 2,
+        "tool:Agent": 2,
+        "tool:Bash": 2,
+        "tool:Edit": 2,
+        "tool:Read": 2,
+        "tool:TaskCreate": 2,
+        "tool:TaskUpdate": 2,
+        "tool:Write": 2,
+        "user:meta-string": 1,
+        "user:meta-text": 2,
+        "user:string": 2,
+        "user:text": 1,
+        "user:tool_result": 2
+      },
+      "features": {
+        "files": [
+          "tool:Read",
+          "tool:Edit",
+          "tool:Write"
+        ],
+        "tasks": [
+          "tool:TaskCreate",
+          "tool:TaskUpdate"
+        ],
+        "subagents": [
+          "tool:Agent"
+        ],
+        "skills": [
+          "user:meta-string",
+          "user:meta-text"
+        ],
+        "thinking": [
+          "assistant:thinking"
+        ],
+        "roles": [
+          "user:string",
+          "assistant:text",
+          "user:tool_result"
+        ]
+      },
+      "missing": []
+    },
+    {
+      "harness": "codex",
+      "file": "fixtures/transcripts/codex/session.jsonl",
+      "discovery": "cass",
+      "records": 22,
+      "sourceLines": 360,
+      "bytes": 21174,
+      "sourceHash": "cee65e573aa7",
+      "kinds": {
+        "call:exec": 2,
+        "call:wait": 1,
+        "message:assistant": 2,
+        "message:developer": 1,
+        "message:user": 2,
+        "payload:agent_message": 2,
+        "payload:custom_tool_call_output": 2,
+        "payload:function_call_output": 1,
+        "payload:patch_apply_end": 2,
+        "payload:reasoning": 2,
+        "payload:task_complete": 1,
+        "payload:task_started": 1,
+        "payload:token_count": 2,
+        "payload:user_message": 1
+      },
+      "features": {
+        "files": [
+          "payload:patch_apply_end"
+        ],
+        "tasks": [
+          "payload:task_started",
+          "payload:task_complete"
+        ],
+        "subagents": [
+          "call:wait"
+        ],
+        "skills": [
+          "message:developer"
+        ],
+        "thinking": [
+          "payload:reasoning"
+        ],
+        "roles": [
+          "message:user",
+          "message:assistant"
+        ]
+      },
+      "missing": []
+    },
+    {
+      "harness": "kimi",
+      "file": "fixtures/transcripts/kimi/session.jsonl",
+      "discovery": "disk-layout",
+      "records": 35,
+      "sourceLines": 579,
+      "bytes": 38764,
+      "sourceHash": "a61dbca0fdd8",
+      "kinds": {
+        "event:step.begin": 2,
+        "event:step.end": 2,
+        "event:tool.result": 2,
+        "line:config.update": 2,
+        "line:context.append_message": 2,
+        "line:llm.request": 2,
+        "line:llm.tools_snapshot": 1,
+        "line:metadata": 1,
+        "line:tools.set_active_tools": 1,
+        "line:tools.update_store": 2,
+        "line:turn.prompt": 1,
+        "line:usage.record": 2,
+        "part:text": 2,
+        "part:think": 2,
+        "tool:Bash": 2,
+        "tool:Edit": 2,
+        "tool:Grep": 1,
+        "tool:Read": 2,
+        "tool:TodoList": 2,
+        "tool:Write": 2
+      },
+      "features": {
+        "files": [
+          "tool:Read",
+          "tool:Edit",
+          "tool:Write"
+        ],
+        "tasks": [
+          "tool:TodoList"
+        ],
+        "subagents": [],
+        "skills": [
+          "line:tools.update_store"
+        ],
+        "thinking": [
+          "part:think"
+        ],
+        "roles": [
+          "line:turn.prompt",
+          "part:text"
+        ]
+      },
+      "missing": []
+    },
+    {
+      "harness": "claude-subagent",
+      "file": "fixtures/transcripts/claude/subagent.jsonl",
+      "discovery": "disk-layout",
+      "records": 20,
+      "sourceLines": 62,
+      "bytes": 30749,
+      "sourceHash": "b2ac680a16af",
+      "kinds": {
+        "assistant:text": 2,
+        "assistant:thinking": 2,
+        "line:attachment": 2,
+        "subagent-line": 20,
+        "tool:Agent": 2,
+        "tool:Bash": 2,
+        "tool:Edit": 1,
+        "tool:Read": 2,
+        "tool:ToolSearch": 2,
+        "tool:WebFetch": 1,
+        "tool:Write": 1,
+        "user:string": 1,
+        "user:tool_result": 2
+      },
+      "features": {
+        "subagents": [
+          "subagent-line"
+        ]
+      },
+      "missing": []
+    }
+  ]
+}

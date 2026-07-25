@@ -407,6 +407,35 @@ fn preview_of(text: &str) -> String {
     }
 }
 
+// A claude `type:"user"` line covers three different things on the wire: a
+// real typed message, a tool result routed back through the user role (it
+// carries a sibling `toolUseResult` field and a `tool_result` content block),
+// and injected content such as skill/slash-command bodies (`isMeta: true`).
+// Classify on content block types and the isMeta flag, never on "string vs
+// array": a real message can still be an array of blocks (image + text).
+fn content_has_tool_result(content: &Value) -> bool {
+    content.as_array().is_some_and(|blocks| {
+        blocks
+            .iter()
+            .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+    })
+}
+
+fn classify_user_line(v: &Value, content: &Value) -> (String, Option<String>) {
+    if content_has_tool_result(content) {
+        return ("tool".to_string(), Some("tool_result".to_string()));
+    }
+    let is_meta = v.get("isMeta").and_then(|m| m.as_bool()).unwrap_or(false);
+    if is_meta {
+        // No subtype: the role already says what this row is, and the sidebar
+        // label is `role · subtype`, which would read "meta · meta".
+        return ("meta".to_string(), None);
+    }
+    // Includes "[Request interrupted by user]": that's something the user
+    // actually did, so it stays a user row on purpose.
+    ("user".to_string(), None)
+}
+
 // Read every turn from one claude jsonl. `after_seq` skips lines already seen
 // (the watcher passes the last line index). Only user/assistant rows become
 // messages; system/mode/snapshot lines are skipped but still advance `seq` so
@@ -428,7 +457,7 @@ fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<
         let Ok(v) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        let role = match v.get("type").and_then(|t| t.as_str()) {
+        let msg_type = match v.get("type").and_then(|t| t.as_str()) {
             Some(t @ ("user" | "assistant")) => t,
             _ => continue,
         };
@@ -437,6 +466,11 @@ fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<
             .and_then(|m| m.get("content"))
             .cloned()
             .unwrap_or(Value::Null);
+        let (role, subtype) = if msg_type == "assistant" {
+            ("assistant".to_string(), None)
+        } else {
+            classify_user_line(&v, &content)
+        };
         let ex = claude_text(&content);
         if ex.full.is_empty() {
             continue;
@@ -459,8 +493,8 @@ fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<
             session_id: session_id.to_string(),
             id,
             seq,
-            role: role.to_string(),
-            subtype: None,
+            role,
+            subtype,
             ts,
             preview,
             text,
@@ -720,3 +754,199 @@ pub fn editor_tag(editor: &Editor) -> &'static str {
 }
 // todo(split): separate Claude and OpenCode parsing from ledger query orchestration
 // todo(test): add fixture coverage for malformed and partially-written session logs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    // One temp file per test, keyed by pid + a counter, so parallel `cargo
+    // test` runs never collide on the same path.
+    fn write_temp(lines: &[&str]) -> PathBuf {
+        let n = TEST_SEQ.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!("ledger_test_{}_{n}.jsonl", std::process::id()));
+        let mut file = fs::File::create(&path).expect("write temp fixture");
+        for line in lines {
+            writeln!(file, "{line}").expect("write temp fixture line");
+        }
+        path
+    }
+
+    #[test]
+    fn title_lookup_skips_leading_tool_and_meta_rows() {
+        // Mirrors list_claude_sessions' `.find(|m| m.role == "user")`: a
+        // session whose first lines are tool output / injected content must
+        // still resolve its title to the first real typed message.
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-07-20T10:00:00.000Z","isMeta":false,"toolUseResult":{"stdout":"ok"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}]}}"#,
+            r#"{"type":"user","uuid":"u2","timestamp":"2026-07-20T10:00:01.000Z","isMeta":true,"message":{"role":"user","content":"injected skill body"}}"#,
+            r#"{"type":"user","uuid":"u3","timestamp":"2026-07-20T10:00:02.000Z","isMeta":false,"message":{"role":"user","content":"fix the off-by-one bug"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        let title = out.into_iter().find(|m| m.role == "user").map(|m| m.preview);
+        assert_eq!(title.as_deref(), Some("fix the off-by-one bug"));
+    }
+
+    #[test]
+    fn string_content_is_a_user_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-07-20T10:00:00.000Z","isMeta":false,"message":{"role":"user","content":"hello there"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "user");
+        assert_eq!(out[0].subtype, None);
+    }
+
+    #[test]
+    fn tool_result_block_is_a_tool_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u2","timestamp":"2026-07-20T10:00:01.000Z","isMeta":false,"toolUseResult":{"stdout":"ok"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "tool");
+        assert_eq!(out[0].subtype.as_deref(), Some("tool_result"));
+    }
+
+    #[test]
+    fn meta_string_content_is_a_meta_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u3","timestamp":"2026-07-20T10:00:02.000Z","isMeta":true,"message":{"role":"user","content":"<command-name>/compact</command-name> body"}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "meta");
+        assert_eq!(out[0].subtype, None);
+    }
+
+    #[test]
+    fn meta_text_block_is_a_meta_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u4","timestamp":"2026-07-20T10:00:03.000Z","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"injected content"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "meta");
+        assert_eq!(out[0].subtype, None);
+    }
+
+    // Recorded on purpose as a user row: it's something the user actually did.
+    #[test]
+    fn interrupted_message_stays_a_user_row() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u5","timestamp":"2026-07-20T10:00:04.000Z","isMeta":false,"message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "user");
+        assert_eq!(out[0].subtype, None);
+    }
+
+    #[test]
+    fn assistant_line_is_unaffected() {
+        let path = write_temp(&[
+            r#"{"type":"assistant","uuid":"a1","timestamp":"2026-07-20T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"here is my answer"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "assistant");
+        assert_eq!(out[0].subtype, None);
+    }
+
+    #[test]
+    fn seq_is_the_line_index_across_skipped_lines() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-07-20T10:00:00.000Z","isMeta":false,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"system","content":"mode change"}"#,
+            r#"{"type":"user","uuid":"u2","timestamp":"2026-07-20T10:00:01.000Z","isMeta":false,"toolUseResult":{"stdout":"ok"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}]}}"#,
+            r#"{"type":"assistant","uuid":"a1","timestamp":"2026-07-20T10:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].seq, 0);
+        assert_eq!(out[1].seq, 2);
+        assert_eq!(out[2].seq, 3);
+    }
+
+    #[test]
+    fn after_seq_skips_up_to_and_including_that_index() {
+        let path = write_temp(&[
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-07-20T10:00:00.000Z","isMeta":false,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"system","content":"mode change"}"#,
+            r#"{"type":"user","uuid":"u2","timestamp":"2026-07-20T10:00:01.000Z","isMeta":false,"toolUseResult":{"stdout":"ok"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"ok"}]}}"#,
+            r#"{"type":"assistant","uuid":"a1","timestamp":"2026-07-20T10:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", Some(0));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].seq, 2);
+        assert_eq!(out[1].seq, 3);
+    }
+
+    // Captured from a real session by `node scripts/capture-transcripts.mjs`,
+    // trimmed and de-identified. Regenerate with that script when the harness
+    // wire format changes.
+    fn fixture(rel: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("fixtures")
+            .join("transcripts")
+            .join(rel)
+    }
+
+    #[test]
+    fn captured_claude_session_labels_every_row_by_its_wire_shape() {
+        let path = fixture("claude/session.jsonl");
+        let raw = fs::read_to_string(&path).expect("captured fixture missing");
+        let out = read_claude(&path, "s", None);
+        let (mut tool, mut user, mut meta) = (0, 0, 0);
+        for (i, line) in raw.lines().enumerate() {
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+                continue;
+            }
+            let Some(row) = out.iter().find(|m| m.seq == i as u64) else {
+                continue;
+            };
+            let content = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            if content_has_tool_result(&content) {
+                assert_eq!(row.role, "tool", "line {} carries tool output", i + 1);
+                tool += 1;
+            } else if v.get("isMeta").and_then(|m| m.as_bool()).unwrap_or(false) {
+                assert_eq!(row.role, "meta", "line {} is injected", i + 1);
+                meta += 1;
+            } else {
+                assert_eq!(row.role, "user", "line {} was typed by the user", i + 1);
+                user += 1;
+            }
+        }
+        assert!(tool > 0, "fixture lost its tool rows");
+        assert!(user > 0, "fixture lost its user rows");
+        assert!(meta > 0, "fixture lost its meta rows");
+    }
+
+    #[test]
+    fn captured_claude_subagent_session_parses() {
+        let path = fixture("claude/subagent.jsonl");
+        let out = read_claude(&path, "s", None);
+        assert!(!out.is_empty(), "subagent fixture produced no rows");
+        assert!(
+            out.iter().any(|m| m.role == "assistant"),
+            "subagent fixture has no assistant rows"
+        );
+        let raw = fs::read_to_string(&path).expect("captured fixture missing");
+        assert!(
+            raw.lines().any(|l| l.contains(r#""isSidechain":true"#)),
+            "subagent fixture must keep its sidechain marker"
+        );
+    }
+}

@@ -100,7 +100,8 @@ export function isCompaction(turn: AiMessage): boolean {
 }
 
 export function isToolOnlyTurn(turn: AiMessage): boolean {
-  return Boolean(turn.subtype) || /^\s*\[[^\]]+\]\s*(?:\{|\[|$)/.test(turn.text);
+  return turn.role === "tool" || turn.role === "meta"
+    || Boolean(turn.subtype) || /^\s*\[[^\]]+\]\s*(?:\{|\[|$)/.test(turn.text);
 }
 
 const SPECIAL_SUBTYPE = /^\s*\[([^\]\r\n]+)\]\s*/;

@@ -157,4 +157,21 @@ describe("session sidebar model", () => {
       ]
     `);
   });
+
+  it("nests a Claude tool-result row under the preceding assistant turn and keeps a real user row visible", () => {
+    const askUser = { ...turn("ask", 1, "what should I look at?"), role: "user" as const };
+    const answer = turn("answer", 2, "I'll check the reader now.");
+    const toolResult = {
+      ...turn("tool-result", 3, "477 if (diff.insert.length > 0 || diff...)"),
+      role: "tool" as const,
+      subtype: "tool_result",
+    };
+    expect(isToolOnlyTurn(toolResult)).toBe(true);
+    expect(isToolOnlyTurn(askUser)).toBe(false);
+    const windows = visibleTurnWindows([askUser, answer, toolResult]);
+    expect(windows.map(({ turn, tools }) => [turn.id, turn.role, tools.map((tool) => tool.id)])).toEqual([
+      ["answer", "assistant", ["tool-result"]],
+      ["ask", "user", []],
+    ]);
+  });
 });

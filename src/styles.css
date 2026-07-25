@@ -883,6 +883,10 @@ body[data-skin="xp"][data-mode="dark"] .turn-role { color: #4ec9b0; }
 .turn-copy[data-role="user"] small { color: var(--row-active-bg); opacity: 1; }
 body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] .turn-preview,
 body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { color: #4ec9b0; }
+/* Tool output and injected content are not the user's voice; dim them below
+   the default preview so a scan of the transcript reads user rows first. */
+.turn-copy[data-role="tool"] .turn-preview,
+.turn-copy[data-role="meta"] .turn-preview { color: var(--muted, #888); opacity: 0.7; }
 .turn-preview-popover {
   position: fixed;
   z-index: 9999;
