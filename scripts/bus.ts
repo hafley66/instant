@@ -6,8 +6,10 @@
 //   node scripts/bus.ts hail --to <agent> --body "..."
 //   node scripts/bus.ts sweep
 //   node scripts/bus.ts list --agent <agent>
+//   node scripts/bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command>
+//   node scripts/bus.ts resolve --to <lane-id> [--mail-dir <dir>]
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
-import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -80,6 +82,112 @@ function nowIso() {
 
 function mintId() {
   return "m-" + globalThis.crypto.randomUUID().slice(0, 8);
+}
+
+function readRegistryRaw(dir) {
+  const path = join(dir, "registry.json");
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function mergeRoute(dir, laneId, route) {
+  const registry = readRegistryRaw(dir);
+  registry[laneId] = route;
+  const path = join(dir, "registry.json");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path, JSON.stringify(registry, null, 2) + "\n");
+}
+
+function sleepSync(seconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+}
+
+function dispatch(args) {
+  const to = args.to;
+  const cwd = args.cwd;
+  const cmd = args.cmd;
+  if (!to || !cwd || !cmd) {
+    console.log("usage: bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command> [--from <agent>] [--harness <default opencode>] [--tmux <session name>] [--socket <tmux -L socket>] [--body <text>] [--ref <path>] [--mail-dir <dir>] [--resolve-wait <seconds>]");
+    return 1;
+  }
+  const harness = args.harness ?? "opencode";
+  const tmux = args.tmux ?? to;
+  const socket = args.socket ?? null;
+  const body = args.body ?? cmd;
+  const ref = args.ref ?? null;
+  const resolveWait = Number(args["resolve-wait"] ?? 3);
+
+  const create = run("tmux", [
+    ...(socket ? ["-L", socket] : []),
+    "new-session", "-d", "-s", tmux, "-c", cwd, cmd,
+  ]);
+  if (!create.ok) {
+    console.log(`tmux new-session failed (${create.status}): ${create.stderr.trim()}`);
+    return 1;
+  }
+
+  const dir = mailDirOf(args);
+  mergeRoute(dir, to, { harness, tmux, cwd });
+
+  const message = MailStore.send({
+    id: mintId(),
+    from: args.from ?? "coordinator",
+    to,
+    from_timestamp: nowIso(),
+    kind: "dispatch",
+    body,
+    reply_to: null,
+    ref,
+  });
+  append(join(dir, DEFAULT_BOX), message);
+  console.log(`dispatched ${message.id} -> ${to} (tmux ${tmux})`);
+
+  sleepSync(resolveWait);
+  resolve(args);
+  return 0;
+}
+
+function resolve(args) {
+  const to = args.to;
+  if (!to) {
+    console.log("usage: bus.ts resolve --to <lane-id> [--mail-dir <dir>]");
+    return 1;
+  }
+  const dir = mailDirOf(args);
+  const route = readRegistryRaw(dir)[to];
+  const harness = route?.harness ?? null;
+  const cwd = route?.cwd ?? null;
+  if (harness !== "opencode") {
+    console.log(`unresolved ${to}: harness ${harness ?? "none"} is not opencode`);
+    return 1;
+  }
+  if (!cwd) {
+    console.log(`unresolved ${to}: no cwd in registry route`);
+    return 1;
+  }
+  if (cwd.includes("'")) {
+    console.log(`unresolved ${to}: cwd contains a single quote, refusing`);
+    return 1;
+  }
+  const db = join(homedir(), ".local/share/opencode/opencode.db");
+  const query = `SELECT id FROM session WHERE directory = '${cwd}' AND time_archived IS NULL ORDER BY time_created DESC LIMIT 1`;
+  const result = run("sqlite3", [db, query]);
+  if (!result.ok) {
+    console.log(`resolve query failed (${result.status}): ${result.stderr.trim()}`);
+    return 1;
+  }
+  const sessionId = result.stdout.trim();
+  if (!sessionId) {
+    console.log(`unresolved ${to}: no opencode session for ${cwd} yet`);
+    return 2;
+  }
+  mergeRoute(dir, to, { ...route, sessionId });
+  console.log(`resolved ${to} -> ${sessionId}`);
+  return 0;
 }
 
 function hail(args) {
@@ -180,9 +288,9 @@ function list(args) {
 
 const [command, ...rest] = process.argv.slice(2);
 const args = flags(rest);
-const commands = { hail, sweep, list };
+const commands = { hail, sweep, list, dispatch, resolve };
 if (!command || !(command in commands)) {
-  console.log("usage: bus.ts <hail|sweep|list> [--mail-dir <path>] ...");
+  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve> [--mail-dir <path>] ...");
   process.exit(1);
 }
 process.exit(commands[command](args));
