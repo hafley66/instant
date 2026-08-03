@@ -18,6 +18,7 @@ function agent(overrides: Partial<IMailAgent> = {}): IMailAgent {
     sessionId: "sess-a",
     harness: "claude",
     tmux: "busmail-a",
+    cwd: null,
     sourcePath: null,
     ...overrides,
   };

@@ -9,7 +9,7 @@ import { getHomeDir, relTime } from "../../core";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { useApp } from "../../useStore";
 import { store } from "../../state";
-import { enrichRows } from "./0_mail";
+import { enrichRows, registrySeeds } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
@@ -151,8 +151,10 @@ export function useAgentTree(): AgentTreeState {
   const [error, setError] = useState("");
   const load = useCallback(() => {
     invoke<HarnessTraceSeed[]>("harness_trace_rows")
-      .then(async (seeds) => {
+      .then(async (storeSeeds) => {
         const mail = await loadMailLedger();
+        const liveTmux = new Set(store.get().sessions.map((s) => s.name));
+        const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux)];
         const flatRows = enrichRows(seeds, mail.envelopes, mail.registry);
         setFlat(toAgentNodes(flatRows, mail.envelopes, mail.registry));
         setRegistry(mail.registry);

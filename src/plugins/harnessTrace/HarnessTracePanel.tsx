@@ -15,12 +15,14 @@ import { TreeTable, type TreeColumn } from "../../treetable";
 import type { DirListing } from "../../state";
 import type { CassSwarmStatus } from "../cass/0_types";
 import { MAIL_DIR } from "./0_live";
+import { MailDirectory } from "./0_bus";
 import { enrichRows, parseMailNdjson, parseMailRegistry } from "./0_mail";
 import { indexAgentTree, materializeAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import type {
   AgentSessionNode,
   HarnessTraceSeed,
   IAgentTreeIndex,
+  IMailDirectory,
   MailEnvelope,
   MailRegistry,
 } from "./0_types";
@@ -133,26 +135,32 @@ function traceFilter(r: AgentTreeNode, q: string): boolean {
 }
 
 // Missing mail dir = zero enrichment, zero errors (the bus is not built yet).
-export async function loadMailLedger(): Promise<{ envelopes: MailEnvelope[]; registry: MailRegistry }> {
+export async function loadMailLedger(): Promise<{
+  envelopes: MailEnvelope[];
+  registry: MailRegistry;
+  directory: IMailDirectory;
+}> {
   let listing: DirListing;
   try {
     listing = await invoke<DirListing>("list_dir", { path: MAIL_DIR });
   } catch {
-    return { envelopes: [], registry: {} };
+    return { envelopes: [], registry: {}, directory: {} };
   }
   const envelopes: MailEnvelope[] = [];
   let registry: MailRegistry = {};
+  let directory: IMailDirectory = {};
   for (const entry of listing.entries) {
     if (entry.is_dir) continue;
     if (entry.name === "registry.json") {
       const text = await invoke<string>("read_text", { path: entry.path }).catch(() => "");
       registry = parseMailRegistry(text);
+      directory = MailDirectory.parse(text);
     } else if (entry.name.endsWith(".ndjson")) {
       const text = await invoke<string>("read_text", { path: entry.path }).catch(() => "");
       envelopes.push(...parseMailNdjson(text));
     }
   }
-  return { envelopes, registry };
+  return { envelopes, registry, directory };
 }
 
 export function HarnessTracePanel() {

@@ -105,3 +105,29 @@ describe("StripPolicy.external", () => {
     expect(external.some((n) => n.id === "claude-s1")).toBe(false);
   });
 });
+
+describe("StripPolicy.tmuxNameOf", () => {
+  it("strips the tab prefix a terminal id carries", () => {
+    expect(StripPolicy.tmuxNameOf("s:sprefa-3")).toBe("sprefa-3");
+  });
+
+  it("passes a raw tmux name through", () => {
+    expect(StripPolicy.tmuxNameOf("sprefa-3")).toBe("sprefa-3");
+  });
+});
+
+describe("StripPolicy with a tab-prefixed terminal id", () => {
+  // Sabotage receipt: before tmuxNameOf, "s:s1" matched no join row, so
+  // related came back empty on every real tab and this tab's own claude
+  // leaked into scope "all" as an external row.
+  it("related scope matches through the s: prefix", () => {
+    const ids = StripPolicy.external(TAB_TREE, "s:s1", "related").map((n) => n.id);
+    expect(ids).toEqual(["oc-lane", "oc-sub"]);
+  });
+
+  it("nativeIds claims through the s: prefix, so scope all still excludes this tab's claude", () => {
+    const ids = StripPolicy.external(TAB_TREE, "s:s1", "all").map((n) => n.id);
+    expect(ids).not.toContain("claude-s1");
+    expect(ids).not.toContain("claude-sub");
+  });
+});

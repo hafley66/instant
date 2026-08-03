@@ -160,7 +160,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
       ) : index.size === 0 ? (
         <div className="session-empty strip-empty" data-testid="strip-empty">
           {scope === "related"
-            ? `no related sessions for ${sid} — the join is by tmux session name, so a tab opened outside tmux never matches one; widen the scope to look anyway.`
+            ? `no related sessions for tmux ${StripPolicy.tmuxNameOf(sid)} — the join is by tmux session name, so a tab opened outside tmux never matches one; widen the scope to look anyway.`
             : "no external shells: every agent session here belongs to a claude tab's own list."}
         </div>
       ) : (

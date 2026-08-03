@@ -34,12 +34,21 @@ function nativeClaudeIds(nodes: AgentSessionNode[], sid: string): Set<string> {
   return native;
 }
 
+// Terminal ids carry the "s:" tab prefix (core.ts sessionId) while join rows
+// and nodes hold raw tmux names; every comparison below runs in tmux-name
+// units, so callers may pass either form.
+function tmuxNameOf(sid: string): string {
+  return sid.startsWith("s:") ? sid.slice(2) : sid;
+}
+
 export const StripPolicy: IStripPolicy = {
   // No entry means nothing is on screen for this terminal, so the first press
   // summons; only an existing entry flips.
   toggle(entry) {
     return { open: entry ? !entry.open : true };
   },
+
+  tmuxNameOf,
 
   // An entry is an explicit user decision and wins outright: open renders the
   // shell even with zero rows (the empty state names the sid). Without one the
@@ -49,12 +58,15 @@ export const StripPolicy: IStripPolicy = {
     return rowCount > 0 || hasCurrent;
   },
 
-  nativeIds: nativeClaudeIds,
+  nativeIds(nodes, sid) {
+    return nativeClaudeIds(nodes, tmuxNameOf(sid));
+  },
 
   external(nodes, sid, scope) {
-    const native = nativeClaudeIds(nodes, sid);
+    const tmux = tmuxNameOf(sid);
+    const native = nativeClaudeIds(nodes, tmux);
     if (scope === "all") return nodes.filter((node) => !native.has(node.id));
-    const related = forestIds(filterForestByTmux(buildAgentTree(nodes), sid), new Set<string>());
+    const related = forestIds(filterForestByTmux(buildAgentTree(nodes), tmux), new Set<string>());
     return nodes.filter((node) => related.has(node.id) && !native.has(node.id));
   },
 };

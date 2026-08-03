@@ -7,6 +7,7 @@ import { MailDirectory, MailStore } from "./0_bus";
 import type {
   HarnessTraceRow,
   HarnessTraceSeed,
+  IMailDirectory,
   IMailMessage,
   MailEnvelope,
   MailRegistry,
@@ -46,6 +47,38 @@ export function parseMailRegistry(text: string): MailRegistry {
 // here. No registry entry = the session id is its own address.
 export function mailAgentIdFor(registry: MailRegistry, sessionId: string): string {
   return Object.entries(registry).find(([, id]) => id === sessionId)?.[0] ?? sessionId;
+}
+
+// Seeds for the registry routes the harness stores cannot see: a dispatched
+// lane with no store (harness "shell", or an unresolved opencode lane whose
+// sessionId is still empty) exists only in registry.json, so without a
+// synthesized seed it never becomes a row anywhere. The agent id doubles as
+// the session id when none is resolved, which is also what the envelope join
+// falls back to, so from/why still attach. Store-backed sessions are the
+// store's to report; any agent whose sessionId a real seed already carries is
+// skipped.
+export function registrySeeds(
+  directory: IMailDirectory,
+  seeds: HarnessTraceSeed[],
+  liveTmux: Set<string>,
+): HarnessTraceSeed[] {
+  const seeded = new Set(seeds.map((seed) => seed.sessionId));
+  return Object.values(directory)
+    .filter((agent) => !agent.sessionId || !seeded.has(agent.sessionId))
+    .map((agent) => {
+      const sessionId = agent.sessionId || agent.id;
+      return {
+        id: sessionId,
+        harness: agent.harness ?? "shell",
+        sessionId,
+        parentId: null,
+        parentKind: null,
+        ts: "",
+        lastActivity: "",
+        status: agent.tmux !== null && liveTmux.has(agent.tmux) ? ("live" as const) : ("done" as const),
+        cwd: agent.cwd ?? "",
+      };
+    });
 }
 
 // Join envelopes to sessions: `to` resolves through the registry when present,

@@ -1,6 +1,6 @@
 // Frozen CONTRACT2 state model plus the seam types shared by the two panels of
 // the harness-trace plugin (the flat trace panel and the dock strip tree).
-export type Harness = "claude" | "opencode" | "codex" | "kimi";
+export type Harness = "claude" | "opencode" | "codex" | "kimi" | "shell";
 export type ParentKind = "subagent" | "dispatch";
 export type SessionStatus = "live" | "idle" | "done" | "dead";
 
@@ -179,6 +179,7 @@ export interface IMailAgent {
   sessionId: string;
   harness: Harness | null;
   tmux: string | null;
+  cwd: string | null;
   sourcePath: string | null;
 }
 
@@ -261,6 +262,10 @@ export interface IStripPolicy {
   // The entry a toggle press writes. Absent means the strip is not on screen,
   // so the first press summons instead of closing.
   toggle(entry: ITermStripEntry | null): ITermStripEntry;
+  // The tmux session name behind a terminal id. Terminal ids carry the "s:"
+  // tab prefix (core.ts sessionId) while every join row and node holds the
+  // raw tmux name; comparing across that unit mismatch matches nothing.
+  tmuxNameOf(sid: string): string;
   // Whether the strip's shell renders. An explicit open entry always renders
   // (zero rows shows the empty state); an absent entry auto-appears only when
   // there is something to show.

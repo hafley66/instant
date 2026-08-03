@@ -223,6 +223,7 @@ describe("MailDirectory", () => {
       sessionId: "sess-9",
       harness: null,
       tmux: null,
+      cwd: null,
       sourcePath: null,
     });
     expect(MailDirectory.agent(directory, "lane-b")?.tmux).toBe("busmail-b");

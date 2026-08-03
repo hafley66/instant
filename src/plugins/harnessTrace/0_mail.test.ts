@@ -5,8 +5,9 @@ import {
   parseMailLog,
   parseMailNdjson,
   parseMailRegistry,
+  registrySeeds,
 } from "./0_mail";
-import type { HarnessTraceSeed } from "./0_types";
+import type { HarnessTraceSeed, IMailAgent } from "./0_types";
 
 const dispatchLine = JSON.stringify({
   id: "env-1",
@@ -144,5 +145,48 @@ describe("enrichRows", () => {
     });
     const [row] = enrichRows([seed("sess-direct")], parseMailNdjson([later, replyLine].join("\n")), {});
     expect(row.id).toBe("env-2");
+  });
+});
+
+function route(partial: Partial<IMailAgent> & { id: string }): IMailAgent {
+  return {
+    sessionId: "",
+    harness: null,
+    tmux: null,
+    cwd: null,
+    sourcePath: null,
+    ...partial,
+  };
+}
+
+describe("registrySeeds", () => {
+  // Sabotage receipt: before this seam, a `bus dispatch`ed shell lane existed
+  // only in registry.json, so it never became a row on any scope.
+  it("synthesizes a seed for a route no harness store reported", () => {
+    const [row] = registrySeeds(
+      { probe: route({ id: "probe", tmux: "probe", cwd: "/tmp/probe" }) },
+      [],
+      new Set(["probe"]),
+    );
+    expect(row).toMatchObject({ id: "probe", sessionId: "probe", harness: "shell", status: "live", cwd: "/tmp/probe" });
+  });
+
+  it("skips a route whose session a store seed already carries", () => {
+    const routes = { lane: route({ id: "lane", sessionId: "sess-1", harness: "opencode" }) };
+    expect(registrySeeds(routes, [seed("sess-1")], new Set())).toEqual([]);
+  });
+
+  it("seeds an unresolved opencode route under its agent id until resolve fills the session", () => {
+    const routes = { lane: route({ id: "lane", harness: "opencode", tmux: "lane" }) };
+    const [row] = registrySeeds(routes, [seed("sess-other")], new Set());
+    expect(row).toMatchObject({ sessionId: "lane", harness: "opencode", status: "done" });
+  });
+
+  it("joins the dispatch envelope through the agent-id fallback, so from/why still attach", () => {
+    const routes = { "lane-a": route({ id: "lane-a", tmux: "lane-a" }) };
+    const synth = registrySeeds(routes, [], new Set());
+    const [row] = enrichRows(synth, parseMailNdjson(dispatchLine), {});
+    expect(row.from).toBe("coordinator");
+    expect(row.why).toBe("build the trace panel");
   });
 });

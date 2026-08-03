@@ -10,7 +10,7 @@ import type {
   IMailStore,
 } from "./0_types";
 
-const HARNESSES: Harness[] = ["claude", "opencode", "codex", "kimi"];
+const HARNESSES: Harness[] = ["claude", "opencode", "codex", "kimi", "shell"];
 
 function str(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
@@ -196,7 +196,7 @@ export const MailDirectory: IMailDirectoryReader = {
     const directory: IMailDirectory = {};
     for (const [id, entry] of Object.entries(rows)) {
       if (typeof entry === "string") {
-        directory[id] = { id, sessionId: entry, harness: null, tmux: null, sourcePath: null };
+        directory[id] = { id, sessionId: entry, harness: null, tmux: null, cwd: null, sourcePath: null };
         continue;
       }
       const fields = record(entry);
@@ -207,6 +207,7 @@ export const MailDirectory: IMailDirectoryReader = {
         sessionId,
         harness: harnessOf(str(fields, "harness")),
         tmux: str(fields, "tmux"),
+        cwd: str(fields, "cwd"),
         sourcePath: str(fields, "sourcePath") ?? str(fields, "source_path"),
       };
     }
