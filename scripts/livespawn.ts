@@ -33,10 +33,12 @@ const MODEL = "openrouter/deepseek/deepseek-v4-flash-0731";
 // The one command the hail tells claude to run verbatim. It is data here and in
 // the mail body; nothing asserts on its text.
 const SPAWN_COMMAND = `opencode run -m ${MODEL} --auto "say the word pineapple and stop"`;
+// The command ends the sentence: any trailing punctuation is typed into the
+// pane too, and claude passes it on as one more argument.
 const HAIL_BODY =
-  "Run this command with the Bash tool exactly as written, changing nothing: " +
-  SPAWN_COMMAND +
-  " . Then reply with the single word done.";
+  "Reply with the single word done after you run exactly this command with the " +
+  "Bash tool, changing nothing about it: " +
+  SPAWN_COMMAND;
 const OPENCODE_DB = join(homedir(), ".local", "share", "opencode", "opencode.db");
 
 const transcript: Record<string, unknown>[] = [];
@@ -64,6 +66,13 @@ function scrubbedEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+// One robot-mode cass line runs to kilobytes of counters; run.json is meant to
+// be read, so the transcript keeps a head of each stream.
+function clip(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > 2000 ? `${trimmed.slice(0, 2000)}\n… (${trimmed.length} chars)` : trimmed;
+}
+
 function step(name: string, bin: string, argv: string[], env?: NodeJS.ProcessEnv) {
   const result = spawnSync(bin, argv, { encoding: "utf8", env: env ?? process.env });
   const entry = {
@@ -71,8 +80,8 @@ function step(name: string, bin: string, argv: string[], env?: NodeJS.ProcessEnv
     step: name,
     argv: [bin, ...argv],
     exit: result.status,
-    stdout: (result.stdout ?? "").trim(),
-    stderr: (result.stderr ?? "").trim(),
+    stdout: clip(result.stdout ?? ""),
+    stderr: clip(result.stderr ?? ""),
   };
   transcript.push(entry);
   console.log(`[${entry.at}] ${name} exit=${entry.exit}`);
@@ -283,7 +292,11 @@ async function main() {
   const args = flags(process.argv.slice(2));
   const root = dirname(import.meta.dirname);
   const scratch = args.scratch ?? join(tmpdir(), "livespawn-gate");
-  const cwd = join(scratch, "cwd");
+  // A fresh cwd per run: claude keys its transcript store on the cwd and
+  // opencode keys session.directory on it, so a reused cwd would hand the run
+  // the PREVIOUS run's sessions as its own rows.
+  const runId = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+  const cwd = join(scratch, `cwd-${runId}`);
   const mailDir = join(scratch, "mail");
   const samplesDir = join(scratch, "samples");
   const pngDir = join(scratch, "png");
@@ -300,7 +313,12 @@ async function main() {
     join(cwd, ".claude", "settings.json"),
     JSON.stringify({ permissions: { allow: ["Bash(opencode run:*)"], deny: [] } }, null, 2) + "\n",
   );
-  writeRegistry(mailDir, {});
+  // The send leg only needs the pane; the session id and source path are the
+  // ack leg's, and claude does not write a transcript until its first message,
+  // so they are filled in after the hail lands.
+  writeRegistry(mailDir, {
+    [PARENT_AGENT]: { sessionId: "", harness: "claude", tmux: PANE, sourcePath: null },
+  });
 
   const env = scrubbedEnv();
   step("default-socket-before", "tmux", ["-L", "default", "ls"]);
@@ -309,27 +327,14 @@ async function main() {
     "-L", SOCKET, "new-session", "-d", "-s", PANE, "-x", "200", "-y", "50", "-c", cwd,
     "claude", "--model", "sonnet",
   ], env);
-  await wait(6000);
+  await wait(8000);
   // Scratch cwd = a folder claude has never seen: answer the trust prompt.
   step("trust-prompt", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
-  await wait(6000);
+  await wait(4000);
 
-  const projectDir = claudeProjectDir(cwd);
-  const jsonl = await waitFor("claude-session", 40, 1000, () => {
-    if (!existsSync(projectDir)) return null;
-    const files = readdirSync(projectDir).filter((name) => name.endsWith(".jsonl"));
-    return files.length ? join(projectDir, files.sort()[0]) : null;
-  });
-  if (!jsonl) {
-    step("capture-no-session", "tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], env);
-    throw new Error(`claude never wrote a transcript under ${projectDir}`);
-  }
-  const claudeSessionId = jsonl.slice(jsonl.lastIndexOf("/") + 1, -".jsonl".length);
-  writeRegistry(mailDir, {
-    [PARENT_AGENT]: { sessionId: claudeSessionId, harness: "claude", tmux: PANE, sourcePath: jsonl },
-  });
-  console.log(`claude session ${claudeSessionId}`);
-
+  // The gate owns this port. A dev server left behind by a killed run would be
+  // reused silently under --strictPort and could serve another tree's sources.
+  step("free-port", "bash", ["-c", `pids=$(lsof -ti :${PORT}); [ -n "$pids" ] && kill -9 $pids; exit 0`]);
   const web = spawn(join(root, "node_modules", ".bin", "vite"), [
     "--host", "127.0.0.1", "--port", String(PORT), "--strictPort",
   ], { cwd: root, stdio: "ignore", detached: true });
@@ -337,14 +342,52 @@ async function main() {
   if (!(await webUp(url))) throw new Error(`vite never came up on ${PORT}`);
   const browser = await playwright.chromium.launch();
 
+  const hail = step("hail", "node", [
+    join(root, "scripts", "bus.ts"),
+    "hail", "--mail-dir", mailDir, "--socket", SOCKET,
+    "--to", PARENT_AGENT, "--from", "coordinator", "--kind", "dispatch",
+    "--body", HAIL_BODY,
+  ]);
+  const hailId = /queued (m-[0-9a-f]+)/.exec(hail.stdout)?.[1] ?? "";
+
   const samples = [];
+  let childSessionId = "";
+
+  // The spawn edge. Nothing in either harness writes a bus row when one agent
+  // starts another, so the observer writes it the moment it first sees the db
+  // row, before the sample that will render it: an edge minted after its own
+  // sample would leave that sample's child hanging off nothing.
+  // to_timestamp stays null — no cass proof was taken for this row.
+  const registerChild = (rows: { harness: string; sessionId: string; ts: string }[]) => {
+    const child = rows.find((row) => row.harness === "opencode");
+    if (!child || childSessionId) return;
+    childSessionId = child.sessionId;
+    const registry = readRegistry(mailDir);
+    registry[CHILD_AGENT] = { sessionId: childSessionId, harness: "opencode", tmux: null, sourcePath: null };
+    writeRegistry(mailDir, registry);
+    appendFileSync(join(mailDir, "bus.ndjson"), JSON.stringify({
+      id: "m-spawn-" + childSessionId.slice(-8),
+      from: PARENT_AGENT,
+      to: CHILD_AGENT,
+      from_timestamp: child.ts,
+      to_timestamp: null,
+      kind: "dispatch",
+      reply_to: hailId || null,
+      body: SPAWN_COMMAND,
+      ref: null,
+    }) + "\n");
+    console.log(`child session ${childSessionId} registered`);
+  };
+
   const takeSample = async (index: number) => {
     const now = Date.now();
+    const rows = [...claudeRows(cwd, now), ...opencodeRows(cwd, now)];
+    registerChild(rows);
     const sample = {
       index,
       at: new Date(now).toISOString(),
       atMs: now,
-      rows: [...claudeRows(cwd, now), ...opencodeRows(cwd, now)],
+      rows,
       files: readMailFiles(mailDir),
       png: join(pngDir, `${String(index).padStart(2, "0")}.png`),
     };
@@ -359,17 +402,26 @@ async function main() {
     return sample;
   };
 
+  const projectDir = claudeProjectDir(cwd);
+  const jsonl = await waitFor("claude-session", 60, 500, () => {
+    if (!existsSync(projectDir)) return null;
+    const files = readdirSync(projectDir).filter((name) => name.endsWith(".jsonl"));
+    return files.length ? join(projectDir, files.sort()[0]) : null;
+  });
+  if (!jsonl) {
+    step("capture-no-session", "tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], env);
+    throw new Error(`claude never wrote a transcript under ${projectDir}`);
+  }
+  const claudeSessionId = jsonl.slice(jsonl.lastIndexOf("/") + 1, -".jsonl".length);
+  writeRegistry(mailDir, {
+    [PARENT_AGENT]: { sessionId: claudeSessionId, harness: "claude", tmux: PANE, sourcePath: jsonl },
+  });
+  console.log(`claude session ${claudeSessionId}`);
+
+  // First sample: the hail has landed and claude's transcript exists, but the
+  // command it was told to run has not created an opencode session yet.
   await takeSample(0);
 
-  const hail = step("hail", "node", [
-    join(root, "scripts", "bus.ts"),
-    "hail", "--mail-dir", mailDir, "--socket", SOCKET,
-    "--to", PARENT_AGENT, "--from", "coordinator", "--kind", "dispatch",
-    "--body", HAIL_BODY,
-  ]);
-  const hailId = /queued (m-[0-9a-f]+)/.exec(hail.stdout)?.[1] ?? "";
-
-  let childSessionId = "";
   let acked = 0;
   let sweeps = 0;
   const totalTicks = windows * Math.max(1, Math.round(60_000 / intervalMs));
@@ -382,29 +434,6 @@ async function main() {
     // matched on prompt text beyond the dialog marker.
     if (/Do you want to (proceed|run)/i.test(pane.stdout ?? "")) {
       step(`permission-enter-${tick}`, "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
-    }
-
-    const child = sample.rows.find((row) => row.harness === "opencode");
-    if (child && !childSessionId) {
-      childSessionId = child.sessionId;
-      const registry = readRegistry(mailDir);
-      registry[CHILD_AGENT] = { sessionId: childSessionId, harness: "opencode", tmux: null, sourcePath: null };
-      writeRegistry(mailDir, registry);
-      // The spawn edge: nothing in either harness writes a bus row when one
-      // agent starts another, so the observer writes it from the db row it just
-      // saw. to_timestamp stays null — no cass proof was taken for it.
-      appendFileSync(join(mailDir, "bus.ndjson"), JSON.stringify({
-        id: "m-spawn-" + childSessionId.slice(-8),
-        from: PARENT_AGENT,
-        to: CHILD_AGENT,
-        from_timestamp: child.ts,
-        to_timestamp: null,
-        kind: "dispatch",
-        reply_to: hailId || null,
-        body: SPAWN_COMMAND,
-        ref: null,
-      }) + "\n");
-      console.log(`child session ${childSessionId} registered`);
     }
 
     if (childSessionId && acked === 0 && sweeps < 4) {
@@ -429,6 +458,8 @@ async function main() {
   } catch {
     // dev server already gone
   }
+  await wait(1000);
+  step("free-port-after", "bash", ["-c", `pids=$(lsof -ti :${PORT}); [ -n "$pids" ] && kill -9 $pids; exit 0`]);
   step("list-mail", "node", [join(root, "scripts", "bus.ts"), "list", "--mail-dir", mailDir]);
   step("capture-final", "tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], env);
   step("kill-gate", "tmux", ["-L", SOCKET, "kill-server"], env);
