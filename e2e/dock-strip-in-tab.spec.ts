@@ -49,6 +49,11 @@ async function seed(page: import("@playwright/test").Page) {
         if (args?.path === `${mailDir}/registry.json`) return registry;
         throw new Error("no such file");
       },
+      // The row X button's only effect, recorded by name.
+      kill_session: (args?: Record<string, unknown>) => {
+        (w as Window & { __killedSession?: string }).__killedSession = String(args?.name);
+        return null;
+      },
     };
   }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS });
 }
@@ -123,6 +128,15 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveCount(0);
   // Finished lanes stay out at every scope too.
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toHaveCount(0);
+
+  // The row X is the one sanctioned kill from the UI: it ends that row's tmux
+  // session by name and nothing else — no view push, no join.
+  await page.evaluate(() => ((window as Window & { __dockStripOpened?: string }).__dockStripOpened = undefined));
+  await page.getByTestId("strip-kill-oc-lane").click();
+  await expect
+    .poll(() => page.evaluate(() => (window as Window & { __killedSession?: string }).__killedSession ?? null))
+    .toBe("s1");
+  expect(await opened()).toBeNull();
 
   expect(pageErrors).toEqual([]);
 });
