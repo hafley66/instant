@@ -75,12 +75,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           refresh
         </button>
       </div>
-      <AgentStripTable
-        tree={filtered}
-        error={error}
-        onRowClick={onRowClick}
-        controls
-      />
+      {filtered.length === 0 && !current ? (
+        <div className="session-empty" data-testid="strip-empty">
+          no related sessions for {sid} — the join is by tmux session name, so a
+          tab opened outside tmux never matches one.
+        </div>
+      ) : (
+        <AgentStripTable tree={filtered} error={error} onRowClick={onRowClick} controls />
+      )}
     </div>
   );
 }
