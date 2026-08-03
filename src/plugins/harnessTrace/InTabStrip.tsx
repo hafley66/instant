@@ -31,7 +31,10 @@ const STYLE =
   ".term-strip .tt-wrap{height:auto}" +
   ".term-strip .strip-back{align-self:center;border:1px solid var(--frame);background:var(--panel-bg)}" +
   ".term-strip .spy-viewing{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-  ".term-strip .strip-empty{padding:6px 8px}";
+  ".term-strip .strip-empty{padding:6px 8px}" +
+  ".term-strip .act-bar{min-height:20px;padding:0 4px;gap:4px}" +
+  ".term-strip .tt-wrap{font-size:11px}" +
+  ".term-strip td,.term-strip th{padding:0 4px;line-height:16px}";
 
 // The toggle command's whole body (main.ts binds it to the hotkey, the e2e
 // harness binds the same command): the policy decides what a press writes.
