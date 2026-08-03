@@ -1,85 +1,84 @@
-# CONTRACT: harness-trace panel (cross-harness session trace)
+# CONTRACT: message bus (queue + passing + ack) with queue-preview view
 
-Seeded by the coordinator. The lab implements exactly this; deviations are
-reported in REPORT.md, never improvised.
+Base sha: a35ad6a. FIRST action: `git merge --ff-only a35ad6a` (must be a
+no-op; STOP AND REPORT on failure). Never spawn subagents. No push. Commit
+on this branch (lab/busmail) only. Deliverable = REPORT.md at this
+worktree root.
 
-## What the panel is
+## Ruling (the design authority, do not re-litigate)
+2026-08-03-bus-ack-ruling.md at this worktree root. Envelope, ack
+semantics, relational state are all fixed there. Apply it from the first
+line: the mailbox NDJSON is the log, to_timestamp updates are APPENDED as
+ack rows (append-only, latest row per id wins), ack = cass finds the
+message in the recipient session's transcript, at-least-once resend is
+safe, no separate receipt channel ever.
+Build-vs-buy is settled by the ruling: the queue is an NDJSON file on the
+OS filesystem, the ack reader is cass (already shelled to by
+src-tauri/src/ledger.rs), tmux is the injection transport. No new queue
+library, no new daemon.
 
-One new instant panel, id `harness-trace`, showing every interactive agent
-session dispatched across the four harnesses (claude, opencode, codex, kimi):
-which session, from which harness, ran for whom, when, and why, with liveness.
-It is a normal dockview panel (the user docks it at the bottom themselves);
-NO new global chrome, footer, or statusbar elements — index.html shows the app
-has none and this lab does not introduce one.
+## Existing pieces (verify, then reuse)
+- src/plugins/harnessTrace/0_mail.ts + 0_mail.test.ts: mailbox fixtures
+  from the dock-strip lab, single `ts` field PREDATES the ruling; its
+  MailEnvelope type is optional-field tolerant (ruling scope note). You
+  own these files; migrate them to the ruled envelope.
+- src/plugins/harnessTrace/3_router.ts (50 lines): per-terminal view
+  stack; how a preview view gets pushed.
+- Registry join (agent id -> harness + session id): the same join the
+  harness-trace rows use.
+- cass CLI: `cass search "<id or body prefix>" --robot` scoped to the
+  recipient's session/source path; `cass index --watch` freshness lever.
 
-## Row model (frozen)
+## Deliverables
+1. Mail store: append envelope, list per agent id (in/out), ack state
+   derived by latest-row-per-id fold. Pure sync functions over parsed
+   rows; file IO and cass at the edges. Interface IMailStore.
+2. Send leg (`hail`): append envelope + inject body into the recipient
+   session. Implement the TMUX leg only (send-keys to the session the
+   registry maps the agent id to). A recipient with no tmux pane = message
+   stays queued, to_timestamp null. Do NOT invent injection for claude
+   jsonl sessions; report it as the known-missing leg.
+3. Ack sweep: for unacked messages, run the cass query; on hit, append
+   the ack row with to_timestamp. Manual/poll trigger is fine; no daemon.
+4. MailPreview view: NEW component rendering one agent id's queue —
+   in/out, kind, reply_to threading, body preview, acked/unacked (show
+   from_timestamp/to_timestamp), fed by IMailStore. Register it as a view
+   in 3_router.ts so any caller can push it with an agent id.
+5. The tree-table action itself (a row action in HarnessTracePanel.tsx
+   that pushes MailPreview) is OWNED BY ANOTHER LANE's file. Do not edit
+   HarnessTracePanel.tsx, InTabStrip.tsx, or src/main.ts. Instead put the
+   exact patch (unified diff, few lines) in REPORT.md for the coordinator
+   to apply at merge.
 
-```ts
-export interface HarnessTraceRow {
-  id: string;                 // session id (or dispatch envelope id when known)
-  harness: "claude" | "opencode" | "codex" | "kimi";
-  sessionId: string;
-  from: string;               // who dispatched it ("user" when unknown)
-  why: string;                // dispatch reason / brief first line ("" when unknown)
-  ts: string;                 // start time, ISO
-  lastActivity: string;       // ISO, from session store mtime/db
-  status: "live" | "idle" | "done" | "dead";
-  cwd: string;                // tildified, display-ready (TmuxRow.pwd precedent)
-}
-```
+## File ownership (two other lanes are live in this repo)
+- Yours: 0_mail.ts, 0_mail.test.ts, all NEW files (mail store, MailPreview,
+  tests), this worktree only.
+- Shared append-only: 0_types.ts and 3_router.ts — ADD lines at the end,
+  never reorder or rewrite existing lines (another lane appends too;
+  coordinator merges the union).
+- Forbidden: HarnessTracePanel.tsx, InTabStrip.tsx, src/main.ts.
 
-## Filter rule (frozen)
+## Style laws (repo)
+- Interfaces in the plugin's 0_types.ts, `I` prefix; important functions
+  interface-bound, never bare export function.
+- Async becomes rxjs; sync stays sync. Promise/async banned above the IO
+  seam; in-memory folds are plain array code. Exactly ONE manual
+  .subscribe() per app (baseline main.ts holds it; you add none).
+- Comment budget: constraints only. Frozen clock
+  (page.clock.setFixedTime) in any e2e rendering relTime.
+- Colocated consistency: follow each touched file's existing style.
 
-Claude Code subagent sessions spawned BY Claude Code do not render (they have
-their own TUI). Determine the marker empirically from ~/.claude/projects
-session files (candidates: sidechain flags, subagents/ paths). If no reliable
-marker is found, STOP that sub-goal and record what was tried in REPORT.md;
-do not guess a heuristic silently.
+## Gates (outputs pasted in REPORT.md)
+- npx tsc --noEmit
+- npx vitest run src/plugins/harnessTrace
+- full: npx vitest run
+- A live round-trip receipt: send a hail to a scratch tmux session you
+  create yourself (never an existing one), show the injected line in the
+  pane, run the ack sweep, show to_timestamp filled. Kill your scratch
+  session after. Paste the transcript.
+- PNG of MailPreview over fixture messages (path in REPORT.md).
 
-## Data sources, in precedence order
-
-1. Dispatch ledger (who/when/why): `~/.agent/mail/*.ndjson` envelopes
-   `{id, from, to, ts, kind, reply_to, body, ref}` — may be EMPTY or absent
-   today (the bus is designed, not built). The panel renders rows without it;
-   ledger rows enrich `from`/`why` by joining on session where possible.
-2. Session enumeration + liveness: the existing rust readers in
-   src-tauri/src/harness.rs (claude_sessions :24, opencode_sessions :59,
-   codex_sessions :93, kimi_sessions :117, commands harness_sessions /
-   harness_session :149-166). If Vec<String> payloads are too thin for the row
-   model, add ONE new tauri command (e.g. harness_trace_rows) in harness.rs
-   following its existing style, register it in ipc/commands.json, and run
-   `corepack pnpm@10.12.4 run api:generate` (generated/native.ts is
-   generated-only, header says do not hand-edit).
-3. cass: per-row "trace" action uses the existing cass commands
-   (cass_status ledger.rs:103, cass_swarm_status :114) and/or opens a cass
-   search for the session id; reuse the cass plugin surface
-   (src/plugins/cass/index.ts) — do not shell to cass from the frontend.
-
-## Refresh
-
-Refresh-on-show like TmuxPanelV2 (tablepanels.tsx:215) PLUS a live leg:
-claimFsWatch (src/fsWatch.ts:10-29, rust fs_watch.rs) on ~/.agent/mail when it
-exists. No polling loops.
-
-## Repo laws that bind this lab (from AGENTS.md, verified)
-
-- Rows render with TreeTable (src/treetable.tsx) copying the
-  tablepanels.tsx column-def + bridge shape (TmuxRow/TMUX_COLUMNS/setTmuxPanel
-  precedent at :15/:56/:51). No hand-rolled lists. No third table impl.
-- One panel per file, files under ~500 lines.
-- Registration: new plugin dir src/plugins/harnessTrace/ mirroring
-  src/plugins/cass/index.ts (registerPlugin({id, panels:[...]})), plus ONE
-  line in src/main.ts main() beside registerCassPlugin() (main.ts:238-242).
-  Rail/dock/palette pick it up from the registry; touch nothing else there.
-- Persisted panel state via readPluginState/savePluginState
-  (src/pluginState.ts:6-16) under id "harness-trace".
-- NEVER run `just dev`. Verification uses `just check`, `just build`,
-  `just cargo-check`; `just dev-safe` only if a live look is required.
-
-## Gates (all must pass, receipts in REPORT.md)
-
-- `just check` (api:check + tsc strict)
-- `just build`
-- `just cargo-check` (only compiles rust; cold worktree may be slow — record
-  the time, do not abort for slowness)
-- `just test` if any code you touched has vitest coverage
+## REPORT.md sections
+envelope migration diff / send-leg transcript / ack-sweep transcript /
+missing-legs list (claude injection etc.) / HarnessTracePanel patch for
+coordinator / gate outputs / PNG path.
