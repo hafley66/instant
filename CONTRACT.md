@@ -1,84 +1,80 @@
-# CONTRACT: message bus (queue + passing + ack) with queue-preview view
+# CONTRACT: live spawn test — claude(sonnet) spawns opencode, states polled
 
-Base sha: a35ad6a. FIRST action: `git merge --ff-only a35ad6a` (must be a
-no-op; STOP AND REPORT on failure). Never spawn subagents. No push. Commit
-on this branch (lab/busmail) only. Deliverable = REPORT.md at this
-worktree root.
+Base: branch lab/livespawn at 57560ff (= a35ad6a + lab/tracetree +
+lab/busmail, merged and green: plugin vitest 68/68). FIRST action:
+`git merge --ff-only 57560ff` (must be a no-op; STOP AND REPORT on
+failure). Never spawn subagents (the scratch harness sessions below are
+the test SUBJECT, not delegation — they are allowed and required). No
+push. Commit on lab/livespawn. Deliverable = REPORT.md at worktree root
+(if the Write tool refuses it, return the content as text; never work
+around the refusal).
 
-## Ruling (the design authority, do not re-litigate)
-2026-08-03-bus-ack-ruling.md at this worktree root. Envelope, ack
-semantics, relational state are all fixed there. Apply it from the first
-line: the mailbox NDJSON is the log, to_timestamp updates are APPENDED as
-ack rows (append-only, latest row per id wins), ack = cass finds the
-message in the recipient session's transcript, at-least-once resend is
-safe, no separate receipt channel ever.
-Build-vs-buy is settled by the ruling: the queue is an NDJSON file on the
-OS filesystem, the ack reader is cass (already shelled to by
-src-tauri/src/ledger.rs), tmux is the injection transport. No new queue
-library, no new daemon.
+## User words (scope law)
+"is there a screenshot that shows a session of claude that just has a
+'spawn an opencode agent etc.' and we are able to poll things for 1
+minute at a time to see the states change. dont equality test things
+that are prompts but we need a live test idc the cost just keep it cheap
+and make sure claude code is started with sonnet as the model"
 
-## Existing pieces (verify, then reuse)
-- src/plugins/harnessTrace/0_mail.ts + 0_mail.test.ts: mailbox fixtures
-  from the dock-strip lab, single `ts` field PREDATES the ruling; its
-  MailEnvelope type is optional-field tolerant (ruling scope note). You
-  own these files; migrate them to the ruled envelope.
-- src/plugins/harnessTrace/3_router.ts (50 lines): per-terminal view
-  stack; how a preview view gets pushed.
-- Registry join (agent id -> harness + session id): the same join the
-  harness-trace rows use.
-- cass CLI: `cass search "<id or body prefix>" --robot` scoped to the
-  recipient's session/source path; `cass index --watch` freshness lever.
+## The test (a script + spec runnable on demand; NOT in any default battery)
+1. Scratch tmux server on its OWN socket (`-L livespawn-gate`), scratch
+   cwd. Never address the default tmux socket (read-only `tmux -L default
+   ls` proof allowed). Recipe proven in REPORT.md section 3 of this
+   branch: env scrubbed of CLAUDE_CODE_*/CLAUDE* vars so the session is
+   its own root.
+2. Start claude IN THAT PANE with `--model sonnet` (hard requirement,
+   cost control). Register it in a scratch registry.json (busmail
+   scripts/bus.ts conventions; sourcePath resolved from
+   ~/.claude/projects after boot).
+3. `node scripts/bus.ts hail` it (kind `dispatch`) with a prompt that
+   tells it to run ONE exact verbatim command spawning an opencode agent:
+   `opencode run -m openrouter/deepseek/deepseek-v4-flash-0731 --auto
+   "<one trivial sentence task>"` in the scratch cwd, then reply done.
+   Sonnet executes, never composes, the command. Cheap models both legs.
+4. Poll loop: up to 6 windows of <=60s (total budget <=6 min wall), each
+   window samples every ~10s. Each sample records (a) the harness data
+   states via the REAL readers (claude jsonl status, opencode.db row for
+   the spawned session, bus.ndjson ack state), and (b) a PNG of the
+   harness-trace tree page rendering THAT SAMPLE'S live data — parent
+   claude row, opencode child under it (the dispatch edge comes from the
+   hail row + registry), status column visible.
+5. Assertions are on STRUCTURE and STATE TRANSITIONS ONLY: session rows
+   exist, the child hangs under the parent via `dispatch`, status moves
+   (live -> idle/done), ack to_timestamp fills after a sweep + targeted
+   `cass index --watch-once`. NEVER assert equality on prompt/body text
+   (user law). Relative times frozen or asserted structurally.
+6. Teardown: kill the scratch tmux server; prove the default socket's
+   sessions survived.
 
-## Deliverables
-1. Mail store: append envelope, list per agent id (in/out), ack state
-   derived by latest-row-per-id fold. Pure sync functions over parsed
-   rows; file IO and cass at the edges. Interface IMailStore.
-2. Send leg (`hail`): append envelope + inject body into the recipient
-   session. Implement the TMUX leg only (send-keys to the session the
-   registry maps the agent id to). A recipient with no tmux pane = message
-   stays queued, to_timestamp null. Do NOT invent injection for claude
-   jsonl sessions; report it as the known-missing leg.
-3. Ack sweep: for unacked messages, run the cass query; on hit, append
-   the ack row with to_timestamp. Manual/poll trigger is fine; no daemon.
-4. MailPreview view: NEW component rendering one agent id's queue —
-   in/out, kind, reply_to threading, body preview, acked/unacked (show
-   from_timestamp/to_timestamp), fed by IMailStore. Register it as a view
-   in 3_router.ts so any caller can push it with an agent id.
-5. The tree-table action itself (a row action in HarnessTracePanel.tsx
-   that pushes MailPreview) is OWNED BY ANOTHER LANE's file. Do not edit
-   HarnessTracePanel.tsx, InTabStrip.tsx, or src/main.ts. Instead put the
-   exact patch (unified diff, few lines) in REPORT.md for the coordinator
-   to apply at merge.
+## Rendering live data in the page
+The e2e harness drives the panel with seeds; the DATA in each sample must
+be real harness output (real jsonl, real opencode.db rows, real
+bus.ndjson) read at sample time — only the transport into the page may be
+adapted (feeding the real files' parsed rows through the existing seed
+seam is legitimate; fabricating rows is not). If no honest seam exists,
+STOP AND REPORT which seam is missing instead of faking data.
 
-## File ownership (two other lanes are live in this repo)
-- Yours: 0_mail.ts, 0_mail.test.ts, all NEW files (mail store, MailPreview,
-  tests), this worktree only.
-- Shared append-only: 0_types.ts and 3_router.ts — ADD lines at the end,
-  never reorder or rewrite existing lines (another lane appends too;
-  coordinator merges the union).
-- Forbidden: HarnessTracePanel.tsx, InTabStrip.tsx, src/main.ts.
+## Laws
+- 10-second law: this gate is a USER-NAMED EXCEPTION (live wall-clock
+  test, on demand only). It must never enter green-all, vitest, or any
+  default battery; wire it as its own script/config, document the run
+  command in REPORT.md.
+- File ownership: InTabStrip.tsx and src/main.ts are FORBIDDEN (a live
+  lane owns them elsewhere). HarnessTracePanel.tsx and everything else in
+  the worktree is yours.
+- Style laws per repo: interfaces in 0_types.ts (append at end), comment
+  budget, colocated consistency.
 
-## Style laws (repo)
-- Interfaces in the plugin's 0_types.ts, `I` prefix; important functions
-  interface-bound, never bare export function.
-- Async becomes rxjs; sync stays sync. Promise/async banned above the IO
-  seam; in-memory folds are plain array code. Exactly ONE manual
-  .subscribe() per app (baseline main.ts holds it; you add none).
-- Comment budget: constraints only. Frozen clock
-  (page.clock.setFixedTime) in any e2e rendering relTime.
-- Colocated consistency: follow each touched file's existing style.
-
-## Gates (outputs pasted in REPORT.md)
-- npx tsc --noEmit
-- npx vitest run src/plugins/harnessTrace
-- full: npx vitest run
-- A live round-trip receipt: send a hail to a scratch tmux session you
-  create yourself (never an existing one), show the injected line in the
-  pane, run the ack sweep, show to_timestamp filled. Kill your scratch
-  session after. Paste the transcript.
-- PNG of MailPreview over fixture messages (path in REPORT.md).
+## Gates (outputs in REPORT.md)
+- The live run transcript: hail output, poll samples with timestamps and
+  states, sweep/ack receipt.
+- PNG sequence paths (minimum 3 distinct states: parent alone; child
+  present live; child done and/or ack filled) + which state each shows.
+- npx tsc --noEmit (no new errors vs 57560ff), npx vitest run
+  src/plugins/harnessTrace still green.
+- Teardown proof.
 
 ## REPORT.md sections
-envelope migration diff / send-leg transcript / ack-sweep transcript /
-missing-legs list (claude injection etc.) / HarnessTracePanel patch for
-coordinator / gate outputs / PNG path.
+run command / live transcript / PNG sequence with state captions /
+assertion list (structure+transition only) / seams adapted vs real /
+missing seams / gate outputs / teardown proof / cost note (models used).

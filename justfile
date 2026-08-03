@@ -132,3 +132,13 @@ vscode-build:
 vscode-install: vscode-build
     cd vscode-ext && corepack pnpm@10.12.4 exec @vscode/vsce package --allow-missing-repository -o instant-activity.vsix
     code --install-extension vscode-ext/instant-activity.vsix
+
+# LIVE spawn gate: boots claude (--model sonnet) in its own tmux server, hails
+# it once over the bus to run one verbatim `opencode run`, polls the harness
+# stores for up to 6 minutes and renders the trace page from each sample, then
+# asserts structure + transitions over the recorded run. Wall-clock and
+# token-spending by construction: a user-named exception to the 10-second law,
+# never part of `just test` or `just verify`. SCRATCH defaults to $TMPDIR.
+livespawn scratch=(justfile_directory() / ".livespawn"):
+    node scripts/livespawn.ts --scratch {{scratch}}
+    LIVESPAWN_RUN={{scratch}}/run.json npx vitest run --config vitest.livespawn.config.ts
