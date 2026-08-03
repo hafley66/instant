@@ -6,6 +6,7 @@
 import type {
   AgentSessionNode,
   HarnessTraceRow,
+  IAgentTreeIndex,
   MailEnvelope,
   MailRegistry,
 } from "./0_types";
@@ -87,6 +88,47 @@ export function buildAgentTree(nodes: AgentSessionNode[]): AgentTreeNode[] {
     else roots.push(node);
   }
   return roots;
+}
+
+// Adjacency for the lazy path: same roots/orphan-promotion law as
+// buildAgentTree, but children stay unbuilt until materializeAgentTree asks for
+// an expanded branch. Insertion order within a parent is the caller's order.
+export function indexAgentTree(nodes: AgentSessionNode[]): IAgentTreeIndex {
+  const ids = new Set(nodes.map((n) => n.id));
+  const byParent = new Map<string, AgentSessionNode[]>();
+  const roots: AgentSessionNode[] = [];
+  for (const node of nodes) {
+    if (node.parentId === null || !ids.has(node.parentId)) {
+      roots.push(node);
+      continue;
+    }
+    const siblings = byParent.get(node.parentId);
+    if (siblings) siblings.push(node);
+    else byParent.set(node.parentId, [node]);
+  }
+  return {
+    roots,
+    childrenOf: (id) => byParent.get(id) ?? [],
+    hasChildren: (id) => byParent.has(id),
+    size: nodes.length,
+  };
+}
+
+// Build the AgentTreeNode forest for the currently expanded ids only. A
+// collapsed node gets `children: []`; its twisty comes from hasChildren, so the
+// row model stays roots-sized until a branch opens. A cycle in the parent links
+// (never emitted by the readers, cheap to survive) stops at the repeated id.
+export function materializeAgentTree(
+  index: IAgentTreeIndex,
+  expanded: Record<string, boolean>,
+): AgentTreeNode[] {
+  const open = (nodes: AgentSessionNode[], seen: Set<string>): AgentTreeNode[] =>
+    nodes.map((node) => {
+      if (!expanded[node.id] || seen.has(node.id)) return { ...node, children: [] };
+      const next = new Set(seen).add(node.id);
+      return { ...node, children: open(index.childrenOf(node.id), next) };
+    });
+  return open(index.roots, new Set());
 }
 
 // In-tab strip (CONTRACT3): keep only the roots whose tree contains at least one

@@ -1,10 +1,12 @@
 // harness-trace panel: every interactive agent session across the four
-// harnesses (claude/opencode/codex/kimi), enriched from the ~/.agent/mail
-// dispatch ledger when it exists. Bridge-free: invokes generated commands
-// directly (cass-plugin precedent). Refresh = mount (panel show) + an fs-watch
-// leg on the mail dir; no polling loops.
-import { useCallback, useEffect, useState } from "react";
-import type { SortingState } from "@tanstack/react-table";
+// harnesses (claude/opencode/codex/kimi) as a who-called-who tree, enriched
+// from the ~/.agent/mail dispatch ledger when it exists. Bridge-free: invokes
+// generated commands directly (cass-plugin precedent). Refresh = mount (panel
+// show) + an fs-watch leg on the mail dir; no polling loops. Children
+// materialize per expanded branch (indexAgentTree/materializeAgentTree), so the
+// row model is roots-sized until a twisty opens.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ExpandedState, SortingState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { claimFsWatch } from "../../fsWatch";
 import { getHomeDir, relTime } from "../../core";
@@ -13,7 +15,14 @@ import { TreeTable, type TreeColumn } from "../../treetable";
 import type { DirListing } from "../../state";
 import type { CassSwarmStatus } from "../cass/0_types";
 import { enrichRows, parseMailNdjson, parseMailRegistry } from "./0_mail";
-import type { HarnessTraceRow, HarnessTraceSeed, MailEnvelope, MailRegistry } from "./0_types";
+import { indexAgentTree, materializeAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
+import type {
+  AgentSessionNode,
+  HarnessTraceSeed,
+  IAgentTreeIndex,
+  MailEnvelope,
+  MailRegistry,
+} from "./0_types";
 
 const PLUGIN_ID = "harness-trace";
 const MAIL_DIR = "~/.agent/mail";
@@ -23,9 +32,20 @@ interface TraceState {
   sorting?: SortingState;
 }
 
-let cassTraceHandler: ((row: HarnessTraceRow) => void) | null = null;
+let cassTraceHandler: ((row: AgentTreeNode) => void) | null = null;
 
-const COLUMNS: TreeColumn<HarnessTraceRow>[] = [
+const COLUMNS: TreeColumn<AgentTreeNode>[] = [
+  {
+    id: "session",
+    header: "session",
+    tree: true,
+    cell: (r) => (
+      <span className="s-name" title={r.id}>
+        {r.id}
+      </span>
+    ),
+    sortValue: (r) => r.id,
+  },
   {
     id: "dot",
     header: "",
@@ -38,14 +58,10 @@ const COLUMNS: TreeColumn<HarnessTraceRow>[] = [
     sortValue: (r) => r.harness,
   },
   {
-    id: "session",
-    header: "session",
-    cell: (r) => (
-      <span className="s-name" title={r.sessionId}>
-        {r.sessionId}
-      </span>
-    ),
-    sortValue: (r) => r.sessionId,
+    id: "link",
+    header: "link",
+    cell: (r) => <span className="s-meta">{r.parentKind ?? "—"}</span>,
+    sortValue: (r) => r.parentKind ?? "",
   },
   {
     id: "from",
@@ -103,13 +119,14 @@ const COLUMNS: TreeColumn<HarnessTraceRow>[] = [
   },
 ];
 
-function traceFilter(r: HarnessTraceRow, q: string): boolean {
+function traceFilter(r: AgentTreeNode, q: string): boolean {
   const s = q.toLowerCase();
   return (
     r.harness.includes(s) ||
-    r.sessionId.toLowerCase().includes(s) ||
+    r.id.toLowerCase().includes(s) ||
     r.from.toLowerCase().includes(s) ||
     r.why.toLowerCase().includes(s) ||
+    (r.parentKind ?? "").includes(s) ||
     r.status.includes(s) ||
     r.cwd.toLowerCase().includes(s)
   );
@@ -139,7 +156,8 @@ export async function loadMailLedger(): Promise<{ envelopes: MailEnvelope[]; reg
 }
 
 export function HarnessTracePanel() {
-  const [rows, setRows] = useState<HarnessTraceRow[]>([]);
+  const [nodes, setNodes] = useState<AgentSessionNode[]>([]);
+  const [expanded, setExpanded] = useState<ExpandedState>({});
   const [error, setError] = useState("");
   const [cassLine, setCassLine] = useState("");
   const [sorting, setSorting] = useState<SortingState>(
@@ -150,13 +168,22 @@ export function HarnessTracePanel() {
     invoke<HarnessTraceSeed[]>("harness_trace_rows")
       .then(async (seeds) => {
         const mail = await loadMailLedger();
-        // Subagent children belong in the dock strip's tree, never top-level
-        // here (tree law): drop parented rows from this flat table.
-        setRows(enrichRows(seeds, mail.envelopes, mail.registry).filter((r) => !r.parentId));
+        const flat = enrichRows(seeds, mail.envelopes, mail.registry);
+        setNodes(toAgentNodes(flat, mail.envelopes, mail.registry));
         setError("");
       })
       .catch((reason: unknown) => setError(String(reason)));
   }, []);
+
+  const index: IAgentTreeIndex = useMemo(() => indexAgentTree(nodes), [nodes]);
+  // The search box forces every branch open (TreeTable's `true` sentinel), which
+  // a lazy tree cannot honor for unmaterialized children; the filter therefore
+  // reaches loaded rows only and the header says so.
+  const openIds = useMemo(
+    () => (typeof expanded === "object" ? expanded : ({} as Record<string, boolean>)),
+    [expanded],
+  );
+  const tree = useMemo(() => materializeAgentTree(index, openIds), [index, openIds]);
 
   useEffect(() => {
     load();
@@ -185,11 +212,11 @@ export function HarnessTracePanel() {
   useEffect(() => {
     cassTraceHandler = (row) => {
       const cwd = row.cwd.startsWith("~") ? getHomeDir() + row.cwd.slice(1) : row.cwd;
-      setCassLine(`cass: querying ${row.sessionId}…`);
+      setCassLine(`cass: querying ${row.id}…`);
       void invoke<CassSwarmStatus>("cass_swarm_status", { cwd })
         .then((snapshot) => {
           const agents = snapshot.summary?.active_agent_count ?? 0;
-          setCassLine(`cass ${row.sessionId}: ${snapshot.status ?? "ok"} · ${agents} agents`);
+          setCassLine(`cass ${row.id}: ${snapshot.status ?? "ok"} · ${agents} agents`);
         })
         .catch((reason: unknown) => setCassLine(`cass: ${String(reason)}`));
     };
@@ -207,7 +234,9 @@ export function HarnessTracePanel() {
     <div className="v2-panel" data-testid="harness-trace">
       <div className="act-bar">
         <span className="spy-title">harness trace</span>
-        <span className="wt-count">{rows.length ? `${rows.length} sessions` : ""}</span>
+        <span className="wt-count">
+          {index.size ? `${tree.length} roots · ${index.size} sessions` : ""}
+        </span>
         <span className="spy-spacer" />
         <button type="button" onClick={load}>
           refresh
@@ -218,19 +247,23 @@ export function HarnessTracePanel() {
         <div className="session-empty">{error}</div>
       ) : (
         <div className="panel-scroll">
-          {rows.length === 0 ? (
+          {index.size === 0 ? (
             <div className="session-empty">no harness sessions found</div>
           ) : (
-            <TreeTable<HarnessTraceRow>
+            <TreeTable<AgentTreeNode>
               columns={COLUMNS}
-              data={rows}
-              getRowId={(r) => `${r.harness}:${r.sessionId}`}
+              data={tree}
+              getRowId={(r) => r.id}
+              getSubRows={(r) => r.children}
+              getRowCanExpand={(r) => index.hasChildren(r.id)}
+              expanded={expanded}
+              onExpandedChange={setExpanded}
               virtual
               sorting={sorting}
               onSortingChange={onSortingChange}
               controls
               filter={traceFilter}
-              searchPlaceholder="filter sessions…"
+              searchPlaceholder="filter loaded rows…"
               rowTitle={(r) => r.why || r.cwd}
             />
           )}

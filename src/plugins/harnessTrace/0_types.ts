@@ -45,6 +45,20 @@ export interface HarnessTraceRow {
 // the seam from rust (subagent children); "dispatch" is attached later.
 export type HarnessTraceSeed = Omit<HarnessTraceRow, "from" | "why">;
 
+// Parent -> children adjacency over the frozen node set, built once per load.
+// The trace panel materializes only the expanded branches from it, so a row's
+// children cost nothing until its twisty opens.
+export interface IAgentTreeIndex {
+  // Nodes with no parent, plus orphans whose parentId is absent from the set.
+  roots: AgentSessionNode[];
+  // Direct children of a node id; empty array when it has none.
+  childrenOf(id: string): AgentSessionNode[];
+  // Whether a node has at least one child (drives the twisty before load).
+  hasChildren(id: string): boolean;
+  // Every node in the index, roots and descendants (for the row count).
+  size: number;
+}
+
 // One dispatch-bus envelope (~/.agent/mail/*.ndjson). The bus is designed, not
 // built yet, so every field is validated on the wire.
 export interface MailEnvelope {
