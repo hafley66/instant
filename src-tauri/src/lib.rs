@@ -874,6 +874,7 @@ pub fn run() {
             fs_watch::fs_watch_release,
             harness::harness_session,
             harness::harness_sessions,
+            harness::harness_trace_rows,
             ledger::list_ai_sessions,
             ledger::read_ai_messages,
             ledger::latest_ai_message,

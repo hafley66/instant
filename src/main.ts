@@ -22,6 +22,7 @@ import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerCassPlugin } from "./plugins/cass";
+import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { registerMdview } from "./mdview";
@@ -239,6 +240,7 @@ async function main() {
   registerRulesPlugin();
   registerMetricsPlugin();
   registerCassPlugin();
+  registerHarnessTracePlugin();
   registerFilesPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.
   void registerSprefa;

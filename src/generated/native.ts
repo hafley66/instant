@@ -52,6 +52,7 @@ export type CommandName =
   | "fs_watch_release"
   | "harness_session"
   | "harness_sessions"
+  | "harness_trace_rows"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
@@ -159,6 +160,7 @@ export namespace commands {
   export namespace harness {
     export const harnessSession = "harness_session";
     export const harnessSessions = "harness_sessions";
+    export const harnessTraceRows = "harness_trace_rows";
   }
 
   export namespace ledger {
