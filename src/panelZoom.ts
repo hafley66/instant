@@ -7,8 +7,9 @@
 // which tracks keyboard focus) names the target panel; anything without a
 // registered kind falls through to the whole-webview chrome zoom — so adding
 // zoom to a new panel kind is a one-line registerZoomKind, not new plumbing.
+// ./state is the only import this module may take: every other app module
+// reaches reactdock/terminal, which import this one back.
 import { store } from "./state";
-import { nudgeZoom, resetZoom } from "./overlay";
 
 export interface ZoomKind {
   prefix: string; // dock panel id prefix ("term:", "md:")
@@ -49,23 +50,49 @@ export function resetPanelZoom(pid: string): void {
   kindFor(pid)?.onZoom?.(pid, 1);
 }
 
-// Injected at boot: focused terminal wins, else the active dock panel.
-// Kept as an injection so this module imports neither terminal.ts nor
-// reactdock.tsx (both would be import cycles).
+// Which panel a gesture zooms, given the two things that can name one: the
+// dock's active panel and the terminal holding keyboard focus. Neither alone
+// is the answer — a markdown preview ⌘-clicked open from a terminal becomes
+// active while that terminal keeps DOM focus, and clicking back into an xterm
+// does not re-activate its dock panel — so the more recently reached one wins,
+// each carrying the time it was reached (same clock, performance.now()).
+export interface ZoomCandidate {
+  pid: string | null;
+  at: number;
+}
+export function resolveZoomTarget(active: ZoomCandidate, focused: ZoomCandidate): string | null {
+  if (focused.pid && focused.at >= active.at) return focused.pid;
+  if (active.pid && kindFor(active.pid)) return active.pid;
+  return focused.pid ?? active.pid;
+}
+
+// Injected at boot (terminal.ts owns both: it tracks keyboard focus and can
+// read the dock). Kept as injections so this module imports neither
+// terminal.ts nor reactdock.tsx nor overlay.ts (each is an import cycle back
+// to here).
 let resolveTarget: () => string | null = () => null;
 export function setZoomTargetResolver(fn: () => string | null): void {
   resolveTarget = fn;
+}
+
+export interface ChromeZoom {
+  nudge: (delta: number) => void;
+  reset: () => void;
+}
+let chromeZoom: ChromeZoom = { nudge: () => {}, reset: () => {} };
+export function setChromeZoom(fns: ChromeZoom): void {
+  chromeZoom = fns;
 }
 
 export function panelZoomGesture(delta: number): void {
   const pid = resolveTarget();
   const k = pid ? kindFor(pid) : undefined;
   if (pid && k) setPanelZoom(pid, zoomFactorFor(pid) + k.step * Math.sign(delta));
-  else nudgeZoom(delta);
+  else chromeZoom.nudge(delta);
 }
 
 export function panelZoomResetGesture(): void {
   const pid = resolveTarget();
   if (pid && kindFor(pid)) resetPanelZoom(pid);
-  else resetZoom();
+  else chromeZoom.reset();
 }

@@ -89,15 +89,19 @@ test("a terminal the user is typing in still zooms its own font", async ({ page 
   await page.getByTestId("open-md").click();
   await expect(page.locator(".mdview-content")).toBeVisible();
   await useTerminal(page);
-  expect((await state(page)).activePanel).toBe(
-    await page.evaluate(() => (window as ZoomWindow).__mdzoom!.termPid),
-  );
+  const termPid = await page.evaluate(() => (window as ZoomWindow).__mdzoom!.termPid);
+  await expect.poll(async () => (await state(page)).activePanel).toBe(termPid);
 
   await page.keyboard.press("Meta+Equal");
   await expect.poll(async () => (await state(page)).term).toBeGreaterThan(1);
   expect((await state(page)).md).toBe(1);
   expect(await contentZoom(page)).toBe("1");
   await page.screenshot({ path: "test-results/mdzoom-term-regression.png" });
+
+  // Back into the preview: the gesture follows the user, both ways.
+  await page.locator(".mdview-content").click({ position: { x: 40, y: 30 } });
+  await page.keyboard.press("Meta+Equal");
+  await expect.poll(async () => (await state(page)).md).toBeCloseTo(1.1, 5);
 
   expect(pageErrors).toEqual([]);
 });

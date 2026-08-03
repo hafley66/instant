@@ -397,6 +397,7 @@ function onReady(e: DockviewReadyEvent) {
 
     api.onDidActivePanelChange((p) => {
       if (p) lastActivePanelId = p.id;
+      activePanelChangedAt = performance.now();
       if (p && isTerm(p.id)) hooks.onTermActivate(termSid(p.id));
     });
     api.onDidRemovePanel((p) => {
@@ -440,6 +441,11 @@ function onReady(e: DockviewReadyEvent) {
 const firstTermPanel = () => api?.panels.find((p) => isTerm(p.id))?.id;
 
 let lastActivePanelId: string | null = null;
+// When the active panel last changed, on the same clock as terminal.ts's
+// keyboard-focus stamp: a gesture that must name "the panel the user reached
+// last" compares the two (see resolveZoomTarget in src/panelZoom.ts).
+let activePanelChangedAt = 0;
+export const activePanelChangedTime = () => activePanelChangedAt;
 const anchorPanel = (): string | undefined => {
   if (lastActivePanelId && api?.getPanel(lastActivePanelId)) return lastActivePanelId;
   return firstTermPanel() ?? api?.panels[0]?.id;
