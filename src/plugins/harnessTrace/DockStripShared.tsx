@@ -5,9 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
-import { claimFsWatch } from "../../fsWatch";
 import { getHomeDir, relTime } from "../../core";
-import { MAIL_DIR } from "./0_live";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { useApp } from "../../useStore";
 import { store } from "../../state";
@@ -17,7 +15,6 @@ import { refreshSessions } from "../../worktrees";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
 import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
-import type { DirListing } from "../../state";
 
 export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
   {
@@ -179,24 +176,6 @@ export function useAgentTree(): AgentTreeState {
   }, []);
   useEffect(() => {
     load();
-  }, [load]);
-  // Live leg (HarnessTracePanel precedent): a dispatch writes the mail dir,
-  // so the strip re-reads without waiting for its refresh button; the watch
-  // claims only when the dir exists and releases on unmount.
-  useEffect(() => {
-    let release: (() => void) | null = null;
-    let disposed = false;
-    void invoke<DirListing>("list_dir", { path: MAIL_DIR })
-      .then(() => claimFsWatch(MAIL_DIR, () => load(), false))
-      .then((releaseClaim) => {
-        if (disposed) releaseClaim();
-        else release = releaseClaim;
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      release?.();
-    };
   }, [load]);
   const liveTmux = new Set(store.get().sessions.map((s) => s.name));
   const nodes = settleRoutedStatus(attachTmux(flat, routeTmux), routeTmux, liveTmux);
