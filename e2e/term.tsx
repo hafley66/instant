@@ -23,7 +23,9 @@ import {
   tabMetaById,
   getFocusedTermId,
   writeTerm,
+  resizeTerm,
   termCellPoint,
+  termDims,
 } from "../src/terminal";
 import { setHomeDir, sessionId } from "../src/core";
 import { store } from "../src/state";
@@ -164,10 +166,17 @@ installKeymap([
 
 // Terminal test hooks: the headless run has no PTY, so the spec writes fixture
 // lines into the emulator itself and asks for the viewport point of a cell.
-type TermHooks = { write: (data: string) => void; point: (row: number, col: number) => { x: number; y: number } | null };
+type TermHooks = {
+  write: (data: string) => void;
+  point: (row: number, col: number) => { x: number; y: number } | null;
+  resize: (cols: number, rows: number) => void;
+  dims: () => { cols: number; rows: number } | null;
+};
 (window as Window & { __term?: TermHooks }).__term = {
   write: (data) => writeTerm(sessionId("e2e"), data),
   point: (row, col) => termCellPoint(sessionId("e2e"), row, col),
+  resize: (cols, rows) => resizeTerm(sessionId("e2e"), cols, rows),
+  dims: () => termDims(sessionId("e2e")),
 };
 
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {

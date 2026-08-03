@@ -28,7 +28,14 @@ import {
   termPanelId,
 } from "./reactdock";
 import { dispatchClick, clickIntent, resolveReference } from "./clickrules";
-import { scanLineTokens, tokenAtColumn } from "./termTokens";
+import { tokenAtColumn } from "./termTokens";
+import {
+  joinWrappedRows,
+  capWrappedRows,
+  wrappedLinkSpans,
+  MAX_WRAP_ROWS,
+  type WrapRow,
+} from "./termWrapJoin";
 import { resolveRef } from "./refResolve";
 import {
   registerZoomKind,
@@ -299,6 +306,13 @@ export function zoomResetGesture() {
 export function writeTerm(id: string, data: string): void {
   tabs.get(id)?.term.write(data);
 }
+export function resizeTerm(id: string, cols: number, rows: number): void {
+  tabs.get(id)?.term.resize(cols, rows);
+}
+export function termDims(id: string): { cols: number; rows: number } | null {
+  const t = tabs.get(id);
+  return t ? { cols: t.term.cols, rows: t.term.rows } : null;
+}
 export function termCellPoint(id: string, row: number, col: number): { x: number; y: number } | null {
   const t = tabs.get(id);
   if (!t) return null;
@@ -309,10 +323,47 @@ export function termCellPoint(id: string, row: number, col: number): { x: number
   return { x: rect.left + (col + 0.5) * cellW, y: rect.top + (row + 0.5) * cellH };
 }
 
+// The logical line a buffer row belongs to, as its row texts plus which index
+// the requested row holds. Walks BACK while the row is a wrap continuation to
+// find the line's first row, then FORWARD collecting each following wrapped row.
+// The walk is capped (see MAX_WRAP_ROWS): a continuation longer than that
+// degrades to the single requested row so a bad buffer can't become a wide scan.
+// Per-row text uses trimRight for the line's LAST row and untrimmed for rows
+// that continue, so mid-line spaces survive and joined offsets stay true.
+function wrappedLineRows(id: string, bufferRow: number): { rows: WrapRow[]; index: number; start: number } | null {
+  const term = tabs.get(id)?.term;
+  if (!term) return null;
+  const buf = term.buffer.active;
+  if (!buf.getLine(bufferRow)) return null;
+
+  let start = bufferRow;
+  while (start > 0 && buf.getLine(start)?.isWrapped) start--;
+
+  const collected: WrapRow[] = [];
+  let clickedIndex = -1;
+  let overCap = false;
+  for (let b = start, n = 0; ; b++, n++) {
+    const line = buf.getLine(b);
+    if (!line) break;
+    if (b === bufferRow) clickedIndex = n;
+    const continued = buf.getLine(b + 1)?.isWrapped ?? false;
+    collected.push({ text: line.translateToString(!continued), isWrapped: line.isWrapped });
+    if (!continued) break;
+    if (n + 1 >= MAX_WRAP_ROWS) {
+      overCap = true;
+      break;
+    }
+  }
+  if (clickedIndex < 0) return null;
+  const capped = capWrappedRows(collected, clickedIndex, overCap);
+  return { rows: capped.rows, index: capped.index, start };
+}
+
 // The word/path token under the pointer, for a ⌘-click miss (no link hit) and
 // for the hover card. Maps clientX/Y to a buffer cell through the screen-cell
-// geometry, then hands the row to the same scanner the link provider uses, so
-// the card names exactly the characters the underline covers.
+// geometry, then hands the row (joined across any wrap) to the same scanner the
+// link provider uses, so the card names exactly the characters the underline
+// covers.
 function wordAt(id: string, clientX: number, clientY: number): string {
   const t = tabs.get(id);
   if (!t) return "";
@@ -323,9 +374,12 @@ function wordAt(id: string, clientX: number, clientY: number): string {
   const row = Math.max(0, Math.min(t.term.rows - 1, Math.floor((clientY - rect.top) / cellH)));
   const col = Math.max(0, Math.min(t.term.cols - 1, Math.floor((clientX - rect.left) / cellW)));
   const buf = t.term.buffer.active;
-  const line = buf.getLine(buf.viewportY + row);
-  if (!line) return "";
-  return tokenAtColumn(line.translateToString(true), col)?.text ?? "";
+  const bufferRow = buf.viewportY + row;
+  const wrapped = wrappedLineRows(id, bufferRow);
+  if (!wrapped) return "";
+  const joined = joinWrappedRows(wrapped.rows);
+  const offset = joined.rowStartOffsets[wrapped.index] + col;
+  return tokenAtColumn(joined.text, offset)?.text ?? "";
 }
 
 // opts let a Space override the agent command and launch cwd; plain sessions
@@ -493,9 +547,10 @@ export function openTab(
   // (cursor placement etc.) still reach the TUI.
   term.registerLinkProvider({
     provideLinks(y, cb) {
-      const line = term.buffer.active.getLine(y - 1); // y is 1-based absolute row
-      if (!line) return cb(undefined);
-      const text = line.translateToString(true);
+      // y is 1-based absolute row; join the whole wrapped logical line so a
+      // path split across rows resolves as one token.
+      const wrapped = wrappedLineRows(id, y - 1);
+      if (!wrapped) return cb(undefined);
       const activate = (e: MouseEvent, t: string) => {
         if (!e.metaKey) return; // ⌘ required; plain click stays with the app
         dispatchClick(t, tabMetaById(id)?.cwd ?? "");
@@ -503,14 +558,22 @@ export function openTab(
       // One scanner owns the span boundaries (see termTokens.ts), so the
       // underline covers the path and stops there: hovering `Update(src/x.ts)`
       // highlights `src/x.ts`, never the call envelope around it.
-      const links: ILink[] = scanLineTokens(text)
-        .filter((span) => looksOpenable(span.text))
-        .map((span) => ({
-          text: span.text,
-          // xterm columns are 1-based and its range end is inclusive.
-          range: { start: { x: span.start + 1, y }, end: { x: span.end, y } },
-          activate,
-        }));
+      const links: ILink[] = wrappedLinkSpans(wrapped.rows, (text) => looksOpenable(text)).map(
+        ({ text, ranges }) => {
+          const top = ranges[0];
+          const bottom = ranges[ranges.length - 1];
+          return {
+            text,
+            // xterm columns are 1-based and its range end is inclusive; a
+            // wrapped token spans rows, so start and end may sit on different y.
+            range: {
+              start: { x: top.startCol + 1, y: wrapped.start + top.rowIndex + 1 },
+              end: { x: bottom.endCol, y: wrapped.start + bottom.rowIndex + 1 },
+            },
+            activate,
+          };
+        },
+      );
       cb(links);
     },
   });
