@@ -14,6 +14,7 @@ import { readPluginState, savePluginState } from "../../pluginState";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import type { DirListing } from "../../state";
 import type { CassSwarmStatus } from "../cass/0_types";
+import { MAIL_DIR } from "./0_live";
 import { enrichRows, parseMailNdjson, parseMailRegistry } from "./0_mail";
 import { indexAgentTree, materializeAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import type {
@@ -25,7 +26,6 @@ import type {
 } from "./0_types";
 
 const PLUGIN_ID = "harness-trace";
-const MAIL_DIR = "~/.agent/mail";
 const DEFAULT_SORT: SortingState = [{ id: "last", desc: true }];
 
 interface TraceState {

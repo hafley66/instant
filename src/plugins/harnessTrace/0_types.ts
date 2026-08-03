@@ -274,3 +274,75 @@ export interface IStripPolicy {
   // law), which is how a dispatched lane surfaces as a top-level shell.
   external(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
 }
+
+// ---------------------------------------------------------------------------
+// Live-spawn gate (scripts/livespawn.ts): a wall-clock run in which one claude
+// session spawns an opencode one, sampled every few seconds. On demand only —
+// never a default battery (10-second law, user-named exception).
+// ---------------------------------------------------------------------------
+
+// One poll instant. `rows` is what the harness stores held when the driver read
+// them (the harness_trace_rows seam's shape, scoped to the gate cwd); `files`
+// is the mail dir verbatim, entry name -> bytes, so a replay of a sample feeds
+// the page exactly what was on disk. Every field is recorded, never derived at
+// assert time: the gate reasons about the run after it ends.
+export interface ILiveSample {
+  index: number;
+  at: string;
+  atMs: number;
+  rows: HarnessTraceSeed[];
+  files: Record<string, string>;
+  png: string;
+}
+
+// One sample projected into the e2e native-invoke table
+// (__instantE2eNativeResults). Serializable end to end: list_dir/read_text are
+// rebuilt inside the page from `files`, since a function cannot cross
+// addInitScript.
+export interface ILivePageSeed {
+  mailDir: string;
+  rows: HarnessTraceSeed[];
+  files: Record<string, string>;
+}
+
+// The structural reading of one sample: session identity, link kind, status
+// bucket and ack counts. Prompt and body text are deliberately absent — the
+// gate asserts on structure and transitions, never on prompt equality.
+export interface ILiveSampleState {
+  at: string;
+  parentId: string | null;
+  parentStatus: SessionStatus | null;
+  parentFrom: string | null;
+  childId: string | null;
+  childStatus: SessionStatus | null;
+  childParentId: string | null;
+  childParentKind: ParentKind | null;
+  rootCount: number;
+  sessionCount: number;
+  acked: number;
+  unacked: number;
+}
+
+// The pure half of the driver: a leaf (type-only imports) so scripts run it
+// under node's type stripping without an extensionless-import resolution.
+export interface ILiveGate {
+  // Same buckets as the rust reader (src-tauri/src/harness.rs trace_status):
+  // a vanished cwd is dead, else live <= 2m, idle <= 1h, done beyond.
+  status(cwdExists: boolean, lastMs: number, nowMs: number): SessionStatus;
+  // Unix ms -> ISO-8601 UTC; 0 (unknown mtime) is the empty string, as rust's
+  // ms_to_iso returns.
+  iso(ms: number): string;
+  seed(sample: ILiveSample): ILivePageSeed;
+  // Has the session finished its turn and gone back to waiting on a human? True
+  // when the last conversational record of a claude jsonl is an assistant
+  // message carrying no tool_use block. A pending tool call never reads as
+  // finished, which is what separates "it refused and is asking" from "the
+  // command it was given is still running".
+  turnEnded(transcript: string): boolean;
+}
+
+// Replays one sample through the panel's own join + tree so the assertions
+// compare what the page would draw, not a second model of it.
+export interface ILiveState {
+  read(sample: ILiveSample): ILiveSampleState;
+}
