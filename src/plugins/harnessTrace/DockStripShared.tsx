@@ -9,7 +9,7 @@ import { getHomeDir, relTime } from "../../core";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { useApp } from "../../useStore";
 import { store } from "../../state";
-import { enrichRows, registrySeeds, routeTmuxBySession } from "./0_mail";
+import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
@@ -171,7 +171,8 @@ export function useAgentTree(): AgentTreeState {
   useEffect(() => {
     load();
   }, [load]);
-  const nodes = attachTmux(flat, routeTmux);
+  const liveTmux = new Set(store.get().sessions.map((s) => s.name));
+  const nodes = settleRoutedStatus(attachTmux(flat, routeTmux), routeTmux, liveTmux);
   return { nodes, tree: buildAgentTree(nodes), registry, error, load };
 }
 

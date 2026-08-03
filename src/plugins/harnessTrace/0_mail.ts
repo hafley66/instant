@@ -5,6 +5,7 @@
 // shape the trace panel's join reads, with ts = from_timestamp.
 import { MailDirectory, MailStore } from "./0_bus";
 import type {
+  AgentSessionNode,
   HarnessTraceRow,
   HarnessTraceSeed,
   IMailDirectory,
@@ -90,6 +91,21 @@ export function routeTmuxBySession(directory: IMailDirectory): Map<string, strin
     if (agent.tmux !== null) bySession.set(agent.sessionId || agent.id, agent.tmux);
   }
   return bySession;
+}
+
+// A dispatched lane lives inside its registry-recorded tmux session, so that
+// session vanishing means the lane is done NOW; without this the store's
+// mtime decay keeps a finished lane "idle" for an hour.
+export function settleRoutedStatus(
+  nodes: AgentSessionNode[],
+  routeTmux: Map<string, string>,
+  liveTmux: Set<string>,
+): AgentSessionNode[] {
+  return nodes.map((node) => {
+    const tmux = routeTmux.get(node.id);
+    if (tmux === undefined || liveTmux.has(tmux)) return node;
+    return node.status === "dead" ? node : { ...node, status: "done" };
+  });
 }
 
 // Join envelopes to sessions: `to` resolves through the registry when present,

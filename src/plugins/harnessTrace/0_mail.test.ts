@@ -7,6 +7,7 @@ import {
   parseMailRegistry,
   registrySeeds,
   routeTmuxBySession,
+  settleRoutedStatus,
 } from "./0_mail";
 import type { HarnessTraceSeed, IMailAgent } from "./0_types";
 
@@ -210,5 +211,43 @@ describe("routeTmuxBySession", () => {
     });
     expect(map.get("lane")).toBe("lane");
     expect(map.has("sess-q")).toBe(false);
+  });
+});
+
+describe("settleRoutedStatus", () => {
+  const node = (id: string, status: "live" | "idle" | "done" | "dead") => ({
+    id,
+    harness: "opencode" as const,
+    parentId: null,
+    parentKind: null,
+    from: "user",
+    why: "",
+    ts: "",
+    lastActivity: "",
+    status,
+    cwd: "",
+    tmuxSession: null,
+  });
+
+  // Sabotage receipt: the fusion lane finished at 15:30 and still sat in the
+  // bar as idle at 15:51; its registry tmux session had been gone the whole
+  // time.
+  it("flips a routed row to done the moment its tmux session is gone", () => {
+    const [row] = settleRoutedStatus([node("sess-f", "idle")], new Map([["sess-f", "lane-f"]]), new Set());
+    expect(row.status).toBe("done");
+  });
+
+  it("leaves a routed row alone while its tmux session lives", () => {
+    const [row] = settleRoutedStatus([node("sess-f", "live")], new Map([["sess-f", "lane-f"]]), new Set(["lane-f"]));
+    expect(row.status).toBe("live");
+  });
+
+  it("never touches unrouted rows or dead ones", () => {
+    const rows = settleRoutedStatus(
+      [node("plain", "idle"), node("gone", "dead")],
+      new Map([["gone", "lane-g"]]),
+      new Set(),
+    );
+    expect(rows.map((r) => r.status)).toEqual(["idle", "dead"]);
   });
 });
