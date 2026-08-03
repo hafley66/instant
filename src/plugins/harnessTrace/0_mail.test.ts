@@ -6,6 +6,7 @@ import {
   parseMailNdjson,
   parseMailRegistry,
   registrySeeds,
+  routeTmuxBySession,
 } from "./0_mail";
 import type { HarnessTraceSeed, IMailAgent } from "./0_types";
 
@@ -188,5 +189,26 @@ describe("registrySeeds", () => {
     const [row] = enrichRows(synth, parseMailNdjson(dispatchLine), {});
     expect(row.from).toBe("coordinator");
     expect(row.why).toBe("build the trace panel");
+  });
+});
+
+describe("routeTmuxBySession", () => {
+  // Sabotage receipt: five tmux sessions sharing one cwd made the cwd guess
+  // join this tab's claude to a sibling session, so related scope missed
+  // every lane the registry could have placed exactly.
+  it("maps a resolved session to its recorded tmux name", () => {
+    const map = routeTmuxBySession({
+      main: route({ id: "main", sessionId: "sess-m", harness: "claude", tmux: "sprefa-3" }),
+    });
+    expect(map.get("sess-m")).toBe("sprefa-3");
+  });
+
+  it("keys an unresolved route by agent id and skips routes with no tmux", () => {
+    const map = routeTmuxBySession({
+      lane: route({ id: "lane", tmux: "lane" }),
+      quiet: route({ id: "quiet", sessionId: "sess-q" }),
+    });
+    expect(map.get("lane")).toBe("lane");
+    expect(map.has("sess-q")).toBe(false);
   });
 });

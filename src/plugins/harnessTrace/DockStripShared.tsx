@@ -9,7 +9,7 @@ import { getHomeDir, relTime } from "../../core";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { useApp } from "../../useStore";
 import { store } from "../../state";
-import { enrichRows, registrySeeds } from "./0_mail";
+import { enrichRows, registrySeeds, routeTmuxBySession } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
@@ -120,12 +120,16 @@ function tmuxJoinRows(): { name: string; pwd: string; chipPaths: string[]; proc:
   }));
 }
 
-// Join each flat node to its tmux session (untildify then match). Derived in
-// render so a store change re-joins without a reload.
-function attachTmux(nodes: AgentSessionNode[]): AgentSessionNode[] {
+// Join each flat node to its tmux session: a registry route's recorded tmux
+// name wins (the cwd guess cannot tell apart sessions sharing a directory),
+// else untildify and match. Derived in render so a store change re-joins
+// without a reload.
+function attachTmux(nodes: AgentSessionNode[], routeTmux: Map<string, string>): AgentSessionNode[] {
   const rows = tmuxJoinRows();
   const home = getHomeDir();
   return nodes.map((n) => {
+    const routed = routeTmux.get(n.id);
+    if (routed !== undefined) return { ...n, tmuxSession: routed };
     const cwd = n.cwd.startsWith("~") ? home + n.cwd.slice(1) : n.cwd;
     return { ...n, tmuxSession: joinTmuxSession(cwd, rows) };
   });
@@ -148,6 +152,7 @@ export function useAgentTree(): AgentTreeState {
   useApp();
   const [flat, setFlat] = useState<AgentSessionNode[]>([]);
   const [registry, setRegistry] = useState<MailRegistry>({});
+  const [routeTmux, setRouteTmux] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState("");
   const load = useCallback(() => {
     invoke<HarnessTraceSeed[]>("harness_trace_rows")
@@ -158,6 +163,7 @@ export function useAgentTree(): AgentTreeState {
         const flatRows = enrichRows(seeds, mail.envelopes, mail.registry);
         setFlat(toAgentNodes(flatRows, mail.envelopes, mail.registry));
         setRegistry(mail.registry);
+        setRouteTmux(routeTmuxBySession(mail.directory));
         setError("");
       })
       .catch((reason: unknown) => setError(String(reason)));
@@ -165,7 +171,7 @@ export function useAgentTree(): AgentTreeState {
   useEffect(() => {
     load();
   }, [load]);
-  const nodes = attachTmux(flat);
+  const nodes = attachTmux(flat, routeTmux);
   return { nodes, tree: buildAgentTree(nodes), registry, error, load };
 }
 

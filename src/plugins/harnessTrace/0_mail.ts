@@ -81,6 +81,17 @@ export function registrySeeds(
     });
 }
 
+// session id -> tmux session name, from the registry routes that carry one.
+// The cwd guess (2_join) cannot tell apart tmux sessions sharing a directory;
+// a route's recorded tmux name is the dispatcher's own statement and wins.
+export function routeTmuxBySession(directory: IMailDirectory): Map<string, string> {
+  const bySession = new Map<string, string>();
+  for (const agent of Object.values(directory)) {
+    if (agent.tmux !== null) bySession.set(agent.sessionId || agent.id, agent.tmux);
+  }
+  return bySession;
+}
+
 // Join envelopes to sessions: `to` resolves through the registry when present,
 // else matches a session id directly. The oldest matching envelope is the
 // dispatch record; it supplies from/why (body first line) and the row id.
