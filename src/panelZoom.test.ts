@@ -91,6 +91,33 @@ describe("panelZoom", () => {
   });
 });
 
+describe("zoom target resolution", () => {
+  it("the active zoomable panel wins over a terminal that still holds focus", async () => {
+    freshGlobals();
+    const { registerZoomKind, resolveZoomTarget } = await import("./panelZoom");
+    registerZoomKind({ prefix: "md:", min: 0.5, max: 2.5, step: 0.1 });
+    registerZoomKind({ prefix: "term:", min: 0.5, max: 3, step: 0.1 });
+    expect(resolveZoomTarget("md:%2Fa.md", "term:s:main")).toBe("md:%2Fa.md");
+  });
+
+  it("falls back to the focused terminal when the active panel has no kind", async () => {
+    freshGlobals();
+    const { registerZoomKind, resolveZoomTarget } = await import("./panelZoom");
+    registerZoomKind({ prefix: "term:", min: 0.5, max: 3, step: 0.1 });
+    expect(resolveZoomTarget("preview:%2Fa.md", "term:s:main")).toBe("term:s:main");
+    expect(resolveZoomTarget(null, "term:s:main")).toBe("term:s:main");
+  });
+
+  it("names the active panel when no terminal holds focus, else nothing", async () => {
+    freshGlobals();
+    const { registerZoomKind, resolveZoomTarget } = await import("./panelZoom");
+    registerZoomKind({ prefix: "md:", min: 0.5, max: 2.5, step: 0.1 });
+    expect(resolveZoomTarget("md:%2Fa.md", null)).toBe("md:%2Fa.md");
+    expect(resolveZoomTarget("preview:%2Fa.md", null)).toBe("preview:%2Fa.md");
+    expect(resolveZoomTarget(null, null)).toBeNull();
+  });
+});
+
 describe("tabZoom -> panelZoom migration", () => {
   it("converts px font sizes to term factors, once", async () => {
     const { localStore } = freshGlobals({ tabZoom: JSON.stringify({ "s:main": 26 }) });
