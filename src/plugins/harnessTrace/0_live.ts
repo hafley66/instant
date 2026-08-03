@@ -29,6 +29,24 @@ export const LiveGate: ILiveGate = {
   seed(sample): ILivePageSeed {
     return { mailDir: MAIL_DIR, rows: sample.rows, files: sample.files };
   },
+
+  turnEnded(transcript) {
+    let last: Record<string, unknown> | null = null;
+    for (const line of transcript.split("\n")) {
+      if (!line.trim()) continue;
+      let value: Record<string, unknown>;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        continue; // a partially flushed tail line is not a turn boundary
+      }
+      if (value.type === "user" || value.type === "assistant") last = value;
+    }
+    if (!last || last.type !== "assistant") return false;
+    const message = last.message as { content?: unknown } | undefined;
+    const content = Array.isArray(message?.content) ? message.content : [];
+    return !content.some((block) => (block as { type?: string })?.type === "tool_use");
+  },
 };
 
 export function isLiveSample(value: unknown): value is ILiveSample {

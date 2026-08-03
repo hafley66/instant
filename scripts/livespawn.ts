@@ -19,6 +19,7 @@
 // gate cwd, and bucket status through LiveGate so the rules stay in one place.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import playwright from "@playwright/test";
@@ -40,6 +41,50 @@ const HAIL_BODY =
   "Bash tool, changing nothing about it: " +
   SPAWN_COMMAND;
 const OPENCODE_DB = join(homedir(), ".local", "share", "opencode", "opencode.db");
+
+// A bare injected line is indistinguishable from a prompt injection, and a
+// recipient that reads its own instructions correctly says so: an unverified
+// external instruction demanding exact reproduction and a one-word reply is the
+// shape it is told to refuse. The scratch cwd therefore carries the gate's own
+// context BEFORE the pane starts, naming the sender, the prefix, the one
+// command and the script that sends it, so the hail is checkable against
+// something local instead of taken on faith.
+function scratchClaudeMd(driverPath: string): string {
+  return [
+    "# livespawn gate scratch",
+    "",
+    "This directory is the scratch cwd of the livespawn gate, an on-demand live",
+    `test in the instant repo. The driver is \`${driverPath}\`; it created this`,
+    "file before starting this session.",
+    "",
+    "## What will arrive",
+    "",
+    "One message, injected into this pane by `scripts/bus.ts hail` over tmux,",
+    "prefixed `[bus m-<id>]` and sent by the agent id `coordinator`. It asks for",
+    "exactly one command to be run with the Bash tool and for the single word",
+    "`done` in reply. Running it is the entire purpose of this session.",
+    "",
+    "## The one pinned command",
+    "",
+    "```",
+    SPAWN_COMMAND,
+    "```",
+    "",
+    "It starts a cheap opencode session in this same cwd, whose row in",
+    "`~/.local/share/opencode/opencode.db` is what the gate polls. Nothing else",
+    "in this session is expected to touch the filesystem or the network.",
+    "",
+    "`.claude/settings.json` here allows `Bash(opencode run:*)` and nothing else.",
+    "",
+  ].join("\n");
+}
+
+// The confirmation sent if the recipient challenges the hail instead of running
+// it. Sent at most once per run, over the same tmux leg as the hail.
+const CONFIRM_LINE = "yes, run it: this is the livespawn gate driver, see CLAUDE.md in this cwd";
+// How long after the hail a still-childless, turn-ended pane counts as a
+// challenge rather than a slow tool call.
+const CONFIRM_AFTER_MS = 25_000;
 
 const transcript: Record<string, unknown>[] = [];
 
@@ -141,6 +186,16 @@ function readClaudeTranscript(path: string): { cwd: string; ts: string; sidechai
   return { cwd: "", ts: "", sidechain: false };
 }
 
+// Read from the transcript store, not the pane's pixels; the decision itself is
+// LiveGate.turnEnded, which vitest covers.
+function claudeTurnEnded(path: string): boolean {
+  try {
+    return LiveGate.turnEnded(readFileSync(path, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 function claudeRows(cwd: string, now: number) {
   const dir = claudeProjectDir(cwd);
   if (!existsSync(dir)) return [];
@@ -230,6 +285,17 @@ async function waitFor<T>(what: string, attempts: number, everyMs: number, probe
   return null;
 }
 
+// First port at or above `from` the OS will hand out. Probing by binding and
+// closing races only against another gate run, which is the one case
+// --strictPort then reports instead of silently sharing a server.
+function freePort(from: number): Promise<number> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.on("error", () => resolve(freePort(from + 1)));
+    probe.listen(from, "127.0.0.1", () => probe.close(() => resolve(from)));
+  });
+}
+
 async function webUp(url: string): Promise<boolean> {
   for (let i = 0; i < 60; i += 1) {
     try {
@@ -313,6 +379,8 @@ async function main() {
     join(cwd, ".claude", "settings.json"),
     JSON.stringify({ permissions: { allow: ["Bash(opencode run:*)"], deny: [] } }, null, 2) + "\n",
   );
+  // Written before the pane starts so it is session context, not a later read.
+  writeFileSync(join(cwd, "CLAUDE.md"), scratchClaudeMd(join(root, "scripts", "livespawn.ts")));
   // The send leg only needs the pane; the session id and source path are the
   // ack leg's, and claude does not write a transcript until its first message,
   // so they are filled in after the hail lands.
@@ -332,14 +400,17 @@ async function main() {
   step("trust-prompt", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
   await wait(4000);
 
-  // The gate owns this port. A dev server left behind by a killed run would be
-  // reused silently under --strictPort and could serve another tree's sources.
-  step("free-port", "bash", ["-c", `pids=$(lsof -ti :${PORT}); [ -n "$pids" ] && kill -9 $pids; exit 0`]);
+  // Own port, so a sibling lane's dev server cannot serve its tree's sources
+  // into this gate's PNGs. Taken by asking the OS for a free one, never by
+  // killing whatever holds the preferred number: the gate kills only processes
+  // it started.
+  const port = await freePort(PORT);
+  transcript.push({ at: new Date().toISOString(), step: "web-port", exit: 0, stdout: String(port), stderr: "" });
   const web = spawn(join(root, "node_modules", ".bin", "vite"), [
-    "--host", "127.0.0.1", "--port", String(PORT), "--strictPort",
+    "--host", "127.0.0.1", "--port", String(port), "--strictPort",
   ], { cwd: root, stdio: "ignore", detached: true });
-  const url = `http://127.0.0.1:${PORT}/e2e-harness-trace.html?e2e=1`;
-  if (!(await webUp(url))) throw new Error(`vite never came up on ${PORT}`);
+  const url = `http://127.0.0.1:${port}/e2e-harness-trace.html?e2e=1`;
+  if (!(await webUp(url))) throw new Error(`vite never came up on ${port}`);
   const browser = await playwright.chromium.launch();
 
   const hail = step("hail", "node", [
@@ -349,6 +420,7 @@ async function main() {
     "--body", HAIL_BODY,
   ]);
   const hailId = /queued (m-[0-9a-f]+)/.exec(hail.stdout)?.[1] ?? "";
+  const hailedAt = Date.now();
 
   const samples = [];
   let childSessionId = "";
@@ -358,8 +430,14 @@ async function main() {
   // row, before the sample that will render it: an edge minted after its own
   // sample would leave that sample's child hanging off nothing.
   // to_timestamp stays null — no cass proof was taken for this row.
+  // `opencode run` leaves more than one session row in the cwd (the titled one
+  // that answers, plus its own bookkeeping rows), so the spawned child is the
+  // EARLIEST created, never whichever row was touched last: newest-updated
+  // flips between polls and would hand a later sample a different child.
   const registerChild = (rows: { harness: string; sessionId: string; ts: string }[]) => {
-    const child = rows.find((row) => row.harness === "opencode");
+    const child = rows
+      .filter((row) => row.harness === "opencode")
+      .sort((a, b) => a.ts.localeCompare(b.ts))[0];
     if (!child || childSessionId) return;
     childSessionId = child.sessionId;
     const registry = readRegistry(mailDir);
@@ -381,8 +459,14 @@ async function main() {
 
   const takeSample = async (index: number) => {
     const now = Date.now();
-    const rows = [...claudeRows(cwd, now), ...opencodeRows(cwd, now)];
-    registerChild(rows);
+    const opencode = opencodeRows(cwd, now);
+    registerChild(opencode);
+    // The gate follows the session it saw spawned; opencode's other rows in the
+    // same cwd are its own bookkeeping and are not this run's child.
+    const rows = [
+      ...claudeRows(cwd, now),
+      ...opencode.filter((row) => row.sessionId === childSessionId),
+    ];
     const sample = {
       index,
       at: new Date(now).toISOString(),
@@ -424,6 +508,8 @@ async function main() {
 
   let acked = 0;
   let sweeps = 0;
+  let confirmations = 0;
+  let compliance = "direct";
   const totalTicks = windows * Math.max(1, Math.round(60_000 / intervalMs));
   for (let tick = 1; tick <= totalTicks; tick += 1) {
     await wait(intervalMs);
@@ -434,6 +520,23 @@ async function main() {
     // matched on prompt text beyond the dialog marker.
     if (/Do you want to (proceed|run)/i.test(pane.stdout ?? "")) {
       step(`permission-enter-${tick}`, "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
+    }
+
+    // Challenge state, read structurally: the turn is over, nothing was spawned,
+    // and enough time has passed that a slow tool call is not the explanation.
+    // The recipient is entitled to ask; the driver answers ONCE and records that
+    // it had to, because a challenged hail and a direct one are different facts.
+    const challenged =
+      !childSessionId &&
+      confirmations === 0 &&
+      Date.now() - hailedAt >= CONFIRM_AFTER_MS &&
+      claudeTurnEnded(jsonl);
+    if (challenged) {
+      confirmations += 1;
+      compliance = "challenged";
+      step("confirm-1", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "-l", "--", CONFIRM_LINE], env);
+      step("confirm-1-enter", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
+      console.log("recipient challenged the hail; one confirmation sent");
     }
 
     if (childSessionId && acked === 0 && sweeps < 4) {
@@ -459,7 +562,12 @@ async function main() {
     // dev server already gone
   }
   await wait(1000);
-  step("free-port-after", "bash", ["-c", `pids=$(lsof -ti :${PORT}); [ -n "$pids" ] && kill -9 $pids; exit 0`]);
+  try {
+    // Only ever this run's own dev server, by process group id.
+    process.kill(-web.pid!, "SIGKILL");
+  } catch {
+    // exited on the SIGTERM above
+  }
   step("list-mail", "node", [join(root, "scripts", "bus.ts"), "list", "--mail-dir", mailDir]);
   step("capture-final", "tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], env);
   step("kill-gate", "tmux", ["-L", SOCKET, "kill-server"], env);
@@ -479,6 +587,10 @@ async function main() {
     childSessionId,
     hailId,
     spawnCommand: SPAWN_COMMAND,
+    // Whether the recipient ran the pinned command off the hail alone
+    // ("direct") or asked to have it confirmed first ("challenged").
+    compliance,
+    confirmations,
     samples,
     transcript,
   }, null, 2) + "\n");

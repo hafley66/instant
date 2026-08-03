@@ -67,6 +67,44 @@ describe("LiveGate.seed", () => {
   });
 });
 
+// The challenge detector. Fail-first receipt: the driver previously had no way
+// to tell "refused and waiting on a human" from "the tool call is still
+// running", and the second case below is exactly the one that would have fired
+// a confirmation into the middle of the pinned command.
+describe("LiveGate.turnEnded", () => {
+  const line = (row: unknown) => JSON.stringify(row);
+  const assistantText = line({
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text: "confirm you want me to run this" }] },
+  });
+  const assistantTool = line({
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "tool_use", name: "Bash" }] },
+  });
+  const userTurn = line({ type: "user", message: { role: "user", content: "go" } });
+
+  it("reads a text-only assistant message as the end of a turn", () => {
+    expect(LiveGate.turnEnded(`${userTurn}\n${assistantText}\n`)).toBe(true);
+  });
+
+  it("never reads a pending tool call as the end of a turn", () => {
+    expect(LiveGate.turnEnded(`${userTurn}\n${assistantTool}\n`)).toBe(false);
+    expect(LiveGate.turnEnded(`${assistantText}\n${assistantTool}\n`)).toBe(false);
+  });
+
+  it("stays false while the user's message is the last record", () => {
+    expect(LiveGate.turnEnded(`${assistantText}\n${userTurn}\n`)).toBe(false);
+  });
+
+  it("ignores non-conversational records and a half-written tail line", () => {
+    const summary = line({ type: "summary", summary: "s" });
+    expect(LiveGate.turnEnded(`${assistantText}\n${summary}\n`)).toBe(true);
+    expect(LiveGate.turnEnded(`${assistantText}\n{"type":"assis`)).toBe(true);
+    expect(LiveGate.turnEnded("")).toBe(false);
+    expect(LiveGate.turnEnded("not json at all")).toBe(false);
+  });
+});
+
 describe("isLiveSample", () => {
   it("accepts a recorded sample and rejects anything else", () => {
     expect(isLiveSample(SAMPLE)).toBe(true);

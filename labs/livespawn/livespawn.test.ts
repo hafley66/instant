@@ -22,6 +22,8 @@ interface GateRun {
   childSessionId: string;
   hailId: string;
   spawnCommand: string;
+  compliance: "direct" | "challenged";
+  confirmations: number;
   model: { claude: string; opencode: string };
   samples: ILiveSample[];
   transcript: { step: string; exit: number | null; stdout: string; stderr: string }[];
@@ -96,6 +98,29 @@ describe("session rows", () => {
     expect(first).toBeGreaterThan(0);
     expect(states[first].childId).toBe(run.childSessionId);
     expect(states[first].sessionCount).toBe(2);
+  });
+});
+
+// A claude recipient may refuse a bus hail as a suspected prompt injection: an
+// unverified external instruction demanding an exact command and a one-word
+// reply is the shape it is told to distrust. The gate treats that as a recorded
+// outcome, not a failure, and requires the spawn either way.
+describe("compliance", () => {
+  it("records how the recipient answered the hail", () => {
+    expect(["direct", "challenged"]).toContain(run.compliance);
+  });
+
+  it("spawns the child whichever way the hail was answered", () => {
+    expect(run.childSessionId).toMatch(/^ses_/);
+    expect(states[states.length - 1].childId).toBe(run.childSessionId);
+  });
+
+  it("sends at most one confirmation, and only after a challenge", () => {
+    expect(run.confirmations).toBeLessThanOrEqual(1);
+    expect(run.confirmations).toBe(run.compliance === "challenged" ? 1 : 0);
+    const sent = run.transcript.filter((row) => row.step === "confirm-1");
+    expect(sent.length).toBe(run.confirmations);
+    for (const row of sent) expect(row.exit).toBe(0);
   });
 });
 

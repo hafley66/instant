@@ -299,6 +299,12 @@ export interface ILiveGate {
   // ms_to_iso returns.
   iso(ms: number): string;
   seed(sample: ILiveSample): ILivePageSeed;
+  // Has the session finished its turn and gone back to waiting on a human? True
+  // when the last conversational record of a claude jsonl is an assistant
+  // message carrying no tool_use block. A pending tool call never reads as
+  // finished, which is what separates "it refused and is asking" from "the
+  // command it was given is still running".
+  turnEnded(transcript: string): boolean;
 }
 
 // Replays one sample through the panel's own join + tree so the assertions
