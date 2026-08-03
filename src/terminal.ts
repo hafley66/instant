@@ -25,6 +25,7 @@ import {
   removeTermPanel,
   hasTermPanel,
   activePanelId,
+  activePanelChangedTime,
   termPanelId,
 } from "./reactdock";
 import { dispatchClick, clickIntent, resolveReference } from "./clickrules";
@@ -40,10 +41,13 @@ import { resolveRef } from "./refResolve";
 import {
   registerZoomKind,
   setZoomTargetResolver,
+  setChromeZoom,
+  resolveZoomTarget,
   panelZoomGesture,
   panelZoomResetGesture,
   zoomFactorFor,
 } from "./panelZoom";
+import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
@@ -261,12 +265,14 @@ export function looksOpenable(tok: string): boolean {
 }
 
 // ---- per-terminal zoom (font size, persisted per tab id) ----
-// The terminal that currently holds keyboard focus. ⌘+/-/0 zoom THAT terminal's
-// font when set; otherwise the active dock panel's kind (md viewer, …) or, with
-// no zoomable target, the chrome zoom. Terminals are one kind in the generic
-// per-tab zoom registry — see src/panelZoom.ts. Set on the xterm textarea
-// focus/blur in openTab.
+// The terminal that currently holds keyboard focus and when it took it, set on
+// the xterm textarea focus/blur in openTab. Terminals are one kind in the
+// generic per-tab zoom registry (src/panelZoom.ts); this id is one of the two
+// candidates ⌘+/-/0 pick between, and it stays set on a terminal the user has
+// since left (a panel opening beside it never blurs the textarea), so
+// resolveZoomTarget weighs it against the active dock panel by recency.
 let focusedTermId: string | null = null;
+let focusedTermAt = 0;
 export const getFocusedTermId = () => focusedTermId;
 const TERM_FONT_DEFAULT = 13;
 const TERM_FONT_MIN = 6;
@@ -286,10 +292,16 @@ registerZoomKind({
   step: 1 / TERM_FONT_DEFAULT, // one gesture tick ≈ 1px, matching the old px zoom
   onZoom: (pid, factor) => applyTermFontSize(pid.slice("term:".length), termPx(factor)),
 });
-setZoomTargetResolver(() => {
-  if (focusedTermId && tabs.has(focusedTermId)) return termPanelId(focusedTermId);
-  return activePanelId(); // a registered kind zooms it; anything else → chrome
-});
+setZoomTargetResolver(() =>
+  resolveZoomTarget(
+    { pid: activePanelId(), at: activePanelChangedTime() },
+    {
+      pid: focusedTermId && tabs.has(focusedTermId) ? termPanelId(focusedTermId) : null,
+      at: focusedTermAt,
+    },
+  ),
+);
+setChromeZoom({ nudge: nudgeZoom, reset: resetZoom });
 // Route a zoom gesture through the generic registry (kept names: main.ts's
 // keymap imports these).
 export function zoomGesture(delta: number) {
@@ -679,11 +691,22 @@ export function openTab(
 
   // Click anywhere in the host (incl. padding around the xterm) focuses the
   // terminal, so keyboard + scroll work without hunting for the text area.
-  el.addEventListener("mousedown", () => term.focus());
+  // Stamped as a reach even when the textarea was already focused (no focus
+  // event fires then), so ⌘+/-/0 come back to a terminal the user clicks into
+  // while another panel is the dock's active one.
+  el.addEventListener("mousedown", () => {
+    term.focus();
+    focusedTermId = id;
+    focusedTermAt = performance.now();
+  });
 
-  // Track which terminal owns keyboard focus so ⌘+/-/0 zoom the right one.
+  // Track which terminal owns keyboard focus, and when: ⌘+/-/0 pick between
+  // this terminal and the active dock panel by which the user reached last
+  // (clicking into an xterm does not reach dockview's own focus tracking, so
+  // the dock's active panel alone cannot answer that).
   term.textarea?.addEventListener("focus", () => {
     focusedTermId = id;
+    focusedTermAt = performance.now();
   });
   term.textarea?.addEventListener("blur", () => {
     if (focusedTermId === id) focusedTermId = null;

@@ -91,6 +91,48 @@ describe("panelZoom", () => {
   });
 });
 
+describe("zoom target resolution", () => {
+  async function target() {
+    freshGlobals();
+    const { registerZoomKind, resolveZoomTarget } = await import("./panelZoom");
+    registerZoomKind({ prefix: "md:", min: 0.5, max: 2.5, step: 0.1 });
+    registerZoomKind({ prefix: "term:", min: 0.5, max: 3, step: 0.1 });
+    return resolveZoomTarget;
+  }
+
+  it("a preview opened after the terminal took focus wins the gesture", async () => {
+    const resolveZoomTarget = await target();
+    expect(
+      resolveZoomTarget({ pid: "md:%2Fa.md", at: 200 }, { pid: "term:s:main", at: 100 }),
+    ).toBe("md:%2Fa.md");
+  });
+
+  it("a terminal focused after that panel was activated wins it back", async () => {
+    const resolveZoomTarget = await target();
+    expect(
+      resolveZoomTarget({ pid: "md:%2Fa.md", at: 100 }, { pid: "term:s:main", at: 200 }),
+    ).toBe("term:s:main");
+  });
+
+  it("keeps the focused terminal when the newer active panel has no kind", async () => {
+    const resolveZoomTarget = await target();
+    expect(
+      resolveZoomTarget({ pid: "preview:%2Fa.md", at: 200 }, { pid: "term:s:main", at: 100 }),
+    ).toBe("term:s:main");
+  });
+
+  it("names the active panel when no terminal holds focus, else nothing", async () => {
+    const resolveZoomTarget = await target();
+    expect(resolveZoomTarget({ pid: "md:%2Fa.md", at: 100 }, { pid: null, at: 0 })).toBe(
+      "md:%2Fa.md",
+    );
+    expect(resolveZoomTarget({ pid: "preview:%2Fa.md", at: 100 }, { pid: null, at: 0 })).toBe(
+      "preview:%2Fa.md",
+    );
+    expect(resolveZoomTarget({ pid: null, at: 0 }, { pid: null, at: 0 })).toBeNull();
+  });
+});
+
 describe("tabZoom -> panelZoom migration", () => {
   it("converts px font sizes to term factors, once", async () => {
     const { localStore } = freshGlobals({ tabZoom: JSON.stringify({ "s:main": 26 }) });
