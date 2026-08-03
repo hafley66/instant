@@ -1,85 +1,63 @@
-# CONTRACT: harness-trace panel (cross-harness session trace)
+# CONTRACT: quote-aware hover links (paths with spaces)
 
-Seeded by the coordinator. The lab implements exactly this; deviations are
-reported in REPORT.md, never improvised.
+Base sha: a35ad6a. FIRST action: `git merge --ff-only a35ad6a` (must be a
+no-op; STOP AND REPORT on failure). Never spawn subagents. No push. Commit
+on this branch (lab/quotelink) only. Deliverable = REPORT.md at this
+worktree root.
 
-## What the panel is
+## Defect (user report + screenshot evidence)
+Hovering `'/var/folders/.../Screenshot 2026-08-03 at 10.05.13 AM.png'` in a
+terminal underlines only `/var/folders/.../Screenshot` — the underline stops
+at the first space. Quoted paths with spaces cannot be opened.
 
-One new instant panel, id `harness-trace`, showing every interactive agent
-session dispatched across the four harnesses (claude, opencode, codex, kimi):
-which session, from which harness, ran for whom, when, and why, with liveness.
-It is a normal dockview panel (the user docks it at the bottom themselves);
-NO new global chrome, footer, or statusbar elements — index.html shows the app
-has none and this lab does not introduce one.
+## What the coordinator already verified (do not re-litigate, DO re-verify)
+- `src/termTokens.ts` scanLineTokens (lines 93-112) ALREADY has a
+  quoted-span pass: the (['"`])(.+?)\1 matchAll, and quoted spans suppress
+  inner `\S+` runs. So the defect is not "no quote handling".
+- `looksOpenable` (src/terminal.ts:259) passes space-containing paths (they
+  carry `/`). Not the filter.
+- Link provider: terminal.ts:548-579 -> wrappedLinkSpans
+  (src/termWrapJoin.ts:83-91) -> scanLineTokens over the JOINED logical
+  line. Join walks xterm isWrapped flags.
 
-## Row model (frozen)
+## Hypotheses to verify (in order; instrument, don't guess)
+1. The failing line was the Claude Code TUI composer row. If the TUI
+   re-renders its input box writing each visual row as its own line (no
+   xterm hard-wrap flag), the joined line ends before the closing quote,
+   the quote regex finds no pair, and the `\S+` fallback token
+   `'/var/...Screenshot` gets LEAD-stripped and underlined. That output
+   matches the screenshot exactly (underline starts at `/`, not at `'`).
+2. Prose apostrophes false-pair: a line like
+   `reading claude's log at '/a b/c.png'` pairs `'s ... '` first and
+   destroys the real span. Non-greedy makes the first apostrophe an opener.
+3. The hover card path (terminal.ts:380-382 wordAt/tokenAtColumn and the
+   mousemove handler ~:591) may disagree with the underline path.
 
-```ts
-export interface HarnessTraceRow {
-  id: string;                 // session id (or dispatch envelope id when known)
-  harness: "claude" | "opencode" | "codex" | "kimi";
-  sessionId: string;
-  from: string;               // who dispatched it ("user" when unknown)
-  why: string;                // dispatch reason / brief first line ("" when unknown)
-  ts: string;                 // start time, ISO
-  lastActivity: string;       // ISO, from session store mtime/db
-  status: "live" | "idle" | "done" | "dead";
-  cwd: string;                // tildified, display-ready (TmuxRow.pwd precedent)
-}
-```
+## Required behavior after fix
+- A quoted path with spaces fully inside one joined logical line:
+  underline + hover card + cmd-click dispatch the FULL inner path.
+- Apostrophe-in-prose lines still link their unquoted tokens correctly and
+  do not create bogus spans (fixture: the line in hypothesis 2).
+- An UNPAIRED opening quote (close quote not in the joined line): no
+  regression vs today; do NOT dispatch a truncated path as if complete. If
+  you find a sound way to link composer-wrapped quoted paths, take it;
+  if not, document why in REPORT.md and leave that case alone.
 
-## Filter rule (frozen)
+## Style laws (repo)
+- One scanner owns span boundaries (termTokens.ts header comment). Fix in
+  the scanner, not per call site.
+- Comments state only constraints the code cannot show.
+- New fixtures in src/termTokens.test.ts / termWrapJoin.test.ts, including
+  the EXACT screenshot line. Fail-first: commit order shows red then green,
+  or REPORT shows the pre-fix failing run.
 
-Claude Code subagent sessions spawned BY Claude Code do not render (they have
-their own TUI). Determine the marker empirically from ~/.claude/projects
-session files (candidates: sidechain flags, subagents/ paths). If no reliable
-marker is found, STOP that sub-goal and record what was tried in REPORT.md;
-do not guess a heuristic silently.
+## Gates (all must pass, output pasted in REPORT.md)
+- npx tsc --noEmit
+- npx vitest run src/termTokens.test.ts src/termWrapJoin.test.ts
+- full: npx vitest run
+- Playwright e2e only if an existing spec covers link hover; do not build
+  new e2e infra.
 
-## Data sources, in precedence order
-
-1. Dispatch ledger (who/when/why): `~/.agent/mail/*.ndjson` envelopes
-   `{id, from, to, ts, kind, reply_to, body, ref}` — may be EMPTY or absent
-   today (the bus is designed, not built). The panel renders rows without it;
-   ledger rows enrich `from`/`why` by joining on session where possible.
-2. Session enumeration + liveness: the existing rust readers in
-   src-tauri/src/harness.rs (claude_sessions :24, opencode_sessions :59,
-   codex_sessions :93, kimi_sessions :117, commands harness_sessions /
-   harness_session :149-166). If Vec<String> payloads are too thin for the row
-   model, add ONE new tauri command (e.g. harness_trace_rows) in harness.rs
-   following its existing style, register it in ipc/commands.json, and run
-   `corepack pnpm@10.12.4 run api:generate` (generated/native.ts is
-   generated-only, header says do not hand-edit).
-3. cass: per-row "trace" action uses the existing cass commands
-   (cass_status ledger.rs:103, cass_swarm_status :114) and/or opens a cass
-   search for the session id; reuse the cass plugin surface
-   (src/plugins/cass/index.ts) — do not shell to cass from the frontend.
-
-## Refresh
-
-Refresh-on-show like TmuxPanelV2 (tablepanels.tsx:215) PLUS a live leg:
-claimFsWatch (src/fsWatch.ts:10-29, rust fs_watch.rs) on ~/.agent/mail when it
-exists. No polling loops.
-
-## Repo laws that bind this lab (from AGENTS.md, verified)
-
-- Rows render with TreeTable (src/treetable.tsx) copying the
-  tablepanels.tsx column-def + bridge shape (TmuxRow/TMUX_COLUMNS/setTmuxPanel
-  precedent at :15/:56/:51). No hand-rolled lists. No third table impl.
-- One panel per file, files under ~500 lines.
-- Registration: new plugin dir src/plugins/harnessTrace/ mirroring
-  src/plugins/cass/index.ts (registerPlugin({id, panels:[...]})), plus ONE
-  line in src/main.ts main() beside registerCassPlugin() (main.ts:238-242).
-  Rail/dock/palette pick it up from the registry; touch nothing else there.
-- Persisted panel state via readPluginState/savePluginState
-  (src/pluginState.ts:6-16) under id "harness-trace".
-- NEVER run `just dev`. Verification uses `just check`, `just build`,
-  `just cargo-check`; `just dev-safe` only if a live look is required.
-
-## Gates (all must pass, receipts in REPORT.md)
-
-- `just check` (api:check + tsc strict)
-- `just build`
-- `just cargo-check` (only compiles rust; cold worktree may be slow — record
-  the time, do not abort for slowness)
-- `just test` if any code you touched has vitest coverage
+## REPORT.md sections
+verified-hypothesis (with instrument output) / fix summary / fixtures
+added / gate outputs / unpaired-quote decision.

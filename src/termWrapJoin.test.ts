@@ -110,4 +110,22 @@ describe("wrappedLinkSpans", () => {
     expect(links[0].text).toBe("src/main.ts");
     expect(links[0].ranges).toEqual([{ rowIndex: 0, startCol: 7, endCol: 18 }]);
   });
+
+  it("emits one link for a quoted path whose spaces straddle a wrap", () => {
+    const shot = "/tmp/shots/Screenshot 2026-08-03 at 10.05.13 AM.png";
+    const rows = [row(`open '${shot.slice(0, 30)}`), row(`${shot.slice(30)}' now`, true)];
+    const links = wrappedLinkSpans(rows, (t) => t.includes("/"));
+    expect(links.map((l) => l.text)).toEqual([shot]);
+    expect(links[0].ranges).toEqual([
+      { rowIndex: 0, startCol: 6, endCol: 36 },
+      { rowIndex: 1, startCol: 0, endCol: 21 },
+    ]);
+  });
+
+  it("keeps a wrapped quoted path whole when prose above it holds an apostrophe", () => {
+    const shot = "/tmp/my shots/a b.png";
+    const rows = [row("don't open '/tmp/my sho"), row("ts/a b.png' yet", true)];
+    const links = wrappedLinkSpans(rows, (t) => t.includes("/"));
+    expect(links.map((l) => l.text)).toEqual([shot]);
+  });
 });
