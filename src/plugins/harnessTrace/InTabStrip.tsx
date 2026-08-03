@@ -13,10 +13,19 @@ import { AgentStripTable, useAgentTree } from "./DockStripShared";
 import { filterForestByTmux, type AgentTreeNode } from "./0_tree";
 import { openSession } from "./DockStripPanel";
 import { termRouter } from "./3_router";
+import { StripPolicy } from "./0_strip";
+import type { ITermStripEntry } from "./0_types";
 
 export interface InTabStripProps {
   sid: string;
   onLayout: () => void;
+}
+
+// The toggle command's whole body (main.ts binds it to the hotkey, the e2e
+// harness binds the same command): the policy decides what a press writes.
+export function toggleTermStripFor(sid: string): void {
+  const entry = store.get().termStrip[sid] ?? null;
+  store.set({ termStrip: { ...store.get().termStrip, [sid]: StripPolicy.toggle(entry) } });
 }
 
 export function InTabStrip({ sid, onLayout }: InTabStripProps) {
@@ -28,15 +37,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   const canGoBack = termRouter.canGoBack(sid);
   const filtered = useMemo(() => filterForestByTmux(tree, sid), [tree, sid]);
 
-  // Per-terminal open state (Toggle Relations Strip command); absent = open.
-  const [open, setOpen] = useState(() => store.get().termStrip[sid]?.open ?? true);
-  useEffect(
-    () => store.subscribe(() => setOpen(store.get().termStrip[sid]?.open ?? true), ["termStrip"]),
-    [sid],
-  );
+  // Per-terminal open state (Toggle Relations Strip command).
+  const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
+  useEffect(() => {
+    setEntry(store.get().termStrip[sid] ?? null);
+    return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
+  }, [sid]);
 
-  // Zero related rows and nothing pushed renders no strip at all (no empty bar).
-  const visible = open && (filtered.length > 0 || !!current);
+  const visible = StripPolicy.visible(entry, filtered.length, !!current);
   // The strip's appearance and the router's push/pop change the term-slot's
   // height, so refit the xterm whenever either changes.
   useEffect(() => {

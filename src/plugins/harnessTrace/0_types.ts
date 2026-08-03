@@ -240,3 +240,24 @@ export interface ITermViewRouter {
   canGoBack(sid: string): boolean;
   subscribe(listener: () => void): () => void;
 }
+
+// ---------------------------------------------------------------------------
+// In-tab strip policy. state.ts persists TermStripState with the same shape;
+// this module-local reading keeps the pure rules free of the store import.
+// ---------------------------------------------------------------------------
+
+// A terminal's persisted strip entry. Absent (null) = never toggled on this
+// terminal; present = the user summoned or dismissed it explicitly.
+export interface ITermStripEntry {
+  open: boolean;
+}
+
+export interface IStripPolicy {
+  // The entry a toggle press writes. Absent means the strip is not on screen,
+  // so the first press summons instead of closing.
+  toggle(entry: ITermStripEntry | null): ITermStripEntry;
+  // Whether the strip's shell renders. An explicit open entry always renders
+  // (zero rows shows the empty state); an absent entry auto-appears only when
+  // there is something to show.
+  visible(entry: ITermStripEntry | null, rowCount: number, hasCurrent: boolean): boolean;
+}

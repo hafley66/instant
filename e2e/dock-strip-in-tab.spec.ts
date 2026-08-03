@@ -75,3 +75,46 @@ test("in-tab strip renders under the term, filters by tmux, pushes and pops the 
   await expect(strip).toHaveScreenshot("dock-strip-in-tab.png", { animations: "disabled" });
   expect(pageErrors).toEqual([]);
 });
+
+// Receipt (a): the summon bugs. A terminal whose sid has no tmux row and no
+// related agent session had NO way to show the strip — the first hotkey press
+// wrote open:false (absent entry read as open), and the shell refused to render
+// with zero rows. Both are red at 57560ff.
+const MOD = process.platform === "darwin" ? "Meta" : "Control";
+
+test("hotkey summons the strip on a fresh terminal with no related sessions", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
+  await page.addInitScript(() => {
+    const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+    w.__instantE2eNativeResults = {
+      harness_trace_rows: [],
+      list_dir: () => {
+        throw new Error("no such dir");
+      },
+      read_text: () => {
+        throw new Error("no such file");
+      },
+    };
+  });
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1&term=s3");
+
+  const strip = page.getByTestId("in-tab-strip");
+  await expect(page.getByTestId("term-stub")).toBeVisible();
+  await expect(strip).toHaveCount(0);
+
+  // One press = summoned. The empty state names the terminal's sid (the tmux
+  // join is by session name, so the sid is the diagnostic) and says why it is
+  // empty rather than rendering nothing.
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(strip).toBeVisible();
+  const empty = page.getByTestId("strip-empty");
+  await expect(empty).toContainText("s3");
+  await expect(empty).toContainText("no related sessions");
+
+  // A second press dismisses it.
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(strip).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
