@@ -8,6 +8,7 @@ import {
   registrySeeds,
   routeTmuxBySession,
   settleRoutedStatus,
+  tmuxLiveNames,
 } from "./0_mail";
 import type { HarnessTraceSeed, IMailAgent } from "./0_types";
 
@@ -211,6 +212,28 @@ describe("routeTmuxBySession", () => {
     });
     expect(map.get("lane")).toBe("lane");
     expect(map.has("sess-q")).toBe(false);
+  });
+});
+
+describe("tmuxLiveNames", () => {
+  it("reads the names out of a list_sessions answer", () => {
+    expect(tmuxLiveNames([{ name: "lane-a" }, { name: "lane-b" }])).toEqual(["lane-a", "lane-b"]);
+  });
+
+  it("an empty list is an answer: no tmux session is alive", () => {
+    expect(tmuxLiveNames([])).toEqual([]);
+  });
+
+  // Sabotage receipt: answering [] here instead of null graded every routed
+  // lane done on the e2e page, whose stub resolves undefined for list_sessions.
+  it("a host with no list answers null, not an empty list", () => {
+    expect(tmuxLiveNames(undefined)).toBeNull();
+    expect(tmuxLiveNames(null)).toBeNull();
+    expect(tmuxLiveNames("nope")).toBeNull();
+  });
+
+  it("drops rows carrying no string name", () => {
+    expect(tmuxLiveNames([{ name: "lane-a" }, {}, null, { name: 7 }])).toEqual(["lane-a"]);
   });
 });
 

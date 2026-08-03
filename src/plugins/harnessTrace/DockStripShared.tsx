@@ -9,12 +9,12 @@ import { getHomeDir, relTime } from "../../core";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { useApp } from "../../useStore";
 import { store } from "../../state";
-import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus } from "./0_mail";
+import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus, tmuxLiveNames } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
-import { refreshSessions } from "../../worktrees";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
 import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
+import type { Session } from "../../state";
 
 export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
   {
@@ -155,16 +155,25 @@ export function useAgentTree(): AgentTreeState {
   const [registry, setRegistry] = useState<MailRegistry>({});
   const [routeTmux, setRouteTmux] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState("");
+  // The tmux names list_sessions reported on the last load; null until one
+  // answers, and on hosts that have no list to give (the e2e page), which is
+  // when the store's seeded sessions stand in.
+  const [liveNames, setLiveNames] = useState<string[] | null>(null);
   const load = useCallback(() => {
-    // The tmux list is the done-signal input (settleRoutedStatus); refresh it
-    // alongside the rows or a lane spawned since boot settles as done. Swallow
-    // failures: hosts without a real list_sessions (the e2e page) stay on the
-    // seeded store list.
-    void refreshSessions().catch(() => {});
-    invoke<HarnessTraceSeed[]>("harness_trace_rows")
-      .then(async (storeSeeds) => {
+    // The live tmux list is what grades a routed lane done (settleRoutedStatus),
+    // so it is read WITH the rows: a lane spawned since boot is missing from the
+    // store's list and would render done. Read straight through list_sessions —
+    // refreshSessions is the tmux panel's own path and carries its worktree scan
+    // and session-list DOM render, neither of which a strip load owes.
+    Promise.all([
+      invoke<Session[]>("list_sessions").catch(() => null),
+      invoke<HarnessTraceSeed[]>("harness_trace_rows"),
+    ])
+      .then(async ([sessions, storeSeeds]) => {
+        const names = tmuxLiveNames(sessions);
+        setLiveNames(names);
         const mail = await loadMailLedger();
-        const liveTmux = new Set(store.get().sessions.map((s) => s.name));
+        const liveTmux = new Set(names ?? store.get().sessions.map((s) => s.name));
         const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux)];
         const flatRows = enrichRows(seeds, mail.envelopes, mail.registry);
         setFlat(toAgentNodes(flatRows, mail.envelopes, mail.registry));
@@ -177,7 +186,7 @@ export function useAgentTree(): AgentTreeState {
   useEffect(() => {
     load();
   }, [load]);
-  const liveTmux = new Set(store.get().sessions.map((s) => s.name));
+  const liveTmux = new Set(liveNames ?? store.get().sessions.map((s) => s.name));
   const nodes = settleRoutedStatus(attachTmux(flat, routeTmux), routeTmux, liveTmux);
   return { nodes, tree: buildAgentTree(nodes), registry, error, load };
 }

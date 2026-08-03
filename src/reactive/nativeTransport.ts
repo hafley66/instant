@@ -20,10 +20,16 @@ function browserE2eInvoke<T>(command: string, args?: Record<string, unknown>): P
     const v = table[command];
     // A fixture may be a function of the invoke args, so an e2e can vary results
     // per call (e.g. resolve a session only for one editor) without per-command
-    // branching here.
-    return Promise.resolve(
-      (typeof v === "function" ? v(args) : v) as T,
-    );
+    // branching here. A fixture that throws must REJECT the way the tauri edge
+    // does: a synchronous throw escapes the caller's promise chain, and one
+    // raised inside a React effect unmounts the panel tree that called invoke.
+    try {
+      return Promise.resolve(
+        (typeof v === "function" ? v(args) : v) as T,
+      );
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
   if (command === "read_image") {
     return Promise.resolve(
