@@ -87,22 +87,53 @@ export function unwrapToken(raw: string): { text: string; offset: number } {
   return { text, offset };
 }
 
+// A quote character delimits a span only where the characters around it agree:
+// an opener needs whitespace, an opening bracket, `=`/`:`/`,` or another quote
+// in front of it, a closer needs whitespace, closing punctuation or another
+// quote behind it. Without that, the apostrophe in `claude's` opens a span that
+// runs to the real path's opening quote and destroys it.
+const QUOTE = /['"`]/;
+const BEFORE_OPEN = /[\s([{<=:,'"`]/;
+const AFTER_CLOSE = /[\s)\]}>.,;:!?'"`]/;
+
+// Paired quoted regions on `line`, left to right, never nested and never
+// overlapping. An opener with no closer on this line yields nothing: where the
+// quoted text ends is unknowable from this line, so the whitespace-run pass
+// handles it and no truncated multi-word path is ever emitted.
+function quotedRegions(line: string): Array<{ open: number; close: number }> {
+  const regions: Array<{ open: number; close: number }> = [];
+  for (let i = 0; i < line.length; i++) {
+    const q = line[i];
+    if (!QUOTE.test(q)) continue;
+    if (i > 0 && !BEFORE_OPEN.test(line[i - 1])) continue;
+    let close = -1;
+    for (let j = i + 1; j < line.length; j++) {
+      if (line[j] !== q) continue;
+      if (j + 1 < line.length && !AFTER_CLOSE.test(line[j + 1])) continue;
+      close = j;
+      break;
+    }
+    if (close < 0) continue;
+    if (line.slice(i + 1, close).trim()) regions.push({ open: i, close });
+    i = close;
+  }
+  return regions;
+}
+
 // Every ⌘-clickable span on `line`, left to right, non-overlapping.
-// Quoted spans win over the whitespace runs they contain, so a path with
+// Quoted spans win over the whitespace runs they touch, so a path with
 // spaces stays one token.
 export function scanLineTokens(line: string): TokenSpan[] {
   const spans: TokenSpan[] = [];
-  const quoted: Array<{ open: number; close: number }> = [];
-  for (const m of line.matchAll(/(['"`])(.+?)\1/g)) {
-    const inner = m[2];
-    if (!inner.trim()) continue;
-    const open = m.index ?? 0;
-    quoted.push({ open, close: open + m[0].length - 1 });
-    spans.push({ text: inner, start: open + 1, end: open + 1 + inner.length });
+  const quoted = quotedRegions(line);
+  for (const { open, close } of quoted) {
+    spans.push({ text: line.slice(open + 1, close), start: open + 1, end: close });
   }
   for (const m of line.matchAll(/\S+/g)) {
     const at = m.index ?? 0;
-    if (quoted.some((q) => at >= q.open && at <= q.close)) continue;
+    // Any overlap loses, not just a run that starts inside: `path='/a b.png'`
+    // is one whitespace run reaching across the whole quoted region.
+    if (quoted.some((q) => at <= q.close && at + m[0].length > q.open)) continue;
     const { text, offset } = unwrapToken(m[0]);
     if (!text) continue;
     spans.push({ text, start: at + offset, end: at + offset + text.length });

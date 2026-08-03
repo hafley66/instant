@@ -114,6 +114,84 @@ describe("scanLineTokens", () => {
   });
 });
 
+// The screenshot path a macOS capture drops on the pasteboard: spaces in the
+// file name, quoted by whatever wrote the line.
+const SHOT =
+  "/var/folders/3k/qz9_8x0d1_v0000gn/T/TemporaryItems/NSIRD_screencaptureui_9Kq2Zt/Screenshot 2026-08-03 at 10.05.13 AM.png";
+
+describe("quote pairing", () => {
+  it("links the whole quoted screenshot path", () => {
+    const line = `'${SHOT}'`;
+    expect(scanLineTokens(line).map((s) => s.text)).toEqual([SHOT]);
+    expect(tokenAtColumn(line, 100)?.text).toBe(SHOT);
+  });
+
+  it("links the quoted screenshot path with prose on both sides", () => {
+    const line = `read '${SHOT}' please`;
+    expect(scanLineTokens(line).map((s) => s.text)).toEqual(["read", SHOT, "please"]);
+  });
+
+  it("does not let a possessive apostrophe open a span", () => {
+    const line = "reading claude's log at '/a b/c.png'";
+    expect(scanLineTokens(line).map((s) => s.text)).toEqual([
+      "reading",
+      "claude's",
+      "log",
+      "at",
+      "/a b/c.png",
+    ]);
+    expect(underline(line, 26)).toBe(" ".repeat(25) + "^".repeat(10));
+  });
+
+  it("does not let a contraction apostrophe open a span", () => {
+    const line = "don't open '/tmp/my shots/a b.png' yet";
+    expect(scanLineTokens(line).map((s) => s.text)).toEqual([
+      "don't",
+      "open",
+      "/tmp/my shots/a b.png",
+      "yet",
+    ]);
+  });
+
+  it("keeps spans non-overlapping on apostrophe prose", () => {
+    for (const line of [
+      "reading claude's log at '/a b/c.png'",
+      "don't open '/tmp/my shots/a b.png' yet",
+      "it's the agents' '/a b/c.png' file",
+      `path='${SHOT}'`,
+    ]) {
+      const spans = scanLineTokens(line);
+      for (let i = 1; i < spans.length; i++) {
+        expect(spans[i].start).toBeGreaterThanOrEqual(spans[i - 1].end);
+      }
+      for (const span of spans) expect(line.slice(span.start, span.end)).toBe(span.text);
+    }
+  });
+
+  it("pairs a quote opened right after an assignment or bracket", () => {
+    expect(scanLineTokens(`path='${SHOT}'`).map((s) => s.text)).toEqual([SHOT]);
+    expect(scanLineTokens("see `src/main.ts`, ok").map((s) => s.text)).toEqual([
+      "see",
+      "src/main.ts",
+      "ok",
+    ]);
+  });
+
+  // An opener whose closer never arrives on this line carries no information
+  // about where the path ends, so the whitespace-run fallback stands: the span
+  // stops at the first space rather than dispatching a truncated path with
+  // spaces as if it were the whole file name.
+  it("leaves an unpaired opening quote to the whitespace-run fallback", () => {
+    const line = "'/tmp/shots/Screenshot 2026-08-03 at 10";
+    expect(scanLineTokens(line).map((s) => s.text)).toEqual([
+      "/tmp/shots/Screenshot",
+      "2026-08-03",
+      "at",
+      "10",
+    ]);
+  });
+});
+
 describe("splitLineRef", () => {
   it("splits line and column suffixes", () => {
     expect(splitLineRef("src/main.ts:42")).toEqual({ path: "src/main.ts", line: 42 });

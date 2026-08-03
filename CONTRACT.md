@@ -1,80 +1,63 @@
-# CONTRACT: live spawn test — claude(sonnet) spawns opencode, states polled
+# CONTRACT: quote-aware hover links (paths with spaces)
 
-Base: branch lab/livespawn at 57560ff (= a35ad6a + lab/tracetree +
-lab/busmail, merged and green: plugin vitest 68/68). FIRST action:
-`git merge --ff-only 57560ff` (must be a no-op; STOP AND REPORT on
-failure). Never spawn subagents (the scratch harness sessions below are
-the test SUBJECT, not delegation — they are allowed and required). No
-push. Commit on lab/livespawn. Deliverable = REPORT.md at worktree root
-(if the Write tool refuses it, return the content as text; never work
-around the refusal).
+Base sha: a35ad6a. FIRST action: `git merge --ff-only a35ad6a` (must be a
+no-op; STOP AND REPORT on failure). Never spawn subagents. No push. Commit
+on this branch (lab/quotelink) only. Deliverable = REPORT.md at this
+worktree root.
 
-## User words (scope law)
-"is there a screenshot that shows a session of claude that just has a
-'spawn an opencode agent etc.' and we are able to poll things for 1
-minute at a time to see the states change. dont equality test things
-that are prompts but we need a live test idc the cost just keep it cheap
-and make sure claude code is started with sonnet as the model"
+## Defect (user report + screenshot evidence)
+Hovering `'/var/folders/.../Screenshot 2026-08-03 at 10.05.13 AM.png'` in a
+terminal underlines only `/var/folders/.../Screenshot` — the underline stops
+at the first space. Quoted paths with spaces cannot be opened.
 
-## The test (a script + spec runnable on demand; NOT in any default battery)
-1. Scratch tmux server on its OWN socket (`-L livespawn-gate`), scratch
-   cwd. Never address the default tmux socket (read-only `tmux -L default
-   ls` proof allowed). Recipe proven in REPORT.md section 3 of this
-   branch: env scrubbed of CLAUDE_CODE_*/CLAUDE* vars so the session is
-   its own root.
-2. Start claude IN THAT PANE with `--model sonnet` (hard requirement,
-   cost control). Register it in a scratch registry.json (busmail
-   scripts/bus.ts conventions; sourcePath resolved from
-   ~/.claude/projects after boot).
-3. `node scripts/bus.ts hail` it (kind `dispatch`) with a prompt that
-   tells it to run ONE exact verbatim command spawning an opencode agent:
-   `opencode run -m openrouter/deepseek/deepseek-v4-flash-0731 --auto
-   "<one trivial sentence task>"` in the scratch cwd, then reply done.
-   Sonnet executes, never composes, the command. Cheap models both legs.
-4. Poll loop: up to 6 windows of <=60s (total budget <=6 min wall), each
-   window samples every ~10s. Each sample records (a) the harness data
-   states via the REAL readers (claude jsonl status, opencode.db row for
-   the spawned session, bus.ndjson ack state), and (b) a PNG of the
-   harness-trace tree page rendering THAT SAMPLE'S live data — parent
-   claude row, opencode child under it (the dispatch edge comes from the
-   hail row + registry), status column visible.
-5. Assertions are on STRUCTURE and STATE TRANSITIONS ONLY: session rows
-   exist, the child hangs under the parent via `dispatch`, status moves
-   (live -> idle/done), ack to_timestamp fills after a sweep + targeted
-   `cass index --watch-once`. NEVER assert equality on prompt/body text
-   (user law). Relative times frozen or asserted structurally.
-6. Teardown: kill the scratch tmux server; prove the default socket's
-   sessions survived.
+## What the coordinator already verified (do not re-litigate, DO re-verify)
+- `src/termTokens.ts` scanLineTokens (lines 93-112) ALREADY has a
+  quoted-span pass: the (['"`])(.+?)\1 matchAll, and quoted spans suppress
+  inner `\S+` runs. So the defect is not "no quote handling".
+- `looksOpenable` (src/terminal.ts:259) passes space-containing paths (they
+  carry `/`). Not the filter.
+- Link provider: terminal.ts:548-579 -> wrappedLinkSpans
+  (src/termWrapJoin.ts:83-91) -> scanLineTokens over the JOINED logical
+  line. Join walks xterm isWrapped flags.
 
-## Rendering live data in the page
-The e2e harness drives the panel with seeds; the DATA in each sample must
-be real harness output (real jsonl, real opencode.db rows, real
-bus.ndjson) read at sample time — only the transport into the page may be
-adapted (feeding the real files' parsed rows through the existing seed
-seam is legitimate; fabricating rows is not). If no honest seam exists,
-STOP AND REPORT which seam is missing instead of faking data.
+## Hypotheses to verify (in order; instrument, don't guess)
+1. The failing line was the Claude Code TUI composer row. If the TUI
+   re-renders its input box writing each visual row as its own line (no
+   xterm hard-wrap flag), the joined line ends before the closing quote,
+   the quote regex finds no pair, and the `\S+` fallback token
+   `'/var/...Screenshot` gets LEAD-stripped and underlined. That output
+   matches the screenshot exactly (underline starts at `/`, not at `'`).
+2. Prose apostrophes false-pair: a line like
+   `reading claude's log at '/a b/c.png'` pairs `'s ... '` first and
+   destroys the real span. Non-greedy makes the first apostrophe an opener.
+3. The hover card path (terminal.ts:380-382 wordAt/tokenAtColumn and the
+   mousemove handler ~:591) may disagree with the underline path.
 
-## Laws
-- 10-second law: this gate is a USER-NAMED EXCEPTION (live wall-clock
-  test, on demand only). It must never enter green-all, vitest, or any
-  default battery; wire it as its own script/config, document the run
-  command in REPORT.md.
-- File ownership: InTabStrip.tsx and src/main.ts are FORBIDDEN (a live
-  lane owns them elsewhere). HarnessTracePanel.tsx and everything else in
-  the worktree is yours.
-- Style laws per repo: interfaces in 0_types.ts (append at end), comment
-  budget, colocated consistency.
+## Required behavior after fix
+- A quoted path with spaces fully inside one joined logical line:
+  underline + hover card + cmd-click dispatch the FULL inner path.
+- Apostrophe-in-prose lines still link their unquoted tokens correctly and
+  do not create bogus spans (fixture: the line in hypothesis 2).
+- An UNPAIRED opening quote (close quote not in the joined line): no
+  regression vs today; do NOT dispatch a truncated path as if complete. If
+  you find a sound way to link composer-wrapped quoted paths, take it;
+  if not, document why in REPORT.md and leave that case alone.
 
-## Gates (outputs in REPORT.md)
-- The live run transcript: hail output, poll samples with timestamps and
-  states, sweep/ack receipt.
-- PNG sequence paths (minimum 3 distinct states: parent alone; child
-  present live; child done and/or ack filled) + which state each shows.
-- npx tsc --noEmit (no new errors vs 57560ff), npx vitest run
-  src/plugins/harnessTrace still green.
-- Teardown proof.
+## Style laws (repo)
+- One scanner owns span boundaries (termTokens.ts header comment). Fix in
+  the scanner, not per call site.
+- Comments state only constraints the code cannot show.
+- New fixtures in src/termTokens.test.ts / termWrapJoin.test.ts, including
+  the EXACT screenshot line. Fail-first: commit order shows red then green,
+  or REPORT shows the pre-fix failing run.
+
+## Gates (all must pass, output pasted in REPORT.md)
+- npx tsc --noEmit
+- npx vitest run src/termTokens.test.ts src/termWrapJoin.test.ts
+- full: npx vitest run
+- Playwright e2e only if an existing spec covers link hover; do not build
+  new e2e infra.
 
 ## REPORT.md sections
-run command / live transcript / PNG sequence with state captions /
-assertion list (structure+transition only) / seams adapted vs real /
-missing seams / gate outputs / teardown proof / cost note (models used).
+verified-hypothesis (with instrument output) / fix summary / fixtures
+added / gate outputs / unpaired-quote decision.

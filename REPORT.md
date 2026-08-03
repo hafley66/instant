@@ -1,396 +1,301 @@
-# REPORT: message bus (queue + passing + ack) with queue-preview view
+# REPORT: quote-aware hover links (paths with spaces)
 
-Lane: lab/busmail, worktree /Users/chrishafley/projects/instant-lab-busmail.
-Base: `git merge --ff-only a35ad6a` -> "Already up to date." (clean no-op).
-Commits: 3fd589f (contract + ruling seed), a8b2590 (implementation).
-Previous lab's REPORT.md preserved at `git show a35ad6a:REPORT.md`.
-(File placed by the coordinator from the lane's returned report text; the
-lane's harness blocks report-file writes.)
+Worktree `/Users/chrishafley/projects/instant-lab-quotelink`, branch `lab/quotelink`.
+`git merge --ff-only a35ad6a` -> "Already up to date." (clean no-op, HEAD was
+already a35ad6a). Deps installed with `corepack pnpm@10.12.4 install --prefer-offline`
+("Done in 8.2s"): the worktree had no node_modules. No subagents, no push,
+nothing written outside the worktree.
 
-## 0. What landed
+Commits:
 
-| file | state | role |
+| sha | what |
+|---|---|
+| a6225e3 | fail-first fixtures (red: 5 failures) |
+| ebb6545 | scanner fix (green: 39/39) |
+
+## verified-hypothesis
+
+Instrumented with a throwaway `src/__probe.test.ts` (deleted before the red
+commit) that dumped `scanLineTokens` spans + the `looksOpenable` verdict for
+each candidate shape. Run at base a35ad6a. Raw output:
+
+```
+### H1a exact contract elision
+line: "'/var/folders/.../Screenshot 2026-08-03 at 10.05.13 AM.png'"
+  [  1, 58) openable=true "/var/folders/.../Screenshot 2026-08-03 at 10.05.13 AM.png"
+
+### H1b realistic full path
+line: "'/var/folders/3k/qz9_8x0d1_v0000gn/T/TemporaryItems/NSIRD_screencaptureui_9Kq2Zt/Screenshot 2026-08-03 at 10.05.13 AM.png'"
+  [  1,121) openable=true "/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png"
+
+### H1c leading prose
+line: "read '/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png' please"
+  [  0,  4) openable=false "read"
+  [  6,126) openable=true "/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png"
+  [128,134) openable=false "please"
+
+### H1d truncated at row end (unpaired opener)
+line: "'/var/folders/3k/.../Screenshot 2026"
+  [  1, 91) openable=true "/var/folders/3k/.../Screenshot"
+  [ 92, 96) openable=false "2026"
+
+### H2a
+line: "reading claude's log at '/a b/c.png'"
+  [  0,  7) openable=false "reading"
+  [  8, 16) openable=false "claude's"
+  [ 15, 24) openable=false "s log at "
+  [ 28, 35) openable=true "b/c.png"
+
+### H2b
+line: "don't open '/tmp/my shots/a b.png' yet"
+  [  0,  5) openable=false "don't"
+  [  4, 11) openable=false "t open "
+  [ 20, 27) openable=true "shots/a"
+  [ 28, 33) openable=true "b.png"
+  [ 35, 38) openable=false "yet"
+
+### H3 joined wrapped rows (isWrapped set), quote pair present
+joined: "'/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png'"
+[{"text":"/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png",
+  "ranges":[{"rowIndex":0,"startCol":1,"endCol":61},
+            {"rowIndex":1,"startCol":0,"endCol":60}]}]
+
+### H4 single row, no wrap flag
+[{"text":"/var/folders/3k/qz9_8x0d1_v0000gn/T/TemporaryItems/NSIRD_scr",
+  "ranges":[{"rowIndex":0,"startCol":1,"endCol":61}]}]
+```
+
+### Deviation from the contract's framing
+
+The contract's screenshot signature ("underline starts at `/`, not at `'`") does
+NOT discriminate. A correctly-paired quoted span is `[open+1, close)` by design:
+it excludes the quotes, so it also starts at `/`. H1a/H1b/H1c/H3 show the
+**paired** case already worked at base -- the exact contract line, the same line
+with prose either side, and the same line hard-wrapped across two rows all
+produced one full span at base, pre-fix. Those four are now regression guards,
+not fixes.
+
+What discriminates is the underline **stopping at the first space**. Two shapes
+produce that, and only two:
+
+| # | shape | verdict |
 |---|---|---|
-| src/plugins/harnessTrace/0_bus.ts | new | `MailStore` (IMailStore): parse/line/fold/inbox/outbox/unacked/thread/replyDepth/queue/send/ack. `MailDirectory` (IMailDirectoryReader): registry.json -> routes. Pure, no fs/clock/invoke. |
-| src/plugins/harnessTrace/1_leg.ts | new | `MailLeg` (IMailLeg): tmux send-keys argv, cass search argv, cass hit scoping. `injectedLine`. Pure. |
-| src/plugins/harnessTrace/2_mailbox.ts | new | `MailboxReader` (IMailboxReader): frontend read side over list_dir/read_text. |
-| src/plugins/harnessTrace/4_MailPreview.tsx | new | `MailPreview`: one agent id's queue, in/out, kind, reply_to indent, body preview, from_timestamp/to_timestamp, acked/queued. |
-| scripts/bus.ts | new | edge CLI: `hail` (append + tmux inject), `sweep` (cass ack), `list`. fs + spawn only. |
-| src/plugins/harnessTrace/0_bus.test.ts | new | 21 cases |
-| src/plugins/harnessTrace/1_leg.test.ts | new | 8 cases |
-| src/plugins/harnessTrace/3_router.mail.test.ts | new | 3 cases |
-| e2e-mail-preview.html, e2e/mail-preview.tsx, e2e/mail-preview.spec.ts | new | render receipt + PNG |
-| playwright.busmail.config.ts | new | own port 4183 (sibling lanes hold 4173 with reuseExistingServer) |
-| src/plugins/harnessTrace/0_mail.ts | modified (owned) | parse migrated to the ruled envelope; legacy projection kept for the panel; `mailAgentIdFor` |
-| src/plugins/harnessTrace/0_mail.test.ts | modified (owned) | + ruled-envelope migration cases, + mailAgentIdFor |
-| src/plugins/harnessTrace/0_types.ts | modified (append-only, end of file) | IMailMessage, IMailSend, IMailQueueRow, IMailStore, IMailAgent, IMailDirectory, IMailDirectoryReader, IMailCassHit, IMailLeg, IMailbox, IMailboxReader, IMailPreviewView, TermViewAny, ITermViewRouter |
-| src/plugins/harnessTrace/3_router.ts | modified (append-only, end of file) | `termViewRouter`, `mailPreviewView`, `pushMailPreview` |
+| 1 | unpaired opener (H1d/H4): the closing quote is not in the joined line | CONFIRMED as a symptom producer. Not fixable from the scanner -- see below. |
+| 2 | apostrophe false-pair (H2a/H2b) | CONFIRMED, and worse than the contract described. |
 
-## 1. Envelope migration diff
+Hypothesis 2 was under-stated. The `(['"`])(.+?)\1` matchAll does not merely
+"destroy the real span", it does three things at once:
 
-The ruled envelope is new (`IMailMessage`); `MailEnvelope` could not be
-rewritten in place because 0_types.ts is append-only for this lane and
-HarnessTracePanel.tsx (forbidden) consumes `parseMailNdjson(): MailEnvelope[]`.
-So the parse moved to the ruled shape and the pre-ruling shape became a
-projection of it.
+- `claude's` -> the apostrophe opens a region that closes on the real path's
+  OPENING quote, emitting the junk span `"s log at "`.
+- that junk span's `close` sits before `/a`, so the suppression test
+  `at >= q.open && at <= q.close` does not fire and the fragments `b/c.png`,
+  `shots/a`, `b.png` are emitted as **openable** links. The user gets an
+  underline on a path fragment that resolves to nothing.
+- the spans **overlap**: `claude's` is `[8,16)` and `"s log at "` is `[15,24)`.
+  `tokenAtColumn` uses `.find()`, so column 15 answers `claude's` while the
+  link provider draws two overlapping xterm ranges over the same cell. The
+  existing "produces non-overlapping spans in column order" test never had an
+  apostrophe fixture, so this invariant was already violated at base.
 
-```diff
---- a/src/plugins/harnessTrace/0_mail.ts
-+++ b/src/plugins/harnessTrace/0_mail.ts
-+export function parseMailLog(text: string): IMailMessage[] {
-+  return MailStore.parse(text);
-+}
-+
-+function legacyView(message: IMailMessage): MailEnvelope {
-+  return {
-+    id: message.id,
-+    from: message.from,
-+    to: message.to,
-+    ts: message.from_timestamp,
-+    kind: message.kind,
-+    reply_to: message.reply_to ?? undefined,
-+    body: message.body || undefined,
-+    ref: message.ref ?? undefined,
-+  };
-+}
-+
- export function parseMailNdjson(text: string): MailEnvelope[] {
--  ... 26 lines of hand-rolled field validation ...
-+  return parseMailLog(text).map(legacyView);
- }
-```
+Hypothesis 3 (hover card disagreeing with the underline) is FALSE: `wordAt`
+(terminal.ts:367-383) and `wrappedLinkSpans` (termWrapJoin.ts:83-91) both go
+through `scanLineTokens` over the same joined line, so they drift together, in
+both directions. No separate fix needed; the scanner fix moves all three call
+sites at once.
 
-| ruled | pre-ruling | read rule |
-|---|---|---|
-| from_timestamp | ts | `from_timestamp ?? ts ?? ""` — 2026-08-02 fixtures still parse |
-| to_timestamp | (absent) | null unless an ack row carries it |
-| reply_to / ref | optional string | `string \| null` |
-| body | optional string | `""` when absent |
-| kind | required string | `"note"` when absent; any wire string survives ("dispatch") |
+Hypothesis 1's *premise* (that the Claude Code TUI composer writes each visual
+row as its own hard line with no `isWrapped` flag) was NOT verifiable from this
+worktree -- it needs a live TUI in a real xterm buffer, and the lab has no such
+harness. What H4 does verify is the scanner's behavior GIVEN that input: a
+single row carrying only an opener yields a truncated, `looksOpenable`-passing
+token. H3 verifies the contrary case: with `isWrapped` set, the join already
+delivers the whole quoted path today.
 
-Wire keys stay the ruling's JSON verbatim (`from`/`to`); the relational
-reading is messages(id, from_id=from, to_id=to, ...) as ruled.
+## fix summary
 
-Two fold rules the ruling implies but does not spell out, both tested:
+`src/termTokens.ts`, one function added and one changed. Both call sites
+(link provider, hover card) inherit it; nothing outside the scanner moved,
+per the module's header law.
 
-- **Ack is monotone.** Latest row per id wins for content, but a
-  to_timestamp once present is kept. Otherwise the ruled at-least-once
-  resend (a fresh row with to_timestamp null) would silently unack a
-  proven read.
-- **A reply_to cycle roots on the smallest id in the cycle**, so every row
-  in it groups into one thread whichever row the walk enters from.
+`quotedRegions(line)` replaces the `(['"`])(.+?)\1` matchAll. A quote character
+delimits a region only where its neighbours agree:
 
-## 2. Send-leg transcript (tmux)
+- opener: at line start, or preceded by one of `` [\s([{<=:,'"`] ``
+- closer: at line end, or followed by one of `` [\s)\]}>.,;:!?'"`] ``
 
-Scratch tmux server on its own socket `-L busmail-gate`, created and killed
-by this lane; the user's default-socket sessions were never addressed (only
-`tmux -L default ls`, read-only, to prove they survived).
+so `claude's`, `don't` and `agents'` cannot open a region, while
+`path='/a b.png'`, `` see `src/a.ts`, `` and `"'/a b/c.png'"` still pair.
+Regions are scanned left to right, never nest, never overlap (the loop jumps
+`i` to the closer).
 
-```
-$ tmux -L busmail-gate new-session -d -s gate-bash -c $SCRATCH/mail/cwd 'bash --norc --noprofile'
-$ tmux -L busmail-gate ls
-gate-bash: 1 windows (created Mon Aug  3 10:31:46 2026)
+Second change: a whitespace run is now suppressed when it **overlaps** a region
+(`at <= q.close && at + run.length > q.open`), not only when it starts inside
+one. Without this `path='/a b.png'` is a single `\S+` run spanning the whole
+region and emits a span overlapping the quoted one.
 
-$ cat $SCRATCH/mail/registry.json
-{ "gate-bash": { "sessionId": "gate-bash", "tmux": "gate-bash" } }
+## fixtures added
 
-$ node scripts/bus.ts hail --mail-dir $SCRATCH/mail --socket busmail-gate \
-    --to gate-bash --from coordinator --kind request \
-    --body "echo busmail send leg reached the pane"
-queued m-26be931c -> gate-bash
-injected into tmux gate-bash
-(exit 0)
+`src/termTokens.test.ts`, new `describe("quote pairing")`, 7 cases. `SHOT` is
+the exact screenshot path (macOS
+`/var/folders/.../T/TemporaryItems/NSIRD_screencaptureui_*/Screenshot 2026-08-03 at 10.05.13 AM.png`).
 
-$ tmux -L busmail-gate capture-pane -p -t gate-bash | tail -3
-bash-5.3$ [bus m-26be931c] echo busmail send leg reached the pane
-bash: [bus: command not found
-bash-5.3$
-```
+| fixture | pre-fix |
+|---|---|
+| links the whole quoted screenshot path | PASS (guard) |
+| links the quoted screenshot path with prose on both sides | PASS (guard) |
+| does not let a possessive apostrophe open a span (`reading claude's log at '/a b/c.png'`, asserts the underline too) | FAIL |
+| does not let a contraction apostrophe open a span (`don't open '/tmp/my shots/a b.png' yet`) | FAIL |
+| keeps spans non-overlapping on apostrophe prose (4 lines, plus every span slices back to its own text) | FAIL |
+| pairs a quote opened right after an assignment or bracket (`path='...'`, `` see `src/main.ts`, ok ``) | FAIL |
+| leaves an unpaired opening quote to the whitespace-run fallback | PASS (guard against the naive fix) |
 
-The injected text is `[bus <id>] <body>`: the envelope id has to ride the
-injection, because the ack query has nothing else to look for in the
-recipient's transcript.
+`src/termWrapJoin.test.ts`, 2 added to `describe("wrappedLinkSpans")`:
 
-No-pane case (ruled: stays queued, to_timestamp null), empty registry:
+| fixture | pre-fix |
+|---|---|
+| emits one link for a quoted path whose spaces straddle a wrap (asserts both row ranges) | PASS (guard) |
+| keeps a wrapped quoted path whole when prose above it holds an apostrophe | FAIL |
+
+Fail-first receipt, at a6225e3 (scanner still at base):
 
 ```
-$ node scripts/bus.ts hail --mail-dir $SCRATCH/mail --to lane-a --body "no route yet"
-queued m-a6f396f0 -> lane-a
-no registry route for lane-a: message stays queued, to_timestamp null
-exit=2
-$ cat $SCRATCH/mail/bus.ndjson
-{"id":"m-a6f396f0","from":"coordinator","to":"lane-a","from_timestamp":"2026-08-03T14:31:35.481Z","to_timestamp":null,"kind":"request","reply_to":null,"body":"no route yet","ref":null}
+ x src/termWrapJoin.test.ts (13 tests | 1 failed) 8ms
+     x keeps a wrapped quoted path whole when prose above it holds an apostrophe 4ms
+ x src/termTokens.test.ts (26 tests | 4 failed) 12ms
+     x does not let a possessive apostrophe open a span 4ms
+     x does not let a contraction apostrophe open a span 0ms
+     x keeps spans non-overlapping on apostrophe prose 0ms
+     x pairs a quote opened right after an assignment or bracket 1ms
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 34 passed (39)
 ```
 
-## 3. Ack-sweep transcript (cass)
+## gate outputs
 
-Recipient is a real harness session so cass has a transcript to read:
-scratch tmux session `gate-claude` running `claude` in a scratch cwd (env
-scrubbed of CLAUDE_CODE_* so it starts as its own session).
+`npx tsc --noEmit`:
 
 ```
-$ tmux -L busmail-gate new-session -d -s gate-claude -x 120 -y 40 -c $SCRATCH/gatecwd \
-    "env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
-     -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH claude"
-(trust prompt answered with a single Enter into the scratch pane)
-
-$ node scripts/bus.ts hail --mail-dir $SCRATCH/mail --socket busmail-gate \
-    --to gate-claude --from coordinator --kind request \
-    --body "reply with the single word ok, nothing else"
-queued m-ee1d13de -> gate-claude
-injected into tmux gate-claude
-(exit 0)
-
-$ tmux -L busmail-gate capture-pane -p -t gate-claude | tail
-❯ [bus m-ee1d13de] reply with the single word ok, nothing else
-⏺ ok
-✻ Brewed for 3s
-
-$ cat $SCRATCH/mail/registry.json
-{ "gate-claude": { "sessionId": "e33345e9-670b-4cd1-8f62-b017747bcd43",
-  "harness": "claude", "tmux": "gate-claude",
-  "sourcePath": "/Users/chrishafley/.claude/projects/-private-tmp-...-gatecwd/e33345e9-670b-4cd1-8f62-b017747bcd43.jsonl" } }
-
-$ node scripts/bus.ts sweep --mail-dir $SCRATCH/mail          # index still stale
-m-26be931c -> gate-bash: no registry route, cannot scope the cass query
-m-ee1d13de -> gate-claude: no transcript hit, still unacked
-swept 2 unacked, acked 0
-
-$ cass index --watch-once "$(dirname "$JSONL")" --robot
-  "index_ms": 755, "connectors": [{"name":"claude_code","conversations":1,"messages":2}]
-real 0m1.579s
-
-$ node scripts/bus.ts sweep --mail-dir $SCRATCH/mail          # after reindex
-m-26be931c -> gate-bash: no registry route, cannot scope the cass query
-m-ee1d13de -> gate-claude: acked via /Users/chrishafley/.claude/projects/-private-tmp-...-gatecwd/e33345e9-670b-4cd1-8f62-b017747bcd43.jsonl
-swept 2 unacked, acked 1
-real 0m0.350s
-
-$ node scripts/bus.ts list --mail-dir $SCRATCH/mail --agent gate-claude
-in  {"id":"m-ee1d13de","from":"coordinator","to":"gate-claude","from_timestamp":"2026-08-03T14:33:31.265Z","to_timestamp":"2026-08-03T14:34:18.860Z","kind":"request","reply_to":null,"body":"reply with the single word ok, nothing else","ref":null}
-gate-claude: 1 in, 0 out, 0 unacked
-
-$ node scripts/bus.ts sweep --mail-dir $SCRATCH/mail --agent gate-claude   # idempotent
-swept 1 unacked, acked 0
-
-$ tmux -L busmail-gate kill-server; tmux -L busmail-gate ls
-no server running on /private/tmp/tmux-501/busmail-gate
-$ tmux -L default ls        # user's sessions, untouched
-sprefa, sprefa-2, sprefa-3, sprefa-4, sprefa-6, duel-dots-flash
-```
-
-The stale-index sweep followed by the fresh-index sweep is the ruling's
-"cass index freshness bounds ack latency" as a receipt, not a claim.
-`cass index --watch-once <dir>` is the cheap lever: 1.6s for the one
-changed transcript, and the sweep itself is 0.35s (both inside the
-10-second law).
-
-**to_timestamp = the moment cass proved the read**, not the transcript's
-own clock: a cass hit carries its conversation's `created_at`, which
-predates the message and would sort before from_timestamp.
-
-**Scoping is what makes an ack mean anything.** The sender types the
-envelope id too, so its own transcript matches the same query;
-`MailLeg.cassHits` keeps only hits whose `source_path` is the recipient's
-(exact `sourcePath`, else contains `sessionId`). Unit-tested both ways in
-1_leg.test.ts.
-
-## 4. Missing legs
-
-1. **Claude/codex/opencode jsonl injection.** Not invented, per the
-   contract. Only the tmux leg exists: `MailLeg.tmuxSendArgs` returns null
-   for a route with no pane, `hail` exits 2 and the row stays queued with
-   to_timestamp null. A harness with no tmux pane is unreachable by this
-   bus today.
-2. **No native command for either leg.** `send`/`sweep` are out of process
-   (scripts/bus.ts) because ipc/commands.json has no tmux-send or
-   cass-search command, and src-tauri/** plus the generated bindings are
-   outside this lane's file ownership. The frontend read side
-   (MailboxReader) needs nothing new: it rides the existing
-   list_dir/read_text. An in-app send button needs a new rust command
-   (`bus_hail`/`bus_sweep`) added by whoever owns src-tauri.
-3. **The pushed view has no renderer.** 3_router.ts now registers the
-   mail-preview kind and `pushMailPreview` puts it on the shared stack,
-   but InTabStrip.tsx (forbidden) renders only `current.agentSessionId` as
-   a text header. Rendering it needs this in InTabStrip's body, which this
-   lane cannot write:
-   ```tsx
-   {current?.kind === "mail-preview" ? <MailPreview agentId={current.agentId} /> : (
-     <AgentStripTable tree={filtered} error={error} onRowClick={onRowClick} controls />
-   )}
-   ```
-4. **Registry population.** registry.json (agent id -> session id / tmux /
-   source path) is hand-written today; nothing generates it from
-   harness_trace_rows + the tmux join (2_join.ts) yet. The live gate wrote
-   it by hand, which is why the session id had to be resolved from
-   `~/.claude/projects/*/<uuid>.jsonl` after the pane started.
-5. **Multi-line bodies.** `tmux send-keys -l` types the body verbatim, so
-   an embedded newline submits early in a TUI harness. `hail` does not
-   mangle the body; a multi-line brief needs a file + `--ref`, which is
-   unimplemented.
-6. **No fs-watch on the mailbox in MailPreview.** It reads on mount and on
-   the refresh button. The trace panel's `claimFsWatch(MAIL_DIR)` leg is
-   the precedent to copy; not done because the preview has no panel of its
-   own yet.
-
-## 5. HarnessTracePanel patch for the coordinator
-
-Not applied (forbidden file). Verified by typechecking an identical copy
-placed at `HarnessTracePanel.patched.tsx`, running `npx tsc --noEmit` (no
-new errors), then deleting the copy; the real file was never written.
-
-NOTE (coordinator): this diff was written against the flat-table panel at
-a35ad6a. The tracetree lane (2e5129c) has since rewritten
-HarnessTracePanel.tsx to the lazy tree with `AgentTreeNode` rows; the mail
-button column and the `mailRegistry` capture must be re-anchored onto that
-version at merge (same idea, different context lines and row type).
-
-```diff
---- a/src/plugins/harnessTrace/HarnessTracePanel.tsx
-+++ b/src/plugins/harnessTrace/HarnessTracePanel.tsx
-@@ -12,7 +12,8 @@
- import { TreeTable, type TreeColumn } from "../../treetable";
- import type { DirListing } from "../../state";
- import type { CassSwarmStatus } from "../cass/0_types";
--import { enrichRows, parseMailNdjson, parseMailRegistry } from "./0_mail";
-+import { enrichRows, mailAgentIdFor, parseMailNdjson, parseMailRegistry } from "./0_mail";
-+import { pushMailPreview } from "./3_router";
- import type { HarnessTraceRow, HarnessTraceSeed, MailEnvelope, MailRegistry } from "./0_types";
- 
- const PLUGIN_ID = "harness-trace";
-@@ -24,6 +25,9 @@
- }
- 
- let cassTraceHandler: ((row: HarnessTraceRow) => void) | null = null;
-+// Last registry read by loadMailLedger: the mail preview keys on the agent
-+// name, the row knows only its session id.
-+let mailRegistry: MailRegistry = {};
- 
- const COLUMNS: TreeColumn<HarnessTraceRow>[] = [
-   {
-@@ -83,6 +87,25 @@
-     sortValue: (r) => r.cwd,
-   },
-   {
-+    id: "mail",
-+    header: "",
-+    noRowClick: true,
-+    cell: (r) => (
-+      <span className="wt-actions">
-+        <button
-+          className="wt-act"
-+          title="preview this agent's message queue"
-+          onClick={(e) => {
-+            e.stopPropagation();
-+            pushMailPreview(r.sessionId, mailAgentIdFor(mailRegistry, r.sessionId));
-+          }}
-+        >
-+          mail
-+        </button>
-+      </span>
-+    ),
-+  },
-+  {
-     id: "trace",
-     header: "",
-     noRowClick: true,
-@@ -130,6 +153,7 @@
-     if (entry.name === "registry.json") {
-       const text = await invoke<string>("read_text", { path: entry.path }).catch(() => "");
-       registry = parseMailRegistry(text);
-+      mailRegistry = registry;
-     } else if (entry.name.endsWith(".ndjson")) {
-       const text = await invoke<string>("read_text", { path: entry.path }).catch(() => "");
-       envelopes.push(...parseMailNdjson(text));
-```
-
-The push key is the row's session id, and the agent id is the reverse
-registry lookup (`mailAgentIdFor`). See missing leg 3: without the
-InTabStrip change the push mutates the stack but nothing draws it.
-
-## 6. Gate outputs
-
-```
-$ npx tsc --noEmit
 src/plugin.test.ts(69,64): error TS2339: Property 'label' does not exist on type 'CtxItem'.
   Property 'label' does not exist on type '{ sep: true; }'.
 ```
-Pre-existing at a35ad6a, in a file this lane never opened. No error in any
-file this lane wrote.
+
+PRE-EXISTING. Reproduced byte-identical on a detached checkout of a35ad6a.
+`src/plugin.test.ts` is untouched by this lab. Left alone (out of scope).
+
+`npx vitest run src/termTokens.test.ts src/termWrapJoin.test.ts`:
 
 ```
-$ npx vitest run src/plugins/harnessTrace
- Test Files  7 passed (7)
-      Tests  62 passed (62)
-   Duration  182ms
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Duration  122ms
 ```
 
-```
-$ npx vitest run
- FAIL  src/panelZoom.test.ts (4 tests)
- Test Files  1 failed | 44 passed (45)
-      Tests  4 failed | 298 passed (302)
-```
-Pre-existing, proven by stashing this lane's 4 modified files and rerunning:
-same 4 failures, same `ReferenceError: Cannot access 'kinds' before
-initialization` (src/panelZoom.ts:24 via src/terminal.ts:282 via
-src/favorites.ts:12, a module init cycle with no harnessTrace import in the
-chain). Stash popped, tree restored.
+`npx vitest run` (full):
 
 ```
-$ npx playwright test --config playwright.busmail.config.ts
-  ✓  1 e2e/mail-preview.spec.ts:44:1 › mail preview renders one agent's queue
-     with threaded replies and ack state (638ms)
-  1 passed (2.0s)
+ x src/panelZoom.test.ts (6 tests | 4 failed) 893ms
+     x defaults to 1x and remembers a set factor
+     x clamps to the kind's bounds
+     x fires onZoom with the applied factor; reset restores 1x
+     x gestures step the resolved target by the kind's step
+ReferenceError: Cannot access 'kinds' before initialization
+ -> registerZoomKind src/panelZoom.ts:24:3
+ -> src/terminal.ts:282:1
+ -> src/favorites.ts:12:1
+
+ Test Files  1 failed | 41 passed (42)
+      Tests  4 failed | 273 passed (277)
 ```
-Clock frozen at 2026-08-03T12:00:00Z (`page.clock.setFixedTime`).
 
-## 7. PNG
+PRE-EXISTING. At a35ad6a the same run gives `4 failed | 264 passed (268)` with
+the same four names and the same `ReferenceError`: a circular import
+(`favorites.ts` -> `terminal.ts` -> `registerZoomKind` before `panelZoom.ts`'s
+`kinds` initializer runs). None of those three files is touched by this lab.
+Delta from base is +9 passing, +0 failing.
 
-`/Users/chrishafley/projects/instant-lab-busmail/e2e/mail-preview.spec.ts-snapshots/mail-preview-darwin.png` (20739 bytes).
+`npx playwright test e2e/term-cmd-hover.spec.ts e2e/term-wrap-hover.spec.ts`
+(both existing specs cover link hover; no new e2e infra built):
 
-Fixture mailbox behind it: 5 NDJSON rows, 4 distinct ids. lane-a's queue is
-m-1 (in, request), m-2 (out, result, reply_to m-1, indented), m-4 (in,
-note); m-3 addresses lane-b and is absent. m-1's ack came from an APPENDED
-fifth row with the same id and to_timestamp filled, so the header reads
-"3 messages · 2 unacked" and only m-1 shows "acked"; the two queued rows
-are dimmed. The registry route reaches the header as "tmux instant-lane-a".
+```
+Running 10 tests using 2 workers
+  ok   2 e2e/term-cmd-hover.spec.ts:53:1 > hover on Update(src/main.ts) names the path, not the call envelope (1.3s)
+  ok   1 e2e/term-wrap-hover.spec.ts:59:1 > hover on either wrapped row names the whole path (1.4s)
+  ok   3 e2e/term-cmd-hover.spec.ts:65:1 > hover over the envelope itself offers nothing (907ms)
+  ok   4 e2e/term-wrap-hover.spec.ts:74:1 > hover on the wrapped path resolves to the real file (858ms)
+  ok   5 e2e/term-cmd-hover.spec.ts:83:1 > hover keeps a line suffix and resolves it (823ms)
+  ok   6 e2e/term-wrap-hover.spec.ts:83:1 > click on the wrapped continuation dispatches the whole path (873ms)
+  ok   7 e2e/term-cmd-hover.spec.ts:93:1 > a bare filename that matches several files reports the ambiguity (745ms)
+  ok   8 e2e/term-wrap-hover.spec.ts:97:1 > wrapped hover card snapshot (869ms)
+  ok   9 e2e/term-cmd-hover.spec.ts:104:1 > click on a resolved file opens it in a preview tab (768ms)
+  ok  10 e2e/term-cmd-hover.spec.ts:119:1 > hover card snapshot (826ms)
 
-## 8. Deviations from the contract
+  10 passed (7.1s)
+```
 
-1. **`MailEnvelope` was not rewritten**, it was made a projection of the
-   ruled `IMailMessage` (section 1). Cause: 0_types.ts is append-only for
-   this lane and the forbidden HarnessTracePanel.tsx consumes the old
-   shape. The parse is migrated; the old type survives as a view.
-   Deletable once HarnessTracePanel.tsx moves to `parseMailLog`.
-2. **The mail-preview kind is not in the `TermView` union.** Same cause:
-   that union's lines belong to another lane. 0_types.ts appends
-   `IMailPreviewView` + `TermViewAny` + `ITermViewRouter`, and 3_router.ts
-   appends `termViewRouter` as the same instance widened. At merge, folding
-   `IMailPreviewView` into `TermView` and deleting `TermViewAny` is a
-   2-line cleanup.
-3. **3_router.ts's new import sits mid-file**, below `termRouter`, because
-   the file's top import line is not this lane's to touch. Hoist it at
-   merge.
-4. **The send and ack legs are a node CLI, not app code.** No native
-   command exists for tmux send-keys or cass search, and src-tauri/** is
-   outside this lane's ownership (missing leg 2). `scripts/bus.ts` runs on
-   node's built-in type stripping (node v24) and imports the same pure
-   modules the app does, so there is one implementation of the fold, not
-   two.
-5. **The live gate's mailbox lives in the session scratchpad**, not
-   `~/.agent/mail` (which does not exist on this machine): the brief
-   forbids touching files outside the worktree. `--mail-dir` defaults to
-   `~/.agent/mail`, which is what MailPreview reads.
-6. **REPORT.md was not written by the lane.** The harness blocks a
-   subagent from writing report files; this file was placed by the
-   coordinator from the lane's returned text, plus the re-anchoring NOTE
-   in section 5.
+Both card snapshots still match, so the fix did not move any span the e2e
+harness draws.
 
-## Coordinator audit (this session)
+Extra sanity sweep (throwaway, not committed) over real terminal shapes, all
+correct after the fix:
 
-Independent reruns: plugin vitest 62/62; mail-preview e2e 1 passed on the
-lane's own port-4183 config; PNG inspected (threading indent, ack column,
-dimmed queued rows render). Forbidden files verified untouched:
-`git diff a35ad6a..HEAD` over HarnessTracePanel.tsx, InTabStrip.tsx,
-src/main.ts is empty. Tree clean at a8b2590.
+```
+"error: pathspec 'src/main.ts' did not match" -> ["error","pathspec","src/main.ts","did","not","match"]
+"it's fine, see src/main.ts"                  -> ["it's","fine","see","src/main.ts"]
+"Bob's file is at /tmp/a.png"                 -> ["Bob's","file","is","at","/tmp/a.png"]
+"rm -rf \"/tmp/my dir\""                      -> ["rm","-rf","/tmp/my dir"]
+"git commit -m \"fix src/a.ts\""              -> ["git","commit","-m","fix src/a.ts"]
+"you can't have 'a' and \"b\""                -> ["you","can't","have","a","and","b"]
+"`src/a.ts` and `src/b.ts`"                   -> ["src/a.ts","and","src/b.ts"]
+"python -c 'import os; print(os.path)'"       -> ["python","-c","import os; print(os.path)"]
+"cd ~/projects/sprefa && ls"                  -> ["cd","~/projects/sprefa","&&","ls"]
+"  L  Read src/termTokens.ts (129 lines)"     -> ["L","Read","src/termTokens.ts","129","lines"]
+```
+
+## unpaired-quote decision
+
+**Left alone**, deliberately, with a fixture pinning today's behavior.
+
+`quotedRegions` emits nothing for an opener with no closer, so the `\S+`
+fallback still yields `/tmp/shots/Screenshot`, `2026-08-03`, `at`, `10` for
+`'/tmp/shots/Screenshot 2026-08-03 at 10`. Identical to base. Zero regression.
+
+Why no fix is available from the scanner:
+
+1. **The information is not in the input.** The scanner is handed the joined
+   logical line. If the composer writes each visual row as its own hard line
+   with no `isWrapped` flag, the closing quote is not in that string at all --
+   not truncated, absent. No rule over the given characters can recover where
+   the path ended. `wrappedLineRows` (terminal.ts:333-359) walks xterm's
+   `isWrapped` flags and nothing else; there is no second source to consult.
+
+2. **The tempting fix is the one the contract forbids.** "Unpaired opener ->
+   run the region to end of line" would dispatch
+   `/tmp/shots/Screenshot 2026-08-03 at 10` -- a truncated multi-word path
+   presented as a complete file name. That is strictly worse than today: the
+   current truncation at least stops at a token boundary, and `refResolve`'s
+   bare-name search can still find a same-named file, whereas a path with a
+   half-eaten timestamp in it can only miss. The added fixture "leaves an
+   unpaired opening quote to the whitespace-run fallback" exists to fail if a
+   later change reaches for that.
+
+3. **Suppression would be a regression.** Blanking every `\S+` span after an
+   unpaired opener kills `he said 'go read src/main.ts` -- a real prose shape
+   that links correctly today. The contract's "no regression vs today" rules
+   it out.
+
+If this case is worth closing later, the fix belongs one layer down, in
+`wrappedLineRows`, not in the scanner: detect a TUI composer box (the row is
+fenced by box-drawing glyphs) and stitch its rows into one logical line the way
+`isWrapped` rows are stitched, stripping the fence glyphs and adjusting
+`rowStartOffsets`. That is a terminal-buffer change with its own e2e surface,
+outside this contract's scope.
+
+## adjacent issue observed, not fixed
+
+A quoted region's inner text bypasses `unwrapToken`, so `"Update(src/a.ts)"`
+emits the raw `Update(src/a.ts)` -- envelope included -- which `looksOpenable`
+passes. Pre-existing at base, unrelated to the quote-pairing defect, and
+routing quoted inner text through `unwrapToken` would break `'q p.md'`-style
+paths whose own punctuation is meaningful. Flagged, not touched.
