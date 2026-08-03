@@ -37,6 +37,7 @@ import {
   showError,
 } from "./core";
 import { openDiffPanel, openPreviewPanel } from "./preview";
+import { setDockStrip } from "./plugins/harnessTrace/DockStripPanel";
 import { tabs, openTab, closeTab, settleClosures, pasteToActive } from "./terminal";
 import {
   applyWorktreeDeltaRows,
@@ -865,6 +866,9 @@ const wtLeafGestures = (r: WtTreeRow) =>
   leafGestures(r.clonePath ?? "", r.branch ?? "", r.worktree ?? "", !!r.dirty);
 
 export function registerV2Bridges() {
+  // The dock strip's click = go there: opening a row jumps to that session's
+  // terminal, the same openTab path TmuxPanelV2 uses.
+  setDockStrip({ onOpen: (name) => openTab(name) });
   setTmuxPanel({
     rows: tmuxRows,
     onOpen: (name) => openTab(name),

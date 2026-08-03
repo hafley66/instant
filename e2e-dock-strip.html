@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dock Strip E2E</title>
+    <script type="module" src="/e2e/dock-strip.tsx" defer></script>
+  </head>
+  <body data-skin="xp">
+    <div id="app" class="window" style="height: 100vh">
+      <div class="window-body body" id="workbench">
+        <nav class="actbar" id="actbar"><span class="actbar-spacer"></span></nav>
+        <div class="actbar-resize" id="actbar-resize"></div>
+        <div id="dock" class="dock"></div>
+      </div>
+    </div>
+  </body>
+</html>

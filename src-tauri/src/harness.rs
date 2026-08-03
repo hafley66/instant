@@ -161,6 +161,10 @@ pub struct HarnessTraceRow {
     pub last_activity: String, // ISO UTC from store mtime/db
     pub status: &'static str,  // live | idle | done | dead
     pub cwd: String,           // tildified
+    // CONTRACT2: claude subagent children carry the parent session id + "subagent";
+    // other harnesses stay None here (the frontend mail join may attach "dispatch").
+    pub parent_id: Option<String>,
+    pub parent_kind: Option<&'static str>,
 }
 
 const TRACE_LIVE_MS: u64 = 2 * 60 * 1000;
@@ -242,6 +246,20 @@ fn trace_row(
     home: &Path,
     now: u64,
 ) -> (u64, HarnessTraceRow) {
+    trace_row_with_parent(harness, session_id, ts, last_ms, cwd, home, now, None, None)
+}
+
+fn trace_row_with_parent(
+    harness: &'static str,
+    session_id: String,
+    ts: String,
+    last_ms: u64,
+    cwd: &str,
+    home: &Path,
+    now: u64,
+    parent_id: Option<String>,
+    parent_kind: Option<&'static str>,
+) -> (u64, HarnessTraceRow) {
     (
         last_ms,
         HarnessTraceRow {
@@ -252,14 +270,46 @@ fn trace_row(
             last_activity: ms_to_iso(last_ms),
             status: trace_status(cwd, last_ms, now),
             cwd: tildify(cwd, home),
+            parent_id,
+            parent_kind,
         },
     )
 }
 
-// Claude Code subagent (sidechain) sessions are excluded: their transcripts
-// live under <projectDir>/<parentSession>/subagents/agent-*.jsonl (skipped by
-// the non-recursive top-level walk) and every record carries "isSidechain":true,
-// checked here on the first records in case an older store kept them top-level.
+// Read the leading transcript records of a claude jsonl: the first cwd-bearing
+// record yields the session cwd + start ts; a sidechain marker, when present,
+// is reused (the duel filter's evidence) to keep the top-level walk excluding
+// subagent transcripts.
+fn read_claude_transcript(path: &Path) -> (String, String, bool) {
+    let mut cwd = String::new();
+    let mut ts = String::new();
+    let mut sidechain = false;
+    if let Ok(file) = fs::File::open(path) {
+        // Leading lines can be summary records without cwd; scan a few.
+        for line in BufReader::new(file).lines().take(10).flatten() {
+            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+                sidechain = true;
+                break;
+            }
+            if let Some(dir) = v.get("cwd").and_then(Value::as_str) {
+                cwd = dir.to_string();
+                ts = v
+                    .get("timestamp")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                break;
+            }
+        }
+    }
+    (cwd, ts, sidechain)
+}
+
+// CONTRACT2: the top-level walk still drops sidechains (the duel filter rule,
+// superseded per CONTRACT2 tree law — they return below as children). The
+// subagent walk re-emits them as child seeds under <project>/<parentSessionId>/
+// subagents/agent-*.jsonl, parent_id = the parent session id.
 fn trace_claude(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
     let projects = home.join(".claude").join("projects");
     let Ok(project_dirs) = fs::read_dir(&projects) else { return vec![] };
@@ -268,36 +318,44 @@ fn trace_claude(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
         let Ok(sessions) = fs::read_dir(project.path()) else { continue };
         for entry in sessions.flatten() {
             let path = entry.path();
-            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                continue;
-            }
-            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            let mut cwd = String::new();
-            let mut ts = String::new();
-            let mut sidechain = false;
-            if let Ok(file) = fs::File::open(&path) {
-                // Leading lines can be summary records without cwd; scan a few.
-                for line in BufReader::new(file).lines().take(10).flatten() {
-                    let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-                    if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-                        sidechain = true;
-                        break;
+            let name = entry
+                .file_name()
+                .to_str()
+                .unwrap_or("")
+                .to_string();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+                let (cwd, ts, sidechain) = read_claude_transcript(&path);
+                if sidechain {
+                    continue;
+                }
+                out.push(trace_row_with_parent(
+                    "claude", id.to_string(), ts, mtime_ms(&path), &cwd, home, now, None, None,
+                ));
+            } else if path.is_dir() {
+                // <parentSessionId>/subagents/agent-*.jsonl
+                let subdir = path.join("subagents");
+                let Ok(subagents) = fs::read_dir(&subdir) else { continue };
+                for sub in subagents.flatten() {
+                    let sp = sub.path();
+                    if !sp.is_file() || sp.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                        continue;
                     }
-                    if let Some(dir) = v.get("cwd").and_then(Value::as_str) {
-                        cwd = dir.to_string();
-                        ts = v
-                            .get("timestamp")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        break;
-                    }
+                    let Some(id) = sp.file_stem().and_then(|s| s.to_str()) else { continue };
+                    let (cwd, ts, _sidechain) = read_claude_transcript(&sp);
+                    out.push(trace_row_with_parent(
+                        "claude",
+                        id.to_string(),
+                        ts,
+                        mtime_ms(&sp),
+                        &cwd,
+                        home,
+                        now,
+                        Some(name.clone()),
+                        Some("subagent"),
+                    ));
                 }
             }
-            if sidechain {
-                continue;
-            }
-            out.push(trace_row("claude", id.to_string(), ts, mtime_ms(&path), &cwd, home, now));
         }
     }
     out
@@ -473,5 +531,41 @@ mod tests {
         assert_eq!(tildify("/Users/someone/projects/a", home), "~/projects/a");
         assert_eq!(tildify("/Users/someone", home), "~");
         assert_eq!(tildify("/Users/someoneelse/x", home), "/Users/someoneelse/x");
+    }
+
+    // CONTRACT2 proof #2: a fake <project>/<parent>/subagents/agent-x.jsonl in a
+    // fixture HOME yields a child seed carrying parent_id = the parent session id.
+    #[test]
+    fn claude_subagent_child_carries_parent_id() {
+        let home = std::env::temp_dir().join(format!("dock-strip-harness-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let project = home.join(".claude").join("projects").join("home-projects-x");
+        let parent_id = "parent-session-1";
+        let subdir = project.join(parent_id).join("subagents");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(
+            project.join(format!("{parent_id}.jsonl")),
+            r#"{"cwd":"/Users/t/home/projects/x","timestamp":"2026-08-02T00:00:00Z"}"#,
+        )
+        .unwrap();
+        fs::write(
+            subdir.join("agent-1234.jsonl"),
+            r#"{"isSidechain":true,"cwd":"/Users/t/home/projects/x","timestamp":"2026-08-02T00:05:00Z"}"#,
+        )
+        .unwrap();
+
+        let rows = trace_claude(&home, now_ms());
+        let children: Vec<_> = rows.iter().filter(|r| r.1.parent_id.is_some()).collect();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].1.session_id, "agent-1234");
+        assert_eq!(children[0].1.harness, "claude");
+        assert_eq!(children[0].1.parent_id.as_deref(), Some(parent_id));
+        assert_eq!(children[0].1.parent_kind, Some("subagent"));
+
+        let tops: Vec<_> = rows.iter().filter(|r| r.1.parent_id.is_none()).collect();
+        assert_eq!(tops.len(), 1);
+        assert_eq!(tops[0].1.session_id, parent_id);
+
+        fs::remove_dir_all(&home).ok();
     }
 }

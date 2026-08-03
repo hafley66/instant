@@ -21,7 +21,6 @@ import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
-import { registerCassPlugin } from "./plugins/cass";
 import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
@@ -126,6 +125,14 @@ function toggleTermSidebar() {
   store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
 }
 
+// Toggle the in-tab relations strip on the focused terminal (absent = open).
+function toggleTermStrip() {
+  const id = getFocusedTermId();
+  if (!id) return;
+  const cur = store.get().termStrip[id] ?? { open: true };
+  store.set({ termStrip: { ...store.get().termStrip, [id]: { open: !cur.open } } });
+}
+
 const TAB_COMMANDS: Command[] = [
   // The palette lists every command below that carries a `title`. ⌘⇧P, the
   // VSCode-standard binding.
@@ -146,6 +153,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
+  { id: "term.strip", keys: ["$mod+Shift+Period"], title: "Toggle Relations Strip", group: "View", run: toggleTermStrip },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -239,7 +247,6 @@ async function main() {
   registerBuiltin();
   registerRulesPlugin();
   registerMetricsPlugin();
-  registerCassPlugin();
   registerHarnessTracePlugin();
   registerFilesPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.

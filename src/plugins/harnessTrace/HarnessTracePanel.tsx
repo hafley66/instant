@@ -116,7 +116,7 @@ function traceFilter(r: HarnessTraceRow, q: string): boolean {
 }
 
 // Missing mail dir = zero enrichment, zero errors (the bus is not built yet).
-async function loadMailLedger(): Promise<{ envelopes: MailEnvelope[]; registry: MailRegistry }> {
+export async function loadMailLedger(): Promise<{ envelopes: MailEnvelope[]; registry: MailRegistry }> {
   let listing: DirListing;
   try {
     listing = await invoke<DirListing>("list_dir", { path: MAIL_DIR });
@@ -150,7 +150,9 @@ export function HarnessTracePanel() {
     invoke<HarnessTraceSeed[]>("harness_trace_rows")
       .then(async (seeds) => {
         const mail = await loadMailLedger();
-        setRows(enrichRows(seeds, mail.envelopes, mail.registry));
+        // Subagent children belong in the dock strip's tree, never top-level
+        // here (tree law): drop parented rows from this flat table.
+        setRows(enrichRows(seeds, mail.envelopes, mail.registry).filter((r) => !r.parentId));
         setError("");
       })
       .catch((reason: unknown) => setError(String(reason)));

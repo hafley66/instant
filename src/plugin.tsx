@@ -40,6 +40,10 @@ export interface PanelDef {
   onDiscard?: (panelId: string) => void;
   onShow?: () => void;
   railChildren?: () => Promise<RailChild[]>; // child rows under the rail button (rail.ts refreshChildren)
+  // Dock in its own bottom group spanning the workspace (the CONTRACT2 strip),
+  // instead of inside the active group. Placed below the active group, sized by
+  // the persisted dock-strip height; see reactdock's openStrip.
+  bottomStrip?: boolean;
 }
 
 export interface PanelInstanceDef {

@@ -133,6 +133,12 @@ export interface TermSidebarState {
   views?: Partial<Record<"files" | "turns" | "touched", TermSidebarView>>;
 }
 
+// Per-terminal in-tab relations strip. Absent entry = open (the strip
+// auto-appears when the terminal has related agent sessions).
+export interface TermStripState {
+  open: boolean;
+}
+
 // A favorited turn (Rust favorites::Fav) — a snapshot persisted to favorites.db,
 // surfaced here as runtime state (the db, not localStorage, is authoritative).
 export interface Fav extends AiMessage {
@@ -253,6 +259,7 @@ export interface AppState {
   // stack (percent units, sums to 100); touched = MRU list of paths opened from
   // this session's sidebar (most-recent first). Both persist per session id.
   termSidebar: Record<string, TermSidebarState>;
+  termStrip: Record<string, TermStripState>;
   zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
   // Per-tab zoom FACTOR, keyed by full dock panel id ("term:<sid>", "md:<path>",
   // …). Generic successor of tabZoom — see src/panelZoom.ts (persisted).
@@ -330,6 +337,7 @@ const PERSIST: (keyof AppState)[] = [
   "scanRoot",
   "sidebarWidth",
   "termSidebar",
+  "termStrip",
   "zoom",
   "panelZoom",
   "resumeTabs",
@@ -464,6 +472,7 @@ function load(): AppState {
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     termSidebar: loadKey<Record<string, TermSidebarState>>("termSidebar", {}),
+    termStrip: loadKey<Record<string, TermStripState>>("termStrip", {}),
     zoom: loadKey<number>("zoom", 1),
     panelZoom: loadKey<Record<string, number>>("panelZoom", {}),
     resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),

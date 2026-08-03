@@ -52,6 +52,8 @@ function seed(sessionId: string): HarnessTraceSeed {
     id: sessionId,
     harness: "claude",
     sessionId,
+    parentId: null,
+    parentKind: null,
     ts: "2026-08-02T00:00:00.000Z",
     lastActivity: "2026-08-02T03:00:00.000Z",
     status: "done",

@@ -6,6 +6,9 @@ import { expect, test } from "@playwright/test";
 test("harness trace renders cross-harness sessions with mail attribution", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  // relTime cells render against Date.now(); freeze it so the screenshot
+  // baseline is date-independent.
+  await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
   await page.addInitScript(() => {
     const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
     const mailDir = "~/.agent/mail";
