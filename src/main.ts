@@ -350,7 +350,7 @@ async function main() {
   setReplaying(true); // don't log restored tabs as fresh visits
   for (const t of store.get().openTabs) {
     if (t.browser && t.url) spawnBrowserTab(t.name, t.url);
-    else openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics });
+    else openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics, viewer: t.viewer });
   }
   setReplaying(false);
   if (wantActive && (tabs.has(wantActive) || browserTabs.has(wantActive))) activate(wantActive);
