@@ -49,6 +49,11 @@ async function seed(page: import("@playwright/test").Page) {
         if (args?.path === `${mailDir}/registry.json`) return registry;
         throw new Error("no such file");
       },
+      // The row X button's only effect, recorded by name.
+      kill_session: (args?: Record<string, unknown>) => {
+        (w as Window & { __killedSession?: string }).__killedSession = String(args?.name);
+        return null;
+      },
     };
   }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS });
 }
@@ -124,6 +129,15 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   // Finished lanes stay out at every scope too.
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toHaveCount(0);
 
+  // The row X is the one sanctioned kill from the UI: it ends that row's tmux
+  // session by name and nothing else — no view push, no join.
+  await page.evaluate(() => ((window as Window & { __dockStripOpened?: string }).__dockStripOpened = undefined));
+  await page.getByTestId("strip-kill-oc-lane").click();
+  await expect
+    .poll(() => page.evaluate(() => (window as Window & { __killedSession?: string }).__killedSession ?? null))
+    .toBe("s1");
+  expect(await opened()).toBeNull();
+
   expect(pageErrors).toEqual([]);
 });
 
@@ -165,7 +179,14 @@ test("hotkey summons the strip on a fresh terminal with no related sessions", as
   await expect(empty).toContainText("no related sessions");
 
   // A second press dismisses it.
+  const refits = () =>
+    page.evaluate(() => (window as Window & { __termRefits?: number }).__termRefits ?? 0);
+  const beforeHide = await refits();
   await page.keyboard.press(`${MOD}+Shift+Period`);
   await expect(strip).toHaveCount(0);
+  // Hiding hands the strip's height back to the xterm, so the host is asked to
+  // refit on the way out as well as on the way in (9d85a55); the height gate
+  // that stopped the reload-driven refits must not swallow this one.
+  await expect.poll(refits).toBeGreaterThan(beforeHide);
   expect(pageErrors).toEqual([]);
 });

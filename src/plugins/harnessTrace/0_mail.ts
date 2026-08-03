@@ -93,6 +93,17 @@ export function routeTmuxBySession(directory: IMailDirectory): Map<string, strin
   return bySession;
 }
 
+// The tmux names in a list_sessions answer, or null when the host has no real
+// list to give (an e2e page's stub resolves undefined). null means "I learned
+// nothing", which is NOT the same as an empty list: the caller keeps whatever
+// liveness it already had instead of grading every routed lane done.
+export function tmuxLiveNames(sessions: unknown): string[] | null {
+  if (!Array.isArray(sessions)) return null;
+  return sessions
+    .map((session) => (session as { name?: unknown } | null)?.name)
+    .filter((name): name is string => typeof name === "string");
+}
+
 // A dispatched lane lives inside its registry-recorded tmux session, so that
 // session vanishing means the lane is done NOW; without this the store's
 // mtime decay keeps a finished lane "idle" for an hour.

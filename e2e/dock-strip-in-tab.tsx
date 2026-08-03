@@ -6,7 +6,7 @@ import { registerPlugin } from "../src/plugin";
 import { setDockStrip } from "../src/plugins/harnessTrace/DockStripPanel";
 import { registerHarnessTracePlugin } from "../src/plugins/harnessTrace";
 import { initRail } from "../src/rail";
-import { activePanelId, addTermPanel, mountReactDock } from "../src/reactdock";
+import { activePanelId, addTermPanel, mountReactDock, setDockHooks } from "../src/reactdock";
 import { store } from "../src/state";
 import { setHomeDir } from "../src/core";
 import { wireContextMenu } from "../src/ctxmenu";
@@ -27,8 +27,12 @@ registerPlugin({
 registerHarnessTracePlugin();
 
 // Spy on the strip's click = go there path (the panel calls this bridge).
-const w = window as Window & { __dockStripOpened?: string };
+const w = window as Window & { __dockStripOpened?: string; __termRefits?: number };
 setDockStrip({ onOpen: (name) => { w.__dockStripOpened = name; } });
+// Count the refits the host is asked for (main.ts wires this to fitTerm, which
+// resizes the pty): the strip owes one whenever its height moves the xterm's
+// bottom edge, and silence the rest of the time.
+setDockHooks({ onTermLayout: () => { w.__termRefits = (w.__termRefits ?? 0) + 1; } });
 
 // Two tmux sessions: s1 rooted at this tab's claude cwd, s2 rooted at the other
 // tree's cwd. The terminal's sid is "s1", so the strip keeps the externals of
