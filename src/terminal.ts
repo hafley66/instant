@@ -990,6 +990,12 @@ async function exitOrDetachTab(
 export function fitTerm(id: string) {
   const t = tabs.get(id);
   if (!t) return;
+  // A host that is detached, pooled (hidden) or laid out to nothing measures as
+  // a garbage geometry, and resize_pty hands that straight to tmux, which
+  // reflows the pane and throws the visible screen away. Refit only what is on
+  // screen; the next real layout pass refits it.
+  const box = t.el.getBoundingClientRect();
+  if (box.width < 1 || box.height < 1) return;
   t.fit.fit();
   invoke("resize_pty", {
     id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),

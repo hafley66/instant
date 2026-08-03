@@ -7,8 +7,8 @@
 // twisty opens. A row click joins its tmux session and pushes an agent-session
 // view; the mail action pushes that agent's queue, which replaces the table
 // while it is the router's top. The auto-height, 240px-capped scroll area
-// reports every appearance/resize up to the host so the xterm refits.
-import { useEffect, useMemo, useState } from "react";
+// reports its height changes up to the host so the xterm refits.
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { store } from "../../state";
@@ -73,13 +73,21 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   }, [sid]);
 
   const visible = StripPolicy.visible(entry, index.size, !!current);
-  // The strip's appearance AND disappearance, the router's push/pop and a
-  // scope change all move the term slot's bottom edge, so refit on each;
-  // refitting only when visible left the term holding the strip's height
-  // after a hide.
+  // The xterm owes a refit exactly when this strip's rendered height moved the
+  // term slot's bottom edge — appearance, disappearance, a router push/pop, a
+  // taller row set. Measuring instead of listing triggers is the whole point:
+  // gating on data identity (a reload's new tree) resized the pty on every
+  // load, and a resize is a tmux reflow, which is how a live pane went blank.
+  // 0 covers the hidden strip (this component renders null), so the mount pass
+  // asks for nothing, back when it fired before the host attached the xterm.
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const stripHeight = useRef(0);
   useEffect(() => {
+    const height = stripRef.current?.getBoundingClientRect().height ?? 0;
+    if (height === stripHeight.current) return;
+    stripHeight.current = height;
     onLayout();
-  }, [visible, onLayout, current, scope, tree.length]);
+  });
 
   const columns = useMemo<TreeColumn<AgentTreeNode>[]>(
     () => [
@@ -139,7 +147,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
         : `viewing: ${current.agentSessionId}`;
 
   return (
-    <div className="term-strip" data-testid="in-tab-strip">
+    <div className="term-strip" data-testid="in-tab-strip" ref={stripRef}>
       <style>{STYLE}</style>
       <div className="act-bar">
         {canGoBack && (

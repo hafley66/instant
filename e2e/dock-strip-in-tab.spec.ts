@@ -165,7 +165,14 @@ test("hotkey summons the strip on a fresh terminal with no related sessions", as
   await expect(empty).toContainText("no related sessions");
 
   // A second press dismisses it.
+  const refits = () =>
+    page.evaluate(() => (window as Window & { __termRefits?: number }).__termRefits ?? 0);
+  const beforeHide = await refits();
   await page.keyboard.press(`${MOD}+Shift+Period`);
   await expect(strip).toHaveCount(0);
+  // Hiding hands the strip's height back to the xterm, so the host is asked to
+  // refit on the way out as well as on the way in (9d85a55); the height gate
+  // that stopped the reload-driven refits must not swallow this one.
+  await expect.poll(refits).toBeGreaterThan(beforeHide);
   expect(pageErrors).toEqual([]);
 });
