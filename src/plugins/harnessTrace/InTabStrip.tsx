@@ -10,6 +10,7 @@
 // reports every appearance/resize up to the host so the xterm refits.
 import { useEffect, useMemo, useState } from "react";
 import type { ExpandedState } from "@tanstack/react-table";
+import { invoke } from "../../generated/native";
 import { store } from "../../state";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { COLUMNS, stripFilter, useAgentTree } from "./DockStripShared";
@@ -101,11 +102,25 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
             >
               mail
             </button>
+            {r.tmuxSession && (
+              <button
+                type="button"
+                className="wt-act"
+                data-testid={"strip-kill-" + r.id}
+                title={`kill tmux session ${r.tmuxSession}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void invoke("kill_session", { name: r.tmuxSession }).then(load, load);
+                }}
+              >
+                ✕
+              </button>
+            )}
           </span>
         ),
       },
     ],
-    [registry, sid],
+    [registry, sid, load],
   );
 
   if (!visible) return null;

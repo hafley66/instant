@@ -13,6 +13,7 @@ import { useApp } from "../../useStore";
 import { store } from "../../state";
 import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
+import { refreshSessions } from "../../worktrees";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
 import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
@@ -158,6 +159,11 @@ export function useAgentTree(): AgentTreeState {
   const [routeTmux, setRouteTmux] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState("");
   const load = useCallback(() => {
+    // The tmux list is the done-signal input (settleRoutedStatus); refresh it
+    // alongside the rows or a lane spawned since boot settles as done. Swallow
+    // failures: hosts without a real list_sessions (the e2e page) stay on the
+    // seeded store list.
+    void refreshSessions().catch(() => {});
     invoke<HarnessTraceSeed[]>("harness_trace_rows")
       .then(async (storeSeeds) => {
         const mail = await loadMailLedger();
