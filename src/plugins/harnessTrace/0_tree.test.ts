@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentTree,
   filterForestByTmux,
+  indexAgentTree,
+  materializeAgentTree,
   resolveDispatchParents,
   toAgentNodes,
   type AgentTreeNode,
@@ -141,6 +143,81 @@ describe("toAgentNodes", () => {  it("maps seam rows to the frozen model keyed b
     expect(child.parentKind).toBe("dispatch");
     const sub = nodes.find((n) => n.id === "kid-a")!;
     expect(sub.parentKind).toBe("subagent");
+  });
+});
+
+describe("indexAgentTree", () => {
+  it("splits roots from children and answers hasChildren/childrenOf per id", () => {
+    const index = indexAgentTree([
+      node({ id: "parent" }),
+      node({ id: "kid-a", parentId: "parent", parentKind: "subagent" }),
+      node({ id: "kid-b", parentId: "parent", parentKind: "subagent" }),
+      node({ id: "solo", harness: "codex" }),
+    ]);
+    expect(index.roots.map((r) => r.id)).toEqual(["parent", "solo"]);
+    expect(index.size).toBe(4);
+    expect(index.hasChildren("parent")).toBe(true);
+    expect(index.hasChildren("solo")).toBe(false);
+    expect(index.childrenOf("parent").map((c) => c.id)).toEqual(["kid-a", "kid-b"]);
+    expect(index.childrenOf("solo")).toEqual([]);
+  });
+
+  it("promotes an orphan child to a root, matching buildAgentTree's law", () => {
+    const index = indexAgentTree([
+      node({ id: "parent" }),
+      node({ id: "orphan", parentId: "deleted-parent", parentKind: "subagent" }),
+    ]);
+    expect(index.roots.map((r) => r.id).sort()).toEqual(["orphan", "parent"]);
+  });
+});
+
+describe("materializeAgentTree", () => {
+  const nodes = [
+    node({ id: "parent" }),
+    node({ id: "kid", parentId: "parent", parentKind: "subagent" }),
+    node({ id: "grandkid", parentId: "kid", parentKind: "subagent" }),
+    node({ id: "solo", harness: "codex" }),
+  ];
+
+  it("materializes nothing below the roots when no row is expanded", () => {
+    const tree = materializeAgentTree(indexAgentTree(nodes), {});
+    expect(tree.map((r) => r.id)).toEqual(["parent", "solo"]);
+    expect(tree[0].children).toEqual([]);
+  });
+
+  it("materializes only the expanded branch, one level per expanded id", () => {
+    const index = indexAgentTree(nodes);
+    const oneLevel = materializeAgentTree(index, { parent: true });
+    expect(oneLevel[0].children.map((c) => c.id)).toEqual(["kid"]);
+    // The grandchild stays unbuilt until its own parent row is expanded too.
+    expect(oneLevel[0].children[0].children).toEqual([]);
+    const twoLevels = materializeAgentTree(index, { parent: true, kid: true });
+    expect(twoLevels[0].children[0].children.map((c) => c.id)).toEqual(["grandkid"]);
+  });
+
+  it("counts the same rows the eager tree does once everything is expanded", () => {
+    const index = indexAgentTree(nodes);
+    const all = materializeAgentTree(index, { parent: true, kid: true });
+    const flatten = (rows: AgentTreeNode[]): string[] =>
+      rows.flatMap((r) => [r.id, ...flatten(r.children)]);
+    expect(flatten(all).sort()).toEqual(
+      buildAgentTree(nodes)
+        .flatMap(function walk(r): string[] {
+          return [r.id, ...r.children.flatMap(walk)];
+        })
+        .sort(),
+    );
+  });
+
+  it("stops on a parent-link cycle instead of recursing forever", () => {
+    const index = indexAgentTree([
+      node({ id: "a", parentId: "b", parentKind: "subagent" }),
+      node({ id: "b", parentId: "a", parentKind: "subagent" }),
+    ]);
+    // Both sides are children of each other, so neither is a root by the null
+    // rule; the index still yields no roots and the walk terminates.
+    const tree = materializeAgentTree(index, { a: true, b: true });
+    expect(tree).toEqual([]);
   });
 });
 

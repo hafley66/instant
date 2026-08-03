@@ -22,6 +22,7 @@ import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
+import { toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { registerMdview } from "./mdview";
@@ -125,12 +126,11 @@ function toggleTermSidebar() {
   store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
 }
 
-// Toggle the in-tab relations strip on the focused terminal (absent = open).
+// Toggle the in-tab relations strip on the focused terminal.
 function toggleTermStrip() {
   const id = getFocusedTermId();
   if (!id) return;
-  const cur = store.get().termStrip[id] ?? { open: true };
-  store.set({ termStrip: { ...store.get().termStrip, [id]: { open: !cur.open } } });
+  toggleTermStripFor(id);
 }
 
 const TAB_COMMANDS: Command[] = [

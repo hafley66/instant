@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { enrichRows, parseMailNdjson, parseMailRegistry } from "./0_mail";
+import {
+  enrichRows,
+  mailAgentIdFor,
+  parseMailLog,
+  parseMailNdjson,
+  parseMailRegistry,
+} from "./0_mail";
 import type { HarnessTraceSeed } from "./0_types";
 
 const dispatchLine = JSON.stringify({
@@ -36,6 +42,48 @@ describe("parseMailNdjson", () => {
 
   it("returns empty for empty input", () => {
     expect(parseMailNdjson("")).toEqual([]);
+  });
+});
+
+describe("ruled-envelope migration", () => {
+  const ruled = JSON.stringify({
+    id: "m-1",
+    from: "coordinator",
+    to: "lane-a",
+    from_timestamp: "2026-08-03T01:00:00Z",
+    to_timestamp: "2026-08-03T01:05:00Z",
+    kind: "request",
+    reply_to: null,
+    body: "read CONTRACT.md",
+    ref: null,
+  });
+
+  it("parseMailLog reads the ruled envelope, ack state included", () => {
+    const [message] = parseMailLog(ruled);
+    expect(message.from_timestamp).toBe("2026-08-03T01:00:00Z");
+    expect(message.to_timestamp).toBe("2026-08-03T01:05:00Z");
+  });
+
+  // The trace panel's join predates the ruling: it still reads `ts`, which the
+  // projection fills from from_timestamp.
+  it("parseMailNdjson projects ts from from_timestamp for the panel join", () => {
+    expect(parseMailNdjson(ruled)[0].ts).toBe("2026-08-03T01:00:00Z");
+    expect(parseMailNdjson(dispatchLine)[0].ts).toBe("2026-08-02T01:00:00Z");
+  });
+
+  it("enrichRows joins a ruled envelope with no `ts` field at all", () => {
+    const [row] = enrichRows([seed("sess-9")], parseMailNdjson(ruled), { "lane-a": "sess-9" });
+    expect(row.id).toBe("m-1");
+    expect(row.why).toBe("read CONTRACT.md");
+  });
+});
+
+describe("mailAgentIdFor", () => {
+  it("resolves a session id back to the mailbox agent name, else itself", () => {
+    const registry = { "lane-a": "sess-9", "lane-b": "sess-7" };
+    expect(mailAgentIdFor(registry, "sess-7")).toBe("lane-b");
+    expect(mailAgentIdFor(registry, "sess-none")).toBe("sess-none");
+    expect(mailAgentIdFor({}, "sess-9")).toBe("sess-9");
   });
 });
 

@@ -10,8 +10,13 @@ import { activePanelId, addTermPanel, mountReactDock } from "../src/reactdock";
 import { store } from "../src/state";
 import { setHomeDir } from "../src/core";
 import { wireContextMenu } from "../src/ctxmenu";
+import { installKeymap } from "../src/keymap";
+import { toggleTermStripFor } from "../src/plugins/harnessTrace/InTabStrip";
 
 setHomeDir("/Users/e2e");
+// ?term=<sid> mounts the terminal for another session id: "s3" has no tmux row
+// and no related agent session, which is the fresh-terminal summon case.
+const TERM_SID = new URLSearchParams(location.search).get("term") ?? "s1";
 function SessionsPanel(_props: IDockviewPanelProps) {
   return createElement("div", { "data-testid": "sessions-panel" }, "Sessions");
 }
@@ -25,9 +30,10 @@ registerHarnessTracePlugin();
 const w = window as Window & { __dockStripOpened?: string };
 setDockStrip({ onOpen: (name) => { w.__dockStripOpened = name; } });
 
-// Two tmux sessions: s1 rooted at the claude parent + subagent cwd, s2 rooted
-// at the other tree's cwd. The panel's terminal sid is "s1", so the in-tab
-// strip must keep tree 1 (joined to s1) and drop tree 2 (joined to s2).
+// Two tmux sessions: s1 rooted at this tab's claude cwd, s2 rooted at the other
+// tree's cwd. The terminal's sid is "s1", so the strip keeps the externals of
+// tree 1 (the opencode lane and its subagent), hides tree 1's claude rows (the
+// tab's own TUI lists those), and drops tree 2 until the scope widens.
 store.set({
   sessions: [
     { name: "s1", windows: 1, attached: true, activity: 1, created: 1, paths: ["/Users/e2e/projects/demo"], commands: ["claude"] },
@@ -39,6 +45,12 @@ store.set({
 mountReactDock(document.getElementById("dock")!);
 initRail();
 wireContextMenu(() => []);
+// The production binding of the Toggle Relations Strip command, running the
+// production body against this page's terminal (the focused-terminal lookup is
+// main.ts's job and has no dock chrome here).
+installKeymap([
+  { id: "term.strip", keys: ["$mod+Shift+Period"], run: () => toggleTermStripFor(TERM_SID) },
+]);
 
 // Wait for the dock to initialize, then add a terminal panel for session "s1"
 // with a stub element standing in for the xterm node, so TerminalPanel mounts
@@ -50,7 +62,7 @@ const attempt = () => {
   }
   const stub = document.createElement("div");
   stub.setAttribute("data-testid", "term-stub");
-  stub.textContent = "s1 xterm";
-  addTermPanel("s1", "s1", stub);
+  stub.textContent = `${TERM_SID} xterm`;
+  addTermPanel(TERM_SID, TERM_SID, stub);
 };
 setTimeout(attempt, 20);

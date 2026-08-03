@@ -1,85 +1,104 @@
-# CONTRACT: harness-trace panel (cross-harness session trace)
+# CONTRACT: the subagent tree as a bottom subpanel of the terminal tab
 
-Seeded by the coordinator. The lab implements exactly this; deviations are
-reported in REPORT.md, never improvised.
+Base: branch lab/stripsub at 57560ff (= a35ad6a + lazy tree + mail bus,
+plugin vitest green at 68/68 there). FIRST action: `git merge --ff-only
+57560ff` (must be a no-op; STOP AND REPORT on failure). Never spawn
+subagents. No push. Commit on lab/stripsub. Deliverable = REPORT.md at
+worktree root (if the Write tool refuses it, return the content as text;
+never work around the refusal).
 
-## What the panel is
+## User words (verbatim, this is the whole point)
+"i want a tmux panel showing a bottom table subpanel like how the files
+work, i do not want to see a lone table, that is the exact opposite of
+what im asking for"
+and, pressing the toggle hotkey today: "im hitting the subagent view
+hotkeys and nothing is showing".
+And the ruling correction, which OVERRIDES anything below that
+contradicts it: "its ur tui table of known claude code agents, we dont
+need to manage claude code agents from outside claude code. see those 5
+shells? i want to know how many actual sub agent shells going on in a
+view that is summonable UNDERNEATH the claude code native agents list
+(which is also just bottom of this tab) so i can pretend to 'extend' it
+as a bottom bar for external subagents."
 
-One new instant panel, id `harness-trace`, showing every interactive agent
-session dispatched across the four harnesses (claude, opencode, codex, kimi):
-which session, from which harness, ran for whom, when, and why, with liveness.
-It is a normal dockview panel (the user docks it at the bottom themselves);
-NO new global chrome, footer, or statusbar elements — index.html shows the app
-has none and this lab does not introduce one.
+Meaning: claude code's own TUI already renders its agent list at the
+bottom of its output inside the tab. The strip must NOT duplicate that:
+it EXCLUDES the tab's own claude session and its claude-native
+subagents. It shows ONLY the externals claude code cannot show —
+opencode/codex/kimi sessions and tmux lanes related to this tab (via
+dispatch edges, registry, cwd/tmux join) — as a slim bottom bar that
+visually reads as one more section under the native agent list. The bar
+label carries the live count ("N external shells"). The standalone
+HarnessTracePanel page stays untouched (no deletions without user
+word); this strip is the real home.
 
-## Row model (frozen)
+## Ownership note (changed since earlier contracts)
+src/main.ts and src/plugins/harnessTrace/InTabStrip.tsx are YOURS in
+this worktree. The lane that owned them died without touching them
+(verified: its worktree diff has no InTabStrip.tsx and no main.ts).
+Everything in the worktree is yours.
 
-```ts
-export interface HarnessTraceRow {
-  id: string;                 // session id (or dispatch envelope id when known)
-  harness: "claude" | "opencode" | "codex" | "kimi";
-  sessionId: string;
-  from: string;               // who dispatched it ("user" when unknown)
-  why: string;                // dispatch reason / brief first line ("" when unknown)
-  ts: string;                 // start time, ISO
-  lastActivity: string;       // ISO, from session store mtime/db
-  status: "live" | "idle" | "done" | "dead";
-  cwd: string;                // tildified, display-ready (TmuxRow.pwd precedent)
-}
-```
+## Known bugs to fix (diagnosed by the coordinator, verify then fix)
+1. main.ts toggleTermStrip (lines ~129-135): absent entry defaults
+   `{ open: true }` and the toggle writes `!cur.open`, so the FIRST
+   hotkey press on a fresh terminal writes open:false — summoning feels
+   dead. Fix: an absent entry means the strip is not visible (because of
+   bug 2), so the first press must summon: write `{ open: true }` when
+   absent, flip only when an entry exists.
+2. InTabStrip.tsx:39: `visible = open && (filtered.length > 0 ||
+   !!current)` renders NOTHING on explicit summon when there are zero
+   related rows. Fix: an explicit store entry with open:true always
+   renders the shell; the empty state shows the tab's sid and a short
+   "no related sessions" hint (the sid is diagnostic: tmux-opened tabs
+   have sid == tmux session name, plain tabs may not, and the hint tells
+   the user which case they are in).
 
-## Filter rule (frozen)
+## The upgrade (the actual ask)
+Replace the strip's flat filtered `AgentStripTable` body with the SAME
+lazy tree the trace page got: `indexAgentTree` + `materializeAgentTree`
++ TreeTable with twisties (see HarnessTracePanel.tsx on this branch for
+the working wiring), with the link (subagent/dispatch) and status
+columns. Behavior:
+- Default scope: EXTERNAL sessions related to this tab — trees joined to
+  this terminal's tmux session (the existing filterForestByTmux) MINUS
+  every claude-harness row belonging to this tab's own session and its
+  claude-native subagents (the TUI shows those already). PLUS a control
+  to widen to all external roots (the user wants to find opencode lanes
+  and jump to them even when the cwd join fails).
+- Row click keeps today's behavior: join the tmux session if the row has
+  one, push the agent-session view.
+- Render the mail-preview view when it is the router top
+  (busmail's missing leg 3):
+  `current?.kind === "mail-preview"` renders `<MailPreview .../>`
+  instead of the table. Add the mail row action that pushes it (the
+  re-anchoring the busmail REPORT section 5 describes, now in the strip
+  body's row actions rather than the standalone page).
+- Match the files-subpanel interaction pattern where it applies
+  (src/main.ts toggleTermSidebar + the files plugin,
+  src/plugins/files/1_FileTree.tsx): per-terminal persisted open state,
+  height behavior, and the onLayout refit contract already in
+  InTabStrip.
+- Cap and scroll stay as today (240px, auto-height).
 
-Claude Code subagent sessions spawned BY Claude Code do not render (they have
-their own TUI). Determine the marker empirically from ~/.claude/projects
-session files (candidates: sidechain flags, subagents/ paths). If no reliable
-marker is found, STOP that sub-goal and record what was tried in REPORT.md;
-do not guess a heuristic silently.
+## Style laws (repo)
+- Interfaces in 0_types.ts (append at end). Comment budget: constraints
+  only. Colocated consistency. Frozen clock in any e2e rendering
+  relTime. Playwright on a private port with reuseExistingServer:false
+  (4173 is poisoned by sibling worktrees; pick an unused port).
 
-## Data sources, in precedence order
+## Gates (outputs in REPORT.md)
+- npx tsc --noEmit (one pre-existing plugin.test.ts error known; no new)
+- npx vitest run src/plugins/harnessTrace (green, plus new cases for the
+  toggle-summon fix and the empty shell)
+- npx vitest run (base is 4 failed panelZoom pre-existing | rest pass;
+  no new failures)
+- Playwright: extend/replace e2e/dock-strip-in-tab.spec.ts — receipts:
+  (a) fresh terminal, hotkey once -> shell appears with sid + hint
+  (the bug-1+2 fix, fail-first: show it red at base),
+  (b) related sessions -> lazy tree with twisties expands under the
+  term, (c) mail action pushes and MailPreview renders in the strip,
+  (d) back pops to the tree. PNG of (b) and (c), paths in REPORT.md.
 
-1. Dispatch ledger (who/when/why): `~/.agent/mail/*.ndjson` envelopes
-   `{id, from, to, ts, kind, reply_to, body, ref}` — may be EMPTY or absent
-   today (the bus is designed, not built). The panel renders rows without it;
-   ledger rows enrich `from`/`why` by joining on session where possible.
-2. Session enumeration + liveness: the existing rust readers in
-   src-tauri/src/harness.rs (claude_sessions :24, opencode_sessions :59,
-   codex_sessions :93, kimi_sessions :117, commands harness_sessions /
-   harness_session :149-166). If Vec<String> payloads are too thin for the row
-   model, add ONE new tauri command (e.g. harness_trace_rows) in harness.rs
-   following its existing style, register it in ipc/commands.json, and run
-   `corepack pnpm@10.12.4 run api:generate` (generated/native.ts is
-   generated-only, header says do not hand-edit).
-3. cass: per-row "trace" action uses the existing cass commands
-   (cass_status ledger.rs:103, cass_swarm_status :114) and/or opens a cass
-   search for the session id; reuse the cass plugin surface
-   (src/plugins/cass/index.ts) — do not shell to cass from the frontend.
-
-## Refresh
-
-Refresh-on-show like TmuxPanelV2 (tablepanels.tsx:215) PLUS a live leg:
-claimFsWatch (src/fsWatch.ts:10-29, rust fs_watch.rs) on ~/.agent/mail when it
-exists. No polling loops.
-
-## Repo laws that bind this lab (from AGENTS.md, verified)
-
-- Rows render with TreeTable (src/treetable.tsx) copying the
-  tablepanels.tsx column-def + bridge shape (TmuxRow/TMUX_COLUMNS/setTmuxPanel
-  precedent at :15/:56/:51). No hand-rolled lists. No third table impl.
-- One panel per file, files under ~500 lines.
-- Registration: new plugin dir src/plugins/harnessTrace/ mirroring
-  src/plugins/cass/index.ts (registerPlugin({id, panels:[...]})), plus ONE
-  line in src/main.ts main() beside registerCassPlugin() (main.ts:238-242).
-  Rail/dock/palette pick it up from the registry; touch nothing else there.
-- Persisted panel state via readPluginState/savePluginState
-  (src/pluginState.ts:6-16) under id "harness-trace".
-- NEVER run `just dev`. Verification uses `just check`, `just build`,
-  `just cargo-check`; `just dev-safe` only if a live look is required.
-
-## Gates (all must pass, receipts in REPORT.md)
-
-- `just check` (api:check + tsc strict)
-- `just build`
-- `just cargo-check` (only compiles rust; cold worktree may be slow — record
-  the time, do not abort for slowness)
-- `just test` if any code you touched has vitest coverage
+## REPORT.md sections
+bug receipts (red at base) / tree-in-strip wiring / widen control /
+mail render / gates / PNG paths.

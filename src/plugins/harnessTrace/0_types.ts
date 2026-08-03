@@ -45,6 +45,20 @@ export interface HarnessTraceRow {
 // the seam from rust (subagent children); "dispatch" is attached later.
 export type HarnessTraceSeed = Omit<HarnessTraceRow, "from" | "why">;
 
+// Parent -> children adjacency over the frozen node set, built once per load.
+// The trace panel materializes only the expanded branches from it, so a row's
+// children cost nothing until its twisty opens.
+export interface IAgentTreeIndex {
+  // Nodes with no parent, plus orphans whose parentId is absent from the set.
+  roots: AgentSessionNode[];
+  // Direct children of a node id; empty array when it has none.
+  childrenOf(id: string): AgentSessionNode[];
+  // Whether a node has at least one child (drives the twisty before load).
+  hasChildren(id: string): boolean;
+  // Every node in the index, roots and descendants (for the row count).
+  size: number;
+}
+
 // One dispatch-bus envelope (~/.agent/mail/*.ndjson). The bus is designed, not
 // built yet, so every field is validated on the wire.
 export interface MailEnvelope {
@@ -82,4 +96,181 @@ export interface ITermRouter {
   canGoBack(sid: string): boolean;
   // React subscription: fires after any push/back mutates a stack.
   subscribe(listener: () => void): () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Message bus (2026-08-03 bus ruling). MailEnvelope above predates it: its
+// single `ts` field is read as a from_timestamp fallback for pre-ruling
+// fixtures, and 0_mail.ts still projects that shape for the trace panel.
+// ---------------------------------------------------------------------------
+
+// The kinds `hail` can mint. The parser accepts any string on the wire, so
+// pre-ruling rows ("dispatch") survive a read.
+export type MailKind = "request" | "result" | "note";
+
+// One ruled envelope. Wire keys are the ruling's JSON verbatim; the relational
+// reading of the same row is messages(id, from_id=from, to_id=to,
+// from_timestamp, to_timestamp, kind, reply_to, body, ref).
+// to_timestamp null = unacked; it is filled only by a cass hit in the
+// recipient's transcript, never by the sender.
+export interface IMailMessage {
+  id: string;
+  from: string;
+  to: string;
+  from_timestamp: string;
+  to_timestamp: string | null;
+  kind: string;
+  reply_to: string | null;
+  body: string;
+  ref: string | null;
+}
+
+// What `hail` hands the store to mint a row: the clock and the id generator are
+// the caller's (edge) business, so the store stays pure and vitest-deterministic.
+export interface IMailSend {
+  id: string;
+  from: string;
+  to: string;
+  from_timestamp: string;
+  kind: MailKind;
+  body: string;
+  reply_to?: string | null;
+  ref?: string | null;
+}
+
+// One line of an agent's queue: the message, which way it went for that agent,
+// and its indent in the reply_to thread.
+export interface IMailQueueRow {
+  message: IMailMessage;
+  direction: "in" | "out";
+  depth: number;
+}
+
+// Pure fold surface over the mailbox log. Every method takes the parsed rows;
+// file IO (append/read) and cass live at the edges (scripts/bus.ts).
+export interface IMailStore {
+  // Parse NDJSON; malformed lines and rows without id/to are skipped.
+  parse(text: string): IMailMessage[];
+  // One NDJSON line, ruled key order, no trailing newline.
+  line(message: IMailMessage): string;
+  // Append-only fold: latest row per id wins for content, but to_timestamp is
+  // monotone (first non-null kept) so an at-least-once resend cannot unack.
+  // Result keeps first-appearance order.
+  fold(rows: IMailMessage[]): IMailMessage[];
+  inbox(rows: IMailMessage[], agentId: string): IMailMessage[];
+  outbox(rows: IMailMessage[], agentId: string): IMailMessage[];
+  unacked(rows: IMailMessage[]): IMailMessage[];
+  // Every message sharing a reply_to root with `id`, oldest first.
+  thread(rows: IMailMessage[], id: string): IMailMessage[];
+  // Hops from this message up to its reply_to root (0 = a root).
+  replyDepth(rows: IMailMessage[], id: string): number;
+  // One agent's whole queue, both directions interleaved oldest first: what
+  // MailPreview renders, so the view holds no fold of its own.
+  queue(rows: IMailMessage[], agentId: string): IMailQueueRow[];
+  send(input: IMailSend): IMailMessage;
+  ack(message: IMailMessage, toTimestamp: string): IMailMessage;
+}
+
+// One routable agent in registry.json beside the mail files: which harness
+// session receives its mail (cass ack scope) and which tmux session the send
+// leg types into. tmux null = no pane; the message stays queued.
+export interface IMailAgent {
+  id: string;
+  sessionId: string;
+  harness: Harness | null;
+  tmux: string | null;
+  sourcePath: string | null;
+}
+
+// registry.json parsed: agent id -> route. The legacy string form
+// ("lane-a": "sess-9") reads as a sessionId with no tmux/source path.
+export type IMailDirectory = Record<string, IMailAgent>;
+
+export interface IMailDirectoryReader {
+  parse(text: string): IMailDirectory;
+  agent(directory: IMailDirectory, agentId: string): IMailAgent | null;
+}
+
+// One cass search hit, the fields the ack sweep reads.
+export interface IMailCassHit {
+  source_path: string;
+  workspace: string;
+  agent: string;
+  line_number: number;
+}
+
+// Transport arg builders for the two legs, kept pure so the CLI shell is a
+// spawn and nothing else.
+export interface IMailLeg {
+  // argv vectors (after "tmux") that type the body into the agent's pane:
+  // a literal write then Enter. null = the agent has no pane.
+  tmuxSendArgs(agent: IMailAgent, body: string, socket: string | null): string[][] | null;
+  // argv (after "cass") proving the message reached a transcript.
+  cassSearchArgs(message: IMailMessage): string[];
+  // Hits scoped to this agent's session/source path.
+  cassHits(agent: IMailAgent, robotJson: string): IMailCassHit[];
+}
+
+// The frontend's read side of the mailbox: list_dir + read_text over the mail
+// dir, parsed by MailStore/MailDirectory. Read-only by construction — the send
+// and ack legs are out-of-process (scripts/bus.ts).
+export interface IMailbox {
+  messages: IMailMessage[];
+  directory: IMailDirectory;
+}
+
+export interface IMailboxReader {
+  read(dir: string): Promise<IMailbox>;
+}
+
+// A mail-preview view: one agent id's queue. Append-only companion to TermView
+// (another lane owns that union's lines); 3_router.ts widens the shared router.
+export interface IMailPreviewView {
+  kind: "mail-preview";
+  agentId: string;
+}
+
+export type TermViewAny = TermView | IMailPreviewView;
+
+// The shared router seen through the wider view union.
+export interface ITermViewRouter {
+  push(sid: string, view: TermViewAny): void;
+  back(sid: string): TermViewAny | null;
+  current(sid: string): TermViewAny | null;
+  canGoBack(sid: string): boolean;
+  subscribe(listener: () => void): () => void;
+}
+
+// ---------------------------------------------------------------------------
+// In-tab strip policy. state.ts persists TermStripState with the same shape;
+// this module-local reading keeps the pure rules free of the store import.
+// ---------------------------------------------------------------------------
+
+// A terminal's persisted strip entry. Absent (null) = never toggled on this
+// terminal; present = the user summoned or dismissed it explicitly.
+export interface ITermStripEntry {
+  open: boolean;
+}
+
+// How wide the strip casts. "related" = trees joined to this terminal's tmux
+// session; "all" = every external session, for when the cwd join misses the
+// lane the user is looking for.
+export type StripScope = "related" | "all";
+
+export interface IStripPolicy {
+  // The entry a toggle press writes. Absent means the strip is not on screen,
+  // so the first press summons instead of closing.
+  toggle(entry: ITermStripEntry | null): ITermStripEntry;
+  // Whether the strip's shell renders. An explicit open entry always renders
+  // (zero rows shows the empty state); an absent entry auto-appears only when
+  // there is something to show.
+  visible(entry: ITermStripEntry | null, rowCount: number, hasCurrent: boolean): boolean;
+  // The sessions claude code's own agent list already shows at the bottom of
+  // this tab: the claude session joined to this terminal plus its claude-native
+  // subagent descendants. The strip must not duplicate them.
+  nativeIds(nodes: AgentSessionNode[], sid: string): Set<string>;
+  // The strip's row set: everything in scope minus nativeIds. Dropping a native
+  // parent promotes its external children to roots (indexAgentTree's orphan
+  // law), which is how a dispatched lane surfaces as a top-level shell.
+  external(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
 }

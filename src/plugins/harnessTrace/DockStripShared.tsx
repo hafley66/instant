@@ -13,7 +13,7 @@ import { enrichRows } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession } from "./2_join";
-import type { HarnessTraceSeed, AgentSessionNode } from "./0_types";
+import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
 
 export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
   {
@@ -94,7 +94,7 @@ export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
   },
 ];
 
-function stripFilter(r: AgentTreeNode, q: string): boolean {
+export function stripFilter(r: AgentTreeNode, q: string): boolean {
   const s = q.toLowerCase();
   return (
     r.harness.includes(s) ||
@@ -132,17 +132,22 @@ function attachTmux(nodes: AgentSessionNode[]): AgentSessionNode[] {
 }
 
 export interface AgentTreeState {
+  // The tmux-joined flat node set, for hosts that index it themselves.
+  nodes: AgentSessionNode[];
   tree: AgentTreeNode[];
+  // Mail agent name -> session id, for row actions that address the mailbox.
+  registry: MailRegistry;
   error: string;
   load: () => void;
 }
 
 // The shared data path: rust rows + mail ledger -> frozen nodes -> tmux join ->
 // tree. Both strips call this; DocStripPanel adds a mail fs-watch live leg on
-// top and InTabStrip filters the result by the terminal's tmux session.
+// top and InTabStrip indexes the flat nodes into its own external-only tree.
 export function useAgentTree(): AgentTreeState {
   useApp();
   const [flat, setFlat] = useState<AgentSessionNode[]>([]);
+  const [registry, setRegistry] = useState<MailRegistry>({});
   const [error, setError] = useState("");
   const load = useCallback(() => {
     invoke<HarnessTraceSeed[]>("harness_trace_rows")
@@ -150,6 +155,7 @@ export function useAgentTree(): AgentTreeState {
         const mail = await loadMailLedger();
         const flatRows = enrichRows(seeds, mail.envelopes, mail.registry);
         setFlat(toAgentNodes(flatRows, mail.envelopes, mail.registry));
+        setRegistry(mail.registry);
         setError("");
       })
       .catch((reason: unknown) => setError(String(reason)));
@@ -157,8 +163,8 @@ export function useAgentTree(): AgentTreeState {
   useEffect(() => {
     load();
   }, [load]);
-  const tree = buildAgentTree(attachTmux(flat));
-  return { tree, error, load };
+  const nodes = attachTmux(flat);
+  return { nodes, tree: buildAgentTree(nodes), registry, error, load };
 }
 
 export interface AgentStripTableProps {

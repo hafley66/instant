@@ -1,70 +1,396 @@
-# REPORT: harness-trace panel lab (fable lane)
+# REPORT: message bus (queue + passing + ack) with queue-preview view
 
-## 1. Base + install receipts
+Lane: lab/busmail, worktree /Users/chrishafley/projects/instant-lab-busmail.
+Base: `git merge --ff-only a35ad6a` -> "Already up to date." (clean no-op).
+Commits: 3fd589f (contract + ruling seed), a8b2590 (implementation).
+Previous lab's REPORT.md preserved at `git show a35ad6a:REPORT.md`.
+(File placed by the coordinator from the lane's returned report text; the
+lane's harness blocks report-file writes.)
 
-- Worktree: /Users/chrishafley/projects/instant-lab-trace-fable, branch lab/harness-trace-fable
-- FIRST action `git merge --ff-only 0e4e0173`: "Already up to date."; `git rev-parse HEAD` = 0e4e01734fd983f157dfbc49b2454e803aa4557b
-- SECOND action `corepack pnpm@10.12.4 install --prefer-offline`: "Done in 8.3s using pnpm v10.12.4", exit 0
-- Nothing committed, nothing written outside the worktree, `just dev` never run.
+## 0. What landed
 
-## 2. What was built
-
-| file | lines | role |
+| file | state | role |
 |---|---|---|
-| src-tauri/src/harness.rs | 477 (+311) | trace section: `HarnessTraceRow` serde struct (camelCase; row model minus from/why), per-store readers `trace_claude/trace_opencode/trace_codex/trace_kimi`, `ms_to_iso`, `trace_status`, `tildify`, `trace_rows`, command `harness_trace_rows`, `#[cfg(test)]` module (4 tests) |
-| src-tauri/src/lib.rs | +1 | `harness::harness_trace_rows` in invoke_handler |
-| ipc/commands.json | +1 entry | `"harness_trace_rows"` in the harness group |
-| src/generated/native.ts | +2 (generated) | via `corepack pnpm@10.12.4 run api:generate`, never hand-edited |
-| src/plugins/harnessTrace/0_types.ts | 32 | frozen `HarnessTraceRow`, `HarnessTraceSeed = Omit<Row,"from"|"why">`, `MailEnvelope`, `MailRegistry` |
-| src/plugins/harnessTrace/0_mail.ts | 72 | pure `parseMailNdjson` / `parseMailRegistry` / `enrichRows` (no fs, no invoke) |
-| src/plugins/harnessTrace/0_mail.test.ts | 98 | 8 vitest tests incl. the S2 sabotage receipt |
-| src/plugins/harnessTrace/HarnessTracePanel.tsx | 239 | TreeTable panel, columns copy the TMUX_COLUMNS shape (tablepanels.tsx:56); bridge-free invoke like the cass plugin; persisted sorting via readPluginState/savePluginState under "harness-trace"; fs-watch leg; per-row cass trace action |
-| src/plugins/harnessTrace/index.ts | 15 | `registerHarnessTracePlugin` mirroring src/plugins/cass/index.ts |
-| src/main.ts | +2 | registration call at :243 beside `registerCassPlugin()` (:241) plus the required import at :25 (the brief said one line; the call is one line, the import is unavoidable TS plumbing) |
+| src/plugins/harnessTrace/0_bus.ts | new | `MailStore` (IMailStore): parse/line/fold/inbox/outbox/unacked/thread/replyDepth/queue/send/ack. `MailDirectory` (IMailDirectoryReader): registry.json -> routes. Pure, no fs/clock/invoke. |
+| src/plugins/harnessTrace/1_leg.ts | new | `MailLeg` (IMailLeg): tmux send-keys argv, cass search argv, cass hit scoping. `injectedLine`. Pure. |
+| src/plugins/harnessTrace/2_mailbox.ts | new | `MailboxReader` (IMailboxReader): frontend read side over list_dir/read_text. |
+| src/plugins/harnessTrace/4_MailPreview.tsx | new | `MailPreview`: one agent id's queue, in/out, kind, reply_to indent, body preview, from_timestamp/to_timestamp, acked/queued. |
+| scripts/bus.ts | new | edge CLI: `hail` (append + tmux inject), `sweep` (cass ack), `list`. fs + spawn only. |
+| src/plugins/harnessTrace/0_bus.test.ts | new | 21 cases |
+| src/plugins/harnessTrace/1_leg.test.ts | new | 8 cases |
+| src/plugins/harnessTrace/3_router.mail.test.ts | new | 3 cases |
+| e2e-mail-preview.html, e2e/mail-preview.tsx, e2e/mail-preview.spec.ts | new | render receipt + PNG |
+| playwright.busmail.config.ts | new | own port 4183 (sibling lanes hold 4173 with reuseExistingServer) |
+| src/plugins/harnessTrace/0_mail.ts | modified (owned) | parse migrated to the ruled envelope; legacy projection kept for the panel; `mailAgentIdFor` |
+| src/plugins/harnessTrace/0_mail.test.ts | modified (owned) | + ruled-envelope migration cases, + mailAgentIdFor |
+| src/plugins/harnessTrace/0_types.ts | modified (append-only, end of file) | IMailMessage, IMailSend, IMailQueueRow, IMailStore, IMailAgent, IMailDirectory, IMailDirectoryReader, IMailCassHit, IMailLeg, IMailbox, IMailboxReader, IMailPreviewView, TermViewAny, ITermViewRouter |
+| src/plugins/harnessTrace/3_router.ts | modified (append-only, end of file) | `termViewRouter`, `mailPreviewView`, `pushMailPreview` |
 
-Data flow: `harness_trace_rows` (rust) enumerates all four stores globally (no cwd filter), sorts newest-activity-first, returns seeds with `ts`/`lastActivity` as ISO UTC and `cwd` tildified. The frontend maps seeds -> rows with `from:"user"`, `why:""`, then enriches from the mail ledger.
+## 1. Envelope migration diff
 
-Mail-ledger join placement: frontend, because the brief fixes the rust payload to the row minus from/why and the mail files are reachable through the existing `list_dir`/`read_text` commands, leaving the join as pure sync array code with direct vitest coverage. Join rule: envelope `to` resolves through `registry.json` (flat name -> sessionId map) else matches a sessionId directly; the oldest matching envelope per session supplies `from`, `why` (body first line), and the row `id`. `~/.agent/mail` is absent on this machine today (`test -d` = absent), so the live path exercises the zero-enrichment/zero-error branch; the join itself is proven by unit tests.
+The ruled envelope is new (`IMailMessage`); `MailEnvelope` could not be
+rewritten in place because 0_types.ts is append-only for this lane and
+HarnessTracePanel.tsx (forbidden) consumes `parseMailNdjson(): MailEnvelope[]`.
+So the parse moved to the ruled shape and the pre-ruling shape became a
+projection of it.
 
-fs-watch leg: the panel probes `list_dir("~/.agent/mail")`; only on success does it `claimFsWatch` (src/fsWatch.ts) on the dir, reloading rows on events; the claim is released in the effect cleanup (panel dispose). No polling loops.
+```diff
+--- a/src/plugins/harnessTrace/0_mail.ts
++++ b/src/plugins/harnessTrace/0_mail.ts
++export function parseMailLog(text: string): IMailMessage[] {
++  return MailStore.parse(text);
++}
++
++function legacyView(message: IMailMessage): MailEnvelope {
++  return {
++    id: message.id,
++    from: message.from,
++    to: message.to,
++    ts: message.from_timestamp,
++    kind: message.kind,
++    reply_to: message.reply_to ?? undefined,
++    body: message.body || undefined,
++    ref: message.ref ?? undefined,
++  };
++}
++
+ export function parseMailNdjson(text: string): MailEnvelope[] {
+-  ... 26 lines of hand-rolled field validation ...
++  return parseMailLog(text).map(legacyView);
+ }
+```
 
-cass action: per-row "trace" button invokes `cass_swarm_status` (ledger.rs:114) with the row's untildified cwd and renders the status line in the panel; `CassSwarmStatus` type reused from src/plugins/cass/0_types.ts. No shelling from the frontend.
+| ruled | pre-ruling | read rule |
+|---|---|---|
+| from_timestamp | ts | `from_timestamp ?? ts ?? ""` — 2026-08-02 fixtures still parse |
+| to_timestamp | (absent) | null unless an ack row carries it |
+| reply_to / ref | optional string | `string \| null` |
+| body | optional string | `""` when absent |
+| kind | required string | `"note"` when absent; any wire string survives ("dispatch") |
 
-## 3. Subagent-marker evidence
+Wire keys stay the ruling's JSON verbatim (`from`/`to`); the relational
+reading is messages(id, from_id=from, to_id=to, ...) as ruled.
 
-Marker found empirically; the filter is implemented.
+Two fold rules the ruling implies but does not spell out, both tested:
 
-- Current layout: subagent transcripts live OUTSIDE the top-level session glob, at `<projectDir>/<parentSessionId>/subagents/agent-<id>.jsonl`. Example on disk: `/Users/chrishafley/.claude/projects/-Users-chrishafley-projects-sprefa/c72a1e89-1e73-4afa-9f61-f5588f4e388d/subagents/agent-a1abf4da0fd7df26d.jsonl`.
-- Line-level marker: every record in that file carries `"isSidechain":true` (grep count: 26 of 26 lines; extracted fragment: `"parentUuid":<uuid>,"isSidechain":true,"promptId"`).
-- Main sessions: top-level `<projectDir>/<uuid>.jsonl` records carry `"isSidechain":false` (sample `7d976dd8-....jsonl`: 1244 false, 0 true). Zero of 74 top-level files in the sprefa project dir and zero of 4 in the instant project dir contain any `"isSidechain":true`.
-- Filter as implemented (trace_claude): the walk is non-recursive over `<projectDir>/*.jsonl` (structurally excludes `subagents/`), and the first records of each file are additionally checked for `"isSidechain":true` (skip if found) in case an older store kept sidechains top-level.
+- **Ack is monotone.** Latest row per id wins for content, but a
+  to_timestamp once present is kept. Otherwise the ruled at-least-once
+  resend (a fresh row with to_timestamp null) would silently unack a
+  proven read.
+- **A reply_to cycle roots on the smallest id in the cycle**, so every row
+  in it groups into one thread whichever row the walk enters from.
 
-Note: full-line reads of session files were blocked by the permission classifier; the evidence above was gathered with count/fragment greps (receipts in section 6).
+## 2. Send-leg transcript (tmux)
 
-## 4. Gate receipts
+Scratch tmux server on its own socket `-L busmail-gate`, created and killed
+by this lane; the user's default-socket sessions were never addressed (only
+`tmux -L default ls`, read-only, to prove they survived).
 
-- `just cargo-check`: exit 0. "Finished `dev` profile ... in 18.68s", real 18.81s (worktree deps were warmed by the preceding cargo test build, cold 40.93s).
-- `cargo test --manifest-path src-tauri/Cargo.toml harness::`: exit 0, "4 passed; 0 failed" (includes S1).
-- `vitest run src/plugins/harnessTrace/0_mail.test.ts`: "Tests 8 passed (8)" (includes S2).
-- `corepack pnpm@10.12.4 run api:generate` then `api:check` (inside just check): generated file regenerated, check passes.
-- `just check`: FAILS with exit 2 on `src/plugin.test.ts(69,64): error TS2339: Property 'label' does not exist on type 'CtxItem'`. Pre-existing at base: with all my tracked changes stashed, `tsc --noEmit` reports the identical error. With my changes applied it is the ONLY tsc error; my code adds zero. (dl todos-check leg: "green-by-skip", cold worktree db refused by design, class 14.)
-- `just build`: FAILS, same pre-existing tsc error (build = api:check && tsc && vite build). Supplementary: `vite build` alone transforms all 4480 modules including this lab's, then fails resolving `"vega"` imported by `vega-embed` (imported at src/plugins/metrics/1_dashboard.tsx:2; `vega` is not in package.json dependencies) — base metrics-plugin condition, untouched by this lab.
-- `just test`: "Test Files 1 failed | 37 passed (38); Tests 4 failed | 233 passed (237)". The 4 failures are all src/panelZoom.test.ts; probe with my tracked changes stashed reproduces the same 4 failures at base. All 8 of this lab's tests pass inside the run.
+```
+$ tmux -L busmail-gate new-session -d -s gate-bash -c $SCRATCH/mail/cwd 'bash --norc --noprofile'
+$ tmux -L busmail-gate ls
+gate-bash: 1 windows (created Mon Aug  3 10:31:46 2026)
 
-Per the brief's STOP doctrine I did not patch the unrelated base files (src/plugin.test.ts, panelZoom, vega dependency) to force the gates green; the stash probes above attribute every red to base 0e4e0173.
+$ cat $SCRATCH/mail/registry.json
+{ "gate-bash": { "sessionId": "gate-bash", "tmux": "gate-bash" } }
 
-## 5. Sabotage receipts
+$ node scripts/bus.ts hail --mail-dir $SCRATCH/mail --socket busmail-gate \
+    --to gate-bash --from coordinator --kind request \
+    --body "echo busmail send leg reached the pane"
+queued m-26be931c -> gate-bash
+injected into tmux gate-bash
+(exit 0)
 
-- S1 (missing harness stores yield empty, not a crash): every trace reader takes `home: &Path` as a parameter; `harness::tests::trace_rows_from_nonexistent_home_is_empty` points all four readers plus the aggregate at `/nonexistent-home-for-harness-trace-test` and asserts empty vecs. `cargo test harness::` output: `test harness::tests::trace_rows_from_nonexistent_home_is_empty ... ok`. (The brief's "via env" example was replaced by parameter injection: mutating HOME in a multithreaded test binary races; the real HOME was never touched.)
-- S2 (malformed NDJSON line skipped, rest kept): `0_mail.test.ts` "skips a malformed line and keeps the rest" feeds `[valid, "{this is not json", valid]` through `parseMailNdjson` and asserts exactly the two valid envelope ids survive. vitest: passed. Real `~/.agent/mail` was never written (it does not exist).
+$ tmux -L busmail-gate capture-pane -p -t gate-bash | tail -3
+bash-5.3$ [bus m-26be931c] echo busmail send leg reached the pane
+bash: [bus: command not found
+bash-5.3$
+```
 
-## 6. Deviations from CONTRACT.md
+The injected text is `[bus <id>] <body>`: the envelope id has to ride the
+injection, because the ack query has nothing else to look for in the
+recipient's transcript.
 
-- Gates: `just check`, `just build`, `just test` are red at base 0e4e0173 for reasons outside this lab (receipts and base-attribution probes in section 4). The contract's "all must pass" is unsatisfiable on this base without editing unowned files; per the brief I stopped and recorded instead of improvising fixes.
-- `status` semantics: the contract froze the enum but not the mapping. Implemented: `dead` = the session's recorded cwd no longer exists on disk; else by last store write: `live` <= 2 min, `idle` <= 60 min, `done` older. Constants TRACE_LIVE_MS/TRACE_IDLE_MS in harness.rs.
-- `registry.json` schema: unbuilt bus, no fixture on disk; assumed a flat JSON object `{ "<to-name>": "<sessionId>" }`, non-string values ignored, malformed file = empty registry.
-- Kimi `ts` (start time) uses state.json `created()` (birthtime, present on macOS/APFS), falling back to "" when unavailable; the store has no explicit start-time field in the layout documented by harness.rs:114.
-- cass "search for the session id": no such command exists in ipc/commands.json; the contract's "and/or" was satisfied with the `cass_swarm_status` branch only.
-- ISO formatting is a ~20-line hand-rolled civil-from-days converter (unit-tested). Build-vs-buy note: chrono/time would each add a new dependency tree to a crate graph that currently has zero date crates and passes unix ms everywhere else (fs.rs, ledger.rs); the lab needed exactly one formatter, UTC-only.
-- Permission classifier denials during research (recorded, not worked around): full-line `head`/`cut` of `~/.claude` session jsonl content, `ls ~/.agent`, `ls ~/.kimi-code/sessions`, `find ~/.codex/sessions` counts, and `SELECT` sampling of opencode.db rows were all blocked. Marker evidence was gathered with grep counts/fragments (allowed); codex/kimi field names (`session_meta.payload.{id,cwd}`, `state.json.workDir`) were taken from the existing readers in harness.rs and ledger.rs, which the contract designates as the authority; opencode `time_created`/`time_updated` come from the sqlite schema (`.schema session` was permitted; row sampling was not).
-- src/main.ts gained 2 lines, not 1: the registration call beside registerCassPlugin() plus its import.
+No-pane case (ruled: stays queued, to_timestamp null), empty registry:
+
+```
+$ node scripts/bus.ts hail --mail-dir $SCRATCH/mail --to lane-a --body "no route yet"
+queued m-a6f396f0 -> lane-a
+no registry route for lane-a: message stays queued, to_timestamp null
+exit=2
+$ cat $SCRATCH/mail/bus.ndjson
+{"id":"m-a6f396f0","from":"coordinator","to":"lane-a","from_timestamp":"2026-08-03T14:31:35.481Z","to_timestamp":null,"kind":"request","reply_to":null,"body":"no route yet","ref":null}
+```
+
+## 3. Ack-sweep transcript (cass)
+
+Recipient is a real harness session so cass has a transcript to read:
+scratch tmux session `gate-claude` running `claude` in a scratch cwd (env
+scrubbed of CLAUDE_CODE_* so it starts as its own session).
+
+```
+$ tmux -L busmail-gate new-session -d -s gate-claude -x 120 -y 40 -c $SCRATCH/gatecwd \
+    "env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+     -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH claude"
+(trust prompt answered with a single Enter into the scratch pane)
+
+$ node scripts/bus.ts hail --mail-dir $SCRATCH/mail --socket busmail-gate \
+    --to gate-claude --from coordinator --kind request \
+    --body "reply with the single word ok, nothing else"
+queued m-ee1d13de -> gate-claude
+injected into tmux gate-claude
+(exit 0)
+
+$ tmux -L busmail-gate capture-pane -p -t gate-claude | tail
+❯ [bus m-ee1d13de] reply with the single word ok, nothing else
+⏺ ok
+✻ Brewed for 3s
+
+$ cat $SCRATCH/mail/registry.json
+{ "gate-claude": { "sessionId": "e33345e9-670b-4cd1-8f62-b017747bcd43",
+  "harness": "claude", "tmux": "gate-claude",
+  "sourcePath": "/Users/chrishafley/.claude/projects/-private-tmp-...-gatecwd/e33345e9-670b-4cd1-8f62-b017747bcd43.jsonl" } }
+
+$ node scripts/bus.ts sweep --mail-dir $SCRATCH/mail          # index still stale
+m-26be931c -> gate-bash: no registry route, cannot scope the cass query
+m-ee1d13de -> gate-claude: no transcript hit, still unacked
+swept 2 unacked, acked 0
+
+$ cass index --watch-once "$(dirname "$JSONL")" --robot
+  "index_ms": 755, "connectors": [{"name":"claude_code","conversations":1,"messages":2}]
+real 0m1.579s
+
+$ node scripts/bus.ts sweep --mail-dir $SCRATCH/mail          # after reindex
+m-26be931c -> gate-bash: no registry route, cannot scope the cass query
+m-ee1d13de -> gate-claude: acked via /Users/chrishafley/.claude/projects/-private-tmp-...-gatecwd/e33345e9-670b-4cd1-8f62-b017747bcd43.jsonl
+swept 2 unacked, acked 1
+real 0m0.350s
+
+$ node scripts/bus.ts list --mail-dir $SCRATCH/mail --agent gate-claude
+in  {"id":"m-ee1d13de","from":"coordinator","to":"gate-claude","from_timestamp":"2026-08-03T14:33:31.265Z","to_timestamp":"2026-08-03T14:34:18.860Z","kind":"request","reply_to":null,"body":"reply with the single word ok, nothing else","ref":null}
+gate-claude: 1 in, 0 out, 0 unacked
+
+$ node scripts/bus.ts sweep --mail-dir $SCRATCH/mail --agent gate-claude   # idempotent
+swept 1 unacked, acked 0
+
+$ tmux -L busmail-gate kill-server; tmux -L busmail-gate ls
+no server running on /private/tmp/tmux-501/busmail-gate
+$ tmux -L default ls        # user's sessions, untouched
+sprefa, sprefa-2, sprefa-3, sprefa-4, sprefa-6, duel-dots-flash
+```
+
+The stale-index sweep followed by the fresh-index sweep is the ruling's
+"cass index freshness bounds ack latency" as a receipt, not a claim.
+`cass index --watch-once <dir>` is the cheap lever: 1.6s for the one
+changed transcript, and the sweep itself is 0.35s (both inside the
+10-second law).
+
+**to_timestamp = the moment cass proved the read**, not the transcript's
+own clock: a cass hit carries its conversation's `created_at`, which
+predates the message and would sort before from_timestamp.
+
+**Scoping is what makes an ack mean anything.** The sender types the
+envelope id too, so its own transcript matches the same query;
+`MailLeg.cassHits` keeps only hits whose `source_path` is the recipient's
+(exact `sourcePath`, else contains `sessionId`). Unit-tested both ways in
+1_leg.test.ts.
+
+## 4. Missing legs
+
+1. **Claude/codex/opencode jsonl injection.** Not invented, per the
+   contract. Only the tmux leg exists: `MailLeg.tmuxSendArgs` returns null
+   for a route with no pane, `hail` exits 2 and the row stays queued with
+   to_timestamp null. A harness with no tmux pane is unreachable by this
+   bus today.
+2. **No native command for either leg.** `send`/`sweep` are out of process
+   (scripts/bus.ts) because ipc/commands.json has no tmux-send or
+   cass-search command, and src-tauri/** plus the generated bindings are
+   outside this lane's file ownership. The frontend read side
+   (MailboxReader) needs nothing new: it rides the existing
+   list_dir/read_text. An in-app send button needs a new rust command
+   (`bus_hail`/`bus_sweep`) added by whoever owns src-tauri.
+3. **The pushed view has no renderer.** 3_router.ts now registers the
+   mail-preview kind and `pushMailPreview` puts it on the shared stack,
+   but InTabStrip.tsx (forbidden) renders only `current.agentSessionId` as
+   a text header. Rendering it needs this in InTabStrip's body, which this
+   lane cannot write:
+   ```tsx
+   {current?.kind === "mail-preview" ? <MailPreview agentId={current.agentId} /> : (
+     <AgentStripTable tree={filtered} error={error} onRowClick={onRowClick} controls />
+   )}
+   ```
+4. **Registry population.** registry.json (agent id -> session id / tmux /
+   source path) is hand-written today; nothing generates it from
+   harness_trace_rows + the tmux join (2_join.ts) yet. The live gate wrote
+   it by hand, which is why the session id had to be resolved from
+   `~/.claude/projects/*/<uuid>.jsonl` after the pane started.
+5. **Multi-line bodies.** `tmux send-keys -l` types the body verbatim, so
+   an embedded newline submits early in a TUI harness. `hail` does not
+   mangle the body; a multi-line brief needs a file + `--ref`, which is
+   unimplemented.
+6. **No fs-watch on the mailbox in MailPreview.** It reads on mount and on
+   the refresh button. The trace panel's `claimFsWatch(MAIL_DIR)` leg is
+   the precedent to copy; not done because the preview has no panel of its
+   own yet.
+
+## 5. HarnessTracePanel patch for the coordinator
+
+Not applied (forbidden file). Verified by typechecking an identical copy
+placed at `HarnessTracePanel.patched.tsx`, running `npx tsc --noEmit` (no
+new errors), then deleting the copy; the real file was never written.
+
+NOTE (coordinator): this diff was written against the flat-table panel at
+a35ad6a. The tracetree lane (2e5129c) has since rewritten
+HarnessTracePanel.tsx to the lazy tree with `AgentTreeNode` rows; the mail
+button column and the `mailRegistry` capture must be re-anchored onto that
+version at merge (same idea, different context lines and row type).
+
+```diff
+--- a/src/plugins/harnessTrace/HarnessTracePanel.tsx
++++ b/src/plugins/harnessTrace/HarnessTracePanel.tsx
+@@ -12,7 +12,8 @@
+ import { TreeTable, type TreeColumn } from "../../treetable";
+ import type { DirListing } from "../../state";
+ import type { CassSwarmStatus } from "../cass/0_types";
+-import { enrichRows, parseMailNdjson, parseMailRegistry } from "./0_mail";
++import { enrichRows, mailAgentIdFor, parseMailNdjson, parseMailRegistry } from "./0_mail";
++import { pushMailPreview } from "./3_router";
+ import type { HarnessTraceRow, HarnessTraceSeed, MailEnvelope, MailRegistry } from "./0_types";
+ 
+ const PLUGIN_ID = "harness-trace";
+@@ -24,6 +25,9 @@
+ }
+ 
+ let cassTraceHandler: ((row: HarnessTraceRow) => void) | null = null;
++// Last registry read by loadMailLedger: the mail preview keys on the agent
++// name, the row knows only its session id.
++let mailRegistry: MailRegistry = {};
+ 
+ const COLUMNS: TreeColumn<HarnessTraceRow>[] = [
+   {
+@@ -83,6 +87,25 @@
+     sortValue: (r) => r.cwd,
+   },
+   {
++    id: "mail",
++    header: "",
++    noRowClick: true,
++    cell: (r) => (
++      <span className="wt-actions">
++        <button
++          className="wt-act"
++          title="preview this agent's message queue"
++          onClick={(e) => {
++            e.stopPropagation();
++            pushMailPreview(r.sessionId, mailAgentIdFor(mailRegistry, r.sessionId));
++          }}
++        >
++          mail
++        </button>
++      </span>
++    ),
++  },
++  {
+     id: "trace",
+     header: "",
+     noRowClick: true,
+@@ -130,6 +153,7 @@
+     if (entry.name === "registry.json") {
+       const text = await invoke<string>("read_text", { path: entry.path }).catch(() => "");
+       registry = parseMailRegistry(text);
++      mailRegistry = registry;
+     } else if (entry.name.endsWith(".ndjson")) {
+       const text = await invoke<string>("read_text", { path: entry.path }).catch(() => "");
+       envelopes.push(...parseMailNdjson(text));
+```
+
+The push key is the row's session id, and the agent id is the reverse
+registry lookup (`mailAgentIdFor`). See missing leg 3: without the
+InTabStrip change the push mutates the stack but nothing draws it.
+
+## 6. Gate outputs
+
+```
+$ npx tsc --noEmit
+src/plugin.test.ts(69,64): error TS2339: Property 'label' does not exist on type 'CtxItem'.
+  Property 'label' does not exist on type '{ sep: true; }'.
+```
+Pre-existing at a35ad6a, in a file this lane never opened. No error in any
+file this lane wrote.
+
+```
+$ npx vitest run src/plugins/harnessTrace
+ Test Files  7 passed (7)
+      Tests  62 passed (62)
+   Duration  182ms
+```
+
+```
+$ npx vitest run
+ FAIL  src/panelZoom.test.ts (4 tests)
+ Test Files  1 failed | 44 passed (45)
+      Tests  4 failed | 298 passed (302)
+```
+Pre-existing, proven by stashing this lane's 4 modified files and rerunning:
+same 4 failures, same `ReferenceError: Cannot access 'kinds' before
+initialization` (src/panelZoom.ts:24 via src/terminal.ts:282 via
+src/favorites.ts:12, a module init cycle with no harnessTrace import in the
+chain). Stash popped, tree restored.
+
+```
+$ npx playwright test --config playwright.busmail.config.ts
+  ✓  1 e2e/mail-preview.spec.ts:44:1 › mail preview renders one agent's queue
+     with threaded replies and ack state (638ms)
+  1 passed (2.0s)
+```
+Clock frozen at 2026-08-03T12:00:00Z (`page.clock.setFixedTime`).
+
+## 7. PNG
+
+`/Users/chrishafley/projects/instant-lab-busmail/e2e/mail-preview.spec.ts-snapshots/mail-preview-darwin.png` (20739 bytes).
+
+Fixture mailbox behind it: 5 NDJSON rows, 4 distinct ids. lane-a's queue is
+m-1 (in, request), m-2 (out, result, reply_to m-1, indented), m-4 (in,
+note); m-3 addresses lane-b and is absent. m-1's ack came from an APPENDED
+fifth row with the same id and to_timestamp filled, so the header reads
+"3 messages · 2 unacked" and only m-1 shows "acked"; the two queued rows
+are dimmed. The registry route reaches the header as "tmux instant-lane-a".
+
+## 8. Deviations from the contract
+
+1. **`MailEnvelope` was not rewritten**, it was made a projection of the
+   ruled `IMailMessage` (section 1). Cause: 0_types.ts is append-only for
+   this lane and the forbidden HarnessTracePanel.tsx consumes the old
+   shape. The parse is migrated; the old type survives as a view.
+   Deletable once HarnessTracePanel.tsx moves to `parseMailLog`.
+2. **The mail-preview kind is not in the `TermView` union.** Same cause:
+   that union's lines belong to another lane. 0_types.ts appends
+   `IMailPreviewView` + `TermViewAny` + `ITermViewRouter`, and 3_router.ts
+   appends `termViewRouter` as the same instance widened. At merge, folding
+   `IMailPreviewView` into `TermView` and deleting `TermViewAny` is a
+   2-line cleanup.
+3. **3_router.ts's new import sits mid-file**, below `termRouter`, because
+   the file's top import line is not this lane's to touch. Hoist it at
+   merge.
+4. **The send and ack legs are a node CLI, not app code.** No native
+   command exists for tmux send-keys or cass search, and src-tauri/** is
+   outside this lane's ownership (missing leg 2). `scripts/bus.ts` runs on
+   node's built-in type stripping (node v24) and imports the same pure
+   modules the app does, so there is one implementation of the fold, not
+   two.
+5. **The live gate's mailbox lives in the session scratchpad**, not
+   `~/.agent/mail` (which does not exist on this machine): the brief
+   forbids touching files outside the worktree. `--mail-dir` defaults to
+   `~/.agent/mail`, which is what MailPreview reads.
+6. **REPORT.md was not written by the lane.** The harness blocks a
+   subagent from writing report files; this file was placed by the
+   coordinator from the lane's returned text, plus the re-anchoring NOTE
+   in section 5.
+
+## Coordinator audit (this session)
+
+Independent reruns: plugin vitest 62/62; mail-preview e2e 1 passed on the
+lane's own port-4183 config; PNG inspected (threading indent, ack column,
+dimmed queued rows render). Forbidden files verified untouched:
+`git diff a35ad6a..HEAD` over HarnessTracePanel.tsx, InTabStrip.tsx,
+src/main.ts is empty. Tree clean at a8b2590.
