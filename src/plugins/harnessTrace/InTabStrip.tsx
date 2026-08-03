@@ -72,10 +72,12 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   }, [sid]);
 
   const visible = StripPolicy.visible(entry, index.size, !!current);
-  // The strip's appearance, the router's push/pop and a scope change all move
-  // the term slot's bottom edge, so refit the xterm on each.
+  // The strip's appearance AND disappearance, the router's push/pop and a
+  // scope change all move the term slot's bottom edge, so refit on each;
+  // refitting only when visible left the term holding the strip's height
+  // after a hide.
   useEffect(() => {
-    if (visible) onLayout();
+    onLayout();
   }, [visible, onLayout, current, scope, tree.length]);
 
   const columns = useMemo<TreeColumn<AgentTreeNode>[]>(
