@@ -58,3 +58,55 @@ swept 1 unacked, acked 0
 0
 ```
 -> bug 3: old row not skipped, no `expired` line.
+
+### 3. fixed behavior (scratch `-L busfix-gate`)
+Dispatch a lane from the fixed code:
+```
+$ node scripts/bus.ts dispatch --to gate-sleep-miss --cwd <...>/.gate/scratchcwd \
+    --cmd "sleep 30" --tmux gate-sleep-miss --socket busfix-gate \
+    --mail-dir .gate/mail --resolve-wait 0; echo $?
+dispatched m-1f938e1e -> gate-sleep-miss (tmux gate-sleep-miss)
+unresolved gate-sleep-miss: no opencode session for <...>/.gate/scratchcwd yet
+0
+```
+capture-pane now carries the stamped id (bug 1 fixed):
+```
+$ sleep 1; tmux -L busfix-gate capture-pane -p -t gate-sleep-miss
+[bus m-1f938e1e] dispatched: sleep 30
+```
+Envelope id matches the stamp (so cass can ack):
+```
+$ cat .gate/mail/bus.ndjson
+{"id":"m-1f938e1e","from":"coordinator","to":"gate-sleep-miss","from_timestamp":"2026-08-03T22:45:51.602Z","to_timestamp":null,"kind":"dispatch","reply_to":null,"body":"sleep 30","ref":null}
+```
+resolve with a single-quoted cwd no longer refuses; it escapes and takes the
+normal miss path (bug 2 fixed):
+```
+$ node scripts/bus.ts resolve --to gate-quote --mail-dir .gate/mail; echo $?
+unresolved gate-quote: no opencode session for <...>/.gate/O'Brien/cwd yet
+2
+```
+sweep with `--max-age-days 0` skips the old unacked row (bug 3 fixed):
+```
+$ node scripts/bus.ts sweep --mail-dir .gate/mail --max-age-days 0; echo $?
+expired m-1f938e1e
+swept 1 unacked, acked 0, expired 1
+0
+```
+Default (7 days) keeps a fresh row inside the cutoff:
+```
+$ node scripts/bus.ts sweep --mail-dir .gate/mail; echo $?
+m-1f938e1e -> gate-sleep-miss: no registry route, cannot scope the cass query
+swept 1 unacked, acked 0, expired 0
+0
+```
+
+### 4. scratch teardown
+```
+tmux -L busfix-gate kill-server  ->  no server running (exit 1, already gone)
+tmux -L busfix-gateb kill-server ->  exit 0
+rm -rf .gate .gateb
+tmux -L busfix-gate ls   ->  no server running (exit 1)
+tmux -L busfix-gateb ls  ->  no server running (exit 1)
+```
+Neither scratch server leaked; scratch dirs removed from the worktree.

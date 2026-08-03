@@ -121,18 +121,6 @@ function dispatch(args) {
   const ref = args.ref ?? null;
   const resolveWait = Number(args["resolve-wait"] ?? 3);
 
-  const create = run("tmux", [
-    ...(socket ? ["-L", socket] : []),
-    "new-session", "-d", "-s", tmux, "-c", cwd, cmd,
-  ]);
-  if (!create.ok) {
-    console.log(`tmux new-session failed (${create.status}): ${create.stderr.trim()}`);
-    return 1;
-  }
-
-  const dir = mailDirOf(args);
-  mergeRoute(dir, to, { harness, tmux, cwd });
-
   const message = MailStore.send({
     id: mintId(),
     from: args.from ?? "coordinator",
@@ -143,6 +131,33 @@ function dispatch(args) {
     reply_to: null,
     ref,
   });
+
+  const create = run("tmux", [
+    ...(socket ? ["-L", socket] : []),
+    "new-session", "-d", "-s", tmux, "-c", cwd, cmd,
+  ]);
+  if (!create.ok) {
+    console.log(`tmux new-session failed (${create.status}): ${create.stderr.trim()}`);
+    return 1;
+  }
+
+  // Stamp the envelope id into the fresh session so cass can ack it: the id
+  // greps out of the lane's transcript just like a hail (injectedLine).
+  const stamp = injectedLine({
+    ...message,
+    body: "dispatched: " + message.body.split("\n")[0],
+  });
+  for (const argv of MailLeg.tmuxSendArgs({ tmux }, stamp, socket)) {
+    const result = run("tmux", argv);
+    if (!result.ok) {
+      console.log(`tmux send-keys failed (${result.status}): ${result.stderr.trim()}`);
+      return 1;
+    }
+  }
+
+  const dir = mailDirOf(args);
+  mergeRoute(dir, to, { harness, tmux, cwd });
+
   append(join(dir, DEFAULT_BOX), message);
   console.log(`dispatched ${message.id} -> ${to} (tmux ${tmux})`);
 
@@ -169,12 +184,15 @@ function resolve(args) {
     console.log(`unresolved ${to}: no cwd in registry route`);
     return 1;
   }
-  if (cwd.includes("'")) {
-    console.log(`unresolved ${to}: cwd contains a single quote, refusing`);
+  // NUL bytes cannot survive argv, so refuse them. A single quote is fine: the
+  // sqlite3 CLI has no bind params, so a literal is escaped by doubling the
+  // quote (SQL string-literal rule); a doubled quote is not escaped further.
+  if (cwd.includes("\0")) {
+    console.log(`unresolved ${to}: cwd contains a NUL byte, refusing`);
     return 1;
   }
   const db = join(homedir(), ".local/share/opencode/opencode.db");
-  const query = `SELECT id FROM session WHERE directory = '${cwd}' AND time_archived IS NULL ORDER BY time_created DESC LIMIT 1`;
+  const query = `SELECT id FROM session WHERE directory = '${cwd.replace(/'/g, "''")}' AND time_archived IS NULL ORDER BY time_created DESC LIMIT 1`;
   const result = run("sqlite3", [db, query]);
   if (!result.ok) {
     console.log(`resolve query failed (${result.status}): ${result.stderr.trim()}`);
@@ -236,14 +254,24 @@ function sweep(args) {
   const dir = mailDirOf(args);
   const directory = readDirectory(dir);
   const boxes = readBoxes(dir);
+  const maxAgeDays = Number(args["max-age-days"] ?? 7);
+  const cutoff = Date.now() - maxAgeDays * 86400_000;
   const pending = MailStore.unacked(allMessages(boxes));
   if (!pending.length) {
     console.log("nothing unacked");
     return 0;
   }
   let acked = 0;
+  let expired = 0;
   for (const message of pending) {
     if (args.agent && message.to !== args.agent) continue;
+    // A dispatch row with null to_timestamp older than the cutoff is dead: the
+    // lane is gone and will never ack, so skip it instead of querying cass.
+    if (new Date(message.from_timestamp).getTime() < cutoff) {
+      console.log(`expired ${message.id}`);
+      expired += 1;
+      continue;
+    }
     const agent = MailDirectory.agent(directory, message.to);
     if (!agent) {
       console.log(`${message.id} -> ${message.to}: no registry route, cannot scope the cass query`);
@@ -266,7 +294,7 @@ function sweep(args) {
     acked += 1;
     console.log(`${message.id} -> ${message.to}: acked via ${hits[0].source_path}`);
   }
-  console.log(`swept ${pending.length} unacked, acked ${acked}`);
+  console.log(`swept ${pending.length} unacked, acked ${acked}, expired ${expired}`);
   return 0;
 }
 
