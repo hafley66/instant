@@ -281,6 +281,22 @@ export interface IStripPolicy {
 }
 
 // ---------------------------------------------------------------------------
+// Viewer tabs. A strip row click opens someone else's lane in a tab to WATCH
+// it; that tab's close must not end the lane the way closing your own agent
+// tab does.
+// ---------------------------------------------------------------------------
+
+// "detach" = drop the pty, the tmux session keeps running. "kill" = end the
+// tmux session (what an agent tab does, so claude/opencode stops burning RAM).
+export type TabCloseAction = "detach" | "kill";
+
+export interface IViewerTabPolicy {
+  // viewer = this tab was opened by a strip/panel row, not launched by the
+  // user here. agent = an agent process is running in it (terminal.ts's probe).
+  closeAction(tab: { viewer: boolean; agent: boolean }): TabCloseAction;
+}
+
+// ---------------------------------------------------------------------------
 // Live-spawn gate (scripts/livespawn.ts): a wall-clock run in which one claude
 // session spawns an opencode one, sampled every few seconds. On demand only —
 // never a default battery (10-second law, user-named exception).

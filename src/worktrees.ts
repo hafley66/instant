@@ -867,8 +867,10 @@ const wtLeafGestures = (r: WtTreeRow) =>
 
 export function registerV2Bridges() {
   // The dock strip's click = go there: opening a row jumps to that session's
-  // terminal, the same openTab path TmuxPanelV2 uses.
-  setDockStrip({ onOpen: (name) => openTab(name) });
+  // terminal, the same openTab path TmuxPanelV2 uses. Both strips reach this
+  // one bridge, so it is where a viewer tab is minted: the tab watches a lane
+  // someone else launched, and closing the view must not end the lane.
+  setDockStrip({ onOpen: (name) => openTab(name, { viewer: true }) });
   setTmuxPanel({
     rows: tmuxRows,
     onOpen: (name) => openTab(name),

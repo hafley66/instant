@@ -54,6 +54,7 @@ import { browserTabs } from "./browser";
 import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
+import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
 import {
   renderSessionActive,
   refreshSessions,
@@ -200,10 +201,16 @@ export function touchTab(id: string) {
 }
 
 // Persisted open-tab list (for reattach after reload). Keyed by tab name.
-export function recordTab(name: string, command: string | null, cwd: string | null, graphics = false) {
+export function recordTab(
+  name: string,
+  command: string | null,
+  cwd: string | null,
+  graphics = false,
+  viewer = false,
+) {
   const cur = store.get().openTabs;
   if (cur.some((t) => t.name === name)) return;
-  store.set({ openTabs: [...cur, { name, command, cwd, graphics }] });
+  store.set({ openTabs: [...cur, { name, command, cwd, graphics, viewer }] });
 }
 export function forgetTab(id: string) {
   store.set({ openTabs: store.get().openTabs.filter((t) => sessionId(t.name) !== id) });
@@ -398,7 +405,7 @@ function wordAt(id: string, clientX: number, clientY: number): string {
 // fall back to QUICK_CMD and the backend default (HOME).
 export function openTab(
   name: string,
-  opts: { command?: string | null; cwd?: string | null; graphics?: boolean } = {},
+  opts: { command?: string | null; cwd?: string | null; graphics?: boolean; viewer?: boolean } = {},
 ) {
   const id = sessionId(name);
   if (tabs.has(id)) {
@@ -777,7 +784,7 @@ export function openTab(
   // 80x24 default that leaves full-screen TUIs (opencode) clipped.
   const command = cmd;
   const cwd = opts.cwd ?? null;
-  recordTab(name, command, cwd, graphics); // survives reload; tmux session outlives the webview
+  recordTab(name, command, cwd, graphics, opts.viewer ?? false); // survives reload; tmux session outlives the webview
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
@@ -882,6 +889,9 @@ export function onTermClosed(id: string) {
   const live = store.get().sessions.find((s) => s.name === name);
   const proc = foregroundProc(live?.commands ?? []);
   const isGraphics = t.graphics ?? false;
+  // Read before forgetTab drops the row: the close decision runs async (below)
+  // and would find the record already gone.
+  const isViewer = store.get().openTabs.find((o) => o.name === name)?.viewer ?? false;
   t.overlay?.dispose();
   t.term.dispose();
   t.el.remove();
@@ -901,7 +911,9 @@ export function onTermClosed(id: string) {
   // resumeTabs read-modify-write, or both probe-record the same newest-in-cwd id
   // and the 2nd reopen resumes the 1st's session ("rando old session"). Chaining
   // lets each close fully claim its id before the next one probes.
-  closeChain = closeChain.then(() => exitOrDetachTab(id, name, tabMeta, proc, isGraphics)).catch(() => {});
+  closeChain = closeChain
+    .then(() => exitOrDetachTab(id, name, tabMeta, proc, isGraphics, isViewer))
+    .catch(() => {});
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -917,13 +929,15 @@ export function onTermClosed(id: string) {
 // anything else just detaches (tmux survives a reload). The kill fires whenever
 // we believe an agent is running — it is NOT gated on resolving the session id,
 // so a stale id lookup can't leave claude alive. The agent writes its jsonl
-// incrementally, so killing mid-run stays resumable.
+// incrementally, so killing mid-run stays resumable. A viewer tab is exempt:
+// see ViewerTabPolicy.
 async function exitOrDetachTab(
   id: string,
   name: string,
   meta: { cwd: string; command: string | null; harness: HarnessObservation["id"] } | null,
   proc: string,
   isGraphics = false,
+  isViewer = false,
 ) {
   // Graphics tabs (awrit) are never tmux sessions; close_pty kills the child so
   // it can't orphan and hold its profile lock.
@@ -941,7 +955,7 @@ async function exitOrDetachTab(
     looksLikeAgentProc(proc) ||
     KNOWN_RESUME[bin] != null ||
     (proc === "" && sessions.length > 0);
-  if (!isAgent) {
+  if (ViewerTabPolicy.closeAction({ viewer: isViewer, agent: isAgent }) === "detach") {
     invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
     return;
   }

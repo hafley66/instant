@@ -155,6 +155,14 @@ export interface OpenTab {
   command: string | null;
   cwd: string | null;
   graphics?: boolean; // kitty-graphics (awrit) tab — restore the overlay on reload
+  // Opened by a strip row to WATCH someone else's lane (DockStripPanel's
+  // bridge), never launched by the user here. Closing it must leave the lane
+  // running. Lifetime = this openTabs row: persisted, so it survives a reload
+  // and the reattach that follows, and gone the moment the tab closes
+  // (forgetTab drops the row). Reopening the same session from the tmux panel
+  // while a viewer tab is already open activates that tab, so it stays a
+  // viewer — the direction that cannot kill a lane by surprise.
+  viewer?: boolean;
   browser?: boolean; // CDP browser tab — re-open the canvas on reload
   url?: string; // browser tab's URL (normalized) to reopen at
 }
