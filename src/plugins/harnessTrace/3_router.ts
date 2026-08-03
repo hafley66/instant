@@ -48,3 +48,22 @@ export class TermRouter implements ITermRouter {
 // The one router instance the in-tab strips share; per-terminal state lives in
 // the keyed stacks, so one instance serves every tab.
 export const termRouter: ITermRouter = new TermRouter();
+
+// ---------------------------------------------------------------------------
+// Mail-preview view registration (2026-08-03 bus ruling). Same instance, wider
+// view union: the stacks hold plain objects, and TermView's own lines belong to
+// another lane, so the kind joins here instead of in that union.
+// ---------------------------------------------------------------------------
+import type { IMailPreviewView, ITermViewRouter } from "./0_types";
+
+export const termViewRouter: ITermViewRouter = termRouter;
+
+export function mailPreviewView(agentId: string): IMailPreviewView {
+  return { kind: "mail-preview", agentId };
+}
+
+// Push one agent id's queue onto a terminal's stack; the host renders whatever
+// `current(sid)` reports, so any caller can open a preview with this alone.
+export function pushMailPreview(sid: string, agentId: string): void {
+  termViewRouter.push(sid, mailPreviewView(agentId));
+}

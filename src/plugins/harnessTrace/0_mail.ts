@@ -1,48 +1,51 @@
 // Pure mail-ledger parsing + session join: no fs, no invoke, so vitest covers
 // it directly (the panel reads the files through list_dir/read_text).
-import type { HarnessTraceRow, HarnessTraceSeed, MailEnvelope, MailRegistry } from "./0_types";
+// The parse itself now yields ruled envelopes (0_bus.ts, 2026-08-03 bus
+// ruling); parseMailNdjson projects them back to the pre-ruling MailEnvelope
+// shape the trace panel's join reads, with ts = from_timestamp.
+import { MailDirectory, MailStore } from "./0_bus";
+import type {
+  HarnessTraceRow,
+  HarnessTraceSeed,
+  IMailMessage,
+  MailEnvelope,
+  MailRegistry,
+} from "./0_types";
+
+export function parseMailLog(text: string): IMailMessage[] {
+  return MailStore.parse(text);
+}
+
+function legacyView(message: IMailMessage): MailEnvelope {
+  return {
+    id: message.id,
+    from: message.from,
+    to: message.to,
+    ts: message.from_timestamp,
+    kind: message.kind,
+    reply_to: message.reply_to ?? undefined,
+    body: message.body || undefined,
+    ref: message.ref ?? undefined,
+  };
+}
 
 export function parseMailNdjson(text: string): MailEnvelope[] {
-  const out: MailEnvelope[] = [];
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let value: unknown;
-    try {
-      value = JSON.parse(trimmed);
-    } catch {
-      continue; // malformed line: skip it, keep the rest
-    }
-    if (typeof value !== "object" || value === null) continue;
-    const record = value as Record<string, unknown>;
-    if (typeof record.id !== "string" || typeof record.to !== "string") continue;
-    out.push({
-      id: record.id,
-      from: typeof record.from === "string" ? record.from : "",
-      to: record.to,
-      ts: typeof record.ts === "string" ? record.ts : "",
-      kind: typeof record.kind === "string" ? record.kind : "",
-      reply_to: typeof record.reply_to === "string" ? record.reply_to : undefined,
-      body: typeof record.body === "string" ? record.body : undefined,
-      ref: typeof record.ref === "string" ? record.ref : undefined,
-    });
-  }
-  return out;
+  return parseMailLog(text).map(legacyView);
 }
 
 export function parseMailRegistry(text: string): MailRegistry {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return {};
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   const registry: MailRegistry = {};
-  for (const [name, sessionId] of Object.entries(value)) {
-    if (typeof sessionId === "string") registry[name] = sessionId;
+  for (const [id, agent] of Object.entries(MailDirectory.parse(text))) {
+    if (agent.sessionId) registry[id] = agent.sessionId;
   }
   return registry;
+}
+
+// Reverse of the registry join: a trace row knows its session id, the mailbox
+// addresses the agent name, so a row action opening a queue resolves through
+// here. No registry entry = the session id is its own address.
+export function mailAgentIdFor(registry: MailRegistry, sessionId: string): string {
+  return Object.entries(registry).find(([, id]) => id === sessionId)?.[0] ?? sessionId;
 }
 
 // Join envelopes to sessions: `to` resolves through the registry when present,
