@@ -1,70 +1,301 @@
-# REPORT: harness-trace panel lab (fable lane)
+# REPORT: quote-aware hover links (paths with spaces)
 
-## 1. Base + install receipts
+Worktree `/Users/chrishafley/projects/instant-lab-quotelink`, branch `lab/quotelink`.
+`git merge --ff-only a35ad6a` -> "Already up to date." (clean no-op, HEAD was
+already a35ad6a). Deps installed with `corepack pnpm@10.12.4 install --prefer-offline`
+("Done in 8.2s"): the worktree had no node_modules. No subagents, no push,
+nothing written outside the worktree.
 
-- Worktree: /Users/chrishafley/projects/instant-lab-trace-fable, branch lab/harness-trace-fable
-- FIRST action `git merge --ff-only 0e4e0173`: "Already up to date."; `git rev-parse HEAD` = 0e4e01734fd983f157dfbc49b2454e803aa4557b
-- SECOND action `corepack pnpm@10.12.4 install --prefer-offline`: "Done in 8.3s using pnpm v10.12.4", exit 0
-- Nothing committed, nothing written outside the worktree, `just dev` never run.
+Commits:
 
-## 2. What was built
+| sha | what |
+|---|---|
+| a6225e3 | fail-first fixtures (red: 5 failures) |
+| ebb6545 | scanner fix (green: 39/39) |
 
-| file | lines | role |
+## verified-hypothesis
+
+Instrumented with a throwaway `src/__probe.test.ts` (deleted before the red
+commit) that dumped `scanLineTokens` spans + the `looksOpenable` verdict for
+each candidate shape. Run at base a35ad6a. Raw output:
+
+```
+### H1a exact contract elision
+line: "'/var/folders/.../Screenshot 2026-08-03 at 10.05.13 AM.png'"
+  [  1, 58) openable=true "/var/folders/.../Screenshot 2026-08-03 at 10.05.13 AM.png"
+
+### H1b realistic full path
+line: "'/var/folders/3k/qz9_8x0d1_v0000gn/T/TemporaryItems/NSIRD_screencaptureui_9Kq2Zt/Screenshot 2026-08-03 at 10.05.13 AM.png'"
+  [  1,121) openable=true "/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png"
+
+### H1c leading prose
+line: "read '/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png' please"
+  [  0,  4) openable=false "read"
+  [  6,126) openable=true "/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png"
+  [128,134) openable=false "please"
+
+### H1d truncated at row end (unpaired opener)
+line: "'/var/folders/3k/.../Screenshot 2026"
+  [  1, 91) openable=true "/var/folders/3k/.../Screenshot"
+  [ 92, 96) openable=false "2026"
+
+### H2a
+line: "reading claude's log at '/a b/c.png'"
+  [  0,  7) openable=false "reading"
+  [  8, 16) openable=false "claude's"
+  [ 15, 24) openable=false "s log at "
+  [ 28, 35) openable=true "b/c.png"
+
+### H2b
+line: "don't open '/tmp/my shots/a b.png' yet"
+  [  0,  5) openable=false "don't"
+  [  4, 11) openable=false "t open "
+  [ 20, 27) openable=true "shots/a"
+  [ 28, 33) openable=true "b.png"
+  [ 35, 38) openable=false "yet"
+
+### H3 joined wrapped rows (isWrapped set), quote pair present
+joined: "'/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png'"
+[{"text":"/var/folders/3k/.../Screenshot 2026-08-03 at 10.05.13 AM.png",
+  "ranges":[{"rowIndex":0,"startCol":1,"endCol":61},
+            {"rowIndex":1,"startCol":0,"endCol":60}]}]
+
+### H4 single row, no wrap flag
+[{"text":"/var/folders/3k/qz9_8x0d1_v0000gn/T/TemporaryItems/NSIRD_scr",
+  "ranges":[{"rowIndex":0,"startCol":1,"endCol":61}]}]
+```
+
+### Deviation from the contract's framing
+
+The contract's screenshot signature ("underline starts at `/`, not at `'`") does
+NOT discriminate. A correctly-paired quoted span is `[open+1, close)` by design:
+it excludes the quotes, so it also starts at `/`. H1a/H1b/H1c/H3 show the
+**paired** case already worked at base -- the exact contract line, the same line
+with prose either side, and the same line hard-wrapped across two rows all
+produced one full span at base, pre-fix. Those four are now regression guards,
+not fixes.
+
+What discriminates is the underline **stopping at the first space**. Two shapes
+produce that, and only two:
+
+| # | shape | verdict |
 |---|---|---|
-| src-tauri/src/harness.rs | 477 (+311) | trace section: `HarnessTraceRow` serde struct (camelCase; row model minus from/why), per-store readers `trace_claude/trace_opencode/trace_codex/trace_kimi`, `ms_to_iso`, `trace_status`, `tildify`, `trace_rows`, command `harness_trace_rows`, `#[cfg(test)]` module (4 tests) |
-| src-tauri/src/lib.rs | +1 | `harness::harness_trace_rows` in invoke_handler |
-| ipc/commands.json | +1 entry | `"harness_trace_rows"` in the harness group |
-| src/generated/native.ts | +2 (generated) | via `corepack pnpm@10.12.4 run api:generate`, never hand-edited |
-| src/plugins/harnessTrace/0_types.ts | 32 | frozen `HarnessTraceRow`, `HarnessTraceSeed = Omit<Row,"from"|"why">`, `MailEnvelope`, `MailRegistry` |
-| src/plugins/harnessTrace/0_mail.ts | 72 | pure `parseMailNdjson` / `parseMailRegistry` / `enrichRows` (no fs, no invoke) |
-| src/plugins/harnessTrace/0_mail.test.ts | 98 | 8 vitest tests incl. the S2 sabotage receipt |
-| src/plugins/harnessTrace/HarnessTracePanel.tsx | 239 | TreeTable panel, columns copy the TMUX_COLUMNS shape (tablepanels.tsx:56); bridge-free invoke like the cass plugin; persisted sorting via readPluginState/savePluginState under "harness-trace"; fs-watch leg; per-row cass trace action |
-| src/plugins/harnessTrace/index.ts | 15 | `registerHarnessTracePlugin` mirroring src/plugins/cass/index.ts |
-| src/main.ts | +2 | registration call at :243 beside `registerCassPlugin()` (:241) plus the required import at :25 (the brief said one line; the call is one line, the import is unavoidable TS plumbing) |
+| 1 | unpaired opener (H1d/H4): the closing quote is not in the joined line | CONFIRMED as a symptom producer. Not fixable from the scanner -- see below. |
+| 2 | apostrophe false-pair (H2a/H2b) | CONFIRMED, and worse than the contract described. |
 
-Data flow: `harness_trace_rows` (rust) enumerates all four stores globally (no cwd filter), sorts newest-activity-first, returns seeds with `ts`/`lastActivity` as ISO UTC and `cwd` tildified. The frontend maps seeds -> rows with `from:"user"`, `why:""`, then enriches from the mail ledger.
+Hypothesis 2 was under-stated. The `(['"`])(.+?)\1` matchAll does not merely
+"destroy the real span", it does three things at once:
 
-Mail-ledger join placement: frontend, because the brief fixes the rust payload to the row minus from/why and the mail files are reachable through the existing `list_dir`/`read_text` commands, leaving the join as pure sync array code with direct vitest coverage. Join rule: envelope `to` resolves through `registry.json` (flat name -> sessionId map) else matches a sessionId directly; the oldest matching envelope per session supplies `from`, `why` (body first line), and the row `id`. `~/.agent/mail` is absent on this machine today (`test -d` = absent), so the live path exercises the zero-enrichment/zero-error branch; the join itself is proven by unit tests.
+- `claude's` -> the apostrophe opens a region that closes on the real path's
+  OPENING quote, emitting the junk span `"s log at "`.
+- that junk span's `close` sits before `/a`, so the suppression test
+  `at >= q.open && at <= q.close` does not fire and the fragments `b/c.png`,
+  `shots/a`, `b.png` are emitted as **openable** links. The user gets an
+  underline on a path fragment that resolves to nothing.
+- the spans **overlap**: `claude's` is `[8,16)` and `"s log at "` is `[15,24)`.
+  `tokenAtColumn` uses `.find()`, so column 15 answers `claude's` while the
+  link provider draws two overlapping xterm ranges over the same cell. The
+  existing "produces non-overlapping spans in column order" test never had an
+  apostrophe fixture, so this invariant was already violated at base.
 
-fs-watch leg: the panel probes `list_dir("~/.agent/mail")`; only on success does it `claimFsWatch` (src/fsWatch.ts) on the dir, reloading rows on events; the claim is released in the effect cleanup (panel dispose). No polling loops.
+Hypothesis 3 (hover card disagreeing with the underline) is FALSE: `wordAt`
+(terminal.ts:367-383) and `wrappedLinkSpans` (termWrapJoin.ts:83-91) both go
+through `scanLineTokens` over the same joined line, so they drift together, in
+both directions. No separate fix needed; the scanner fix moves all three call
+sites at once.
 
-cass action: per-row "trace" button invokes `cass_swarm_status` (ledger.rs:114) with the row's untildified cwd and renders the status line in the panel; `CassSwarmStatus` type reused from src/plugins/cass/0_types.ts. No shelling from the frontend.
+Hypothesis 1's *premise* (that the Claude Code TUI composer writes each visual
+row as its own hard line with no `isWrapped` flag) was NOT verifiable from this
+worktree -- it needs a live TUI in a real xterm buffer, and the lab has no such
+harness. What H4 does verify is the scanner's behavior GIVEN that input: a
+single row carrying only an opener yields a truncated, `looksOpenable`-passing
+token. H3 verifies the contrary case: with `isWrapped` set, the join already
+delivers the whole quoted path today.
 
-## 3. Subagent-marker evidence
+## fix summary
 
-Marker found empirically; the filter is implemented.
+`src/termTokens.ts`, one function added and one changed. Both call sites
+(link provider, hover card) inherit it; nothing outside the scanner moved,
+per the module's header law.
 
-- Current layout: subagent transcripts live OUTSIDE the top-level session glob, at `<projectDir>/<parentSessionId>/subagents/agent-<id>.jsonl`. Example on disk: `/Users/chrishafley/.claude/projects/-Users-chrishafley-projects-sprefa/c72a1e89-1e73-4afa-9f61-f5588f4e388d/subagents/agent-a1abf4da0fd7df26d.jsonl`.
-- Line-level marker: every record in that file carries `"isSidechain":true` (grep count: 26 of 26 lines; extracted fragment: `"parentUuid":<uuid>,"isSidechain":true,"promptId"`).
-- Main sessions: top-level `<projectDir>/<uuid>.jsonl` records carry `"isSidechain":false` (sample `7d976dd8-....jsonl`: 1244 false, 0 true). Zero of 74 top-level files in the sprefa project dir and zero of 4 in the instant project dir contain any `"isSidechain":true`.
-- Filter as implemented (trace_claude): the walk is non-recursive over `<projectDir>/*.jsonl` (structurally excludes `subagents/`), and the first records of each file are additionally checked for `"isSidechain":true` (skip if found) in case an older store kept sidechains top-level.
+`quotedRegions(line)` replaces the `(['"`])(.+?)\1` matchAll. A quote character
+delimits a region only where its neighbours agree:
 
-Note: full-line reads of session files were blocked by the permission classifier; the evidence above was gathered with count/fragment greps (receipts in section 6).
+- opener: at line start, or preceded by one of `` [\s([{<=:,'"`] ``
+- closer: at line end, or followed by one of `` [\s)\]}>.,;:!?'"`] ``
 
-## 4. Gate receipts
+so `claude's`, `don't` and `agents'` cannot open a region, while
+`path='/a b.png'`, `` see `src/a.ts`, `` and `"'/a b/c.png'"` still pair.
+Regions are scanned left to right, never nest, never overlap (the loop jumps
+`i` to the closer).
 
-- `just cargo-check`: exit 0. "Finished `dev` profile ... in 18.68s", real 18.81s (worktree deps were warmed by the preceding cargo test build, cold 40.93s).
-- `cargo test --manifest-path src-tauri/Cargo.toml harness::`: exit 0, "4 passed; 0 failed" (includes S1).
-- `vitest run src/plugins/harnessTrace/0_mail.test.ts`: "Tests 8 passed (8)" (includes S2).
-- `corepack pnpm@10.12.4 run api:generate` then `api:check` (inside just check): generated file regenerated, check passes.
-- `just check`: FAILS with exit 2 on `src/plugin.test.ts(69,64): error TS2339: Property 'label' does not exist on type 'CtxItem'`. Pre-existing at base: with all my tracked changes stashed, `tsc --noEmit` reports the identical error. With my changes applied it is the ONLY tsc error; my code adds zero. (dl todos-check leg: "green-by-skip", cold worktree db refused by design, class 14.)
-- `just build`: FAILS, same pre-existing tsc error (build = api:check && tsc && vite build). Supplementary: `vite build` alone transforms all 4480 modules including this lab's, then fails resolving `"vega"` imported by `vega-embed` (imported at src/plugins/metrics/1_dashboard.tsx:2; `vega` is not in package.json dependencies) — base metrics-plugin condition, untouched by this lab.
-- `just test`: "Test Files 1 failed | 37 passed (38); Tests 4 failed | 233 passed (237)". The 4 failures are all src/panelZoom.test.ts; probe with my tracked changes stashed reproduces the same 4 failures at base. All 8 of this lab's tests pass inside the run.
+Second change: a whitespace run is now suppressed when it **overlaps** a region
+(`at <= q.close && at + run.length > q.open`), not only when it starts inside
+one. Without this `path='/a b.png'` is a single `\S+` run spanning the whole
+region and emits a span overlapping the quoted one.
 
-Per the brief's STOP doctrine I did not patch the unrelated base files (src/plugin.test.ts, panelZoom, vega dependency) to force the gates green; the stash probes above attribute every red to base 0e4e0173.
+## fixtures added
 
-## 5. Sabotage receipts
+`src/termTokens.test.ts`, new `describe("quote pairing")`, 7 cases. `SHOT` is
+the exact screenshot path (macOS
+`/var/folders/.../T/TemporaryItems/NSIRD_screencaptureui_*/Screenshot 2026-08-03 at 10.05.13 AM.png`).
 
-- S1 (missing harness stores yield empty, not a crash): every trace reader takes `home: &Path` as a parameter; `harness::tests::trace_rows_from_nonexistent_home_is_empty` points all four readers plus the aggregate at `/nonexistent-home-for-harness-trace-test` and asserts empty vecs. `cargo test harness::` output: `test harness::tests::trace_rows_from_nonexistent_home_is_empty ... ok`. (The brief's "via env" example was replaced by parameter injection: mutating HOME in a multithreaded test binary races; the real HOME was never touched.)
-- S2 (malformed NDJSON line skipped, rest kept): `0_mail.test.ts` "skips a malformed line and keeps the rest" feeds `[valid, "{this is not json", valid]` through `parseMailNdjson` and asserts exactly the two valid envelope ids survive. vitest: passed. Real `~/.agent/mail` was never written (it does not exist).
+| fixture | pre-fix |
+|---|---|
+| links the whole quoted screenshot path | PASS (guard) |
+| links the quoted screenshot path with prose on both sides | PASS (guard) |
+| does not let a possessive apostrophe open a span (`reading claude's log at '/a b/c.png'`, asserts the underline too) | FAIL |
+| does not let a contraction apostrophe open a span (`don't open '/tmp/my shots/a b.png' yet`) | FAIL |
+| keeps spans non-overlapping on apostrophe prose (4 lines, plus every span slices back to its own text) | FAIL |
+| pairs a quote opened right after an assignment or bracket (`path='...'`, `` see `src/main.ts`, ok ``) | FAIL |
+| leaves an unpaired opening quote to the whitespace-run fallback | PASS (guard against the naive fix) |
 
-## 6. Deviations from CONTRACT.md
+`src/termWrapJoin.test.ts`, 2 added to `describe("wrappedLinkSpans")`:
 
-- Gates: `just check`, `just build`, `just test` are red at base 0e4e0173 for reasons outside this lab (receipts and base-attribution probes in section 4). The contract's "all must pass" is unsatisfiable on this base without editing unowned files; per the brief I stopped and recorded instead of improvising fixes.
-- `status` semantics: the contract froze the enum but not the mapping. Implemented: `dead` = the session's recorded cwd no longer exists on disk; else by last store write: `live` <= 2 min, `idle` <= 60 min, `done` older. Constants TRACE_LIVE_MS/TRACE_IDLE_MS in harness.rs.
-- `registry.json` schema: unbuilt bus, no fixture on disk; assumed a flat JSON object `{ "<to-name>": "<sessionId>" }`, non-string values ignored, malformed file = empty registry.
-- Kimi `ts` (start time) uses state.json `created()` (birthtime, present on macOS/APFS), falling back to "" when unavailable; the store has no explicit start-time field in the layout documented by harness.rs:114.
-- cass "search for the session id": no such command exists in ipc/commands.json; the contract's "and/or" was satisfied with the `cass_swarm_status` branch only.
-- ISO formatting is a ~20-line hand-rolled civil-from-days converter (unit-tested). Build-vs-buy note: chrono/time would each add a new dependency tree to a crate graph that currently has zero date crates and passes unix ms everywhere else (fs.rs, ledger.rs); the lab needed exactly one formatter, UTC-only.
-- Permission classifier denials during research (recorded, not worked around): full-line `head`/`cut` of `~/.claude` session jsonl content, `ls ~/.agent`, `ls ~/.kimi-code/sessions`, `find ~/.codex/sessions` counts, and `SELECT` sampling of opencode.db rows were all blocked. Marker evidence was gathered with grep counts/fragments (allowed); codex/kimi field names (`session_meta.payload.{id,cwd}`, `state.json.workDir`) were taken from the existing readers in harness.rs and ledger.rs, which the contract designates as the authority; opencode `time_created`/`time_updated` come from the sqlite schema (`.schema session` was permitted; row sampling was not).
-- src/main.ts gained 2 lines, not 1: the registration call beside registerCassPlugin() plus its import.
+| fixture | pre-fix |
+|---|---|
+| emits one link for a quoted path whose spaces straddle a wrap (asserts both row ranges) | PASS (guard) |
+| keeps a wrapped quoted path whole when prose above it holds an apostrophe | FAIL |
+
+Fail-first receipt, at a6225e3 (scanner still at base):
+
+```
+ x src/termWrapJoin.test.ts (13 tests | 1 failed) 8ms
+     x keeps a wrapped quoted path whole when prose above it holds an apostrophe 4ms
+ x src/termTokens.test.ts (26 tests | 4 failed) 12ms
+     x does not let a possessive apostrophe open a span 4ms
+     x does not let a contraction apostrophe open a span 0ms
+     x keeps spans non-overlapping on apostrophe prose 0ms
+     x pairs a quote opened right after an assignment or bracket 1ms
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 34 passed (39)
+```
+
+## gate outputs
+
+`npx tsc --noEmit`:
+
+```
+src/plugin.test.ts(69,64): error TS2339: Property 'label' does not exist on type 'CtxItem'.
+  Property 'label' does not exist on type '{ sep: true; }'.
+```
+
+PRE-EXISTING. Reproduced byte-identical on a detached checkout of a35ad6a.
+`src/plugin.test.ts` is untouched by this lab. Left alone (out of scope).
+
+`npx vitest run src/termTokens.test.ts src/termWrapJoin.test.ts`:
+
+```
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Duration  122ms
+```
+
+`npx vitest run` (full):
+
+```
+ x src/panelZoom.test.ts (6 tests | 4 failed) 893ms
+     x defaults to 1x and remembers a set factor
+     x clamps to the kind's bounds
+     x fires onZoom with the applied factor; reset restores 1x
+     x gestures step the resolved target by the kind's step
+ReferenceError: Cannot access 'kinds' before initialization
+ -> registerZoomKind src/panelZoom.ts:24:3
+ -> src/terminal.ts:282:1
+ -> src/favorites.ts:12:1
+
+ Test Files  1 failed | 41 passed (42)
+      Tests  4 failed | 273 passed (277)
+```
+
+PRE-EXISTING. At a35ad6a the same run gives `4 failed | 264 passed (268)` with
+the same four names and the same `ReferenceError`: a circular import
+(`favorites.ts` -> `terminal.ts` -> `registerZoomKind` before `panelZoom.ts`'s
+`kinds` initializer runs). None of those three files is touched by this lab.
+Delta from base is +9 passing, +0 failing.
+
+`npx playwright test e2e/term-cmd-hover.spec.ts e2e/term-wrap-hover.spec.ts`
+(both existing specs cover link hover; no new e2e infra built):
+
+```
+Running 10 tests using 2 workers
+  ok   2 e2e/term-cmd-hover.spec.ts:53:1 > hover on Update(src/main.ts) names the path, not the call envelope (1.3s)
+  ok   1 e2e/term-wrap-hover.spec.ts:59:1 > hover on either wrapped row names the whole path (1.4s)
+  ok   3 e2e/term-cmd-hover.spec.ts:65:1 > hover over the envelope itself offers nothing (907ms)
+  ok   4 e2e/term-wrap-hover.spec.ts:74:1 > hover on the wrapped path resolves to the real file (858ms)
+  ok   5 e2e/term-cmd-hover.spec.ts:83:1 > hover keeps a line suffix and resolves it (823ms)
+  ok   6 e2e/term-wrap-hover.spec.ts:83:1 > click on the wrapped continuation dispatches the whole path (873ms)
+  ok   7 e2e/term-cmd-hover.spec.ts:93:1 > a bare filename that matches several files reports the ambiguity (745ms)
+  ok   8 e2e/term-wrap-hover.spec.ts:97:1 > wrapped hover card snapshot (869ms)
+  ok   9 e2e/term-cmd-hover.spec.ts:104:1 > click on a resolved file opens it in a preview tab (768ms)
+  ok  10 e2e/term-cmd-hover.spec.ts:119:1 > hover card snapshot (826ms)
+
+  10 passed (7.1s)
+```
+
+Both card snapshots still match, so the fix did not move any span the e2e
+harness draws.
+
+Extra sanity sweep (throwaway, not committed) over real terminal shapes, all
+correct after the fix:
+
+```
+"error: pathspec 'src/main.ts' did not match" -> ["error","pathspec","src/main.ts","did","not","match"]
+"it's fine, see src/main.ts"                  -> ["it's","fine","see","src/main.ts"]
+"Bob's file is at /tmp/a.png"                 -> ["Bob's","file","is","at","/tmp/a.png"]
+"rm -rf \"/tmp/my dir\""                      -> ["rm","-rf","/tmp/my dir"]
+"git commit -m \"fix src/a.ts\""              -> ["git","commit","-m","fix src/a.ts"]
+"you can't have 'a' and \"b\""                -> ["you","can't","have","a","and","b"]
+"`src/a.ts` and `src/b.ts`"                   -> ["src/a.ts","and","src/b.ts"]
+"python -c 'import os; print(os.path)'"       -> ["python","-c","import os; print(os.path)"]
+"cd ~/projects/sprefa && ls"                  -> ["cd","~/projects/sprefa","&&","ls"]
+"  L  Read src/termTokens.ts (129 lines)"     -> ["L","Read","src/termTokens.ts","129","lines"]
+```
+
+## unpaired-quote decision
+
+**Left alone**, deliberately, with a fixture pinning today's behavior.
+
+`quotedRegions` emits nothing for an opener with no closer, so the `\S+`
+fallback still yields `/tmp/shots/Screenshot`, `2026-08-03`, `at`, `10` for
+`'/tmp/shots/Screenshot 2026-08-03 at 10`. Identical to base. Zero regression.
+
+Why no fix is available from the scanner:
+
+1. **The information is not in the input.** The scanner is handed the joined
+   logical line. If the composer writes each visual row as its own hard line
+   with no `isWrapped` flag, the closing quote is not in that string at all --
+   not truncated, absent. No rule over the given characters can recover where
+   the path ended. `wrappedLineRows` (terminal.ts:333-359) walks xterm's
+   `isWrapped` flags and nothing else; there is no second source to consult.
+
+2. **The tempting fix is the one the contract forbids.** "Unpaired opener ->
+   run the region to end of line" would dispatch
+   `/tmp/shots/Screenshot 2026-08-03 at 10` -- a truncated multi-word path
+   presented as a complete file name. That is strictly worse than today: the
+   current truncation at least stops at a token boundary, and `refResolve`'s
+   bare-name search can still find a same-named file, whereas a path with a
+   half-eaten timestamp in it can only miss. The added fixture "leaves an
+   unpaired opening quote to the whitespace-run fallback" exists to fail if a
+   later change reaches for that.
+
+3. **Suppression would be a regression.** Blanking every `\S+` span after an
+   unpaired opener kills `he said 'go read src/main.ts` -- a real prose shape
+   that links correctly today. The contract's "no regression vs today" rules
+   it out.
+
+If this case is worth closing later, the fix belongs one layer down, in
+`wrappedLineRows`, not in the scanner: detect a TUI composer box (the row is
+fenced by box-drawing glyphs) and stitch its rows into one logical line the way
+`isWrapped` rows are stitched, stripping the fence glyphs and adjusting
+`rowStartOffsets`. That is a terminal-buffer change with its own e2e surface,
+outside this contract's scope.
+
+## adjacent issue observed, not fixed
+
+A quoted region's inner text bypasses `unwrapToken`, so `"Update(src/a.ts)"`
+emits the raw `Update(src/a.ts)` -- envelope included -- which `looksOpenable`
+passes. Pre-existing at base, unrelated to the quote-pairing defect, and
+routing quoted inner text through `unwrapToken` would break `'q p.md'`-style
+paths whose own punctuation is meaningful. Flagged, not touched.
