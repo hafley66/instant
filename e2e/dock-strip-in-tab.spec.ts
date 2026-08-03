@@ -20,8 +20,11 @@ const ROWS = [
   { id: "child-s1", harness: "claude", sessionId: "child-s1", parentId: "parent-s1", parentKind: "subagent", ts: "2026-08-03T10:10:00Z", lastActivity: "2026-08-03T10:50:00Z", status: "live", cwd: "~/projects/demo" },
   { id: "oc-lane", harness: "opencode", sessionId: "oc-lane", parentId: "parent-s1", parentKind: "dispatch", ts: "2026-08-03T10:20:00Z", lastActivity: "2026-08-03T10:55:00Z", status: "live", cwd: "~/projects/demo" },
   { id: "oc-sub", harness: "opencode", sessionId: "oc-sub", parentId: "oc-lane", parentKind: "subagent", ts: "2026-08-03T10:30:00Z", lastActivity: "2026-08-03T10:45:00Z", status: "idle", cwd: "~/projects/demo" },
-  { id: "parent-other", harness: "claude", sessionId: "parent-other", parentId: null, parentKind: null, ts: "2026-08-03T09:00:00Z", lastActivity: "2026-08-03T09:30:00Z", status: "done", cwd: "~/projects/other" },
-  { id: "codex-other", harness: "codex", sessionId: "codex-other", parentId: "parent-other", parentKind: "dispatch", ts: "2026-08-03T09:05:00Z", lastActivity: "2026-08-03T09:20:00Z", status: "done", cwd: "~/projects/other" },
+  { id: "parent-other", harness: "claude", sessionId: "parent-other", parentId: null, parentKind: null, ts: "2026-08-03T09:00:00Z", lastActivity: "2026-08-03T09:30:00Z", status: "idle", cwd: "~/projects/other" },
+  { id: "codex-other", harness: "codex", sessionId: "codex-other", parentId: "parent-other", parentKind: "dispatch", ts: "2026-08-03T09:05:00Z", lastActivity: "2026-08-03T09:20:00Z", status: "idle", cwd: "~/projects/other" },
+  // A finished lane: the strip must not count it on any scope (the bar answers
+  // "going on", the trace page keeps history).
+  { id: "oc-finished", harness: "opencode", sessionId: "oc-finished", parentId: "parent-s1", parentKind: "dispatch", ts: "2026-08-03T08:00:00Z", lastActivity: "2026-08-03T08:30:00Z", status: "done", cwd: "~/projects/demo" },
 ];
 
 async function seed(page: import("@playwright/test").Page) {
@@ -118,6 +121,8 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   await expect(page.locator("tr").filter({ hasText: "codex-other" })).toBeVisible();
   // This tab's own claude rows stay out at every scope.
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveCount(0);
+  // Finished lanes stay out at every scope too.
+  await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toHaveCount(0);
 
   expect(pageErrors).toEqual([]);
 });

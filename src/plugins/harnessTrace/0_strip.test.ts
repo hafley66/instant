@@ -131,3 +131,21 @@ describe("StripPolicy with a tab-prefixed terminal id", () => {
     expect(ids).not.toContain("claude-sub");
   });
 });
+
+describe("StripPolicy.external drops finished lanes", () => {
+  // Sabotage receipt: the first live day put 7 rows in the bar with 0 lanes
+  // running; every dispatched-and-done lane counted as a "shell".
+  it("keeps live and idle rows, drops done and dead on both scopes", () => {
+    const day = [
+      ...TAB_TREE,
+      node({ id: "oc-done", harness: "opencode", status: "done", parentId: "claude-s1", parentKind: "dispatch" }),
+      node({ id: "sh-dead", harness: "shell", status: "dead", tmuxSession: "s1" }),
+      node({ id: "oc-idle", harness: "opencode", status: "idle", tmuxSession: "s1" }),
+    ];
+    const related = StripPolicy.external(day, "s1", "related").map((n) => n.id);
+    expect(related).toEqual(["oc-lane", "oc-sub", "oc-idle"]);
+    const all = StripPolicy.external(day, "s1", "all").map((n) => n.id);
+    expect(all).not.toContain("oc-done");
+    expect(all).not.toContain("sh-dead");
+  });
+});

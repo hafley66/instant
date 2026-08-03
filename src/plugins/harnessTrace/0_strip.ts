@@ -62,11 +62,14 @@ export const StripPolicy: IStripPolicy = {
     return nativeClaudeIds(nodes, tmuxNameOf(sid));
   },
 
+  // Done/dead rows stay out of the strip on every scope: the bar answers
+  // "how many shells are going on", the full trace page keeps the history.
   external(nodes, sid, scope) {
     const tmux = tmuxNameOf(sid);
-    const native = nativeClaudeIds(nodes, tmux);
-    if (scope === "all") return nodes.filter((node) => !native.has(node.id));
-    const related = forestIds(filterForestByTmux(buildAgentTree(nodes), tmux), new Set<string>());
-    return nodes.filter((node) => related.has(node.id) && !native.has(node.id));
+    const going = nodes.filter((node) => node.status === "live" || node.status === "idle");
+    const native = nativeClaudeIds(going, tmux);
+    if (scope === "all") return going.filter((node) => !native.has(node.id));
+    const related = forestIds(filterForestByTmux(buildAgentTree(going), tmux), new Set<string>());
+    return going.filter((node) => related.has(node.id) && !native.has(node.id));
   },
 };
