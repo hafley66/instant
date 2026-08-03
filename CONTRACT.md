@@ -1,84 +1,104 @@
-# CONTRACT: message bus (queue + passing + ack) with queue-preview view
+# CONTRACT: the subagent tree as a bottom subpanel of the terminal tab
 
-Base sha: a35ad6a. FIRST action: `git merge --ff-only a35ad6a` (must be a
-no-op; STOP AND REPORT on failure). Never spawn subagents. No push. Commit
-on this branch (lab/busmail) only. Deliverable = REPORT.md at this
-worktree root.
+Base: branch lab/stripsub at 57560ff (= a35ad6a + lazy tree + mail bus,
+plugin vitest green at 68/68 there). FIRST action: `git merge --ff-only
+57560ff` (must be a no-op; STOP AND REPORT on failure). Never spawn
+subagents. No push. Commit on lab/stripsub. Deliverable = REPORT.md at
+worktree root (if the Write tool refuses it, return the content as text;
+never work around the refusal).
 
-## Ruling (the design authority, do not re-litigate)
-2026-08-03-bus-ack-ruling.md at this worktree root. Envelope, ack
-semantics, relational state are all fixed there. Apply it from the first
-line: the mailbox NDJSON is the log, to_timestamp updates are APPENDED as
-ack rows (append-only, latest row per id wins), ack = cass finds the
-message in the recipient session's transcript, at-least-once resend is
-safe, no separate receipt channel ever.
-Build-vs-buy is settled by the ruling: the queue is an NDJSON file on the
-OS filesystem, the ack reader is cass (already shelled to by
-src-tauri/src/ledger.rs), tmux is the injection transport. No new queue
-library, no new daemon.
+## User words (verbatim, this is the whole point)
+"i want a tmux panel showing a bottom table subpanel like how the files
+work, i do not want to see a lone table, that is the exact opposite of
+what im asking for"
+and, pressing the toggle hotkey today: "im hitting the subagent view
+hotkeys and nothing is showing".
+And the ruling correction, which OVERRIDES anything below that
+contradicts it: "its ur tui table of known claude code agents, we dont
+need to manage claude code agents from outside claude code. see those 5
+shells? i want to know how many actual sub agent shells going on in a
+view that is summonable UNDERNEATH the claude code native agents list
+(which is also just bottom of this tab) so i can pretend to 'extend' it
+as a bottom bar for external subagents."
 
-## Existing pieces (verify, then reuse)
-- src/plugins/harnessTrace/0_mail.ts + 0_mail.test.ts: mailbox fixtures
-  from the dock-strip lab, single `ts` field PREDATES the ruling; its
-  MailEnvelope type is optional-field tolerant (ruling scope note). You
-  own these files; migrate them to the ruled envelope.
-- src/plugins/harnessTrace/3_router.ts (50 lines): per-terminal view
-  stack; how a preview view gets pushed.
-- Registry join (agent id -> harness + session id): the same join the
-  harness-trace rows use.
-- cass CLI: `cass search "<id or body prefix>" --robot` scoped to the
-  recipient's session/source path; `cass index --watch` freshness lever.
+Meaning: claude code's own TUI already renders its agent list at the
+bottom of its output inside the tab. The strip must NOT duplicate that:
+it EXCLUDES the tab's own claude session and its claude-native
+subagents. It shows ONLY the externals claude code cannot show —
+opencode/codex/kimi sessions and tmux lanes related to this tab (via
+dispatch edges, registry, cwd/tmux join) — as a slim bottom bar that
+visually reads as one more section under the native agent list. The bar
+label carries the live count ("N external shells"). The standalone
+HarnessTracePanel page stays untouched (no deletions without user
+word); this strip is the real home.
 
-## Deliverables
-1. Mail store: append envelope, list per agent id (in/out), ack state
-   derived by latest-row-per-id fold. Pure sync functions over parsed
-   rows; file IO and cass at the edges. Interface IMailStore.
-2. Send leg (`hail`): append envelope + inject body into the recipient
-   session. Implement the TMUX leg only (send-keys to the session the
-   registry maps the agent id to). A recipient with no tmux pane = message
-   stays queued, to_timestamp null. Do NOT invent injection for claude
-   jsonl sessions; report it as the known-missing leg.
-3. Ack sweep: for unacked messages, run the cass query; on hit, append
-   the ack row with to_timestamp. Manual/poll trigger is fine; no daemon.
-4. MailPreview view: NEW component rendering one agent id's queue —
-   in/out, kind, reply_to threading, body preview, acked/unacked (show
-   from_timestamp/to_timestamp), fed by IMailStore. Register it as a view
-   in 3_router.ts so any caller can push it with an agent id.
-5. The tree-table action itself (a row action in HarnessTracePanel.tsx
-   that pushes MailPreview) is OWNED BY ANOTHER LANE's file. Do not edit
-   HarnessTracePanel.tsx, InTabStrip.tsx, or src/main.ts. Instead put the
-   exact patch (unified diff, few lines) in REPORT.md for the coordinator
-   to apply at merge.
+## Ownership note (changed since earlier contracts)
+src/main.ts and src/plugins/harnessTrace/InTabStrip.tsx are YOURS in
+this worktree. The lane that owned them died without touching them
+(verified: its worktree diff has no InTabStrip.tsx and no main.ts).
+Everything in the worktree is yours.
 
-## File ownership (two other lanes are live in this repo)
-- Yours: 0_mail.ts, 0_mail.test.ts, all NEW files (mail store, MailPreview,
-  tests), this worktree only.
-- Shared append-only: 0_types.ts and 3_router.ts — ADD lines at the end,
-  never reorder or rewrite existing lines (another lane appends too;
-  coordinator merges the union).
-- Forbidden: HarnessTracePanel.tsx, InTabStrip.tsx, src/main.ts.
+## Known bugs to fix (diagnosed by the coordinator, verify then fix)
+1. main.ts toggleTermStrip (lines ~129-135): absent entry defaults
+   `{ open: true }` and the toggle writes `!cur.open`, so the FIRST
+   hotkey press on a fresh terminal writes open:false — summoning feels
+   dead. Fix: an absent entry means the strip is not visible (because of
+   bug 2), so the first press must summon: write `{ open: true }` when
+   absent, flip only when an entry exists.
+2. InTabStrip.tsx:39: `visible = open && (filtered.length > 0 ||
+   !!current)` renders NOTHING on explicit summon when there are zero
+   related rows. Fix: an explicit store entry with open:true always
+   renders the shell; the empty state shows the tab's sid and a short
+   "no related sessions" hint (the sid is diagnostic: tmux-opened tabs
+   have sid == tmux session name, plain tabs may not, and the hint tells
+   the user which case they are in).
+
+## The upgrade (the actual ask)
+Replace the strip's flat filtered `AgentStripTable` body with the SAME
+lazy tree the trace page got: `indexAgentTree` + `materializeAgentTree`
++ TreeTable with twisties (see HarnessTracePanel.tsx on this branch for
+the working wiring), with the link (subagent/dispatch) and status
+columns. Behavior:
+- Default scope: EXTERNAL sessions related to this tab — trees joined to
+  this terminal's tmux session (the existing filterForestByTmux) MINUS
+  every claude-harness row belonging to this tab's own session and its
+  claude-native subagents (the TUI shows those already). PLUS a control
+  to widen to all external roots (the user wants to find opencode lanes
+  and jump to them even when the cwd join fails).
+- Row click keeps today's behavior: join the tmux session if the row has
+  one, push the agent-session view.
+- Render the mail-preview view when it is the router top
+  (busmail's missing leg 3):
+  `current?.kind === "mail-preview"` renders `<MailPreview .../>`
+  instead of the table. Add the mail row action that pushes it (the
+  re-anchoring the busmail REPORT section 5 describes, now in the strip
+  body's row actions rather than the standalone page).
+- Match the files-subpanel interaction pattern where it applies
+  (src/main.ts toggleTermSidebar + the files plugin,
+  src/plugins/files/1_FileTree.tsx): per-terminal persisted open state,
+  height behavior, and the onLayout refit contract already in
+  InTabStrip.
+- Cap and scroll stay as today (240px, auto-height).
 
 ## Style laws (repo)
-- Interfaces in the plugin's 0_types.ts, `I` prefix; important functions
-  interface-bound, never bare export function.
-- Async becomes rxjs; sync stays sync. Promise/async banned above the IO
-  seam; in-memory folds are plain array code. Exactly ONE manual
-  .subscribe() per app (baseline main.ts holds it; you add none).
-- Comment budget: constraints only. Frozen clock
-  (page.clock.setFixedTime) in any e2e rendering relTime.
-- Colocated consistency: follow each touched file's existing style.
+- Interfaces in 0_types.ts (append at end). Comment budget: constraints
+  only. Colocated consistency. Frozen clock in any e2e rendering
+  relTime. Playwright on a private port with reuseExistingServer:false
+  (4173 is poisoned by sibling worktrees; pick an unused port).
 
-## Gates (outputs pasted in REPORT.md)
-- npx tsc --noEmit
-- npx vitest run src/plugins/harnessTrace
-- full: npx vitest run
-- A live round-trip receipt: send a hail to a scratch tmux session you
-  create yourself (never an existing one), show the injected line in the
-  pane, run the ack sweep, show to_timestamp filled. Kill your scratch
-  session after. Paste the transcript.
-- PNG of MailPreview over fixture messages (path in REPORT.md).
+## Gates (outputs in REPORT.md)
+- npx tsc --noEmit (one pre-existing plugin.test.ts error known; no new)
+- npx vitest run src/plugins/harnessTrace (green, plus new cases for the
+  toggle-summon fix and the empty shell)
+- npx vitest run (base is 4 failed panelZoom pre-existing | rest pass;
+  no new failures)
+- Playwright: extend/replace e2e/dock-strip-in-tab.spec.ts — receipts:
+  (a) fresh terminal, hotkey once -> shell appears with sid + hint
+  (the bug-1+2 fix, fail-first: show it red at base),
+  (b) related sessions -> lazy tree with twisties expands under the
+  term, (c) mail action pushes and MailPreview renders in the strip,
+  (d) back pops to the tree. PNG of (b) and (c), paths in REPORT.md.
 
 ## REPORT.md sections
-envelope migration diff / send-leg transcript / ack-sweep transcript /
-missing-legs list (claude injection etc.) / HarnessTracePanel patch for
-coordinator / gate outputs / PNG path.
+bug receipts (red at base) / tree-in-strip wiring / widen control /
+mail render / gates / PNG paths.
