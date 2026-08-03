@@ -30,9 +30,10 @@ registerHarnessTracePlugin();
 const w = window as Window & { __dockStripOpened?: string };
 setDockStrip({ onOpen: (name) => { w.__dockStripOpened = name; } });
 
-// Two tmux sessions: s1 rooted at the claude parent + subagent cwd, s2 rooted
-// at the other tree's cwd. The panel's terminal sid is "s1", so the in-tab
-// strip must keep tree 1 (joined to s1) and drop tree 2 (joined to s2).
+// Two tmux sessions: s1 rooted at this tab's claude cwd, s2 rooted at the other
+// tree's cwd. The terminal's sid is "s1", so the strip keeps the externals of
+// tree 1 (the opencode lane and its subagent), hides tree 1's claude rows (the
+// tab's own TUI lists those), and drops tree 2 until the scope widens.
 store.set({
   sessions: [
     { name: "s1", windows: 1, attached: true, activity: 1, created: 1, paths: ["/Users/e2e/projects/demo"], commands: ["claude"] },

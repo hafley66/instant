@@ -252,6 +252,11 @@ export interface ITermStripEntry {
   open: boolean;
 }
 
+// How wide the strip casts. "related" = trees joined to this terminal's tmux
+// session; "all" = every external session, for when the cwd join misses the
+// lane the user is looking for.
+export type StripScope = "related" | "all";
+
 export interface IStripPolicy {
   // The entry a toggle press writes. Absent means the strip is not on screen,
   // so the first press summons instead of closing.
@@ -260,4 +265,12 @@ export interface IStripPolicy {
   // (zero rows shows the empty state); an absent entry auto-appears only when
   // there is something to show.
   visible(entry: ITermStripEntry | null, rowCount: number, hasCurrent: boolean): boolean;
+  // The sessions claude code's own agent list already shows at the bottom of
+  // this tab: the claude session joined to this terminal plus its claude-native
+  // subagent descendants. The strip must not duplicate them.
+  nativeIds(nodes: AgentSessionNode[], sid: string): Set<string>;
+  // The strip's row set: everything in scope minus nativeIds. Dropping a native
+  // parent promotes its external children to roots (indexAgentTree's orphan
+  // law), which is how a dispatched lane surfaces as a top-level shell.
+  external(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
 }
