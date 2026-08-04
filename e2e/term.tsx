@@ -106,7 +106,10 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
     {
       editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m3", seq: 3, role: "assistant", ts: NOW - 7 * 3_600_000,
       preview: "moving chrome to .dv-host-term",
-      text: "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host.",
+      text: [
+        "I'll move the terminal chrome to .dv-host-term so FitAddon measures a zero-chrome host.",
+        ...Array.from({ length: 28 }, (_, index) => `Implementation detail ${index + 1}: preserve the measured terminal row.`),
+      ].join("\n"),
       locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L3",
     },
     {
@@ -126,6 +129,25 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
       preview: "latest visible answer",
       text: "The latest visible answer has a paired tool record before it.",
       locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L6",
+    },
+    {
+      editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m7", seq: 7, role: "assistant", ts: NOW - 60_000,
+      preview: "terminal diagrams",
+      text: [
+        "```d2",
+        "PTY -> tmux",
+        "tmux -> xterm",
+        'xterm -> "D2 renderer"',
+        "```",
+        "",
+        "```mermaid",
+        "flowchart LR",
+        "PTY --> tmux",
+        "tmux --> xterm",
+        "xterm --> Mermaid",
+        "```",
+      ].join("\n"),
+      locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L7",
     },
   ],
   read_text: "# Terminal\n\n## Sidebar UX\n\nA heading target.\n",

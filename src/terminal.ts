@@ -52,7 +52,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { refreshTurns, warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
@@ -538,7 +538,12 @@ export function openTab(
   const cmd = opts.command ?? QUICK_CMD[name] ?? null;
   const graphics = opts.graphics ?? /^\s*awrit\b/.test(cmd ?? "");
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
-  const diagrams = graphics ? undefined : new TerminalDiagramOverlay(term, el);
+  const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
+    term,
+    el,
+    undefined,
+    () => refreshTurns(id),
+  );
   const live = store.get().sessions.find((s) => s.name === name);
   const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
   tabs.set(id, { id, name, term, fit, el, graphics, overlay, diagrams, harness, outputTail: "" });
