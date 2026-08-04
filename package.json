@@ -15,7 +15,8 @@
     "ext:watch": "node extension/build.mjs --watch",
     "ext:check": "tsc -p extension/tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
     "@hafley66/json-rx": "0.1.2",
