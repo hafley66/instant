@@ -12,7 +12,7 @@
 //   node scripts/bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--model <id>] [--mode <m>]
 //   node scripts/bus.ts prune
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
-import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
@@ -188,13 +188,36 @@ function resolve(args) {
   const route = readRegistryRaw(dir)[to];
   const harness = route?.harness ?? null;
   const cwd = route?.cwd ?? null;
-  if (harness !== "opencode") {
-    console.log(`unresolved ${to}: harness ${harness ?? "none"} is not opencode`);
+  if (harness !== "opencode" && harness !== "claude") {
+    console.log(`unresolved ${to}: harness ${harness ?? "none"} has no resolve leg`);
     return 1;
   }
   if (!cwd) {
     console.log(`unresolved ${to}: no cwd in registry route`);
     return 1;
+  }
+  if (harness === "claude") {
+    // A claude lane's session is its transcript: newest jsonl in the project
+    // dir wins, and sourcePath is what scopes the sweep's cass ack to it.
+    const proj = join(homedir(), ".claude", "projects", cwd.replace(/\//g, "-"));
+    let newest = null;
+    try {
+      for (const name of readdirSync(proj)) {
+        if (!name.endsWith(".jsonl")) continue;
+        const path = join(proj, name);
+        const mtime = statSync(path).mtimeMs;
+        if (!newest || mtime > newest.mtime) newest = { path, mtime, id: name.slice(0, -6) };
+      }
+    } catch {
+      newest = null;
+    }
+    if (!newest) {
+      console.log(`unresolved ${to}: no claude transcript under ${proj} yet`);
+      return 2;
+    }
+    mergeRoute(dir, to, { ...route, sessionId: newest.id, sourcePath: newest.path });
+    console.log(`resolved ${to} -> ${newest.id}`);
+    return 0;
   }
   // NUL bytes cannot survive argv, so refuse them. A single quote is fine: the
   // sqlite3 CLI has no bind params, so a literal is escaped by doubling the
