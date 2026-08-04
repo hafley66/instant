@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinTmuxSession, type JoinTmuxRow } from "./2_join";
+import { joinTmuxSession, joinTmuxSessions, type JoinTmuxRow } from "./2_join";
 
 function tmux(partial: Partial<JoinTmuxRow> & { name: string }): JoinTmuxRow {
   return { pwd: "", chipPaths: [], proc: "", ...partial };
@@ -46,5 +46,30 @@ describe("joinTmuxSession", () => {
 
   it("returns null for an empty cwd", () => {
     expect(joinTmuxSession("", [tmux({ name: "s-1", pwd: "/Users/x/projects/app" })])).toBeNull();
+  });
+});
+
+describe("joinTmuxSessions", () => {
+  it("returns every matching row name in row order for a shared pwd", () => {
+    const rows = [
+      tmux({ name: "demo", pwd: "/Users/x/projects/app", proc: "claude" }),
+      tmux({ name: "demo-3", pwd: "/Users/x/projects/app", proc: "claude" }),
+    ];
+    expect(joinTmuxSessions("/Users/x/projects/app", rows)).toEqual(["demo", "demo-3"]);
+  });
+
+  it("returns empty when nothing matches or the cwd is empty", () => {
+    const rows = [tmux({ name: "demo", pwd: "/elsewhere", proc: "claude" })];
+    expect(joinTmuxSessions("/Users/x/projects/app", rows)).toEqual([]);
+    expect(joinTmuxSessions("", rows)).toEqual([]);
+  });
+
+  it("keep the single-guess tiebreak on joinTmuxSession for display", () => {
+    const rows = [
+      tmux({ name: "demo", pwd: "/Users/x/projects/app", proc: "zsh" }),
+      tmux({ name: "demo-3", pwd: "/Users/x/projects/app", proc: "claude" }),
+    ];
+    expect(joinTmuxSessions("/Users/x/projects/app", rows)).toEqual(["demo", "demo-3"]);
+    expect(joinTmuxSession("/Users/x/projects/app", rows)).toBe("demo-3");
   });
 });

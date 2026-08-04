@@ -18,7 +18,7 @@ function forestIds(roots: AgentTreeNode[], into: Set<string>): Set<string> {
 // subagent is still inside the TUI's own list.
 function nativeClaudeIds(nodes: AgentSessionNode[], sid: string): Set<string> {
   const native = new Set(
-    nodes.filter((n) => n.harness === "claude" && n.tmuxSession === sid).map((n) => n.id),
+    nodes.filter((n) => n.harness === "claude" && (n.tmuxMatches ?? []).includes(sid)).map((n) => n.id),
   );
   for (let grew = true; grew; ) {
     grew = false;

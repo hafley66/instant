@@ -23,6 +23,7 @@ function node(partial: Partial<AgentSessionNode> & { id: string }): AgentSession
     cwd: "~/projects/x",
     tmuxSession: null,
     ...partial,
+    tmuxMatches: partial.tmuxMatches ?? (partial.tmuxSession != null ? [partial.tmuxSession] : []),
   };
 }
 

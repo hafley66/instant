@@ -21,6 +21,16 @@ function namesHarness(proc: string): boolean {
   return HARNESS_BINS.has(base);
 }
 
+// Every tmux session whose join row matched this cwd, in row order. A repo
+// directory hosts more than one running tmux session (e.g. "sprefa" and
+// "sprefa-3"), so the related scope needs the full list, not the single guess.
+export function joinTmuxSessions(untildifiedCwd: string, rows: JoinTmuxRow[]): string[] {
+  if (!untildifiedCwd) return [];
+  return rows
+    .filter((r) => r.pwd === untildifiedCwd || r.chipPaths.includes(untildifiedCwd))
+    .map((r) => r.name);
+}
+
 export function joinTmuxSession(untildifiedCwd: string, rows: JoinTmuxRow[]): string | null {
   if (!untildifiedCwd) return null;
   const matches = rows.filter(

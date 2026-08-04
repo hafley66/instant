@@ -15,6 +15,7 @@ function node(partial: Partial<AgentSessionNode> & { id: string }): AgentSession
     cwd: "~/projects/demo",
     tmuxSession: null,
     ...partial,
+    tmuxMatches: partial.tmuxMatches ?? (partial.tmuxSession != null ? [partial.tmuxSession] : []),
   };
 }
 
@@ -161,5 +162,21 @@ describe("StripPolicy.external drops finished lanes", () => {
     const all = StripPolicy.external(day, "s1", "all").map((n) => n.id);
     expect(all).not.toContain("oc-done");
     expect(all).not.toContain("sh-dead");
+  });
+});
+
+describe("StripPolicy.external with a cwd shared by several tmux sessions", () => {
+  // Defect receipt: a repo directory hosts tmux sessions "demo" and "demo-3".
+  // The cwd guess pinned the node's tmuxSession to "demo", so a viewer on
+  // "demo-3" saw related as empty forever. tmuxMatches carries every match, so
+  // the viewer's sid matches even though the display guess is "demo".
+  it("related scope reaches a node whose tmuxSession guessed one of the shared sessions", () => {
+    const nodes: AgentSessionNode[] = [
+      node({ id: "claude-demo", tmuxSession: "demo", tmuxMatches: ["demo", "demo-3"] }),
+      node({ id: "oc-demo", harness: "opencode", parentId: "claude-demo", parentKind: "dispatch" }),
+    ];
+    expect([...StripPolicy.nativeIds(nodes, "demo-3")].sort()).toEqual(["claude-demo"]);
+    const related = StripPolicy.external(nodes, "demo-3", "related").map((n) => n.id);
+    expect(related).toEqual(["oc-demo"]);
   });
 });
