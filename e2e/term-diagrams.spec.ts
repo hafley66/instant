@@ -27,6 +27,19 @@ const output = (harness: "Codex" | "Claude Code") => [
   "```",
 ].join("\r\n");
 
+const renderedCliOutput = (harness: "Codex" | "Claude Code") => [
+  `${harness} response:`,
+  "",
+  "• PTY -> tmux",
+  "  tmux -> xterm",
+  '  xterm -> "D2 renderer"',
+  "",
+  "  flowchart LR",
+  "    PTY --> tmux",
+  "    tmux --> xterm",
+  "    xterm --> Mermaid",
+].join("\r\n");
+
 async function openTerminal(page: Page) {
   await page.goto("/e2e-term.html?e2e=1");
   await page.getByTestId("open-term").click();
@@ -66,5 +79,13 @@ for (const harness of ["Codex", "Claude Code"] as const) {
       body: await page.locator(".term-host").screenshot(),
       contentType: "image/png",
     });
+  });
+
+  test(`infers Mermaid and D2 after ${harness} strips Markdown fences`, async ({ page }) => {
+    await openTerminal(page);
+    await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), renderedCliOutput(harness));
+
+    await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
+    await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
   });
 }

@@ -37,6 +37,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
     Math.min(buffer.length - 1, viewportTop + term.rows - 1),
   );
   const found: DiagramFence[] = [];
+  const occupied = new Set<number>();
   for (let index = 0; index < lines.length; index++) {
     const open = lines[index].text.match(/^\s*(`{3,}|~{3,})\s*(mermaid|d2)\s*$/i);
     if (!open) continue;
@@ -49,11 +50,46 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
         start: lines[index].start,
         end: lines[closeIndex].end,
       });
+      for (let row = lines[index].start; row <= lines[closeIndex].end; row++) occupied.add(row);
       index = closeIndex;
       break;
     }
   }
+  for (let index = 0; index < lines.length; index++) {
+    if (occupied.has(lines[index].start)) continue;
+    const first = stripTuiBullet(lines[index].text).trimStart();
+    const language: DiagramLanguage | null = isMermaidStart(first)
+      ? "mermaid"
+      : isD2ArrowLine(first) && isD2ArrowLine(stripTuiBullet(lines[index + 1]?.text ?? "").trimStart())
+        ? "d2"
+        : null;
+    if (!language) continue;
+    let end = index;
+    while (end + 1 < lines.length && stripTuiBullet(lines[end + 1].text).trim()) end++;
+    const block = lines.slice(index, end + 1);
+    const code = dedent(block.map((line) => stripTuiBullet(line.text)));
+    found.push({ language, code, start: block[0].start, end: block[block.length - 1].end });
+    index = end;
+  }
   return found;
+}
+
+function stripTuiBullet(line: string): string {
+  return line.replace(/^\s*[•●]\s?/, "");
+}
+
+function dedent(lines: string[]): string {
+  const indents = lines.filter((line) => line.trim()).map((line) => line.match(/^\s*/)?.[0].length ?? 0);
+  const margin = indents.length ? Math.min(...indents) : 0;
+  return lines.map((line) => line.slice(margin).trimEnd()).join("\n");
+}
+
+function isMermaidStart(line: string): boolean {
+  return /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|C4Context|sankey-beta|xychart-beta)\b/.test(line);
+}
+
+function isD2ArrowLine(line: string): boolean {
+  return !/-->|<--/.test(line) && /(?:^|\s)(?:<?->|<-)(?:\s|$)/.test(line);
 }
 
 function darkBackground(host: HTMLElement): boolean {
