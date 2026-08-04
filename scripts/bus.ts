@@ -110,6 +110,181 @@ function mergeRoute(dir, laneId, route) {
   casUpdateJson(join(dir, "registry.json"), (registry) => ({ ...registry, [laneId]: route }));
 }
 
+// ---- per-harness session artifacts (the strip's ground truth, not dispatch
+// args): codex rollouts / claude transcripts / the opencode.db. Each reader
+// returns null when its source is unreadable, never throws, never guesses. ----
+
+// Newest codex rollout whose session_meta cwd matches, or null. Codex stores
+// rollouts as dated nested dirs under ~/.codex/sessions/<yyyy>/<MM>/<dd>.
+function codexRolloutFor(cwd) {
+  const root = join(homedir(), ".codex", "sessions");
+  const stack = [root];
+  let newest = null;
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const ent of entries) {
+      const full = join(dir, ent.name);
+      if (ent.isDirectory()) {
+        stack.push(full);
+      } else if (ent.name.endsWith(".jsonl")) {
+        if (codexRolloutCwd(full) !== cwd) continue;
+        const mtime = statSync(full).mtimeMs;
+        if (!newest || mtime > newest.mtime) newest = { path: full, mtime, id: codexRolloutId(full) };
+      }
+    }
+  }
+  return newest;
+}
+
+function codexRolloutCwd(path) {
+  try {
+    const first = readFileSync(path, "utf8").split("\n", 1)[0];
+    return JSON.parse(first)?.payload?.cwd ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function codexRolloutId(path) {
+  try {
+    const first = readFileSync(path, "utf8").split("\n", 1)[0];
+    const payload = JSON.parse(first)?.payload;
+    return payload?.id ?? payload?.session_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// The last turn_context's model name (session_meta carries only provider).
+function codexModel(path) {
+  try {
+    let model = null;
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (!line.includes('"model"')) continue;
+      const value = safeJson(line);
+      if (value?.type === "turn_context" && typeof value.payload?.model === "string") model = value.payload.model;
+    }
+    return model;
+  } catch {
+    return null;
+  }
+}
+
+// Cumulative input tokens: the last token_count event's total_token_usage.
+function codexTokens(path) {
+  try {
+    let n = null;
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (!line.includes("total_token_usage")) continue;
+      const value = safeJson(line);
+      const total = value?.payload?.info?.total_token_usage;
+      if (value?.payload?.type === "token_count" && typeof total?.input_tokens === "number") n = total.input_tokens;
+    }
+    return n;
+  } catch {
+    return null;
+  }
+}
+
+function safeJson(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+function claudeTranscriptFor(cwd) {
+  const proj = join(homedir(), ".claude", "projects", cwd.replace(/\//g, "-"));
+  let newest = null;
+  try {
+    for (const name of readdirSync(proj)) {
+      if (!name.endsWith(".jsonl")) continue;
+      const path = join(proj, name);
+      const mtime = statSync(path).mtimeMs;
+      if (!newest || mtime > newest.mtime) newest = { path, mtime };
+    }
+  } catch {
+    newest = null;
+  }
+  return newest?.path ?? null;
+}
+
+// Current context size: the last assistant usage's input side (input + cache
+// read + cache creation). The transcript has no cumulative field.
+function claudeTokens(path) {
+  let n = null;
+  try {
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (!line.includes('"usage"')) continue;
+      const usage = usageOf(safeJson(line), 0);
+      if (!usage) continue;
+      n =
+        (typeof usage.input_tokens === "number" ? usage.input_tokens : 0) +
+        (typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : 0) +
+        (typeof usage.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : 0);
+    }
+  } catch {
+    return null;
+  }
+  return n;
+}
+
+function usageOf(value, depth) {
+  if (depth > 6 || value === null || typeof value !== "object") return null;
+  if (!Array.isArray(value) && typeof value.input_tokens === "number") return value;
+  for (const v of Object.values(value)) {
+    if (v && typeof v === "object") {
+      const found = usageOf(v, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function opencodeSessionId(cwd) {
+  if (typeof cwd !== "string" || cwd.includes("\0")) return null;
+  const db = join(homedir(), ".local/share/opencode/opencode.db");
+  const query = `SELECT id FROM session WHERE directory = '${cwd.replace(/'/g, "''")}' AND time_archived IS NULL ORDER BY time_created DESC LIMIT 1`;
+  const result = run("sqlite3", [db, query]);
+  return result.ok ? result.stdout.trim() || null : null;
+}
+
+// Per-message input tokens of the last message: the current in-flight count.
+function opencodeTokens(cwd) {
+  const sid = opencodeSessionId(cwd);
+  if (!sid) return null;
+  const db = join(homedir(), ".local/share/opencode/opencode.db");
+  const query = `SELECT json_extract(data, '$.tokens.input') FROM message WHERE session_id = '${sid.replace(/'/g, "''")}' ORDER BY time_created DESC LIMIT 1`;
+  const result = run("sqlite3", [db, query]);
+  if (!result.ok) return null;
+  const n = Number(result.stdout.trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function readTokens(harness, cwd) {
+  try {
+    if (harness === "codex") {
+      const rollout = codexRolloutFor(cwd);
+      return rollout?.path ? codexTokens(rollout.path) : null;
+    }
+    if (harness === "claude") {
+      const path = claudeTranscriptFor(cwd);
+      return path ? claudeTokens(path) : null;
+    }
+    if (harness === "opencode") return opencodeTokens(cwd);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function sleepSync(seconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
 }
@@ -186,7 +361,7 @@ function resolve(args) {
   const route = readRegistryRaw(dir)[to];
   const harness = route?.harness ?? null;
   const cwd = route?.cwd ?? null;
-  if (harness !== "opencode" && harness !== "claude") {
+  if (harness !== "opencode" && harness !== "claude" && harness !== "codex") {
     console.log(`unresolved ${to}: harness ${harness ?? "none"} has no resolve leg`);
     return 1;
   }
@@ -217,6 +392,20 @@ function resolve(args) {
     console.log(`resolved ${to} -> ${newest.id}`);
     return 0;
   }
+  if (harness === "codex") {
+    // A codex lane's session is its rollout, matched by the session_meta cwd
+    // like the opencode leg's newest-non-archived rule. Model comes from the
+    // rollout's own turn_context records, never from the dispatch args.
+    const rollout = codexRolloutFor(cwd);
+    if (!rollout || !rollout.id) {
+      console.log(`unresolved ${to}: no codex rollout for ${cwd} yet`);
+      return 2;
+    }
+    const model = codexModel(rollout.path) ?? route.model ?? null;
+    mergeRoute(dir, to, { ...route, sessionId: rollout.id, model });
+    console.log(`resolved ${to} -> ${rollout.id} (${model ?? "?"})`);
+    return 0;
+  }
   // NUL bytes cannot survive argv, so refuse them. A single quote is fine: the
   // sqlite3 CLI has no bind params, so a literal is escaped by doubling the
   // quote (SQL string-literal rule); a doubled quote is not escaped further.
@@ -224,14 +413,7 @@ function resolve(args) {
     console.log(`unresolved ${to}: cwd contains a NUL byte, refusing`);
     return 1;
   }
-  const db = join(homedir(), ".local/share/opencode/opencode.db");
-  const query = `SELECT id FROM session WHERE directory = '${cwd.replace(/'/g, "''")}' AND time_archived IS NULL ORDER BY time_created DESC LIMIT 1`;
-  const result = run("sqlite3", [db, query]);
-  if (!result.ok) {
-    console.log(`resolve query failed (${result.status}): ${result.stderr.trim()}`);
-    return 1;
-  }
-  const sessionId = result.stdout.trim();
+  const sessionId = opencodeSessionId(cwd);
   if (!sessionId) {
     console.log(`unresolved ${to}: no opencode session for ${cwd} yet`);
     return 2;
@@ -287,6 +469,25 @@ function sweep(args) {
   const dir = mailDirOf(args);
   const directory = readDirectory(dir);
   const boxes = readBoxes(dir);
+  // Stamp current token usage into every live route from the session's own
+  // artifact. A live set is required to call a route live; a route whose
+  // artifact cannot be read keeps the field absent (no guess, never an error).
+  const live = liveSessions();
+  if (live !== null) {
+    casUpdateJson(join(dir, "registry.json"), (registry) => {
+      for (const id of Object.keys(registry)) {
+        const route = registry[id];
+        if (typeof route !== "object" || route === null) continue;
+        const r = route;
+        if (typeof r.harness !== "string" || typeof r.cwd !== "string") continue;
+        if (typeof r.tmux !== "string" || !live.has(r.tmux)) continue;
+        const inTokens = readTokens(r.harness, r.cwd);
+        if (inTokens === null) continue;
+        registry[id] = { ...r, tokens: { in: inTokens, at: nowIso() } };
+      }
+      return registry;
+    });
+  }
   const maxAgeDays = Number(args["max-age-days"] ?? 7);
   const cutoff = Date.now() - maxAgeDays * 86400_000;
   const pending = MailStore.unacked(allMessages(boxes));

@@ -8,6 +8,7 @@ import type {
   IMailDirectoryReader,
   IMailMessage,
   IMailStore,
+  MailTokens,
 } from "./0_types";
 
 const HARNESSES: Harness[] = ["claude", "opencode", "codex", "kimi", "shell"];
@@ -24,6 +25,17 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function harnessOf(value: string | null): Harness | null {
   return HARNESSES.find((h) => h === value) ?? null;
+}
+
+// The route's token stamp: only a well-formed { in: number, at: iso } counts;
+// anything else is left absent so the strip renders "-" instead of garbage.
+function tokensOf(fields: Record<string, unknown>): MailTokens | null {
+  const box = record(fields.tokens);
+  if (box === null) return null;
+  const at = str(box, "at");
+  const n = box.in;
+  if (typeof n !== "number" || Number.isNaN(n) || at === null) return null;
+  return { in: n, at };
 }
 
 // A row's own timestamp for ordering. `ts` is the pre-ruling field name.
@@ -209,6 +221,7 @@ export const MailDirectory: IMailDirectoryReader = {
         tmux: str(fields, "tmux"),
         cwd: str(fields, "cwd"),
         sourcePath: str(fields, "sourcePath") ?? str(fields, "source_path"),
+        tokens: tokensOf(fields),
       };
     }
     return directory;

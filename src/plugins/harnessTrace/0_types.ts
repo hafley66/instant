@@ -27,6 +27,9 @@ export interface AgentSessionNode {
   // full list (includes the sid) while display still shows the single tmuxSession.
   // Optional (absent = no matches) so join-free fixtures keep compiling.
   tmuxMatches?: string[];
+  // Current token usage stamped by the bus sweep from the session's own
+  // harness artifact; absent when the source is unreadable or not yet swept.
+  tokens?: MailTokens | null;
 }
 
 // The flat trace panel's row: the frozen model plus the display session id
@@ -43,6 +46,8 @@ export interface HarnessTraceRow {
   lastActivity: string;
   status: SessionStatus;
   cwd: string;
+  // The bus sweep's token stamp for this lane (see MailTokens/AgentSessionNode).
+  tokens?: MailTokens | null;
 }
 
 // The rust command harness_trace_rows returns HarnessTraceRow minus from/why;
@@ -186,6 +191,15 @@ export interface IMailAgent {
   tmux: string | null;
   cwd: string | null;
   sourcePath: string | null;
+  // The bus sweep's stamp of current input-token usage, with the sweep time.
+  tokens?: MailTokens | null;
+}
+
+// Token stamp the bus sweep writes into a live route: current input-token
+// usage `in` at ISO time `at`. Absent when the host artifact is unreadable.
+export interface MailTokens {
+  in: number;
+  at: string;
 }
 
 // registry.json parsed: agent id -> route. The legacy string form

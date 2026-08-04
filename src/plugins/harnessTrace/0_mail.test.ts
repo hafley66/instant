@@ -194,6 +194,18 @@ describe("registrySeeds", () => {
     expect(row).toMatchObject({ id: "probe", sessionId: "probe", harness: "shell", status: "idle", cwd: "/tmp/probe" });
   });
 
+  it("carries the route's sweep token stamp onto the seed", () => {
+    const stamp = { in: 10482488, at: "2026-08-04T23:44:56Z" };
+    const [row] = registrySeeds(
+      { lane: route({ id: "lane", tmux: "lane", harness: "codex", cwd: "/tmp/rx", tokens: stamp }) },
+      [],
+      new Set(["lane"]),
+      [],
+      NOW,
+    );
+    expect(row).toMatchObject({ tokens: stamp });
+  });
+
   // REVIEW-reactive finding 9: a registry lane was "live" purely because its
   // tmux existed, with a blank activity column beside a green dot for hours.
   it("grades a live-tmux route by mail activity: fresh = live, stale = idle", () => {

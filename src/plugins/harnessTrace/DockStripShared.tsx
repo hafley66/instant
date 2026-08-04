@@ -14,7 +14,7 @@ import { enrichRows, registrySeeds, resolveRouteSessions, routeTmuxBySession, se
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { assignTmuxPanes, joinTmuxSessions } from "./2_join";
-import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
+import type { HarnessTraceSeed, AgentSessionNode, MailRegistry, MailTokens } from "./0_types";
 import type { Session } from "../../state";
 
 export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
@@ -33,6 +33,16 @@ export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
     id: "dot",
     header: "",
     cell: (r) => <span className={"dot" + (r.status === "live" ? " on" : "")} />,
+  },
+  {
+    id: "tokens",
+    header: "tokens",
+    cell: (r) => (
+      <span className="s-meta" title={r.tokens ? `in ${r.tokens.in} @ ${r.tokens.at}` : "not swept"}>
+        {r.tokens ? fmtTokens(r.tokens.in) : "-"}
+      </span>
+    ),
+    sortValue: (r) => r.tokens?.in ?? -1,
   },
   {
     id: "harness",
@@ -108,6 +118,10 @@ export function stripFilter(r: AgentTreeNode, q: string): boolean {
     r.cwd.toLowerCase().includes(s) ||
     (r.tmuxSession ?? "").includes(s)
   );
+}
+
+function fmtTokens(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
 // The store tmux rows the strip joins against (same source TmuxPanelV2 reads).
@@ -281,7 +295,17 @@ export function useAgentTree(): AgentTreeState {
         // sharing its harness+cwd instead of seeding a duplicate (m-17f56e54).
         const resolved = { ...resolveRouteSessions(mail.directory, storeSeeds, getHomeDir()), ...mail.registry };
         const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux, mail.envelopes, Date.now(), resolved)];
-        const flatRows = enrichRows(seeds, mail.envelopes, resolved);
+        // Token stamps ride the registry routes keyed by session id, so they
+        // merge onto the flat rows after the seed walk (store-backed lanes too).
+        const tokensBySession = new Map<string, MailTokens | null>();
+        for (const agent of Object.values(mail.directory)) {
+          const sid = agent.sessionId || resolved[agent.id] || agent.id;
+          if (agent.tokens) tokensBySession.set(sid, agent.tokens);
+        }
+        const flatRows = enrichRows(seeds, mail.envelopes, resolved).map((r) => ({
+          ...r,
+          tokens: tokensBySession.get(r.sessionId) ?? null,
+        }));
         setFlat(toAgentNodes(flatRows, mail.envelopes, resolved));
         setRegistry(resolved);
         setRouteTmux(routeTmuxBySession(mail.directory, resolved));

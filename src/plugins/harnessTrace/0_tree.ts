@@ -35,6 +35,7 @@ export function toAgentNodes(
     lastActivity: r.lastActivity,
     status: r.status,
     cwd: r.cwd,
+    tokens: r.tokens ?? null,
     // The tmux join happens on the panel (it reads the store); trees leave it
     // null so the pure shaping fns keep no store dependency.
     tmuxSession: null,

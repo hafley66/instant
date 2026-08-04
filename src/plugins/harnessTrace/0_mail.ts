@@ -134,6 +134,7 @@ export function registrySeeds(
         lastActivity: mailMs ? new Date(mailMs).toISOString() : "",
         status: status as HarnessTraceSeed["status"],
         cwd: agent.cwd ?? "",
+        tokens: agent.tokens ?? null,
       };
     });
 }

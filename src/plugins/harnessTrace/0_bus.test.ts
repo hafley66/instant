@@ -232,6 +232,23 @@ describe("MailDirectory", () => {
     expect(MailDirectory.agent(directory, "nobody")).toBeNull();
   });
 
+  it("reads the sweep's token stamp, and rejects malformed ones", () => {
+    const good = JSON.stringify({
+      "lane-c": { sessionId: "s", harness: "codex", tokens: { in: 10482488, at: "2026-08-04T23:44:56Z" } },
+    });
+    expect(MailDirectory.agent(MailDirectory.parse(good), "lane-c")?.tokens).toEqual({
+      in: 10482488,
+      at: "2026-08-04T23:44:56Z",
+    });
+    const bad = JSON.stringify({
+      "lane-d": { sessionId: "s", harness: "codex", tokens: { in: "many", at: "x" } },
+      "lane-e": { sessionId: "s", harness: "codex", tokens: { in: 5 } },
+    });
+    const dir = MailDirectory.parse(bad);
+    expect(dir["lane-d"].tokens).toBeNull();
+    expect(dir["lane-e"].tokens).toBeNull();
+  });
+
   it("survives malformed json, arrays and unknown harness names", () => {
     expect(MailDirectory.parse("not json")).toEqual({});
     expect(MailDirectory.parse("[1,2]")).toEqual({});
