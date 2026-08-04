@@ -51,6 +51,20 @@ describe("StripPolicy.toggle", () => {
   });
 });
 
+describe("StripPolicy.setActivation", () => {
+  it("flips the checkbox on an on-screen auto-appeared entry, keeping it open", () => {
+    expect(StripPolicy.setActivation(null, false)).toEqual({ open: true, showActive: false });
+  });
+
+  it("keeps the entry's open state and sets showActive", () => {
+    expect(StripPolicy.setActivation({ open: true }, false)).toEqual({ open: true, showActive: false });
+    expect(StripPolicy.setActivation({ open: false, showActive: false }, true)).toEqual({
+      open: false,
+      showActive: true,
+    });
+  });
+});
+
 describe("StripPolicy.visible", () => {
   it("renders the shell on an explicit summon with zero rows", () => {
     expect(StripPolicy.visible({ open: true }, 0, false)).toBe(true);

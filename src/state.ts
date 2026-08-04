@@ -134,9 +134,11 @@ export interface TermSidebarState {
 }
 
 // Per-terminal in-tab relations strip. Absent entry = open (the strip
-// auto-appears when the terminal has related agent sessions).
+// auto-appears when the terminal has related agent sessions). showActive
+// absent = default true (the going-on table); false = the history waterfall.
 export interface TermStripState {
   open: boolean;
+  showActive?: boolean;
 }
 
 // A favorited turn (Rust favorites::Fav) — a snapshot persisted to favorites.db,
