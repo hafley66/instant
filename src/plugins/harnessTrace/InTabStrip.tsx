@@ -18,6 +18,7 @@ import { indexAgentTree, materializeAgentTree, type AgentTreeNode } from "./0_tr
 import { openSession } from "./DockStripPanel";
 import { termViewRouter, pushMailPreview } from "./3_router";
 import { MailPreview } from "./4_MailPreview";
+import { Waterfall } from "./4_Waterfall";
 import { mailAgentIdFor } from "./0_mail";
 import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
@@ -34,6 +35,7 @@ const STYLE =
   ".term-strip .spy-viewing{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
   ".term-strip .strip-empty{padding:6px 8px}" +
   ".term-strip .act-bar{min-height:20px;padding:0 4px;gap:4px}" +
+  ".term-strip .act-check{align-items:center}" +
   ".term-strip .tt-wrap{font-size:11px}" +
   ".term-strip td,.term-strip th{padding:0 4px;line-height:16px}";
 
@@ -148,6 +150,12 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     termViewRouter.push(sid, { kind: "agent-session", agentSessionId: r.id });
   };
 
+  const openWaterfallId = (id: string) => {
+    const n = nodes.find((x) => x.id === id);
+    if (n?.tmuxSession) openSession(n.tmuxSession);
+    termViewRouter.push(sid, { kind: "agent-session", agentSessionId: id });
+  };
+
   const viewing =
     current === null
       ? null
@@ -169,15 +177,16 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
         </span>
         {viewing && <span className="spy-viewing">{viewing}</span>}
         <span className="spy-spacer" />
-        <label className="act-check" title="uncheck to see the session history waterfall">
+        <span className="act-check" title="uncheck to see the session history waterfall">
           <input
             type="checkbox"
+            id={"showactive-" + sid}
             data-testid="strip-showactive"
             checked={showActive}
             onChange={(e) => setShowActive(e.target.checked)}
           />
-          Show active
-        </label>
+          <label htmlFor={"showactive-" + sid}>Show active</label>
+        </span>
         <button
           type="button"
           data-testid="strip-scope"
@@ -196,6 +205,8 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
       </div>
       {current?.kind === "mail-preview" ? (
         <MailPreview agentId={current.agentId} />
+      ) : !showActive ? (
+        <Waterfall nodes={nodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
       ) : error ? (
         <div className="session-empty">{error}</div>
       ) : index.size === 0 ? (

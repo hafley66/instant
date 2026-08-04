@@ -55,6 +55,9 @@ importers:
       d3-scale:
         specifier: ^4.0.2
         version: 4.0.2
+      d3-selection:
+        specifier: ^3.0.0
+        version: 3.0.0
       dockview:
         specifier: ^6.6.1
         version: 6.6.1(react@19.2.7)
@@ -122,6 +125,15 @@ importers:
       '@types/d3':
         specifier: ^7.4.3
         version: 7.4.3
+      '@types/d3-brush':
+        specifier: ^3.0.6
+        version: 3.0.6
+      '@types/d3-scale':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/d3-selection':
+        specifier: ^3.0.11
+        version: 3.0.11
       '@types/json-logic-js':
         specifier: ^2.0.8
         version: 2.0.8
