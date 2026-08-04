@@ -1,16 +1,20 @@
 // Pure rules for the in-tab strip: what a toggle press writes, when the shell
 // renders, and which sessions belong in it. No React and no store import, so
 // vitest covers them in the node environment the rest of the 0_ modules use.
-import { buildAgentTree, filterForestByTmux, type AgentTreeNode } from "./0_tree";
 import type { AgentSessionNode, IStripPolicy } from "./0_types";
 
-// Every id in a forest, roots and descendants.
-function forestIds(roots: AgentTreeNode[], into: Set<string>): Set<string> {
-  for (const root of roots) {
-    into.add(root.id);
-    forestIds(root.children, into);
+// Transitive parentId closure over `nodes` starting from `seed` ids.
+function descendantsOf(nodes: AgentSessionNode[], seed: Set<string>): Set<string> {
+  const reachable = new Set(seed);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const node of nodes) {
+      if (reachable.has(node.id) || !node.parentId || !reachable.has(node.parentId)) continue;
+      reachable.add(node.id);
+      grew = true;
+    }
   }
-  return into;
+  return reachable;
 }
 
 // This tab's own claude session (the claude row joined to its tmux session)
@@ -72,7 +76,9 @@ export const StripPolicy: IStripPolicy = {
     );
     const native = nativeClaudeIds(going, tmux);
     if (scope === "all") return going.filter((node) => !native.has(node.id));
-    const related = forestIds(filterForestByTmux(buildAgentTree(going), tmux), new Set<string>());
+    // Parent links only: the cwd guess joins same-cwd sessions from other
+    // tabs to this sid, and a tab is not a relation.
+    const related = descendantsOf(going, native);
     return going.filter((node) => related.has(node.id) && !native.has(node.id));
   },
 

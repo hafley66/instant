@@ -158,10 +158,32 @@ describe("StripPolicy.external drops finished lanes", () => {
       node({ id: "oc-idle", harness: "opencode", status: "idle", tmuxSession: "s1" }),
     ];
     const related = StripPolicy.external(day, "s1", "related").map((n) => n.id);
-    expect(related).toEqual(["oc-lane", "oc-idle"]);
+    expect(related).toEqual(["oc-lane"]);
     const all = StripPolicy.external(day, "s1", "all").map((n) => n.id);
+    expect(all).toContain("oc-idle");
     expect(all).not.toContain("oc-done");
     expect(all).not.toContain("sh-dead");
+  });
+});
+
+describe("StripPolicy.external related is parent links only", () => {
+  // Defect receipt 2026-08-04: the user's own codex tab (same cwd, so its
+  // tmuxMatches carried the viewing tab's sid) showed up in related scope.
+  it("drops another tab's session that joins this sid through the cwd guess", () => {
+    const nodes: AgentSessionNode[] = [
+      node({ id: "claude-here", tmuxSession: "s1" }),
+      node({ id: "codex-tab", harness: "codex", tmuxSession: "sprefa-2", tmuxMatches: ["sprefa-2", "s1"] }),
+    ];
+    expect(StripPolicy.external(nodes, "s1", "related")).toEqual([]);
+    expect(StripPolicy.external(nodes, "s1", "all").map((n) => n.id)).toEqual(["codex-tab"]);
+  });
+
+  it("keeps a parentless session out of related even when tmux-joined to this tab", () => {
+    const nodes: AgentSessionNode[] = [
+      node({ id: "claude-here", tmuxSession: "s1" }),
+      node({ id: "oc-stray", harness: "opencode", tmuxSession: "s1" }),
+    ];
+    expect(StripPolicy.external(nodes, "s1", "related")).toEqual([]);
   });
 });
 
@@ -171,11 +193,12 @@ describe("StripPolicy.external with a subagent thread of an external session", (
   // codex pane on sprefa-2 counted as "2 external shells" with different ids.
   it("counts one shell for a codex session plus its guardian thread, both scopes", () => {
     const nodes: AgentSessionNode[] = [
-      node({ id: "codex-main", harness: "codex", tmuxSession: "s2" }),
+      node({ id: "claude-here", tmuxSession: "s1" }),
+      node({ id: "codex-main", harness: "codex", parentId: "claude-here", parentKind: "dispatch", tmuxSession: "s2" }),
       node({ id: "codex-guardian", harness: "codex", parentId: "codex-main", parentKind: "subagent", tmuxSession: "s2" }),
     ];
     expect(StripPolicy.external(nodes, "s1", "all").map((n) => n.id)).toEqual(["codex-main"]);
-    expect(StripPolicy.external(nodes, "s2", "related").map((n) => n.id)).toEqual(["codex-main"]);
+    expect(StripPolicy.external(nodes, "s1", "related").map((n) => n.id)).toEqual(["codex-main"]);
   });
 });
 
