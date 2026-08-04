@@ -84,6 +84,16 @@ describe("tickType", () => {
   it("codex tool-result names ride subtype as tool", () => {
     expect(tickType(msg({ id: "m", role: "assistant", subtype: "Shell(1)" }))).toBe("tool");
   });
+
+  // m-6377c775: harness transcripts store injected coordinator lines as
+  // role=user, so every lane turn rendered as a human prompt.
+  it("a [bus m-*] stamped user line is dispatch, not user", () => {
+    expect(tickType(msg({ id: "m", role: "user", preview: "[bus m-12ab34cd] take the lane" }))).toBe("dispatch");
+  });
+
+  it("a user line merely mentioning the bus mid-text stays user", () => {
+    expect(tickType(msg({ id: "m", role: "user", preview: "what does [bus m-1] mean" }))).toBe("user");
+  });
 });
 
 describe("tickFrom", () => {

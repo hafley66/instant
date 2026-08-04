@@ -65,6 +65,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     [nodes, sid, chosenScope],
   );
   const external = useMemo(() => StripPolicy.external(nodes, sid, scope), [nodes, sid, scope]);
+  const historyNodes = useMemo(() => StripPolicy.history(nodes, sid, scope), [nodes, sid, scope]);
   const index = useMemo(() => indexAgentTree(external), [external]);
   // The search box forces every branch open (TreeTable's `true` sentinel),
   // which a lazy tree cannot honor for unmaterialized children; the filter
@@ -214,7 +215,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
       {current?.kind === "mail-preview" ? (
         <MailPreview agentId={current.agentId} />
       ) : !showActive ? (
-        <Waterfall nodes={nodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
+        <Waterfall nodes={historyNodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
       ) : error ? (
         <div className="session-empty">{error}</div>
       ) : index.size === 0 ? (

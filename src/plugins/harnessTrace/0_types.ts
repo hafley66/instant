@@ -296,6 +296,9 @@ export interface IStripPolicy {
   // The scope the strip renders. An explicit choice wins; untouched (null),
   // a "related" that matches nothing widens to "all" (m-36e96eb8).
   effectiveScope(nodes: AgentSessionNode[], sid: string, chosen: StripScope | null): StripScope;
+  // History mode's node set: external's scope + native subtraction, keeping
+  // done/dead and subagent threads (the waterfall draws history).
+  history(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
 }
 
 // ---------------------------------------------------------------------------

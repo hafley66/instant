@@ -44,7 +44,9 @@ export function tickType(msg: AiMessage): TickType {
   const st = msg.subtype;
   if (st?.includes("tool")) return "tool";
   if (st === "reasoning") return "reasoning";
-  if (msg.role === "user") return "user";
+  // Harness transcripts store bus-injected coordinator lines as role=user;
+  // the [bus m-*] stamp (1_leg injectedLine) is what tells them apart.
+  if (msg.role === "user") return /^\[bus [^\]]+\]/.test(msg.preview) ? "dispatch" : "user";
   if (st) return "tool";
   return "assistant";
 }

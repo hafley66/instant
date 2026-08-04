@@ -163,6 +163,8 @@ function route(partial: Partial<IMailAgent> & { id: string }): IMailAgent {
 }
 
 describe("registrySeeds", () => {
+  const NOW = Date.parse("2026-08-03T12:00:00Z");
+
   // Sabotage receipt: before this seam, a `bus dispatch`ed shell lane existed
   // only in registry.json, so it never became a row on any scope.
   it("synthesizes a seed for a route no harness store reported", () => {
@@ -170,24 +172,51 @@ describe("registrySeeds", () => {
       { probe: route({ id: "probe", tmux: "probe", cwd: "/tmp/probe" }) },
       [],
       new Set(["probe"]),
+      [],
+      NOW,
     );
-    expect(row).toMatchObject({ id: "probe", sessionId: "probe", harness: "shell", status: "live", cwd: "/tmp/probe" });
+    expect(row).toMatchObject({ id: "probe", sessionId: "probe", harness: "shell", status: "idle", cwd: "/tmp/probe" });
+  });
+
+  // REVIEW-reactive finding 9: a registry lane was "live" purely because its
+  // tmux existed, with a blank activity column beside a green dot for hours.
+  it("grades a live-tmux route by mail activity: fresh = live, stale = idle", () => {
+    const routes = { lane: route({ id: "lane", tmux: "lane" }) };
+    const fresh = parseMailNdjson(
+      JSON.stringify({ id: "m-f", from: "coord", to: "lane", ts: "2026-08-03T11:59:00Z", kind: "request" }),
+    );
+    expect(registrySeeds(routes, [], new Set(["lane"]), fresh, NOW)[0]).toMatchObject({
+      status: "live",
+      lastActivity: "2026-08-03T11:59:00.000Z",
+    });
+    const stale = parseMailNdjson(
+      JSON.stringify({ id: "m-s", from: "coord", to: "lane", ts: "2026-08-03T09:00:00Z", kind: "request" }),
+    );
+    expect(registrySeeds(routes, [], new Set(["lane"]), stale, NOW)[0]).toMatchObject({ status: "idle" });
+  });
+
+  it("never grades a living tmux done, however old the mail", () => {
+    const routes = { lane: route({ id: "lane", tmux: "lane" }) };
+    const ancient = parseMailNdjson(
+      JSON.stringify({ id: "m-a", from: "coord", to: "lane", ts: "2026-08-01T00:00:00Z", kind: "request" }),
+    );
+    expect(registrySeeds(routes, [], new Set(["lane"]), ancient, NOW)[0]).toMatchObject({ status: "idle" });
   });
 
   it("skips a route whose session a store seed already carries", () => {
     const routes = { lane: route({ id: "lane", sessionId: "sess-1", harness: "opencode" }) };
-    expect(registrySeeds(routes, [seed("sess-1")], new Set())).toEqual([]);
+    expect(registrySeeds(routes, [seed("sess-1")], new Set(), [], NOW)).toEqual([]);
   });
 
   it("seeds an unresolved opencode route under its agent id until resolve fills the session", () => {
     const routes = { lane: route({ id: "lane", harness: "opencode", tmux: "lane" }) };
-    const [row] = registrySeeds(routes, [seed("sess-other")], new Set());
+    const [row] = registrySeeds(routes, [seed("sess-other")], new Set(), [], NOW);
     expect(row).toMatchObject({ sessionId: "lane", harness: "opencode", status: "done" });
   });
 
   it("joins the dispatch envelope through the agent-id fallback, so from/why still attach", () => {
     const routes = { "lane-a": route({ id: "lane-a", tmux: "lane-a" }) };
-    const synth = registrySeeds(routes, [], new Set());
+    const synth = registrySeeds(routes, [], new Set(), [], NOW);
     const [row] = enrichRows(synth, parseMailNdjson(dispatchLine), {});
     expect(row.from).toBe("coordinator");
     expect(row.why).toBe("build the trace panel");

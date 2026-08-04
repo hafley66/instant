@@ -59,13 +59,21 @@ test("waterfall: default is today's going-on table; unchecking draws the history
   await expect(page.locator("tr").filter({ hasText: "sess-hist" })).toHaveCount(0);
   await expect(page.locator("tr").filter({ hasText: "sess-dead" })).toHaveCount(0);
 
-  // Uncheck => history waterfall: brush overview + one bar per session + ticks.
+  // Uncheck => history waterfall. The scope holds in history too: related
+  // keeps only the dispatch lane descending from this tab's session, and the
+  // tab's own claude row (the TUI's own list) never draws a bar.
   await page.getByText("Show active").click();
   const waterfall = page.getByTestId("waterfall");
   await expect(waterfall).toBeVisible();
-  await expect(page.getByTestId("waterfall-count")).toHaveText("4 sessions");
-  await expect(page.locator(".waterfall-bar")).toHaveCount(4);
-  for (const id of ["sess-live", "sess-lane", "sess-hist", "sess-dead"]) {
+  await expect(page.getByTestId("waterfall-count")).toHaveText("1 session");
+  await expect(page.locator(".waterfall-plot text").filter({ hasText: "sess-live" })).toHaveCount(0);
+
+  // Widening reaches the parentless history: every non-native session,
+  // done/dead included.
+  await page.getByTestId("strip-scope").click();
+  await expect(page.getByTestId("waterfall-count")).toHaveText("3 sessions");
+  await expect(page.locator(".waterfall-bar")).toHaveCount(3);
+  for (const id of ["sess-lane", "sess-hist", "sess-dead"]) {
     await expect(page.locator(".waterfall-plot text").filter({ hasText: id })).toBeVisible();
   }
   // The brush rect painted the full domain selection.
@@ -73,12 +81,12 @@ test("waterfall: default is today's going-on table; unchecking draws the history
   await expect(sel).toBeVisible();
   expect(Number(await sel.getAttribute("width"))).toBeGreaterThan(0);
 
-  // One tick per seeded message, colored by type (user=blue, assistant=green,
-  // tool=orange).
-  await expect(page.locator(".waterfall-tick")).toHaveCount(MESSAGES.length);
-  await expect(page.locator('.waterfall-tick[fill="#3b82f6"]')).toHaveCount(3);
-  await expect(page.locator('.waterfall-tick[fill="#22c55e"]')).toHaveCount(3);
-  await expect(page.locator('.waterfall-tick[fill="#f59e0b"]')).toHaveCount(2);
+  // One tick per message of the drawn sessions, colored by type (user=blue,
+  // assistant=green, tool=orange).
+  await expect(page.locator(".waterfall-tick")).toHaveCount(5);
+  await expect(page.locator('.waterfall-tick[fill="#3b82f6"]')).toHaveCount(2);
+  await expect(page.locator('.waterfall-tick[fill="#22c55e"]')).toHaveCount(2);
+  await expect(page.locator('.waterfall-tick[fill="#f59e0b"]')).toHaveCount(1);
 
   // The table below is constrained to the range (the whole domain): every
   // seeded session, including the done history row the default view hides.
@@ -101,12 +109,13 @@ test("waterfall: dragging the brush narrows the visible sessions and ticks", asy
   await seed(page);
   await page.goto("/e2e-waterfall.html?e2e=1");
 
-  // Show the history waterfall first.
+  // Show the history waterfall at the widest scope first.
   await page.getByText("Show active").click();
   const waterfall = page.getByTestId("waterfall");
   await expect(waterfall).toBeVisible();
-  await expect(page.getByTestId("waterfall-count")).toHaveText("4 sessions");
-  await expect(page.locator(".waterfall-tick")).toHaveCount(MESSAGES.length);
+  await page.getByTestId("strip-scope").click();
+  await expect(page.getByTestId("waterfall-count")).toHaveText("3 sessions");
+  await expect(page.locator(".waterfall-tick")).toHaveCount(5);
 
   // Drag the brush's right edge to ~15% of the plot: that range covers only the
   // early history session (sess-hist, 08:00-08:30), so the other three sessions

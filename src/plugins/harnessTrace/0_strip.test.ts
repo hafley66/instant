@@ -218,6 +218,27 @@ describe("StripPolicy.openAction", () => {
   });
 });
 
+describe("StripPolicy.history", () => {
+  // REVIEW-reactive finding 5: history mode passed raw nodes to the waterfall,
+  // drawing the tab's own claude session, the one thing the bar must not show.
+  it("drops native claude rows, keeps done/dead externals and subagent threads on scope all", () => {
+    const day = [
+      ...TAB_TREE,
+      node({ id: "oc-done", harness: "opencode", status: "done", parentId: "claude-s1", parentKind: "dispatch" }),
+    ];
+    const ids = StripPolicy.history(day, "s1", "all").map((n) => n.id);
+    expect(ids).not.toContain("claude-s1");
+    expect(ids).not.toContain("claude-sub");
+    expect(ids).toContain("oc-done");
+    expect(ids).toContain("oc-sub");
+  });
+
+  it("related keeps parent-link descendants only", () => {
+    const ids = StripPolicy.history(TAB_TREE, "s1", "related").map((n) => n.id);
+    expect(ids).toEqual(["oc-lane", "oc-sub"]);
+  });
+});
+
 describe("StripPolicy.effectiveScope", () => {
   // Coordinator receipt (m-36e96eb8, screenshot 23:28): a coordinator tab's
   // strip said "0 external shells" while four dispatched lanes ran in tmux.

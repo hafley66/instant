@@ -264,7 +264,7 @@ export function useAgentTree(): AgentTreeState {
         setLiveNames((prev) => names ?? prev);
         const mail = await loadMailLedger();
         const liveTmux = new Set(names ?? store.get().sessions.map((s) => s.name));
-        const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux)];
+        const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux, mail.envelopes, Date.now())];
         const flatRows = enrichRows(seeds, mail.envelopes, mail.registry);
         setFlat(toAgentNodes(flatRows, mail.envelopes, mail.registry));
         setRegistry(mail.registry);

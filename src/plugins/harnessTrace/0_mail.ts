@@ -58,16 +58,32 @@ export function mailAgentIdFor(registry: MailRegistry, sessionId: string): strin
 // falls back to, so from/why still attach. Store-backed sessions are the
 // store's to report; any agent whose sessionId a real seed already carries is
 // skipped.
+const SEED_LIVE_MS = 2 * 60 * 1000;
+
 export function registrySeeds(
   directory: IMailDirectory,
   seeds: HarnessTraceSeed[],
   liveTmux: Set<string>,
+  envelopes: MailEnvelope[],
+  nowMs: number,
 ): HarnessTraceSeed[] {
   const seeded = new Set(seeds.map((seed) => seed.sessionId));
+  const lastMailMs = new Map<string, number>();
+  for (const envelope of envelopes) {
+    const ms = Date.parse(envelope.ts) || 0;
+    for (const agentId of [envelope.to, envelope.from]) {
+      if (ms > (lastMailMs.get(agentId) ?? 0)) lastMailMs.set(agentId, ms);
+    }
+  }
   return Object.values(directory)
     .filter((agent) => !agent.sessionId || !seeded.has(agent.sessionId))
     .map((agent) => {
       const sessionId = agent.sessionId || agent.id;
+      const mailMs = lastMailMs.get(agent.id) ?? 0;
+      const alive = agent.tmux !== null && liveTmux.has(agent.tmux);
+      // Registry-only lanes have no store mtime, so mail traffic is the only
+      // activity signal: live decays to idle, never done while the tmux lives.
+      const status = !alive ? "done" : nowMs - mailMs <= SEED_LIVE_MS ? "live" : "idle";
       return {
         id: sessionId,
         harness: agent.harness ?? "shell",
@@ -75,8 +91,8 @@ export function registrySeeds(
         parentId: null,
         parentKind: null,
         ts: "",
-        lastActivity: "",
-        status: agent.tmux !== null && liveTmux.has(agent.tmux) ? ("live" as const) : ("done" as const),
+        lastActivity: mailMs ? new Date(mailMs).toISOString() : "",
+        status: status as HarnessTraceSeed["status"],
         cwd: agent.cwd ?? "",
       };
     });
