@@ -249,8 +249,11 @@ export interface ITermViewRouter {
 
 // A terminal's persisted strip entry. Absent (null) = never toggled on this
 // terminal; present = the user summoned or dismissed it explicitly.
+// showActive absent = default true (today's going-on view); false = history
+// waterfall, and the strip keeps the checkbox state while the entry survives.
 export interface ITermStripEntry {
   open: boolean;
+  showActive?: boolean;
 }
 
 // How wide the strip casts. "related" = trees joined to this terminal's tmux
@@ -367,3 +370,46 @@ export interface ILiveGate {
 export interface ILiveState {
   read(sample: ILiveSample): ILiveSampleState;
 }
+
+// ---------------------------------------------------------------------------
+// Session waterfall (history mode). The strip's "Show active" checkbox flips
+// today's going-on table to a devtools-network-style waterfall: a brush
+// overview on top, one bar per session below with a tick per message, and the
+// table constrained to the brushed range. All times are unix ms.
+// ---------------------------------------------------------------------------
+
+// One session's bar in the waterfall: start -> last activity (or now for live).
+export interface ISessionSpan {
+  id: string; // session id (== AgentSessionNode.id)
+  harness: Harness;
+  start: number; // unix ms
+  end: number; // unix ms (lastActivity; now for live/dead-present)
+}
+
+// One message/event tick on a session's bar, colored/shaped by type.
+export type TickType = "user" | "assistant" | "tool" | "reasoning" | "dispatch";
+
+export interface ISessionTick {
+  sessionId: string;
+  ts: number; // unix ms
+  type: TickType;
+  preview: string; // short text for the title tooltip
+}
+
+// The brush window. Both unix ms. start <= end. A range is always within the
+// overview domain; the table keeps only sessions whose span intersects it.
+export interface IWaterfallRange {
+  start: number;
+  end: number;
+}
+
+// The full domain the overview strip spans (min session start .. max activity
+// or now), padded so the brush has breathing room.
+export interface IWaterfallDomain {
+  start: number;
+  end: number;
+}
+
+// The lazy per-session message tick cache the waterfall reads: filled on first
+// range intersection, never all history up front.
+export type IWaterfallEvents = ReadonlyMap<string, ISessionTick[]>;
