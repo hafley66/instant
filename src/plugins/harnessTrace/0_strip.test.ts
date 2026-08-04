@@ -218,6 +218,28 @@ describe("StripPolicy.openAction", () => {
   });
 });
 
+describe("StripPolicy.effectiveScope", () => {
+  // Coordinator receipt (m-36e96eb8, screenshot 23:28): a coordinator tab's
+  // strip said "0 external shells" while four dispatched lanes ran in tmux.
+  const lanes = [node({ id: "oc-a", harness: "opencode", tmuxSession: "oc-a" })];
+
+  it("widens an untouched related scope that matches nothing", () => {
+    expect(StripPolicy.effectiveScope(lanes, "s9", null)).toBe("all");
+  });
+
+  it("keeps related when it has rows", () => {
+    expect(StripPolicy.effectiveScope(TAB_TREE, "s1", null)).toBe("related");
+  });
+
+  it("honors an explicit choice even when related is empty", () => {
+    expect(StripPolicy.effectiveScope(lanes, "s9", "related")).toBe("related");
+  });
+
+  it("stays related when both scopes are empty (the empty state names the sid)", () => {
+    expect(StripPolicy.effectiveScope([], "s9", null)).toBe("related");
+  });
+});
+
 describe("StripPolicy.external with a cwd shared by several tmux sessions", () => {
   // Defect receipt: a repo directory hosts tmux sessions "demo" and "demo-3".
   // The cwd guess pinned the node's tmuxSession to "demo", so a viewer on

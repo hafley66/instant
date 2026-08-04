@@ -56,9 +56,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
 
   const current = termViewRouter.current(sid);
   const canGoBack = termViewRouter.canGoBack(sid);
-  const [scope, setScope] = useState<StripScope>("related");
+  // null until the scope button is pressed; the policy widens an empty default.
+  const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
 
+  const scope = useMemo(
+    () => StripPolicy.effectiveScope(nodes, sid, chosenScope),
+    [nodes, sid, chosenScope],
+  );
   const external = useMemo(() => StripPolicy.external(nodes, sid, scope), [nodes, sid, scope]);
   const index = useMemo(() => indexAgentTree(external), [external]);
   // The search box forces every branch open (TreeTable's `true` sentinel),
@@ -198,7 +203,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
               ? "show every external session, including ones this terminal's cwd join missed"
               : "show only the sessions related to this terminal"
           }
-          onClick={() => setScope(scope === "related" ? "all" : "related")}
+          onClick={() => setChosenScope(scope === "related" ? "all" : "related")}
         >
           scope: {scope}
         </button>

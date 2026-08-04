@@ -293,6 +293,9 @@ export interface IStripPolicy {
   // "open" only when the row's tmux is in the live list: opening a dead lane
   // would mint an empty shell under its name (tmux new-session -A).
   openAction(row: { tmuxSession: string | null }, liveTmux: Set<string>): "open" | "ignore";
+  // The scope the strip renders. An explicit choice wins; untouched (null),
+  // a "related" that matches nothing widens to "all" (m-36e96eb8).
+  effectiveScope(nodes: AgentSessionNode[], sid: string, chosen: StripScope | null): StripScope;
 }
 
 // ---------------------------------------------------------------------------
