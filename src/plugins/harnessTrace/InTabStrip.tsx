@@ -18,11 +18,7 @@ import { indexAgentTree, materializeAgentTree, type AgentTreeNode } from "./0_tr
 import { openSession } from "./DockStripPanel";
 import { termViewRouter, pushMailPreview } from "./3_router";
 import { MailPreview } from "./4_MailPreview";
-// Waterfall parked: its unvirtualized render (bar per session, circle per
-// message, full-history default range) seized the webview at real session
-// counts. Re-enable only with a DOM budget: e2e/waterfall.spec.ts holds the
-// skipped tests + node-count assert.
-// import { Waterfall } from "./4_Waterfall";
+import { Waterfall } from "./4_Waterfall";
 import { mailAgentIdFor } from "./0_mail";
 import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
@@ -81,14 +77,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
   }, [sid]);
 
-  // const showActive = entry?.showActive ?? true;
-  // const setShowActive = (next: boolean) =>
-  //   store.set({
-  //     termStrip: {
-  //       ...store.get().termStrip,
-  //       [sid]: StripPolicy.setActivation(store.get().termStrip[sid] ?? null, next),
-  //     },
-  //   });
+  const showActive = entry?.showActive ?? true;
+  const setShowActive = (next: boolean) =>
+    store.set({
+      termStrip: {
+        ...store.get().termStrip,
+        [sid]: StripPolicy.setActivation(store.get().termStrip[sid] ?? null, next),
+      },
+    });
 
   const visible = StripPolicy.visible(entry, index.size, !!current);
   // The xterm owes a refit exactly when this strip's rendered height moved the
@@ -157,11 +153,11 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     termViewRouter.push(sid, { kind: "agent-session", agentSessionId: r.id });
   };
 
-  // const openWaterfallId = (id: string) => {
-  //   const n = nodes.find((x) => x.id === id);
-  //   if (n?.tmuxSession) openSession(n.tmuxSession);
-  //   termViewRouter.push(sid, { kind: "agent-session", agentSessionId: id });
-  // };
+  const openWaterfallId = (id: string) => {
+    const n = nodes.find((x) => x.id === id);
+    if (n?.tmuxSession) openSession(n.tmuxSession);
+    termViewRouter.push(sid, { kind: "agent-session", agentSessionId: id });
+  };
 
   const viewing =
     current === null
@@ -184,7 +180,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
         </span>
         {viewing && <span className="spy-viewing">{viewing}</span>}
         <span className="spy-spacer" />
-        {/* <span className="act-check" title="uncheck to see the session history waterfall">
+        <span className="act-check" title="uncheck to see the session history waterfall">
           <input
             type="checkbox"
             id={"showactive-" + sid}
@@ -193,7 +189,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
             onChange={(e) => setShowActive(e.target.checked)}
           />
           <label htmlFor={"showactive-" + sid}>Show active</label>
-        </span> */}
+        </span>
         <button
           type="button"
           data-testid="strip-scope"
@@ -212,9 +208,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
       </div>
       {current?.kind === "mail-preview" ? (
         <MailPreview agentId={current.agentId} />
-      ) : /* !showActive ? (
+      ) : !showActive ? (
         <Waterfall nodes={nodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
-      ) : */ error ? (
+      ) : error ? (
         <div className="session-empty">{error}</div>
       ) : index.size === 0 ? (
         <div className="session-empty strip-empty" data-testid="strip-empty">
