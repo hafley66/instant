@@ -162,6 +162,7 @@ test("renders full ledger diagrams when the viewport contains only one source li
 
 test("does not repaint the committed diagram during PTY writes", async ({ page }) => {
   await openTerminal(page);
+  await page.evaluate(() => window.__term!.resize(80, 12));
   await writeFixture(page, renderedCliOutput("Codex"));
   await settleScroll(page);
 
@@ -186,4 +187,39 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
   });
 
   expect(result).toEqual({ samples: Array(30).fill(true), mutations: 0 });
+
+  const tether = await page.evaluate(async () => {
+    const before = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
+    const beforeTop = before.getBoundingClientRect().top;
+    document.querySelector<HTMLElement>(".term-host")!.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -100,
+    }));
+    const hiddenOnWheel = document.querySelector<HTMLElement>(".term-diagrams")!.hidden;
+    window.__term!.scroll(-2);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    const immediate = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
+    const immediateTop = immediate.getBoundingClientRect().top;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const visibleAfterScrollIdle = !document.querySelector<HTMLElement>(".term-diagrams")!.hidden;
+    const afterScrollIdle = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const afterDebounce = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
+    return {
+      hiddenOnWheel,
+      movedImmediately: immediateTop !== beforeTop,
+      sameAfterImmediateMove: immediate === before,
+      visibleAfterScrollIdle,
+      sameAfterScrollIdle: afterScrollIdle === before,
+      sameAfterDebouncedScan: afterDebounce === before,
+    };
+  });
+  expect(tether).toEqual({
+    hiddenOnWheel: true,
+    movedImmediately: true,
+    sameAfterImmediateMove: true,
+    visibleAfterScrollIdle: true,
+    sameAfterScrollIdle: true,
+    sameAfterDebouncedScan: true,
+  });
 });

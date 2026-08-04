@@ -219,6 +219,8 @@ export class TerminalDiagramOverlay {
   frame = 0;
   activityEvents = new Subject<void>();
   activitySubscription: Subscription | null = null;
+  scrollEvents = new Subject<void>();
+  scrollSubscription: Subscription;
   cache = new Map<string, Promise<string>>();
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
@@ -237,24 +239,45 @@ export class TerminalDiagramOverlay {
         debounceTime(1000),
       ).subscribe(() => this.scheduleFrame());
     }
+    this.scrollSubscription = this.scrollEvents.pipe(
+      debounceTime(120),
+    ).subscribe(() => this.scheduleFrame());
+    const onWheel = () => this.viewportScrolled();
+    host.addEventListener("wheel", onWheel, { capture: true, passive: true });
     this.disposables = [
+      { dispose: () => host.removeEventListener("wheel", onWheel, { capture: true }) },
       term.onWriteParsed(() => {
-        if (this.messages) this.activityEvents.next();
+        if (this.messages) {
+          this.positionElements();
+          this.activityEvents.next();
+        }
         else this.scheduleFrame();
       }),
       term.onScroll(() => this.viewportScrolled()),
-      term.onResize(() => this.scheduleFrame()),
+      term.onResize(() => {
+        this.positionElements();
+        this.scheduleFrame();
+      }),
     ];
     this.scheduleFrame();
   }
 
   viewportScrolled() {
     if (this.messages) {
+      this.positionElements();
       this.root.hidden = true;
+      this.scrollEvents.next();
       this.activityEvents.next();
     } else {
       this.scheduleFrame();
     }
+  }
+
+  activate() {
+    this.root.hidden = true;
+    this.generation++;
+    this.positionElements();
+    this.scheduleFrame();
   }
 
   scheduleFrame() {
@@ -262,6 +285,29 @@ export class TerminalDiagramOverlay {
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       void this.paint();
+    });
+  }
+
+  positionElements(screen = this.host.querySelector<HTMLElement>(".xterm-screen")) {
+    if (!screen) return;
+    const hostRect = this.host.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const cellHeight = screenRect.height / this.term.rows;
+    const viewportTop = this.term.buffer.active.viewportY;
+    const viewportEnd = viewportTop + this.term.rows - 1;
+    this.root.querySelectorAll<HTMLElement>(".term-diagram").forEach((element) => {
+      const start = Number(element.dataset.bufferStart);
+      const end = Number(element.dataset.bufferEnd);
+      const visibleStart = Math.max(start, viewportTop);
+      const visibleEnd = Math.min(end, viewportEnd);
+      element.hidden = visibleStart > visibleEnd;
+      if (element.hidden) return;
+      Object.assign(element.style, {
+        left: `${screenRect.left - hostRect.left}px`,
+        top: `${screenRect.top - hostRect.top + (visibleStart - viewportTop) * cellHeight}px`,
+        width: `${screenRect.width}px`,
+        height: `${(visibleEnd - visibleStart + 1) * cellHeight}px`,
+      });
     });
   }
 
@@ -298,9 +344,13 @@ export class TerminalDiagramOverlay {
     }));
     if (generation !== this.generation) return;
     this.root.hidden = false;
-    this.root.replaceChildren(...rendered.map(({ fence, svg, error }) => {
-      const element = document.createElement("div");
-      element.className = error ? "term-diagram term-diagram-error" : "term-diagram";
+    const existing = new Map(Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
+      .map((element) => [element.dataset.diagramKey ?? "", element]));
+    const elements = rendered.map(({ fence, svg, error }) => {
+      const diagramKey = `${dark}:${fence.language}:${fence.code}`;
+      const element = existing.get(diagramKey) ?? document.createElement("div");
+      const created = !element.dataset.diagramKey;
+      element.dataset.diagramKey = diagramKey;
       element.dataset.language = fence.language;
       const aspectRatio = svg ? svgAspectRatio(svg) : null;
       const sourceRows = fence.end - fence.start + 1;
@@ -321,22 +371,24 @@ export class TerminalDiagramOverlay {
       }
       element.dataset.sourceRows = String(sourceRows);
       element.dataset.allocatedRows = String(allocatedEnd - fence.start + 1);
-      const visibleStart = Math.max(fence.start, viewportTop);
-      const visibleEnd = Math.min(allocatedEnd, viewportEnd);
-      Object.assign(element.style, {
-        left: `${screenRect.left - hostRect.left}px`,
-        top: `${screenRect.top - hostRect.top + (visibleStart - viewportTop) * cellHeight}px`,
-        width: `${screenRect.width}px`,
-        height: `${(visibleEnd - visibleStart + 1) * cellHeight}px`,
-      });
-      if (error) element.textContent = error;
-      else {
+      element.dataset.bufferStart = String(fence.start);
+      element.dataset.bufferEnd = String(allocatedEnd);
+      if (error && (created || !element.classList.contains("term-diagram-error"))) {
+        element.className = "term-diagram term-diagram-error";
+        element.textContent = error;
+      } else if (!error && (created || element.classList.contains("term-diagram-error"))) {
+        element.className = "term-diagram";
         element.title = "Click to expand diagram";
         element.innerHTML = diagramSvgMarkup(svg);
         element.addEventListener("click", () => this.openLarge(svg, fence.language));
       }
       return element;
-    }));
+    });
+    const current = Array.from(this.root.children);
+    if (current.length !== elements.length || elements.some((element, index) => current[index] !== element)) {
+      this.root.replaceChildren(...elements);
+    }
+    this.positionElements(screen);
   }
 
   openLarge(svg: string, language: DiagramLanguage) {
@@ -368,6 +420,8 @@ export class TerminalDiagramOverlay {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.activitySubscription?.unsubscribe();
     this.activityEvents.complete();
+    this.scrollSubscription.unsubscribe();
+    this.scrollEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
     this.closeLarge();

@@ -844,6 +844,7 @@ export function onTermShown(id: string) {
   void warmTurns(id); // warm the ledger so right-click turn-identify stays sync
   requestAnimationFrame(() => {
     t.fit.fit();
+    t.diagrams?.activate();
     invoke("resize_pty", {
       id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
     }).catch(() => {});

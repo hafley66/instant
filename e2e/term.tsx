@@ -205,9 +205,7 @@ type TermHooks = {
   dims: () => termDims(sessionId("e2e")),
   scroll: (lines) => {
     const tab = tabs.get(sessionId("e2e"));
-    const term = tab?.term;
-    if (lines < 0) term?.scrollToTop();
-    else term?.scrollToBottom();
+    if (tab) tab.term.scrollToLine(Math.max(0, tab.term.buffer.active.viewportY + lines));
     tab?.diagrams?.viewportScrolled();
   },
 };
