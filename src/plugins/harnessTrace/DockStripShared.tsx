@@ -2,14 +2,13 @@
 // tree's data path and table, factored out so the global bottom strip
 // (DockStripPanel) and the per-terminal in-tab strip (InTabStrip) render the
 // same columns and join logic from one source instead of drifting copy-paste.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { claimFsWatch } from "../../fsWatch";
 import { getHomeDir, relTime } from "../../core";
 import { MAIL_DIR } from "./0_live";
 import { TreeTable, type TreeColumn } from "../../treetable";
-import { useApp } from "../../useStore";
 import { store } from "../../state";
 import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus, tmuxLiveNames } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
@@ -113,22 +112,26 @@ export function stripFilter(r: AgentTreeNode, q: string): boolean {
 
 // The store tmux rows the strip joins against (same source TmuxPanelV2 reads).
 // pwd = first pane path; chipPaths = the session's touched worktree paths.
-function tmuxJoinRows(): { name: string; pwd: string; chipPaths: string[]; proc: string }[] {
-  const sw = store.get().sessionWorktrees;
-  return store.get().sessions.map((s) => ({
+function tmuxJoinRows(
+  sessions: Session[],
+  sessionWorktrees: Record<string, string[]>,
+): { name: string; pwd: string; chipPaths: string[]; proc: string }[] {
+  return sessions.map((s) => ({
     name: s.name,
     pwd: (s.paths ?? [])[0] ?? "",
-    chipPaths: sw[s.name] ?? [],
+    chipPaths: sessionWorktrees[s.name] ?? [],
     proc: (s.commands ?? [])[0] ?? "",
   }));
 }
 
 // Join each flat node to its tmux session: a registry route's recorded tmux
 // name wins (the cwd guess cannot tell apart sessions sharing a directory),
-// else untildify and match. Derived in render so a store change re-joins
-// without a reload.
-function attachTmux(nodes: AgentSessionNode[], routeTmux: Map<string, string>): AgentSessionNode[] {
-  const rows = tmuxJoinRows();
+// else untildify and match.
+function attachTmux(
+  nodes: AgentSessionNode[],
+  routeTmux: Map<string, string>,
+  rows: ReturnType<typeof tmuxJoinRows>,
+): AgentSessionNode[] {
   const home = getHomeDir();
   return nodes.map((n) => {
     const routed = routeTmux.get(n.id);
@@ -226,7 +229,16 @@ export interface AgentTreeState {
 // tree. Every host shares the single-owner live feed through this hook;
 // InTabStrip indexes the flat nodes into its own external-only tree.
 export function useAgentTree(): AgentTreeState {
-  useApp();
+  // Narrow store read: the join consumes sessions + sessionWorktrees only, so
+  // unrelated store writes must not rebuild every node identity downstream.
+  const sessions = useSyncExternalStore(
+    useCallback((cb: () => void) => store.subscribe(cb, ["sessions"]), []),
+    () => store.get().sessions,
+  );
+  const sessionWorktrees = useSyncExternalStore(
+    useCallback((cb: () => void) => store.subscribe(cb, ["sessionWorktrees"]), []),
+    () => store.get().sessionWorktrees,
+  );
   const [flat, setFlat] = useState<AgentSessionNode[]>([]);
   const [registry, setRegistry] = useState<MailRegistry>({});
   const [routeTmux, setRouteTmux] = useState<Map<string, string>>(new Map());
@@ -265,9 +277,23 @@ export function useAgentTree(): AgentTreeState {
     load();
     return claimStripFeed({ onMail: load, onLiveNames: setLiveNames });
   }, [load]);
-  const liveTmux = new Set(liveNames ?? store.get().sessions.map((s) => s.name));
-  const nodes = settleRoutedStatus(attachTmux(flat, routeTmux), routeTmux, liveTmux);
-  return { nodes, tree: buildAgentTree(nodes), liveTmux, registry, error, load };
+  // Memoized on honest deps: every consumer memo (external, index, spans, row
+  // models) keys on node identity, so it must move only when the inputs move.
+  const liveTmux = useMemo(
+    () => new Set(liveNames ?? sessions.map((s) => s.name)),
+    [liveNames, sessions],
+  );
+  const nodes = useMemo(
+    () =>
+      settleRoutedStatus(
+        attachTmux(flat, routeTmux, tmuxJoinRows(sessions, sessionWorktrees)),
+        routeTmux,
+        liveTmux,
+      ),
+    [flat, routeTmux, sessions, sessionWorktrees, liveTmux],
+  );
+  const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
+  return { nodes, tree, liveTmux, registry, error, load };
 }
 
 export interface AgentStripTableProps {
