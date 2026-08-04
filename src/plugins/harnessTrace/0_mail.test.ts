@@ -223,6 +223,31 @@ describe("registrySeeds", () => {
     expect(row.why).toBe("build the trace panel");
   });
 
+  // Proof-run defect: a lane dispatched by a dispatched coordinator had no
+  // parent link, so the grandparent tab's related scope never showed it.
+  it("hangs a dispatched lane under its dispatcher's resolved session", () => {
+    const routes = {
+      coord: route({ id: "coord", harness: "claude", cwd: "~/projects/x" }),
+      lane: route({ id: "lane", tmux: "lane" }),
+    };
+    const stored = [seed("sess-real")];
+    const resolved = resolveRouteSessions(routes, stored, "/Users/h");
+    const envs = parseMailNdjson(
+      JSON.stringify({ id: "m-d", from: "coord", to: "lane", ts: "2026-08-03T11:00:00Z", kind: "dispatch" }),
+    );
+    const [row] = registrySeeds(routes, stored, new Set(["lane"]), envs, NOW, resolved);
+    expect(row).toMatchObject({ id: "lane", parentId: "sess-real", parentKind: "dispatch" });
+  });
+
+  it("leaves parentId null when the dispatcher is not a registered agent", () => {
+    const routes = { lane: route({ id: "lane", tmux: "lane" }) };
+    const envs = parseMailNdjson(
+      JSON.stringify({ id: "m-u", from: "user", to: "lane", ts: "2026-08-03T11:00:00Z", kind: "request" }),
+    );
+    const [row] = registrySeeds(routes, [], new Set(["lane"]), envs, NOW);
+    expect(row).toMatchObject({ parentId: null, parentKind: null });
+  });
+
   // m-17f56e54 receipt: instant-fable's unresolved route seeded a second row
   // beside its own store session (same harness, same cwd), 6 shells where 2 ran.
   it("skips a route resolved onto a store seed instead of duplicating it", () => {

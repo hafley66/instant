@@ -99,6 +99,12 @@ export function registrySeeds(
       if (ms > (lastMailMs.get(agentId) ?? 0)) lastMailMs.set(agentId, ms);
     }
   }
+  // The oldest envelope to an agent is its dispatch record; its `from` names
+  // the dispatcher, whose session becomes the lane's tree parent.
+  const dispatchFrom = new Map<string, string>();
+  for (const envelope of [...envelopes].sort((a, b) => a.ts.localeCompare(b.ts))) {
+    if (!dispatchFrom.has(envelope.to)) dispatchFrom.set(envelope.to, envelope.from);
+  }
   return Object.values(directory)
     .filter((agent) => {
       const sessionId = agent.sessionId || resolved[agent.id] || "";
@@ -111,12 +117,16 @@ export function registrySeeds(
       // Registry-only lanes have no store mtime, so mail traffic is the only
       // activity signal: live decays to idle, never done while the tmux lives.
       const status = !alive ? "done" : nowMs - mailMs <= SEED_LIVE_MS ? "live" : "idle";
+      const dispatcher = directory[dispatchFrom.get(agent.id) ?? ""];
+      const parentId = dispatcher
+        ? dispatcher.sessionId || resolved[dispatcher.id] || dispatcher.id
+        : null;
       return {
         id: sessionId,
         harness: agent.harness ?? "shell",
         sessionId,
-        parentId: null,
-        parentKind: null,
+        parentId,
+        parentKind: parentId === null ? null : ("dispatch" as const),
         ts: "",
         lastActivity: mailMs ? new Date(mailMs).toISOString() : "",
         status: status as HarnessTraceSeed["status"],
