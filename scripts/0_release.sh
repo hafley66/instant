@@ -21,8 +21,9 @@ git rev-parse "$tag" >/dev/null 2>&1 && {
 perl -0pi -e "s/(\"version\": \")[0-9]+\.[0-9]+\.[0-9]+(\")/\${1}$version\${2}/" package.json
 perl -0pi -e "s/^(version = \")[0-9]+\.[0-9]+\.[0-9]+(\")/\${1}$version\${2}/m" src-tauri/Cargo.toml
 perl -0pi -e "s/(\"version\": \")[0-9]+\.[0-9]+\.[0-9]+(\")/\${1}$version\${2}/" src-tauri/tauri.conf.json
+perl -0pi -e "s/(name = \"instant\"\nversion = \")[0-9]+\.[0-9]+\.[0-9]+(\")/\${1}$version\${2}/" src-tauri/Cargo.lock
 
-git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
 git commit -m "release: $tag"
 git tag -a "$tag" -m "$tag"
 

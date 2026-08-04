@@ -66,6 +66,8 @@ describe("plugin panel instances", () => {
     expect(pluginCommands().some((command) => command.id === "contribution.test")).toBe(true);
     expect(routePath("/tmp/contribution")).toBe(true);
     expect(routePath("/tmp/other")).toBe(false);
-    expect(tabOverrideItems("contribution").map((item) => item.label)).toEqual(["contribution"]);
+    expect(tabOverrideItems("contribution")
+      .filter((item) => "label" in item)
+      .map((item) => item.label)).toEqual(["contribution"]);
   });
 });

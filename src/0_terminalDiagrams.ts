@@ -333,7 +333,6 @@ export class TerminalDiagramOverlay {
     const generation = ++this.generation;
     const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) return;
-    const hostRect = this.host.getBoundingClientRect();
     const screenRect = screen.getBoundingClientRect();
     const cellHeight = screenRect.height / this.term.rows;
     const viewportTop = this.term.buffer.active.viewportY;
