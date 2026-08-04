@@ -40,6 +40,15 @@ const renderedCliOutput = (harness: "Codex" | "Claude Code") => [
   "    xterm --> Mermaid",
 ].join("\r\n");
 
+const scrolledMermaidOutput = [
+  "Codex response:",
+  "  flowchart LR",
+  "    PTY --> tmux",
+  "    tmux --> xterm",
+  "    xterm --> Mermaid",
+  "This prose arrived later without a blank separator (click)",
+].join("\r\n");
+
 async function openTerminal(page: Page) {
   await page.goto("/e2e-term.html?e2e=1");
   await page.getByTestId("open-term").click();
@@ -94,5 +103,22 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("D2 renderer");
     await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("Mermaid");
+    const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+    const allocation = await mermaid.evaluate((element) => ({
+      sourceRows: Number((element as HTMLElement).dataset.sourceRows),
+      allocatedRows: Number((element as HTMLElement).dataset.allocatedRows),
+    }));
+    expect(allocation.allocatedRows).toBeGreaterThan(allocation.sourceRows);
   });
 }
+
+test("keeps later scrolled prose outside an inferred Mermaid diagram", async ({ page }) => {
+  await openTerminal(page);
+  await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), scrolledMermaidOutput);
+
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(mermaid).toContainText("PTY");
+  await expect(mermaid).toContainText("Mermaid");
+  await expect(mermaid).not.toContainText("This prose arrived later");
+  await expect(mermaid).not.toHaveClass(/term-diagram-error/);
+});
