@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  binSpans,
+  binsPath,
+  decimateTicks,
   defaultRange,
   domainOf,
   sessionSpans,
@@ -103,13 +106,150 @@ describe("sessionSpans / domainOf / defaultRange", () => {
     expect(d.start).toBe(100 - Math.max(1, 150 * 0.02));
     expect(d.end).toBe(400 + Math.max(1, 150 * 0.02));
   });
-  it("defaultRange is the whole domain", () => {
+  it("defaultRange is the whole domain at or below the session limit", () => {
     const d = domainOf(spans, 400);
-    expect(defaultRange(d)).toEqual({ start: d.start, end: d.end });
+    expect(defaultRange(spans, d)).toEqual({ start: d.start, end: d.end });
   });
   it("empty span set degrades to a zero-width domain at the clock", () => {
     const d = domainOf([], 500);
     expect(d).toEqual({ start: 500, end: 500 });
+  });
+});
+
+describe("defaultRange over the session limit", () => {
+  // Ten sessions one second apart; a limit of 3 must open on the newest three.
+  const many: ISessionSpan[] = Array.from({ length: 10 }, (_, i) => ({
+    id: "s" + i,
+    harness: "claude" as const,
+    start: 1000 + i * 1000,
+    end: 1500 + i * 1000,
+  }));
+
+  it("opens on the newest `limit` sessions, not the whole history", () => {
+    const d = domainOf(many, 11_000);
+    const r = defaultRange(many, d, 3);
+    expect(r.start).toBe(8000); // s7's start: s7, s8, s9 are the newest three
+    expect(r.end).toBe(d.end);
+    expect(spansInRange(many, r).map((s) => s.id)).toEqual(["s7", "s8", "s9"]);
+  });
+
+  it("bounds the opening row count by the limit however long history gets", () => {
+    const huge: ISessionSpan[] = Array.from({ length: 300 }, (_, i) => ({
+      id: "h" + i,
+      harness: "claude" as const,
+      start: i * 1000,
+      end: i * 1000 + 100,
+    }));
+    const d = domainOf(huge, 300_000);
+    expect(spansInRange(huge, defaultRange(huge, d, 40))).toHaveLength(40);
+  });
+});
+
+describe("decimateTicks", () => {
+  const r = { start: 0, end: 1000 };
+
+  it("keeps well separated ticks intact", () => {
+    const ticks: ISessionTick[] = [
+      { sessionId: "a", ts: 0, type: "user", preview: "" },
+      { sessionId: "a", ts: 500, type: "assistant", preview: "" },
+      { sessionId: "a", ts: 1000, type: "tool", preview: "" },
+    ];
+    expect(decimateTicks(ticks, r, 300).map((t) => t.ts)).toEqual([0, 500, 1000]);
+  });
+
+  it("collapses ticks sharing a pixel column, keeping the higher ranked type", () => {
+    const ticks: ISessionTick[] = [
+      { sessionId: "a", ts: 500, type: "assistant", preview: "" },
+      { sessionId: "a", ts: 501, type: "user", preview: "" },
+    ];
+    const out = decimateTicks(ticks, r, 300);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("user");
+  });
+
+  it("caps a lane at plotW/minPx + 1 whatever the message count", () => {
+    const ticks: ISessionTick[] = Array.from({ length: 5000 }, (_, i) => ({
+      sessionId: "a",
+      ts: (i / 5000) * 1000,
+      type: "assistant" as const,
+      preview: "",
+    }));
+    const out = decimateTicks(ticks, r, 300, 3);
+    expect(out.length).toBeLessThanOrEqual(300 / 3 + 1);
+  });
+
+  it("returns time-ordered ticks", () => {
+    const ticks: ISessionTick[] = [
+      { sessionId: "a", ts: 900, type: "user", preview: "" },
+      { sessionId: "a", ts: 100, type: "user", preview: "" },
+    ];
+    expect(decimateTicks(ticks, r, 300).map((t) => t.ts)).toEqual([100, 900]);
+  });
+
+  it("degenerate zero-width range keeps one tick", () => {
+    const ticks: ISessionTick[] = [
+      { sessionId: "a", ts: 5, type: "assistant", preview: "" },
+      { sessionId: "a", ts: 5, type: "user", preview: "" },
+    ];
+    const out = decimateTicks(ticks, { start: 5, end: 5 }, 300);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("user");
+  });
+});
+
+describe("binSpans", () => {
+  it("emits a fixed column count independent of the span count", () => {
+    const few: ISessionSpan[] = [{ id: "a", harness: "claude", start: 10, end: 20 }];
+    const many: ISessionSpan[] = Array.from({ length: 4000 }, (_, i) => ({
+      id: "s" + i,
+      harness: "claude" as const,
+      start: i % 100,
+      end: (i % 100) + 5,
+    }));
+    const domain = { start: 0, end: 100 };
+    expect(binSpans(few, domain, 60)).toHaveLength(60);
+    expect(binSpans(many, domain, 60)).toHaveLength(60);
+  });
+
+  it("counts overlap per column", () => {
+    const spans: ISessionSpan[] = [
+      { id: "a", harness: "claude", start: 0, end: 50 },
+      { id: "b", harness: "claude", start: 25, end: 100 },
+    ];
+    const bins = binSpans(spans, { start: 0, end: 100 }, 4);
+    expect(bins.map((b) => b.count)).toEqual([1, 2, 2, 1]);
+  });
+
+  it("a zero-width domain has no columns to lay out", () => {
+    expect(binSpans([], { start: 5, end: 5 }, 60)).toEqual([]);
+  });
+});
+
+describe("binsPath", () => {
+  it("draws a closed step area from the floor", () => {
+    const bins = [
+      { start: 0, end: 50, count: 1 },
+      { start: 50, end: 100, count: 2 },
+    ];
+    const d = binsPath(bins, 100, 20);
+    expect(d.startsWith("M0,20")).toBe(true);
+    expect(d.endsWith("Z")).toBe(true);
+    // Peak column reaches the top, half-height column sits mid-way.
+    expect(d).toContain("L0.00,10.00");
+    expect(d).toContain("L50.00,0.00");
+  });
+
+  it("is one path however many columns there are", () => {
+    const many = Array.from({ length: 500 }, (_, i) => ({ start: i, end: i + 1, count: 1 }));
+    const d = binsPath(many, 600, 20);
+    expect(d.match(/M/g)).toHaveLength(1);
+    expect(d.match(/Z/g)).toHaveLength(1);
+  });
+
+  it("degenerate inputs draw nothing", () => {
+    expect(binsPath([], 100, 20)).toBe("");
+    expect(binsPath([{ start: 0, end: 1, count: 0 }], 100, 20)).toBe("");
+    expect(binsPath([{ start: 0, end: 1, count: 3 }], 0, 20)).toBe("");
   });
 });
 

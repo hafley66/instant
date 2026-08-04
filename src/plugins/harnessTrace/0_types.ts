@@ -417,3 +417,12 @@ export interface IWaterfallDomain {
 // The lazy per-session message tick cache the waterfall reads: filled on first
 // range intersection, never all history up front.
 export type IWaterfallEvents = ReadonlyMap<string, ISessionTick[]>;
+
+// One column of the overview's density strip. The overview draws a fixed number
+// of these instead of one rect per session, so its node count is set by the bin
+// count and never by how much history exists.
+export interface IWaterfallBin {
+  start: number; // unix ms, left edge
+  end: number;   // unix ms, right edge
+  count: number; // sessions whose span overlaps [start,end]
+}
