@@ -12,12 +12,13 @@
 //   node scripts/bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--model <id>] [--mode <m>]
 //   node scripts/bus.ts prune
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
-import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { MailDirectory, MailStore } from "../src/plugins/harnessTrace/0_bus.ts";
 import { MailLeg, injectedLine } from "../src/plugins/harnessTrace/1_leg.ts";
+import { casUpdateJson, CorruptJsonError } from "./0_atomicJson.ts";
 
 const DEFAULT_MAIL_DIR = "~/.agent/mail";
 const DEFAULT_BOX = "bus.ndjson";
@@ -93,7 +94,8 @@ function readRegistryRaw(dir) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    return {};
+    console.log(`registry.json is invalid JSON at ${path}: fix or remove it by hand`);
+    throw new CorruptJsonError(`registry.json is invalid JSON at ${path}`);
   }
 }
 
@@ -105,11 +107,7 @@ function liveSessions() {
 }
 
 function mergeRoute(dir, laneId, route) {
-  const registry = readRegistryRaw(dir);
-  registry[laneId] = route;
-  const path = join(dir, "registry.json");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path, JSON.stringify(registry, null, 2) + "\n");
+  casUpdateJson(join(dir, "registry.json"), (registry) => ({ ...registry, [laneId]: route }));
 }
 
 function sleepSync(seconds) {
@@ -454,8 +452,12 @@ function prune(args) {
   }
   const registry = readRegistryRaw(dir);
   const dead = Object.keys(registry).filter((name) => !live.has(registry[name]?.tmux));
-  for (const name of dead) delete registry[name];
-  writeFileSync(join(dir, "registry.json"), JSON.stringify(registry, null, 2) + "\n");
+  casUpdateJson(join(dir, "registry.json"), (current) => {
+    for (const name of Object.keys(current)) {
+      if (!live.has(current[name]?.tmux)) delete current[name];
+    }
+    return current;
+  });
   console.log(`pruned ${dead.length} dead routes${dead.length ? ": " + dead.join(" ") : ""}`);
   return 0;
 }
@@ -467,4 +469,12 @@ if (!command || !(command in commands)) {
   console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve|lane|adopt|prune> [--mail-dir <path>] ...");
   process.exit(1);
 }
-process.exit(commands[command](args));
+try {
+  process.exit(commands[command](args));
+} catch (error) {
+  if (error instanceof CorruptJsonError) {
+    console.log(error.message);
+    process.exit(1);
+  }
+  throw error;
+}
