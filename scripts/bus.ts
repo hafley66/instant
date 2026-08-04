@@ -4,12 +4,13 @@
 // (src/plugins/harnessTrace/0_bus.ts, 1_leg.ts); here there is only fs and
 // spawn. Run with node's type stripping:
 //   node scripts/bus.ts hail --to <agent> --body "..."
-//   node scripts/bus.ts sweep
-//   node scripts/bus.ts list --agent <agent>
+//   node scripts/bus.ts sweep [--max-age-days <n>] [--close-routeless]
+//   node scripts/bus.ts list [--agent <agent>] [--all]
 //   node scripts/bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command>
 //   node scripts/bus.ts resolve --to <lane-id> [--mail-dir <dir>]
 //   node scripts/bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>] [--parent <agent>]
-//   node scripts/bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>]
+//   node scripts/bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--model <id>] [--mode <m>]
+//   node scripts/bus.ts prune
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
 import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -94,6 +95,13 @@ function readRegistryRaw(dir) {
   } catch {
     return {};
   }
+}
+
+// null means tmux itself is unreachable, which is not the same as "no sessions".
+function liveSessions() {
+  const result = run("tmux", ["list-sessions", "-F", "#{session_name}"]);
+  if (!result.ok) return null;
+  return new Set(result.stdout.split("\n").filter(Boolean));
 }
 
 function mergeRoute(dir, laneId, route) {
@@ -267,18 +275,28 @@ function sweep(args) {
   }
   let acked = 0;
   let expired = 0;
+  const close = (message) => {
+    const box = boxes.find((entry) => entry.messages.some((row) => row.id === message.id));
+    append(box?.path ?? join(dir, args.box ?? DEFAULT_BOX), MailStore.ack(message, nowIso()));
+    expired += 1;
+  };
   for (const message of pending) {
     if (args.agent && message.to !== args.agent) continue;
-    // A dispatch row with null to_timestamp older than the cutoff is dead: the
-    // lane is gone and will never ack, so skip it instead of querying cass.
+    // Past the cutoff the lane will never ack; the ack row closes it for good
+    // instead of the old print-and-refold-next-sweep behavior.
     if (new Date(message.from_timestamp).getTime() < cutoff) {
+      close(message);
       console.log(`expired ${message.id}`);
-      expired += 1;
       continue;
     }
     const agent = MailDirectory.agent(directory, message.to);
     if (!agent) {
-      console.log(`${message.id} -> ${message.to}: no registry route, cannot scope the cass query`);
+      if (args["close-routeless"]) {
+        close(message);
+        console.log(`expired ${message.id} -> ${message.to}: no registry route`);
+      } else {
+        console.log(`${message.id} -> ${message.to}: no registry route, cannot scope the cass query (--close-routeless expires these)`);
+      }
       continue;
     }
     const search = run("cass", MailLeg.cassSearchArgs(message));
@@ -307,8 +325,11 @@ function list(args) {
   const messages = allMessages(readBoxes(dir));
   if (!args.agent) {
     const registry = readRegistryRaw(dir);
+    const live = liveSessions();
     for (const [name, route] of Object.entries(registry)) {
+      const state = live === null ? "?" : live.has(route.tmux) ? "live" : "dead";
       console.log([
+        state.padEnd(4),
         name.padEnd(16),
         (route.harness ?? "-").padEnd(10),
         (route.mode ?? "-").padEnd(6),
@@ -317,7 +338,9 @@ function list(args) {
         route.cwd ?? "-",
       ].join(" "));
     }
-    for (const message of MailStore.fold(messages)) console.log(MailStore.line(message));
+    const rows = args.all ? MailStore.fold(messages) : MailStore.unacked(messages);
+    for (const message of rows) console.log(MailStore.line(message));
+    if (!args.all) console.log(`${rows.length} open (closed history: --all)`);
     return 0;
   }
   const inbox = MailStore.inbox(messages, args.agent);
@@ -399,11 +422,26 @@ function adopt(args) {
   return 0;
 }
 
+function prune(args) {
+  const dir = mailDirOf(args);
+  const live = liveSessions();
+  if (live === null) {
+    console.log("refusing prune: tmux unreachable, cannot tell live from dead");
+    return 1;
+  }
+  const registry = readRegistryRaw(dir);
+  const dead = Object.keys(registry).filter((name) => !live.has(registry[name]?.tmux));
+  for (const name of dead) delete registry[name];
+  writeFileSync(join(dir, "registry.json"), JSON.stringify(registry, null, 2) + "\n");
+  console.log(`pruned ${dead.length} dead routes${dead.length ? ": " + dead.join(" ") : ""}`);
+  return 0;
+}
+
 const [command, ...rest] = process.argv.slice(2);
 const args = flags(rest);
-const commands = { hail, sweep, list, dispatch, resolve, lane, adopt };
+const commands = { hail, sweep, list, dispatch, resolve, lane, adopt, prune };
 if (!command || !(command in commands)) {
-  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve|lane|adopt> [--mail-dir <path>] ...");
+  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve|lane|adopt|prune> [--mail-dir <path>] ...");
   process.exit(1);
 }
 process.exit(commands[command](args));
