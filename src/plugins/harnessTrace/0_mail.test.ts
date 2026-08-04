@@ -248,6 +248,23 @@ describe("registrySeeds", () => {
     expect(row).toMatchObject({ parentId: null, parentKind: null });
   });
 
+  // The log is append-only and lane ids get reused: a stale placeholder-from
+  // envelope older than the real dispatch must not eat the parent edge.
+  it("skips older placeholder froms and parents from the first agent envelope", () => {
+    const routes = {
+      coord: route({ id: "coord", sessionId: "sess-c", harness: "claude" }),
+      lane: route({ id: "lane", tmux: "lane" }),
+    };
+    const envs = parseMailNdjson(
+      [
+        JSON.stringify({ id: "m-0", from: "coordinator", to: "lane", ts: "2026-08-03T10:00:00Z", kind: "dispatch" }),
+        JSON.stringify({ id: "m-1", from: "coord", to: "lane", ts: "2026-08-03T11:00:00Z", kind: "dispatch" }),
+      ].join("\n"),
+    );
+    const [row] = registrySeeds(routes, [], new Set(["lane"]), envs, NOW);
+    expect(row).toMatchObject({ parentId: "sess-c", parentKind: "dispatch" });
+  });
+
   // m-17f56e54 receipt: instant-fable's unresolved route seeded a second row
   // beside its own store session (same harness, same cwd), 6 shells where 2 ran.
   it("skips a route resolved onto a store seed instead of duplicating it", () => {

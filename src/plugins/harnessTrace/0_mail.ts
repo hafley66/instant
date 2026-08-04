@@ -99,11 +99,13 @@ export function registrySeeds(
       if (ms > (lastMailMs.get(agentId) ?? 0)) lastMailMs.set(agentId, ms);
     }
   }
-  // The oldest envelope to an agent is its dispatch record; its `from` names
-  // the dispatcher, whose session becomes the lane's tree parent.
+  // The oldest envelope whose `from` names a registered agent is the lane's
+  // dispatch edge; placeholder froms ("coordinator", "user") cannot parent.
   const dispatchFrom = new Map<string, string>();
   for (const envelope of [...envelopes].sort((a, b) => a.ts.localeCompare(b.ts))) {
-    if (!dispatchFrom.has(envelope.to)) dispatchFrom.set(envelope.to, envelope.from);
+    if (!dispatchFrom.has(envelope.to) && directory[envelope.from]) {
+      dispatchFrom.set(envelope.to, envelope.from);
+    }
   }
   return Object.values(directory)
     .filter((agent) => {
