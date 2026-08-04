@@ -12,7 +12,7 @@ import { store } from "../../state";
 import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus, tmuxLiveNames } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
-import { joinTmuxSession } from "./2_join";
+import { joinTmuxSession, joinTmuxSessions } from "./2_join";
 import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
 import type { Session } from "../../state";
 
@@ -130,9 +130,9 @@ function attachTmux(nodes: AgentSessionNode[], routeTmux: Map<string, string>): 
   const home = getHomeDir();
   return nodes.map((n) => {
     const routed = routeTmux.get(n.id);
-    if (routed !== undefined) return { ...n, tmuxSession: routed };
+    if (routed !== undefined) return { ...n, tmuxSession: routed, tmuxMatches: [routed] };
     const cwd = n.cwd.startsWith("~") ? home + n.cwd.slice(1) : n.cwd;
-    return { ...n, tmuxSession: joinTmuxSession(cwd, rows) };
+    return { ...n, tmuxSession: joinTmuxSession(cwd, rows), tmuxMatches: joinTmuxSessions(cwd, rows) };
   });
 }
 

@@ -22,6 +22,11 @@ export interface AgentSessionNode {
   // The instant tmux session this agent runs in, joined by cwd/chip-path match
   // against the store's tmux rows (null = none; row is dimmed, click is a no-op).
   tmuxSession: string | null;
+  // Every tmux session whose join row matched this node's cwd. A repo hosts
+  // several tmux sessions sharing one cwd, so the related scope matches on the
+  // full list (includes the sid) while display still shows the single tmuxSession.
+  // Optional (absent = no matches) so join-free fixtures keep compiling.
+  tmuxMatches?: string[];
 }
 
 // The flat trace panel's row: the frozen model plus the display session id

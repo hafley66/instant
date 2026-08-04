@@ -1,120 +1,86 @@
-# REPORT: build-vs-buy for d2 code-fence rendering
+# REPORT: fix scope:related always-zero in the harnessTrace strip
 
-## Context
+## What this is
 
-Goal: render ```d2 fenced blocks in the markdown viewer (src/mdview) as diagrams,
-mirroring the existing ```mermaid renderer (src/mdview/0a_MermaidDiagram.tsx). Winds:
-no bespoke renderer, no server-side shell-out to a d2 binary (tauri app must work
-offline without a d2 install). wasm is explicitly permitted.
+Fixes the in-tab dock strip's "related" scope coming back empty whenever a repo
+directory hosts several tmux sessions. A node was joined to exactly one tmux
+session (the display guess), and the related scope compared that single string
+to the viewer's sid with exact equality, so a viewer on "sprefa-3" never matched
+a node whose guess resolved to "sprefa".
 
-## TOC
+## Root cause (as briefed, not re-diagnosed)
 
-- Build-vs-buy table
-- Candidate 1: @terrastruct/d2
-- Candidate 2: d2-wasm wrappers on npm
-- Decision
-- Gates
-- Commits
-- Notes
+A terminal tab's sid is its tmux session name (e.g. "sprefa-3"). Nodes get ONE
+tmuxSession via attachTmux (DockStripShared.tsx:128-137): a registry route wins,
+else joinTmuxSession(cwd, rows) (2_join.ts:24-31) which returns
+`matches.find(namesHarness) ?? matches[0]` (the first match, e.g. "sprefa") when
+several tmux sessions share the node's cwd. Related then did exact equality
+against the sid (0_tree.ts treeContainsTmux, 0_strip.ts nativeClaudeIds), so
+"sprefa" !== "sprefa-3" and related was empty whenever a repo dir hosted more
+than one tmux session.
 
-## Build-vs-buy table
+## Fix
 
-| Criterion        | @terrastruct/d2  | astro-d2 (closest wrapper)      |
-|------------------|------------------|---------------------------------|
-| version          | 0.1.33           | 0.13.1                          |
-| last release     | 2025-08-17       | 2026-07-17                      |
-| license          | MPL-2.0          | MIT                             |
-| unpacked size    | ~59.7 MB         | depends on @terrastruct/d2      |
-| API shape        | new D2(); compile(src) -> {diagram}; render(diagram) -> svg string | Astro remark plugin (build-time), wraps @terrastruct/d2 ^0.1.33 |
-| browser render   | yes, wasm, dot-free | indirectly via @terrastruct/d2, but build-time AST transform |
-| Tauri offline    | yes              | yes (compiles at build, not runtime) |
+Added `tmuxMatches` (every tmux session whose join row matched the node's cwd) so
+the related scope matches by set membership while display keeps the single
+tmuxSession guess.
 
-## Candidate 1: @terrastruct/d2
+| File | Change |
+|------|--------|
+| src/plugins/harnessTrace/0_types.ts:22-29 | additive `tmuxMatches` on AgentSessionNode. **Deviation:** made it optional (`tmuxMatches?: string[]`) so join-free fixtures in unowned test files (0_mail.test.ts, 0_waterfall.test.ts) keep compiling without editing them. |
+| src/plugins/harnessTrace/2_join.ts:27-42 | new `joinTmuxSessions(cwd, rows): string[]` returning every matching row name in row order; `joinTmuxSession` keeps the harness-named tiebreak as display. |
+| src/plugins/harnessTrace/DockStripShared.tsx:15,133,135 | attachTmux: routed -> `tmuxMatches: [routed]`; guessed -> full `joinTmuxSessions` list; no match -> `[]`. |
+| src/plugins/harnessTrace/0_tree.ts:40-41,144 | node default `tmuxMatches: []`; treeContainsTmux tests `(root.tmuxMatches ?? []).includes(sid)`. buildAgentTree/materializeAgentTree spread nodes, so they carry it. |
+| src/plugins/harnessTrace/0_strip.ts:21 | nativeClaudeIds seeds on `(n.tmuxMatches ?? []).includes(sid)`. |
+| src/plugins/harnessTrace/2_join.test.ts | added `joinTmuxSessions` block (line 52): shared pwd returns both names in row order; joinTmuxSession keeps old winner. |
+| src/plugins/harnessTrace/0_strip.test.ts:168-180 | regression test "StripPolicy.external with a cwd shared by several tmux sessions": node tmuxSession "demo", tmuxMatches ["demo","demo-3"], viewer sid "demo-3"; nativeIds claims the node, related contains the non-native tree. |
+| src/plugins/harnessTrace/0_tree.test.ts, 0_strip.test.ts | fixture node helpers derive tmuxMatches from tmuxSession (`tmuxSession ? [tmuxSession] : []`), overridable via partial. |
 
-The official d2 TypeScript package, compiled to wasm. API: `new D2()`, then
-`await d2.compile(source)` returns `{ diagram, renderOptions }`, then
-`await d2.render(diagram, renderOptions)` returns the svg string. No graphviz dot
-binary needed anywhere; the wasm does layout (dagre or elk) in-browser and in-node.
-Runs in the tauri webview offline. MPL-2.0, published by terrastruct (the d2
-authors), actively maintained against the d2 language. Large unpacked size is the
-wasm engine plus bundled theme fonts, an acceptable price for a repo that already
-bundles mermaid and shiki.
+## Validation (run from worktree root)
 
-## Candidate 2: d2-wasm wrappers on npm
-
-No standalone, maintained third-party "d2-wasm" wrapper exists on npm
-(`npm search d2 wasm` returns only @terrastruct/d2 itself and unrelated tools).
-The closest wrapper is `astro-d2`, an Astro remark plugin (MIT) built on top of
-@terrastruct/d2. It is a build-time markdown transformer tied to the Astro/remark
-stack, not a reusable browser runtime primitive; adopting it in this app would drag
-in that stack and still run terrastruct's wrapper underneath. There is no case for
-buying the wrapper when the wrapper's only engine is candidate 1 itself.
-
-## Decision
-
-Use candidate 1, `@terrastruct/d2`:
-
-- It is the only maintained d2->svg wasm engine and the only real "d2-wasm wrapper"
-  on npm; it is the official package from the d2 authors, active, and its two-step
-  `compile` + `render` -> svg string API maps directly onto the existing mermaid
-  component's async render to svg.
-- The alt (astro-d2) is a build-time Astro plugin with no runtime browser primitive;
-  it only re-exports the same engine, so it adds Astro stack weight with no new
-  capability and would still depend on @terrastruct/d2.
-
-## Gates (verbatim, run in order)
+### npx vitest run src/plugins/harnessTrace
 
 ```
-npx vitest run src/mdview
-npx tsc --noEmit
-npm run api:check
+ Test Files  12 passed (12)
+      Tests  141 passed (141)
+   Start at  09:51:44
+   Duration  244ms (transform 520ms, setup 0ms, import 641ms, tests 63ms, environment 1ms)
 ```
 
-api:check exists in package.json scripts (node scripts/generate-api.mjs --check &&
-node scripts/generate-native.mjs --check).
-
-### Gate outputs
+### npx tsc --noEmit
 
 ```
-$ npx vitest run src/mdview
- Test Files  2 passed (2)
-      Tests  23 passed (23)
-   Start at  08:12:05
-   Duration  702ms (transform 47ms, setup 0ms, import 111ms, tests 603ms, environment 0ms)
-
-$ npx tsc --noEmit
-src/mdview/0_Streamdown.tsx(50,9): error TS2322: Type '{ code: CodeHighlighterPlugin; renderers: { language: string; component: ({ code }: { code: string; }) => JSX.Element; }[]; }' is not assignable to type 'PluginConfig'.
-  The types of 'code.highlight' are incompatible between these types.
-    ...shiki BundledLanguage mismatch...
 src/plugin.test.ts(69,64): error TS2339: Property 'label' does not exist on type 'CtxItem'.
   Property 'label' does not exist on type '{ sep: true; }'.
-EXIT:2
-   Note: both errors reproduce on the base commit 4201461 via `git stash`; neither is
-   introduced by this change. The plugin.test.ts(69,64) error is the known one from the
-   brief; the 0_Streamdown.tsx code.highlight mismatch is a second pre-existing one.
-
-$ npm run api:check
-> instant@0.1.1 api:check
-> node scripts/generate-api.mjs --check && node scripts/generate-native.mjs --check
-
-EXIT:0
 ```
 
-## Commits (stepwise)
+The only error is the pre-existing src/plugin.test.ts(69) CtxItem 'label'
+allowed by the brief. No other errors.
 
-1. dep add @terrastruct/d2
-2. component 0a_D2Diagram.tsx
-3. registry (0_Streamdown.tsx) + css (mdview.css)
-4. tests (d2 render test beside model.test.ts) + fixture
+### npx playwright test e2e/dock-strip-in-tab.spec.ts
 
-## Notes
+```
+Running 2 tests using 1 worker
 
-- One pre-existing tsc error in src/plugin.test.ts(69,64) is known and not from this
-  work.
-- Class family: mdview-d2, mdview-d2-error (mirrors mdview-mermaid, mdview-mermaid-error).
-- Dark theme: pass RenderOptions.darkThemeID matching the current theme, same shape
-  as MermaidDiagram's theme: dark ? "dark" : "default".
-- Fixture: skipped. MdExplorer reads the live filesystem via a host (getMdviewHost)
-  rooted at the open doc's directory (src/mdview/MdExplorer.tsx); the repo ships no
-  bundled sample .md fixtures under a fixture path, so there is nothing to add one to.
-  The unit test in src/mdview/d2.test.ts covers rendering in its place.
+[WebServer] 9:52:21 AM [vite] (client) Pre-transform error: Failed to resolve import "vega" from "node_modules/.vite/deps/vega-embed.js?v=19cb11ba". Does the file exist?
+  ✓  1 e2e/dock-strip-in-tab.spec.ts:61:1 › in-tab strip: external-only lazy tree under the term, mail preview, back (1.3s)
+  ✓  2 e2e/dock-strip-in-tab.spec.ts:150:1 › hotkey summons the strip on a fresh terminal with no related sessions (540ms)
+
+  2 passed (3.5s)
+```
+
+The WebServer vega line is a vite module-pre-transform warning from an unrelated
+dashboard bundle; neither test failed.
+
+## Deviations
+
+1. `tmuxMatches` is optional (`tmuxMatches?: string[]`) instead of the briefed
+   required `tmuxMatches: string[]`. The brief's hard ownership list excludes
+   0_mail.test.ts and 0_waterfall.test.ts, both of which construct
+   AgentSessionNode literals; a required field would force edits to unowned
+   files. Optional keeps the gate (only the allowed plugin.test.ts error) and
+   all producers set the value. The two reads (treeContainsTmux, nativeClaudeIds)
+   default to `[]`.
+2. No installs were expected by the brief, but the worktree had no node_modules;
+   `pnpm install --frozen-lockfile` was run once to make the validation commands
+   executable. pnpm only, as the repo mandates.

@@ -38,6 +38,7 @@ export function toAgentNodes(
     // The tmux join happens on the panel (it reads the store); trees leave it
     // null so the pure shaping fns keep no store dependency.
     tmuxSession: null,
+    tmuxMatches: [],
   }));
   return resolveDispatchParents(nodes, envelopes, registry);
 }
@@ -140,6 +141,6 @@ export function filterForestByTmux(roots: AgentTreeNode[], sid: string): AgentTr
 }
 
 function treeContainsTmux(root: AgentTreeNode, sid: string): boolean {
-  if (root.tmuxSession === sid) return true;
+  if ((root.tmuxMatches ?? []).includes(sid)) return true;
   return root.children.some((child) => treeContainsTmux(child, sid));
 }
