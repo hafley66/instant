@@ -135,3 +135,26 @@ test("renders full ledger diagrams when the viewport contains only one source li
   await expect(d2).toContainText("D2 renderer");
   await expect(mermaid).toContainText("Mermaid");
 });
+
+test("keeps the committed diagram visible during throttled PTY writes", async ({ page }) => {
+  await openTerminal(page);
+  await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), renderedCliOutput("Codex"));
+
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(mermaid).toContainText("Mermaid");
+  const visibility = await page.evaluate(async () => {
+    const samples: boolean[] = [];
+    for (let index = 0; index < 30; index++) {
+      window.__term!.write(`\rworking ${index}`);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const root = document.querySelector<HTMLElement>(".term-diagrams");
+      const diagram = root?.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]');
+      const svg = diagram?.querySelector<SVGElement>("svg");
+      const box = svg?.getBoundingClientRect();
+      samples.push(Boolean(root && !root.hidden && diagram?.textContent?.includes("Mermaid") && box?.width && box.height));
+    }
+    return samples;
+  });
+
+  expect(visibility).toEqual(Array(30).fill(true));
+});

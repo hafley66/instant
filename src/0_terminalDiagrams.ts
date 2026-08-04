@@ -242,7 +242,6 @@ export class TerminalDiagramOverlay {
         this.scheduleFrame();
         return;
       }
-      this.root.hidden = true;
       this.messageEvents.next();
     };
     this.disposables = [
