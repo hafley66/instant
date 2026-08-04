@@ -8,12 +8,13 @@
 //   node scripts/bus.ts list --agent <agent>
 //   node scripts/bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command>
 //   node scripts/bus.ts resolve --to <lane-id> [--mail-dir <dir>]
-//   node scripts/bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>]
+//   node scripts/bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>] [--parent <agent>]
+//   node scripts/bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>]
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
 import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { MailDirectory, MailStore } from "../src/plugins/harnessTrace/0_bus.ts";
 import { MailLeg, injectedLine } from "../src/plugins/harnessTrace/1_leg.ts";
 
@@ -318,7 +319,7 @@ function lane(args) {
   const to = args.name;
   const cwd = args.cwd;
   if (!to || !cwd) {
-    console.log("usage: bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>] [--mail-dir <dir>] [--resolve-wait <seconds>] [--dry-run]");
+    console.log("usage: bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>] [--parent <agent>] [--mail-dir <dir>] [--resolve-wait <seconds>] [--dry-run]");
     return 1;
   }
   const brief = args.brief ?? join(cwd, "brief.md");
@@ -329,7 +330,16 @@ function lane(args) {
   const body = readFileSync(brief, "utf8").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
   const model = args.model ?? "openrouter/deepseek/deepseek-v4-flash-0731";
   const tmux = args.tmux ?? to;
-  const cmd = `opencode run -m ${model} --auto "$(cat ${brief})"`;
+  let cmd = `opencode run -m ${model} --auto "$(cat ${brief})"`;
+
+  if (args.parent) {
+    // The wrapped cmd appends a completion hail, never replaces the original
+    // opencode cmd. The body is double-quoted so shell expands $__rc and $(pwd)
+    // at run time; the trailing `exit $__rc` re-raises the lane's own status.
+    const bus = resolvePath(process.argv[1]);
+    const hail = `node ${bus} hail --to ${args.parent} --from ${to} --kind result --body "lane ${to} done rc=$__rc cwd=$(pwd)"`;
+    cmd = `${cmd}; __rc=$?; ${hail}; exit $__rc`;
+  }
 
   if (args["dry-run"]) {
     console.log(`cmd: ${cmd}`);
@@ -349,11 +359,31 @@ function lane(args) {
   return dispatch(dispatchArgs);
 }
 
+function adopt(args) {
+  const name = args.name;
+  const tmux = args.tmux;
+  if (!name || !tmux) {
+    console.log("usage: bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--mail-dir <dir>]");
+    return 1;
+  }
+  // The route is only writable for a session that actually exists right now;
+  // a stale name would make bus hail inject into a dead pane.
+  const check = run("tmux", ["has-session", "-t", tmux]);
+  if (!check.ok) {
+    console.log(`refusing adopt ${name}: no such tmux session ${tmux} (${check.status})`);
+    return 1;
+  }
+  const dir = mailDirOf(args);
+  mergeRoute(dir, name, { harness: args.harness ?? null, tmux, cwd: args.cwd ?? null });
+  console.log(`adopted ${name} -> tmux ${tmux}`);
+  return 0;
+}
+
 const [command, ...rest] = process.argv.slice(2);
 const args = flags(rest);
-const commands = { hail, sweep, list, dispatch, resolve, lane };
+const commands = { hail, sweep, list, dispatch, resolve, lane, adopt };
 if (!command || !(command in commands)) {
-  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve|lane> [--mail-dir <path>] ...");
+  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve|lane|adopt> [--mail-dir <path>] ...");
   process.exit(1);
 }
 process.exit(commands[command](args));
