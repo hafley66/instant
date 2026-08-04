@@ -8,6 +8,7 @@
 //   node scripts/bus.ts list --agent <agent>
 //   node scripts/bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command>
 //   node scripts/bus.ts resolve --to <lane-id> [--mail-dir <dir>]
+//   node scripts/bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>]
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
 import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -162,8 +163,7 @@ function dispatch(args) {
   console.log(`dispatched ${message.id} -> ${to} (tmux ${tmux})`);
 
   sleepSync(resolveWait);
-  resolve(args);
-  return 0;
+  return resolve(args);
 }
 
 function resolve(args) {
@@ -314,11 +314,46 @@ function list(args) {
   return 0;
 }
 
+function lane(args) {
+  const to = args.name;
+  const cwd = args.cwd;
+  if (!to || !cwd) {
+    console.log("usage: bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>] [--mail-dir <dir>] [--resolve-wait <seconds>] [--dry-run]");
+    return 1;
+  }
+  const brief = args.brief ?? join(cwd, "brief.md");
+  if (!existsSync(brief)) {
+    console.log(`brief file not found: ${brief}`);
+    return 1;
+  }
+  const body = readFileSync(brief, "utf8").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+  const model = args.model ?? "openrouter/deepseek/deepseek-v4-flash-0731";
+  const tmux = args.tmux ?? to;
+  const cmd = `opencode run -m ${model} --auto "$(cat ${brief})"`;
+
+  if (args["dry-run"]) {
+    console.log(`cmd: ${cmd}`);
+    console.log(`to: ${to}`);
+    console.log(`cwd: ${cwd}`);
+    console.log(`harness: opencode`);
+    console.log(`tmux: ${tmux}`);
+    console.log(`body: ${body}`);
+    console.log(`mail-dir: ${args["mail-dir"] ?? DEFAULT_MAIL_DIR}`);
+    console.log(`resolve-wait: ${args["resolve-wait"] ?? 3}`);
+    return 0;
+  }
+
+  const dispatchArgs = { to, cwd, cmd, harness: "opencode", tmux, body };
+  if (args["mail-dir"]) dispatchArgs["mail-dir"] = args["mail-dir"];
+  if (args["resolve-wait"]) dispatchArgs["resolve-wait"] = args["resolve-wait"];
+  return dispatch(dispatchArgs);
+}
+
 const [command, ...rest] = process.argv.slice(2);
 const args = flags(rest);
-const commands = { hail, sweep, list, dispatch, resolve };
+const commands = { hail, sweep, list, dispatch, resolve, lane };
 if (!command || !(command in commands)) {
-  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve> [--mail-dir <path>] ...");
+  console.log("usage: bus.ts <hail|sweep|list|dispatch|resolve|lane> [--mail-dir <path>] ...");
   process.exit(1);
 }
 process.exit(commands[command](args));
