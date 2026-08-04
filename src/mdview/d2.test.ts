@@ -15,6 +15,88 @@ describe("renderD2", () => {
     expect(dark).not.toBe(light);
   });
 
+  it("renders labeled horizontal terminal output", async () => {
+    const svg = await renderD2([
+      "direction: right",
+      'source: "Codex / Claude"',
+      "source -> tmux",
+      "tmux -> xterm",
+      'xterm -> inline: "render"',
+    ].join("\n"), true);
+
+    expect({
+      type: typeof svg,
+      labels: ["Codex / Claude", "tmux", "xterm", "render"].map((label) => svg.includes(label)),
+      hasSvg: svg.includes("<svg"),
+    }).toMatchInlineSnapshot(`
+      {
+        "hasSvg": true,
+        "labels": [
+          true,
+          true,
+          true,
+          true,
+        ],
+        "type": "string",
+      }
+    `);
+  });
+
+  it("renders concurrent diagrams through the shared instance", async () => {
+    const rendered = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      renderD2(`node-${index} -> result-${index}`, true),
+    ));
+
+    expect(rendered.map((svg, index) => [
+      typeof svg,
+      svg.includes("<svg"),
+      svg.includes(`node-${index}`),
+    ])).toMatchInlineSnapshot(`
+      [
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+        [
+          "string",
+          true,
+          true,
+        ],
+      ]
+    `);
+  });
+
   it("rejects on broken d2 source instead of throwing synchronously", async () => {
     let rejection: string | null = null;
     try {
