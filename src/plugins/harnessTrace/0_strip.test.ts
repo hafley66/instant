@@ -100,12 +100,12 @@ describe("StripPolicy.nativeIds", () => {
 describe("StripPolicy.external", () => {
   it("keeps only the externals of this tab's tree, never the claude rows the TUI shows", () => {
     const ids = StripPolicy.external(TAB_TREE, "s1", "related").map((n) => n.id);
-    expect(ids).toEqual(["oc-lane", "oc-sub"]);
+    expect(ids).toEqual(["oc-lane"]);
   });
 
   it("widens to every external session, other terminals' included", () => {
     const ids = StripPolicy.external(TAB_TREE, "s1", "all").map((n) => n.id);
-    expect(ids).toEqual(["oc-lane", "oc-sub", "claude-s2", "codex-s2"]);
+    expect(ids).toEqual(["oc-lane", "claude-s2", "codex-s2"]);
   });
 
   it("drops the other terminal's tree from the related scope", () => {
@@ -137,7 +137,7 @@ describe("StripPolicy with a tab-prefixed terminal id", () => {
   // leaked into scope "all" as an external row.
   it("related scope matches through the s: prefix", () => {
     const ids = StripPolicy.external(TAB_TREE, "s:s1", "related").map((n) => n.id);
-    expect(ids).toEqual(["oc-lane", "oc-sub"]);
+    expect(ids).toEqual(["oc-lane"]);
   });
 
   it("nativeIds claims through the s: prefix, so scope all still excludes this tab's claude", () => {
@@ -158,10 +158,24 @@ describe("StripPolicy.external drops finished lanes", () => {
       node({ id: "oc-idle", harness: "opencode", status: "idle", tmuxSession: "s1" }),
     ];
     const related = StripPolicy.external(day, "s1", "related").map((n) => n.id);
-    expect(related).toEqual(["oc-lane", "oc-sub", "oc-idle"]);
+    expect(related).toEqual(["oc-lane", "oc-idle"]);
     const all = StripPolicy.external(day, "s1", "all").map((n) => n.id);
     expect(all).not.toContain("oc-done");
     expect(all).not.toContain("sh-dead");
+  });
+});
+
+describe("StripPolicy.external with a subagent thread of an external session", () => {
+  // Defect receipt 2026-08-04: codex's guardian thread (thread_source subagent,
+  // parent_thread_id set, same cwd) rendered as a second external shell, so one
+  // codex pane on sprefa-2 counted as "2 external shells" with different ids.
+  it("counts one shell for a codex session plus its guardian thread, both scopes", () => {
+    const nodes: AgentSessionNode[] = [
+      node({ id: "codex-main", harness: "codex", tmuxSession: "s2" }),
+      node({ id: "codex-guardian", harness: "codex", parentId: "codex-main", parentKind: "subagent", tmuxSession: "s2" }),
+    ];
+    expect(StripPolicy.external(nodes, "s1", "all").map((n) => n.id)).toEqual(["codex-main"]);
+    expect(StripPolicy.external(nodes, "s2", "related").map((n) => n.id)).toEqual(["codex-main"]);
   });
 });
 

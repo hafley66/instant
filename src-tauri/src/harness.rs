@@ -161,8 +161,8 @@ pub struct HarnessTraceRow {
     pub last_activity: String, // ISO UTC from store mtime/db
     pub status: &'static str,  // live | idle | done | dead
     pub cwd: String,           // tildified
-    // CONTRACT2: claude subagent children carry the parent session id + "subagent";
-    // other harnesses stay None here (the frontend mail join may attach "dispatch").
+    // CONTRACT2: claude/codex subagent children carry the parent session id +
+    // "subagent"; others stay None (the frontend mail join may attach "dispatch").
     pub parent_id: Option<String>,
     pub parent_kind: Option<&'static str>,
 }
@@ -417,7 +417,22 @@ fn trace_codex(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        out.push(trace_row("codex", id.to_string(), ts, mtime_ms(&path), cwd, home, now));
+        // A guardian/subagent thread shares the parent's pane: same cwd, same
+        // tmux, and codex writes it as its own rollout file with its own id.
+        let parent = meta.get("parent_thread_id").and_then(Value::as_str);
+        let is_sub = meta.get("thread_source").and_then(Value::as_str) == Some("subagent");
+        let kind = (is_sub || parent.is_some()).then_some("subagent");
+        out.push(trace_row_with_parent(
+            "codex",
+            id.to_string(),
+            ts,
+            mtime_ms(&path),
+            cwd,
+            home,
+            now,
+            parent.map(str::to_string),
+            kind,
+        ));
     }
     out
 }
@@ -531,6 +546,33 @@ mod tests {
         assert_eq!(tildify("/Users/someone/projects/a", home), "~/projects/a");
         assert_eq!(tildify("/Users/someone", home), "~");
         assert_eq!(tildify("/Users/someoneelse/x", home), "/Users/someoneelse/x");
+    }
+
+    // Defect receipt 2026-08-04: guardian rollout read as top-level = 2 shells for 1 pane.
+    #[test]
+    fn codex_subagent_thread_carries_parent_id() {
+        let home = std::env::temp_dir().join(format!("dock-strip-codex-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let day = home.join(".codex").join("sessions").join("2026").join("08").join("04");
+        fs::create_dir_all(&day).unwrap();
+        fs::write(
+            day.join("rollout-a.jsonl"),
+            r#"{"type":"session_meta","payload":{"id":"main-1","cwd":"/","thread_source":"user","timestamp":"2026-08-04T00:00:00Z"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            day.join("rollout-b.jsonl"),
+            r#"{"type":"session_meta","payload":{"id":"guard-1","parent_thread_id":"main-1","cwd":"/","thread_source":"subagent","timestamp":"2026-08-04T00:00:00Z"}}"#,
+        )
+        .unwrap();
+        let rows = trace_codex(&home, 0);
+        let main = rows.iter().find(|(_, r)| r.id == "main-1").unwrap();
+        let guard = rows.iter().find(|(_, r)| r.id == "guard-1").unwrap();
+        assert_eq!(main.1.parent_id, None);
+        assert_eq!(main.1.parent_kind, None);
+        assert_eq!(guard.1.parent_id.as_deref(), Some("main-1"));
+        assert_eq!(guard.1.parent_kind, Some("subagent"));
+        let _ = fs::remove_dir_all(&home);
     }
 
     // CONTRACT2 proof #2: a fake <project>/<parent>/subagents/agent-x.jsonl in a

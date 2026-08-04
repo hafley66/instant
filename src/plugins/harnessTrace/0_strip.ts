@@ -64,9 +64,12 @@ export const StripPolicy: IStripPolicy = {
 
   // Done/dead rows stay out of the strip on every scope: the bar answers
   // "how many shells are going on", the full trace page keeps the history.
+  // Subagent threads run inside their parent's pane, so they are not shells.
   external(nodes, sid, scope) {
     const tmux = tmuxNameOf(sid);
-    const going = nodes.filter((node) => node.status === "live" || node.status === "idle");
+    const going = nodes.filter(
+      (node) => (node.status === "live" || node.status === "idle") && node.parentKind !== "subagent",
+    );
     const native = nativeClaudeIds(going, tmux);
     if (scope === "all") return going.filter((node) => !native.has(node.id));
     const related = forestIds(filterForestByTmux(buildAgentTree(going), tmux), new Set<string>());
