@@ -21,6 +21,7 @@ import { fileGlyph } from "./core";
 import { openPreviewPanel } from "./preview";
 import { openMarkdownPanel } from "./mdview/open";
 import { markdownHeadingRows, type MarkdownHeadingRow } from "./0_markdownTree";
+import { TurnPreviewPopover } from "./0_turnPreviewPopover";
 import { fileEntry, isCompaction, isMarkdown, isToolOnlyTurn, touchedFiles, turnOrder, turnPrimaryPreview, turnReferences, turnRoleLabel, visibleTurnWindows, type TouchedFile } from "./0_sessionSidebarModel";
 import {
   warmTurns,
@@ -266,12 +267,22 @@ export function SessionSidebar(props: {
   const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("visible");
   const [turnPreview, setTurnPreview] = useState<{ path: string; text: string; fallbackRect: DOMRect | null } | null>(null);
   const [turnExpanded, setTurnExpanded] = useState<ExpandedState>({});
+  const previewHideTimer = useRef(0);
+  const cancelPreviewHide = useCallback(() => {
+    if (previewHideTimer.current) window.clearTimeout(previewHideTimer.current);
+    previewHideTimer.current = 0;
+  }, []);
+  const hidePreviewSoon = useCallback(() => {
+    cancelPreviewHide();
+    previewHideTimer.current = window.setTimeout(() => setTurnPreview(null), 140);
+  }, [cancelPreviewHide]);
   const turnColumns = useMemo(
     () => turnCols((path, text, target) => {
+      cancelPreviewHide();
       const anchored = CSS.supports("anchor-name: --turn-preview-anchor") && CSS.supports("top: anchor(--turn-preview-anchor bottom)");
       setTurnPreview({ path, text, fallbackRect: anchored ? null : target.getBoundingClientRect() });
-    }, () => setTurnPreview(null), turnPreview?.path ?? null),
-    [turnPreview?.path],
+    }, hidePreviewSoon, turnPreview?.path ?? null),
+    [cancelPreviewHide, hidePreviewSoon, turnPreview?.path],
   );
   const previewStyle = turnPreview?.fallbackRect ? {
     left: Math.max(8, Math.min(turnPreview.fallbackRect.left, window.innerWidth - Math.min(520, window.innerWidth - 16))),
@@ -286,6 +297,7 @@ export function SessionSidebar(props: {
     window.addEventListener("pointerdown", closePreview, true);
     return () => window.removeEventListener("pointerdown", closePreview, true);
   }, [turnPreview]);
+  useEffect(() => () => cancelPreviewHide(), [cancelPreviewHide]);
 
   // Re-render when shared listings or favorites change. Star state lives in
   // store.aiFavs; the turn rows re-read isTurnFav on each render.
@@ -612,6 +624,6 @@ export function SessionSidebar(props: {
         </PanelGroup>
       </div>
     </aside>
-    {turnPreview ? createPortal(<div className="turn-preview-popover" data-testid="turn-preview-popover" data-anchor-positioned={turnPreview.fallbackRect ? undefined : "true"} role="tooltip" style={previewStyle}>{turnPreview.text}</div>, document.body) : null}
+    {turnPreview ? createPortal(<TurnPreviewPopover text={turnPreview.text} anchored={!turnPreview.fallbackRect} style={previewStyle} onPointerEnter={cancelPreviewHide} onPointerLeave={hidePreviewSoon} />, document.body) : null}
   </>);
 }

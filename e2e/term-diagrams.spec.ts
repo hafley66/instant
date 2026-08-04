@@ -95,7 +95,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     });
   });
 
-  test(`infers Mermaid and D2 after ${harness} strips Markdown fences`, async ({ page }) => {
+  test(`matches ${harness} viewport lines to ledger Mermaid and D2`, async ({ page }) => {
     await openTerminal(page);
     await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), renderedCliOutput(harness));
 
@@ -112,7 +112,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
   });
 }
 
-test("keeps later scrolled prose outside an inferred Mermaid diagram", async ({ page }) => {
+test("keeps later scrolled prose outside the ledger Mermaid source", async ({ page }) => {
   await openTerminal(page);
   await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), scrolledMermaidOutput);
 
@@ -121,4 +121,17 @@ test("keeps later scrolled prose outside an inferred Mermaid diagram", async ({ 
   await expect(mermaid).toContainText("Mermaid");
   await expect(mermaid).not.toContainText("This prose arrived later");
   await expect(mermaid).not.toHaveClass(/term-diagram-error/);
+});
+
+test("renders full ledger diagrams when the viewport contains only one source line", async ({ page }) => {
+  await openTerminal(page);
+  await page.evaluate(() => window.__term!.write("\x1b[2J\x1b[Htmux -> xterm\r\nPTY --> tmux"));
+
+  await page.waitForTimeout(500);
+  await expect(page.locator(".term-diagram")).toHaveCount(0);
+
+  const d2 = page.locator('.term-diagram[data-language="d2"]');
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(d2).toContainText("D2 renderer");
+  await expect(mermaid).toContainText("Mermaid");
 });

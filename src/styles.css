@@ -234,7 +234,7 @@ body.show-toolbar .toolbar {
   font-size: 12px;
   line-height: 1.4;
   padding: 8px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .term-inspector strong, .term-inspector span, .term-inspector small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-inspector strong, .term-inspector span { font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif !important; }
@@ -438,7 +438,7 @@ body[data-skin] .actbar-item.active {
   box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
   font-size: 11px;
   white-space: nowrap;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 /* Rail child rows (rail.ts refreshChildren): the ▸/▾ chevron sits inside the
@@ -889,6 +889,7 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
 .turn-copy[data-role="meta"] .turn-preview { color: var(--muted, #888); opacity: 0.7; }
 .turn-preview-popover {
   position: fixed;
+  inset: auto;
   z-index: 9999;
   width: min(520px, 80vw);
   max-height: 180px;
@@ -901,7 +902,7 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
   white-space: pre-wrap;
   font: 11px/1.35 "Menlo", "Consolas", monospace;
   box-shadow: 0 3px 12px rgba(0, 0, 0, .32);
-  pointer-events: none;
+  pointer-events: auto;
 }
 @position-try --turn-preview-flip-inline {
   left: auto;

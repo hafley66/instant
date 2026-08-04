@@ -126,6 +126,19 @@ test("session sidebar Turns view: transcript tree and Touched metadata", async (
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  expect(await preview.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      open: element.matches(":popover-open"),
+      pointerEvents: getComputedStyle(element).pointerEvents,
+      hitClass: (document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) as HTMLElement | null)?.className ?? null,
+    };
+  })).toEqual({ open: true, pointerEvents: "auto", hitClass: "turn-preview-popover" });
+  await preview.hover();
+  expect(await preview.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await preview.evaluate((element) => { element.scrollTop = 0; });
+  await page.mouse.wheel(0, 240);
+  await expect.poll(() => preview.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await page.screenshot({ path: "test-results/term-turns-hover.png" });
 
   await turn.hover();

@@ -1,9 +1,12 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { asyncScheduler, Subject, throttleTime, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup } from "./mdview/0_DiagramLightbox";
 import { renderD2 } from "./mdview/d2";
+import { diagramsFromMessageTail, normalizedDiagramLines, type MessageDiagram } from "./0_terminalDiagramMessages";
+import type { AiMessage } from "./state";
 
 type DiagramLanguage = "mermaid" | "d2";
 type DiagramFence = { language: DiagramLanguage; code: string; start: number; end: number; inferred: boolean };
@@ -56,6 +59,45 @@ function logicalLines(term: Terminal, from: number, through: number): LogicalLin
     }
   }
   return lines;
+}
+
+function normalizeTerminalLine(line: string): string {
+  return stripTuiBullet(line).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function locateMessageDiagrams(term: Terminal, diagrams: MessageDiagram[]): DiagramFence[] {
+  const buffer = term.buffer.active;
+  const viewportTop = buffer.viewportY;
+  const viewportEnd = Math.min(buffer.length - 1, viewportTop + term.rows - 1);
+  const lines = logicalLines(term, viewportTop, viewportEnd);
+  const normalized = lines.map((line) => normalizeTerminalLine(line.text));
+  const found: DiagramFence[] = [];
+  for (const diagram of diagrams) {
+    const sourceLines = normalizedDiagramLines(diagram.code);
+    const anchors = sourceLines
+      .map((text, sourceIndex) => ({ text, sourceIndex }))
+      .sort((a, b) => b.text.length - a.text.length);
+    let hit: { terminalIndex: number; sourceIndex: number } | null = null;
+    for (const anchor of anchors) {
+      const terminalIndex = normalized.findIndex((line) => line === anchor.text || line.includes(anchor.text));
+      if (terminalIndex >= 0) {
+        hit = { terminalIndex, sourceIndex: anchor.sourceIndex };
+        break;
+      }
+    }
+    if (!hit) continue;
+    const estimatedStart = lines[hit.terminalIndex].start - hit.sourceIndex;
+    const start = Math.max(viewportTop, estimatedStart);
+    const end = Math.min(viewportEnd, estimatedStart + Math.max(0, sourceLines.length - 1));
+    found.push({
+      language: diagram.language,
+      code: diagram.code,
+      start,
+      end: Math.max(start, end),
+      inferred: false,
+    });
+  }
+  return found;
 }
 
 export function findDiagramFences(term: Terminal): DiagramFence[] {
@@ -175,6 +217,8 @@ export class TerminalDiagramOverlay {
   disposables: IDisposable[];
   generation = 0;
   frame = 0;
+  messageEvents = new Subject<void>();
+  messageSubscription: Subscription | null = null;
   cache = new Map<string, Promise<string>>();
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
@@ -183,19 +227,33 @@ export class TerminalDiagramOverlay {
     readonly term: Terminal,
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
+    readonly messages?: () => Promise<AiMessage[] | null>,
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
     host.appendChild(this.root);
+    if (messages) {
+      this.messageSubscription = this.messageEvents.pipe(
+        throttleTime(1000, asyncScheduler, { leading: false, trailing: true }),
+      ).subscribe(() => this.scheduleFrame());
+    }
+    const scheduleOutput = () => {
+      if (!this.messages) {
+        this.scheduleFrame();
+        return;
+      }
+      this.root.hidden = true;
+      this.messageEvents.next();
+    };
     this.disposables = [
-      term.onWriteParsed(() => this.schedule()),
-      term.onScroll(() => this.schedule()),
-      term.onResize(() => this.schedule()),
+      term.onWriteParsed(scheduleOutput),
+      term.onScroll(scheduleOutput),
+      term.onResize(() => this.scheduleFrame()),
     ];
-    this.schedule();
+    this.scheduleFrame();
   }
 
-  schedule() {
+  scheduleFrame() {
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
@@ -213,7 +271,11 @@ export class TerminalDiagramOverlay {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
-    const fences = findDiagramFences(this.term).filter(
+    const messages = await this.messages?.();
+    if (generation !== this.generation) return;
+    const fences = (messages
+      ? locateMessageDiagrams(this.term, diagramsFromMessageTail(messages))
+      : findDiagramFences(this.term)).filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
     const rendered = await Promise.all(fences.map(async (fence) => {
@@ -231,6 +293,7 @@ export class TerminalDiagramOverlay {
       }
     }));
     if (generation !== this.generation) return;
+    this.root.hidden = false;
     this.root.replaceChildren(...rendered.map(({ fence, svg, error }) => {
       const element = document.createElement("div");
       element.className = error ? "term-diagram term-diagram-error" : "term-diagram";
@@ -299,6 +362,8 @@ export class TerminalDiagramOverlay {
 
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
+    this.messageSubscription?.unsubscribe();
+    this.messageEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
     this.closeLarge();
