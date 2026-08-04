@@ -217,8 +217,8 @@ export class TerminalDiagramOverlay {
   disposables: IDisposable[];
   generation = 0;
   frame = 0;
-  scrollEvents = new Subject<void>();
-  scrollSubscription: Subscription | null = null;
+  activityEvents = new Subject<void>();
+  activitySubscription: Subscription | null = null;
   cache = new Map<string, Promise<string>>();
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
@@ -233,13 +233,14 @@ export class TerminalDiagramOverlay {
     this.root.className = "term-diagrams";
     host.appendChild(this.root);
     if (messages) {
-      this.scrollSubscription = this.scrollEvents.pipe(
+      this.activitySubscription = this.activityEvents.pipe(
         debounceTime(1000),
       ).subscribe(() => this.scheduleFrame());
     }
     this.disposables = [
       term.onWriteParsed(() => {
-        if (!this.messages) this.scheduleFrame();
+        if (this.messages) this.activityEvents.next();
+        else this.scheduleFrame();
       }),
       term.onScroll(() => this.viewportScrolled()),
       term.onResize(() => this.scheduleFrame()),
@@ -250,7 +251,7 @@ export class TerminalDiagramOverlay {
   viewportScrolled() {
     if (this.messages) {
       this.root.hidden = true;
-      this.scrollEvents.next();
+      this.activityEvents.next();
     } else {
       this.scheduleFrame();
     }
@@ -365,8 +366,8 @@ export class TerminalDiagramOverlay {
 
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
-    this.scrollSubscription?.unsubscribe();
-    this.scrollEvents.complete();
+    this.activitySubscription?.unsubscribe();
+    this.activityEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
     this.closeLarge();

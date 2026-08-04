@@ -75,7 +75,6 @@ for (const harness of ["Codex", "Claude Code"] as const) {
   test(`renders plain fenced Mermaid and D2 output from ${harness}`, async ({ page }, testInfo) => {
     await openTerminal(page);
     await writeFixture(page, output(harness));
-    await settleScroll(page);
 
     const diagrams = page.locator(".term-diagram");
     await expect(diagrams).toHaveCount(2);
@@ -85,6 +84,12 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("xterm");
     await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("PTY");
     await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("xterm");
+    const inlineBoxes = await page.locator(".term-diagram > svg").evaluateAll((svgs) => svgs.map((svg) => {
+      const box = svg.getBoundingClientRect();
+      return { width: Math.round(box.width), height: Math.round(box.height) };
+    }));
+    expect(inlineBoxes).toHaveLength(2);
+    expect(inlineBoxes.every(({ width, height }) => width > 500 && height > 40)).toBe(true);
 
     await page.locator('.term-diagram[data-language="d2"]').click();
     const expanded = page.locator('.diagram-lightbox[data-language="d2"]');
