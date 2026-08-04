@@ -3,6 +3,7 @@ import { Streamdown, type StreamdownProps } from "streamdown";
 import { code } from "@streamdown/code";
 import "streamdown/styles.css";
 import { MermaidDiagram } from "./0a_MermaidDiagram";
+import { D2Diagram } from "./0a_D2Diagram";
 
 const controls = {
   code: { copy: true, download: false },
@@ -26,12 +27,19 @@ export default function StreamdownBody({
     ({ code }: { code: string }) => <MermaidDiagram code={code} dark={dark} />,
     [dark],
   );
+  const D2Renderer = useCallback(
+    ({ code }: { code: string }) => <D2Diagram code={code} dark={dark} />,
+    [dark],
+  );
   const plugins = useMemo(
     () => ({
       code,
-      renderers: [{ language: "mermaid", component: MermaidRenderer }],
+      renderers: [
+        { language: "mermaid", component: MermaidRenderer },
+        { language: "d2", component: D2Renderer },
+      ],
     }),
-    [MermaidRenderer],
+    [MermaidRenderer, D2Renderer],
   );
 
   return (
