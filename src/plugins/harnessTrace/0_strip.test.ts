@@ -105,7 +105,16 @@ describe("StripPolicy.external", () => {
 
   it("widens to every external session, other terminals' included", () => {
     const ids = StripPolicy.external(TAB_TREE, "s1", "all").map((n) => n.id);
-    expect(ids).toEqual(["oc-lane", "claude-s2", "codex-s2"]);
+    expect(ids).toEqual(["oc-lane", "claude-s2"]);
+  });
+
+  // m-17f56e54 receipt: three pane-less scratch transcripts counted as
+  // shells; a session with no tmux pane is history, never a going-on row.
+  it("drops a pane-less session from the going-on bar on both scopes", () => {
+    const day = [...TAB_TREE, node({ id: "oc-orphan", harness: "opencode", parentId: "claude-s1", parentKind: "dispatch" })];
+    expect(StripPolicy.external(day, "s1", "all").map((n) => n.id)).not.toContain("oc-orphan");
+    expect(StripPolicy.external(day, "s1", "related").map((n) => n.id)).not.toContain("oc-orphan");
+    expect(StripPolicy.history(day, "s1", "all").map((n) => n.id)).toContain("oc-orphan");
   });
 
   it("drops the other terminal's tree from the related scope", () => {
@@ -269,7 +278,7 @@ describe("StripPolicy.external with a cwd shared by several tmux sessions", () =
   it("related scope reaches a node whose tmuxSession guessed one of the shared sessions", () => {
     const nodes: AgentSessionNode[] = [
       node({ id: "claude-demo", tmuxSession: "demo", tmuxMatches: ["demo", "demo-3"] }),
-      node({ id: "oc-demo", harness: "opencode", parentId: "claude-demo", parentKind: "dispatch" }),
+      node({ id: "oc-demo", harness: "opencode", parentId: "claude-demo", parentKind: "dispatch", tmuxSession: "oc-demo" }),
     ];
     expect([...StripPolicy.nativeIds(nodes, "demo-3")].sort()).toEqual(["claude-demo"]);
     const related = StripPolicy.external(nodes, "demo-3", "related").map((n) => n.id);

@@ -10,7 +10,7 @@ import { getHomeDir, relTime } from "../../core";
 import { MAIL_DIR } from "./0_live";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { store } from "../../state";
-import { enrichRows, registrySeeds, routeTmuxBySession, settleRoutedStatus, tmuxLiveNames } from "./0_mail";
+import { enrichRows, registrySeeds, resolveRouteSessions, routeTmuxBySession, settleRoutedStatus, tmuxLiveNames } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
 import { joinTmuxSession, joinTmuxSessions } from "./2_join";
@@ -264,11 +264,14 @@ export function useAgentTree(): AgentTreeState {
         setLiveNames((prev) => names ?? prev);
         const mail = await loadMailLedger();
         const liveTmux = new Set(names ?? store.get().sessions.map((s) => s.name));
-        const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux, mail.envelopes, Date.now())];
-        const flatRows = enrichRows(seeds, mail.envelopes, mail.registry);
-        setFlat(toAgentNodes(flatRows, mail.envelopes, mail.registry));
-        setRegistry(mail.registry);
-        setRouteTmux(routeTmuxBySession(mail.directory));
+        // One agent, one row: an unresolved route folds onto the store session
+        // sharing its harness+cwd instead of seeding a duplicate (m-17f56e54).
+        const resolved = { ...resolveRouteSessions(mail.directory, storeSeeds, getHomeDir()), ...mail.registry };
+        const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux, mail.envelopes, Date.now(), resolved)];
+        const flatRows = enrichRows(seeds, mail.envelopes, resolved);
+        setFlat(toAgentNodes(flatRows, mail.envelopes, resolved));
+        setRegistry(resolved);
+        setRouteTmux(routeTmuxBySession(mail.directory, resolved));
         setError("");
       })
       .catch((reason: unknown) => setError(String(reason)));

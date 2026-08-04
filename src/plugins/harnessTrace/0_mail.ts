@@ -50,6 +50,29 @@ export function mailAgentIdFor(registry: MailRegistry, sessionId: string): strin
   return Object.entries(registry).find(([, id]) => id === sessionId)?.[0] ?? sessionId;
 }
 
+// One agent, one row (m-17f56e54): a route with no resolved sessionId still
+// names a real session when a store seed shares its harness and cwd.
+export function resolveRouteSessions(
+  directory: IMailDirectory,
+  seeds: HarnessTraceSeed[],
+  homeDir: string,
+): MailRegistry {
+  const untildify = (path: string) => (path.startsWith("~") ? homeDir + path.slice(1) : path);
+  const resolved: MailRegistry = {};
+  for (const [id, agent] of Object.entries(directory)) {
+    if (agent.sessionId) {
+      resolved[id] = agent.sessionId;
+      continue;
+    }
+    if (agent.harness === null || agent.cwd === null) continue;
+    const match = seeds
+      .filter((seed) => seed.harness === agent.harness && untildify(seed.cwd) === untildify(agent.cwd!))
+      .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))[0];
+    if (match) resolved[id] = match.sessionId;
+  }
+  return resolved;
+}
+
 // Seeds for the registry routes the harness stores cannot see: a dispatched
 // lane with no store (harness "shell", or an unresolved opencode lane whose
 // sessionId is still empty) exists only in registry.json, so without a
@@ -66,6 +89,7 @@ export function registrySeeds(
   liveTmux: Set<string>,
   envelopes: MailEnvelope[],
   nowMs: number,
+  resolved: MailRegistry = {},
 ): HarnessTraceSeed[] {
   const seeded = new Set(seeds.map((seed) => seed.sessionId));
   const lastMailMs = new Map<string, number>();
@@ -76,7 +100,10 @@ export function registrySeeds(
     }
   }
   return Object.values(directory)
-    .filter((agent) => !agent.sessionId || !seeded.has(agent.sessionId))
+    .filter((agent) => {
+      const sessionId = agent.sessionId || resolved[agent.id] || "";
+      return !sessionId || !seeded.has(sessionId);
+    })
     .map((agent) => {
       const sessionId = agent.sessionId || agent.id;
       const mailMs = lastMailMs.get(agent.id) ?? 0;
@@ -101,10 +128,13 @@ export function registrySeeds(
 // session id -> tmux session name, from the registry routes that carry one.
 // The cwd guess (2_join) cannot tell apart tmux sessions sharing a directory;
 // a route's recorded tmux name is the dispatcher's own statement and wins.
-export function routeTmuxBySession(directory: IMailDirectory): Map<string, string> {
+export function routeTmuxBySession(
+  directory: IMailDirectory,
+  resolved: MailRegistry = {},
+): Map<string, string> {
   const bySession = new Map<string, string>();
   for (const agent of Object.values(directory)) {
-    if (agent.tmux !== null) bySession.set(agent.sessionId || agent.id, agent.tmux);
+    if (agent.tmux !== null) bySession.set(agent.sessionId || resolved[agent.id] || agent.id, agent.tmux);
   }
   return bySession;
 }

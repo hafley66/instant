@@ -6,6 +6,7 @@ import {
   parseMailNdjson,
   parseMailRegistry,
   registrySeeds,
+  resolveRouteSessions,
   routeTmuxBySession,
   settleRoutedStatus,
   tmuxLiveNames,
@@ -220,6 +221,40 @@ describe("registrySeeds", () => {
     const [row] = enrichRows(synth, parseMailNdjson(dispatchLine), {});
     expect(row.from).toBe("coordinator");
     expect(row.why).toBe("build the trace panel");
+  });
+
+  // m-17f56e54 receipt: instant-fable's unresolved route seeded a second row
+  // beside its own store session (same harness, same cwd), 6 shells where 2 ran.
+  it("skips a route resolved onto a store seed instead of duplicating it", () => {
+    const routes = { agent: route({ id: "agent", harness: "claude", tmux: "agent", cwd: "~/projects/x" }) };
+    const stored = [seed("sess-real")];
+    const resolved = resolveRouteSessions(routes, stored, "/Users/h");
+    expect(resolved).toEqual({ agent: "sess-real" });
+    expect(registrySeeds(routes, stored, new Set(["agent"]), [], NOW, resolved)).toEqual([]);
+  });
+});
+
+describe("resolveRouteSessions", () => {
+  it("maps an unresolved route to the newest store seed sharing harness and cwd", () => {
+    const routes = { agent: route({ id: "agent", harness: "claude", cwd: "~/projects/x" }) };
+    const older = { ...seed("sess-old"), lastActivity: "2026-08-02T01:00:00.000Z" };
+    const newer = { ...seed("sess-new"), lastActivity: "2026-08-02T05:00:00.000Z" };
+    expect(resolveRouteSessions(routes, [older, newer], "/Users/h")).toEqual({ agent: "sess-new" });
+  });
+
+  it("keeps an explicit sessionId and ignores cwd matches for it", () => {
+    const routes = { agent: route({ id: "agent", sessionId: "sess-pinned", harness: "claude", cwd: "~/projects/x" }) };
+    expect(resolveRouteSessions(routes, [seed("sess-other")], "/Users/h")).toEqual({ agent: "sess-pinned" });
+  });
+
+  it("matches across tilde and absolute cwd spellings", () => {
+    const routes = { agent: route({ id: "agent", harness: "claude", cwd: "/Users/h/projects/x" }) };
+    expect(resolveRouteSessions(routes, [seed("sess-real")], "/Users/h")).toEqual({ agent: "sess-real" });
+  });
+
+  it("never crosses harnesses on a shared cwd", () => {
+    const routes = { agent: route({ id: "agent", harness: "opencode", cwd: "~/projects/x" }) };
+    expect(resolveRouteSessions(routes, [seed("sess-claude")], "/Users/h")).toEqual({});
   });
 });
 
