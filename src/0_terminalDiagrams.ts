@@ -1,12 +1,32 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import DOMPurify from "dompurify";
-import mermaid from "mermaid";
+import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { renderD2 } from "./mdview/d2";
 
 type DiagramLanguage = "mermaid" | "d2";
 type DiagramFence = { language: DiagramLanguage; code: string; start: number; end: number };
 type LogicalLine = { text: string; start: number; end: number };
 let mermaidId = 0;
+type MermaidApi = typeof import("mermaid").default;
+let mermaidPromise: Promise<MermaidApi> | null = null;
+
+function loadMermaid(): Promise<MermaidApi> {
+  const loaded = (window as typeof window & { mermaid?: MermaidApi }).mermaid;
+  if (loaded) return Promise.resolve(loaded);
+  if (mermaidPromise) return mermaidPromise;
+  mermaidPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = mermaidBundleUrl;
+    script.addEventListener("load", () => {
+      const api = (window as typeof window & { mermaid?: MermaidApi }).mermaid;
+      if (api) resolve(api);
+      else reject(new Error("Mermaid bundle loaded without its global API"));
+    });
+    script.addEventListener("error", () => reject(new Error("Mermaid bundle failed to load")));
+    document.head.appendChild(script);
+  });
+  return mermaidPromise;
+}
 
 function logicalLines(term: Terminal, from: number, through: number): LogicalLine[] {
   const buffer = term.buffer.active;
@@ -99,6 +119,7 @@ function darkBackground(host: HTMLElement): boolean {
 
 async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string> {
   if (fence.language === "d2") return renderD2(fence.code, dark);
+  const mermaid = await loadMermaid();
   mermaid.initialize({
     startOnLoad: false,
     theme: dark ? "dark" : "default",
