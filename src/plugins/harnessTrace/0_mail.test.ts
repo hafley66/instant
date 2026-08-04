@@ -57,7 +57,7 @@ describe("ruled-envelope migration", () => {
     to: "lane-a",
     from_timestamp: "2026-08-03T01:00:00Z",
     to_timestamp: "2026-08-03T01:05:00Z",
-    kind: "request",
+    kind: "dispatch",
     reply_to: null,
     body: "read CONTRACT.md",
     ref: null,
@@ -149,6 +149,21 @@ describe("enrichRows", () => {
     });
     const [row] = enrichRows([seed("sess-direct")], parseMailNdjson([later, replyLine].join("\n")), {});
     expect(row.id).toBe("env-2");
+  });
+
+  it("a non-dispatch result mail supplies no from/why, so the row falls back to user/empty", () => {
+    const result = JSON.stringify({
+      id: "env-r",
+      from: "lane-a",
+      to: "sess-9",
+      ts: "2026-08-02T03:00:00Z",
+      kind: "result",
+      body: "here is the report",
+    });
+    const [row] = enrichRows([seed("sess-9")], parseMailNdjson(result), { "lane-a": "sess-9" });
+    expect(row.from).toBe("user");
+    expect(row.why).toBe("");
+    expect(row.id).toBe("sess-9");
   });
 });
 
@@ -246,6 +261,15 @@ describe("registrySeeds", () => {
     );
     const [row] = registrySeeds(routes, [], new Set(["lane"]), envs, NOW);
     expect(row).toMatchObject({ parentId: null, parentKind: null });
+  });
+
+  it("a note from a registered agent does not parent but still counts as activity", () => {
+    const routes = { lane: route({ id: "lane", tmux: "lane" }) };
+    const envs = parseMailNdjson(
+      JSON.stringify({ id: "m-n", from: "coord", to: "lane", ts: "2026-08-03T11:59:00Z", kind: "note" }),
+    );
+    const [row] = registrySeeds(routes, [], new Set(["lane"]), envs, NOW);
+    expect(row).toMatchObject({ parentId: null, parentKind: null, status: "live" });
   });
 
   // The log is append-only and lane ids get reused: a stale placeholder-from

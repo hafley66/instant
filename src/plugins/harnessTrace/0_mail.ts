@@ -103,6 +103,7 @@ export function registrySeeds(
   // dispatch edge; placeholder froms ("coordinator", "user") cannot parent.
   const dispatchFrom = new Map<string, string>();
   for (const envelope of [...envelopes].sort((a, b) => a.ts.localeCompare(b.ts))) {
+    if (envelope.kind !== "dispatch") continue;
     if (!dispatchFrom.has(envelope.to) && directory[envelope.from]) {
       dispatchFrom.set(envelope.to, envelope.from);
     }
@@ -188,6 +189,7 @@ export function enrichRows(
   const dispatchBySession = new Map<string, MailEnvelope>();
   const oldestFirst = [...envelopes].sort((a, b) => a.ts.localeCompare(b.ts));
   for (const envelope of oldestFirst) {
+    if (envelope.kind !== "dispatch") continue;
     const sessionId = registry[envelope.to] ?? envelope.to;
     if (!dispatchBySession.has(sessionId)) dispatchBySession.set(sessionId, envelope);
   }

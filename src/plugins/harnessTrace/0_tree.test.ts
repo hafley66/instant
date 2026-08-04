@@ -126,6 +126,21 @@ describe("resolveDispatchParents", () => {
     const resolved = resolveDispatchParents(nodes, envelopes, registry);
     expect(resolved.find((n) => n.id === "kid")!.parentKind).toBe("subagent");
   });
+
+  it("does not attach a parent from a non-dispatch envelope: a request mail leaves the node a root", () => {
+    const nodes: AgentSessionNode[] = [
+      node({ id: "sess-driver", from: "fable" }),
+      node({ id: "sess-child", harness: "opencode", from: "coordinator" }),
+    ];
+    const envelopes = [
+      env({ id: "m-1", from: "fable", to: "oc-worker", kind: "request", body: "status?" }),
+    ];
+    const registry = { "oc-worker": "sess-child", fable: "sess-driver" };
+    const resolved = resolveDispatchParents(nodes, envelopes, registry);
+    const child = resolved.find((n) => n.id === "sess-child")!;
+    expect(child.parentId).toBeNull();
+    expect(child.parentKind).toBeNull();
+  });
 });
 
 describe("toAgentNodes", () => {  it("maps seam rows to the frozen model keyed by session id and keeps from/why + a dispatch parent", () => {

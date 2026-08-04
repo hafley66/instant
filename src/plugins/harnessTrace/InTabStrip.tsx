@@ -153,8 +153,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
 
   if (!visible) return null;
 
-  const onRowClick = (r: AgentTreeNode) => {
-    // Click = go there (live joins only) AND push the row as the tab's current view.
+  const onOpenRow = (r: AgentTreeNode) => {
+    // Double-click a leaf = go there (live joins only) AND push the row as the
+    // tab's current view. A row WITH children expands/collapses instead.
     openSession(r.tmuxSession, liveTmux);
     termViewRouter.push(sid, { kind: "agent-session", agentSessionId: r.id });
   };
@@ -239,7 +240,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           searchPlaceholder="filter loaded rows…"
           rowTitle={(r) => r.why || r.cwd}
           rowClass={(r) => (r.tmuxSession ? "dock-strip-row" : "dock-strip-row unjoined")}
-          onRowClick={onRowClick}
+          onRowDoubleClick={(r) => {
+            if (!index.hasChildren(r.id)) onOpenRow(r);
+          }}
         />
       )}
     </div>

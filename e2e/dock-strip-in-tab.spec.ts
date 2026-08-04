@@ -90,9 +90,14 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   await expect(laneRow).toContainText("dispatch");
   await strip.screenshot({ path: "test-results/strip-tree.png" });
 
-  // Row click = join the tmux session + push the agent-session view.
+  // A single row click does nothing: no view push, no join. Only a leaf
+  // double-click opens. Twisty rows expand instead.
   await page.evaluate(() => ((window as Window & { __dockStripOpened?: string }).__dockStripOpened = undefined));
   await laneRow.locator(".s-name").click();
+  await expect(page.getByText("viewing: oc-lane")).toHaveCount(0);
+  expect(await opened()).toBeNull();
+  // Row dblclick on a leaf = join the tmux session + push the agent-session view.
+  await laneRow.locator(".s-name").dblclick();
   await expect(page.getByText("viewing: oc-lane")).toBeVisible();
   await expect.poll(opened).toBe("s1");
   await page.locator(".term-strip .strip-back").click();

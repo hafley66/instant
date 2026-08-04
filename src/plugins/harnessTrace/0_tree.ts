@@ -56,6 +56,7 @@ export function resolveDispatchParents(
   const bySession = new Map<string, MailEnvelope>();
   const oldestFirst = [...envelopes].sort((a, b) => a.ts.localeCompare(b.ts));
   for (const envelope of oldestFirst) {
+    if (envelope.kind !== "dispatch") continue;
     const target = registry[envelope.to] ?? envelope.to;
     if (!bySession.has(target)) bySession.set(target, envelope);
   }
