@@ -1,11 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-// Waterfall is parked: InTabStrip comments out the Show active checkbox and
-// the render branch after an unvirtualized full-history render seized the
-// webview. Un-skip together with re-enabling that branch; the DOM-budget
-// assert below is the gate that must hold at real session counts.
-test.skip(true, "waterfall entry point commented out in InTabStrip");
-
 // The session waterfall is history mode of the in-tab strip: unchecking
 // "Show active" swaps today's going-on table for the devtools-network-style
 // waterfall (brush overview on top, one bar per session, a tick per message)
@@ -140,5 +134,112 @@ test("waterfall: dragging the brush narrows the visible sessions and ticks", asy
   await expect(page.locator(".waterfall-tick")).toHaveCount(2);
 
   await waterfall.screenshot({ path: "test-results/waterfall-brushed.png" });
+  expect(pageErrors).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// Stress: the size that froze the webview. 300 sessions x 50 messages = 15,000
+// events. Unwindowed that is ~30,600 nodes (a bar and a label per session, a
+// circle and a title per message) and 300 concurrent reads. Every assertion
+// below is a constant, so a regression that reintroduces any history-sized term
+// fails rather than merely slowing down.
+// ---------------------------------------------------------------------------
+const STRESS_SESSIONS = 300;
+const STRESS_MESSAGES = 50;
+const STRESS_BASE = Date.parse("2026-08-01T00:00:00Z");
+const STRESS_STEP_MS = 10 * 60 * 1000; // one session started every 10 minutes
+const STRESS_SPAN_MS = 8 * 60 * 1000; // each runs for 8 of those minutes
+// 0_waterfall.ts DEFAULT_SESSION_LIMIT: what the opening range is allowed to cover.
+const OPENING_LIMIT = 40;
+
+async function seedStress(page: import("@playwright/test").Page) {
+  await page.clock.setFixedTime(new Date(STRESS_BASE + STRESS_SESSIONS * STRESS_STEP_MS));
+  await page.addInitScript(
+    ({ sessions, messages, base, step, span }) => {
+      const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+      const startOf = (i: number) => base + i * step;
+      // External harnesses only: a claude session joined to this tmux is what
+      // the tab's own agent list already shows, so StripPolicy drops it and the
+      // strip would never appear.
+      const harnesses = ["opencode", "codex", "kimi"];
+      const rows = Array.from({ length: sessions }, (_, i) => ({
+        id: `sess-${i}`,
+        harness: harnesses[i % harnesses.length],
+        sessionId: `sess-${i}`,
+        parentId: null,
+        parentKind: null,
+        ts: new Date(startOf(i)).toISOString(),
+        lastActivity: new Date(startOf(i) + span).toISOString(),
+        status: "idle",
+        cwd: "~/projects/demo",
+      }));
+      w.__instantE2eNativeResults = {
+        harness_trace_rows: rows,
+        list_dir: () => ({ entries: [] }),
+        // Built per call so the 15,000 messages never cross addInitScript.
+        read_ai_messages: (args?: Record<string, unknown>) => {
+          const id = String(args?.sessionId ?? "");
+          const i = Number(id.replace("sess-", ""));
+          if (!Number.isFinite(i)) return [];
+          return Array.from({ length: messages }, (_, j) => ({
+            editor: String(args?.editor ?? "opencode"),
+            session_id: id,
+            id: `${id}-m${j}`,
+            seq: j + 1,
+            role: j % 2 === 0 ? "user" : "assistant",
+            subtype: undefined,
+            ts: startOf(i) + Math.round((j * span) / messages),
+            preview: `m${j}`,
+            text: "",
+            locator: "",
+          }));
+        },
+      };
+    },
+    { sessions: STRESS_SESSIONS, messages: STRESS_MESSAGES, base: STRESS_BASE, step: STRESS_STEP_MS, span: STRESS_SPAN_MS },
+  );
+}
+
+test("waterfall stress: 300 sessions x 50 messages stays inside the node and IPC budget", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await seedStress(page);
+  await page.goto("/e2e-waterfall.html?e2e=1");
+
+  await expect(page.getByTestId("in-tab-strip")).toBeVisible();
+  await page.getByText("Show active").click();
+  const waterfall = page.getByTestId("waterfall");
+  await expect(waterfall).toBeVisible();
+
+  // 1. The opening range covers the newest OPENING_LIMIT sessions, not all 300.
+  await expect(page.getByTestId("waterfall-count")).toHaveText(`${OPENING_LIMIT} sessions`);
+
+  // 2. Lanes are windowed: the scroller shows 6, so bars stay near that even
+  //    though 40 sessions are in range and 300 exist.
+  const bars = await page.locator(".waterfall-bar").count();
+  expect(bars).toBeGreaterThan(0);
+  expect(bars).toBeLessThanOrEqual(14); // measured 9
+
+  // 3. Ticks are capped per lane by pixel column, so 15,000 events cannot
+  //    reach the DOM even when their sessions are all in range.
+  const ticks = await page.locator(".waterfall-tick").count();
+  expect(ticks).toBeLessThan(150); // measured 63
+
+  // 4. The budget itself. Unwindowed this render was ~30,600 nodes.
+  const domNodes = await waterfall.evaluate((el) => el.querySelectorAll("*").length);
+  expect(domNodes).toBeLessThan(700); // measured 547
+
+  // 5. IPC reads follow the lane window, not history: 300 sessions must never
+  //    mean 300 concurrent read_ai_messages calls.
+  const reads = await page.evaluate(
+    () =>
+      ((window as Window & { __instantE2eNativeCalls?: string[] }).__instantE2eNativeCalls ?? []).filter(
+        (c) => c === "read_ai_messages",
+      ).length,
+  );
+  expect(reads).toBeGreaterThan(0);
+  expect(reads).toBeLessThanOrEqual(20); // measured 9
+
+  await waterfall.screenshot({ path: "test-results/waterfall-stress.png" });
   expect(pageErrors).toEqual([]);
 });
