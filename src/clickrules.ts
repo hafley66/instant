@@ -11,6 +11,7 @@ import { openMarkdownPanel } from "./mdview/open";
 import { getFocusedTermId, tabMetaById } from "./terminal";
 import { splitLineRef, tokenAtColumn } from "./termTokens";
 import { looksLikePath, resolveRef } from "./refResolve";
+import { htmlFileUrl } from "./0_htmlFileUrl";
 
 const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
 
@@ -56,6 +57,12 @@ export async function dispatchClick(rawToken: string, cwd: string) {
   // click rules still own what is left: urls, and tokens that name no file.
   if (result.kind === "hit") {
     const { path, line } = result.ref;
+    const browserUrl = htmlFileUrl(path);
+    if (browserUrl) {
+      const { openBrowserTab } = await import("./browser");
+      await openBrowserTab(browserUrl);
+      return;
+    }
     const name = path.split("/").pop() ?? path;
     const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
     if (MD_EXTS.has(ext) && !line) openMarkdownPanel(path);

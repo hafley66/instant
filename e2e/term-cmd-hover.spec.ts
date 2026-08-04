@@ -17,6 +17,7 @@ declare global {
 
 const LINE_UPDATE = "  Update(src/main.ts) then Read(src/preview.ts:214)";
 const LINE_BARE = "  edited MdPanel.tsx just now";
+const LINE_REPORT = "Playwright receipt: .worktrees/terminal-inline-diagrams/playwright-report/index.html";
 
 async function openTerm(page: Page) {
   await page.goto("/e2e-term.html?e2e=1");
@@ -114,6 +115,24 @@ test("⌘-click on a resolved file opens it in a preview tab", async ({ page }) 
   // repo-relative form both land on the same tab.
   await expect(page.locator(".dv-default-tab", { hasText: "main.ts" })).toBeVisible();
   await expect(page.locator(".fs-preview .fs-preview-meta")).toContainText("/tmp/term-e2e/src/main.ts");
+});
+
+test("⌘-click resolves an HTML report from the tmux cwd and opens Chromium", async ({ page }, testInfo) => {
+  await openTerm(page);
+  await writeLines(page, [LINE_REPORT]);
+
+  const point = await page.evaluate(() => window.__term!.point(0, 24));
+  await page.keyboard.down("Meta");
+  await page.mouse.move(point!.x, point!.y);
+  await page.mouse.click(point!.x, point!.y);
+
+  const expected = "file:///tmp/term-e2e/.worktrees/terminal-inline-diagrams/playwright-report/index.html";
+  await expect(page.locator(".dv-default-tab", { hasText: `web:${expected}` })).toBeVisible();
+  await expect(page.locator('.term-host input').last()).toHaveValue(expected);
+  await testInfo.attach("cwd-resolved-html-in-chromium", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
 });
 
 test("hover card snapshot", async ({ page }) => {

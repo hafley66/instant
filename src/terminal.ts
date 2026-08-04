@@ -8,6 +8,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "./generated/native";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
+import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
 import { runMatchingCommand } from "./keymap";
 import {
   sessionId,
@@ -71,6 +72,7 @@ export type Tab = {
   el: HTMLElement;
   graphics?: boolean;
   overlay?: GraphicsOverlay;
+  diagrams?: TerminalDiagramOverlay;
   harness: HarnessObservation;
   outputTail: string;
 };
@@ -421,6 +423,7 @@ export function openTab(
     // Self-heal: drop the orphaned entry and fall through to build fresh.
     const stale = tabs.get(id);
     stale?.overlay?.dispose();
+    stale?.diagrams?.dispose();
     stale?.term.dispose();
     stale?.el.remove();
     tabs.delete(id);
@@ -535,9 +538,10 @@ export function openTab(
   const cmd = opts.command ?? QUICK_CMD[name] ?? null;
   const graphics = opts.graphics ?? /^\s*awrit\b/.test(cmd ?? "");
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
+  const diagrams = graphics ? undefined : new TerminalDiagramOverlay(term, el);
   const live = store.get().sessions.find((s) => s.name === name);
   const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
-  tabs.set(id, { id, name, term, fit, el, graphics, overlay, harness, outputTail: "" });
+  tabs.set(id, { id, name, term, fit, el, graphics, overlay, diagrams, harness, outputTail: "" });
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -893,6 +897,7 @@ export function onTermClosed(id: string) {
   // and would find the record already gone.
   const isViewer = store.get().openTabs.find((o) => o.name === name)?.viewer ?? false;
   t.overlay?.dispose();
+  t.diagrams?.dispose();
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);

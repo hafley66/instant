@@ -57,6 +57,8 @@ const DIRS: Record<string, string[]> = {
   [`${ROOT}/e2e`]: [`${ROOT}/e2e/MdPanel.tsx`],
 };
 const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`]);
+const REPORT = `${ROOT}/.worktrees/terminal-inline-diagrams/playwright-report/index.html`;
+DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
 
 (window as E2eWindow).__instantE2eNativeResults = {
   cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
