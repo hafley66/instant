@@ -4,12 +4,10 @@
 // open/closed toggle, and height persistence live in reactdock's strip helper
 // (toggleStripPanel). Both this panel and the in-tab strip open a joined tmux
 // session through the same bridge (openSession).
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { SortingState } from "@tanstack/react-table";
-import { invoke } from "../../generated/native";
 import { readPluginState, savePluginState } from "../../pluginState";
-import { claimFsWatch } from "../../fsWatch";
-import { AgentStripTable, useAgentTree, type AgentTreeState } from "./DockStripShared";
+import { AgentStripTable, useAgentTree } from "./DockStripShared";
 import { StripPolicy } from "./0_strip";
 import type { AgentTreeNode } from "./0_tree";
 
@@ -31,32 +29,9 @@ export function openSession(sessionName: string | null, liveTmux: Set<string>) {
 }
 
 const PLUGIN_ID = "dock-strip";
-const MAIL_DIR = "~/.agent/mail";
 
 interface StripState {
   sorting?: SortingState;
-}
-
-// The dock strip's live leg: watch the mail dir and reload rows when it changes.
-// Uses a ref so the fs-watch release is tied to this panel's lifetime.
-function useMailLiveLeg(load: () => void) {
-  useEffect(() => {
-    let releaseClaim: (() => void) | null = null;
-    let disposed = false;
-    void invoke<{ entries: { is_dir: boolean; name: string; path: string }[] }>("list_dir", {
-      path: MAIL_DIR,
-    })
-      .then(() => claimFsWatch(MAIL_DIR, load, false))
-      .then((claim) => {
-        if (disposed) claim();
-        else releaseClaim = claim;
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      releaseClaim?.();
-    };
-  }, [load]);
 }
 
 export function DockStripPanel() {
@@ -64,14 +39,6 @@ export function DockStripPanel() {
   const [sorting, setSorting] = useState<SortingState>(
     () => readPluginState<StripState>(PLUGIN_ID, {}).sorting ?? [],
   );
-  // Keep a stable ref to the latest load so the fs-watch never re-subscribes.
-  const loadRef = useRef(load);
-  loadRef.current = load;
-  const loadStable: AgentTreeState["load"] = useCallback(
-    () => loadRef.current(),
-    [],
-  );
-  useMailLiveLeg(loadStable);
 
   const onSortingChange = (next: SortingState) => {
     setSorting(next);

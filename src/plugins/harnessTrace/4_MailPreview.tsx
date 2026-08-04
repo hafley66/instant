@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { relTime } from "../../core";
 import { MailStore } from "./0_bus";
 import { MAIL_DIR, MailboxReader } from "./2_mailbox";
+import { claimStripFeed } from "./DockStripShared";
 import type { IMailAgent, IMailMessage, IMailQueueRow } from "./0_types";
 
 export interface MailPreviewProps {
@@ -36,7 +37,11 @@ export function MailPreview({ agentId, messages, mailDir }: MailPreviewProps) {
 
   useEffect(() => {
     load();
-  }, [load]);
+    // Same single-owner feed the strips ride: an ack sweep lands without the
+    // refresh button (fixture renders skip it, load is a no-op there anyway).
+    if (messages) return;
+    return claimStripFeed({ onMail: load, onLiveNames: () => {} });
+  }, [load, messages]);
 
   const rows = useMemo(
     () => MailStore.queue(messages ?? loaded, agentId),

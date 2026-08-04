@@ -5,7 +5,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
+import { claimFsWatch } from "../../fsWatch";
 import { getHomeDir, relTime } from "../../core";
+import { MAIL_DIR } from "./0_live";
 import { TreeTable, type TreeColumn } from "../../treetable";
 import { useApp } from "../../useStore";
 import { store } from "../../state";
@@ -136,6 +138,77 @@ function attachTmux(nodes: AgentSessionNode[], routeTmux: Map<string, string>): 
   });
 }
 
+// Single-owner live feed (stripfix law: never a per-terminal fs-watch). One
+// mail-dir claim and one liveness poll serve every mounted strip and preview.
+const LIVENESS_POLL_MS = 5_000;
+const MAIL_DEBOUNCE_MS = 75;
+
+export interface StripFeedListener {
+  onMail: () => void;
+  onLiveNames: (names: string[]) => void;
+}
+
+const feedListeners = new Set<StripFeedListener>();
+let stopFeed: (() => void) | null = null;
+
+function startFeed(): () => void {
+  let releaseClaim: (() => void) | null = null;
+  let claiming = false;
+  let disposed = false;
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  const notifyMail = () => {
+    clearTimeout(debounce);
+    // A 14-line bus sweep is one reload, not 14 (mdview 0_watch precedent).
+    debounce = setTimeout(() => {
+      for (const listener of feedListeners) listener.onMail();
+    }, MAIL_DEBOUNCE_MS);
+  };
+  const claimMailWatch = () => {
+    if (disposed || claiming || releaseClaim) return;
+    claiming = true;
+    void invoke<{ entries: unknown[] }>("list_dir", { path: MAIL_DIR })
+      .then(() => claimFsWatch(MAIL_DIR, notifyMail, false))
+      .then((claim) => {
+        claiming = false;
+        if (disposed) claim();
+        else releaseClaim = claim;
+      })
+      .catch(() => {
+        claiming = false;
+      });
+  };
+  claimMailWatch();
+  // A lane's tmux dying is what grades it done (settleRoutedStatus) and no
+  // event reports it; poll only the cheap liveness call, never the seed walk.
+  const timer = window.setInterval(() => {
+    claimMailWatch(); // heals a mail dir that did not exist at the first claim
+    void invoke<Session[]>("list_sessions")
+      .then((sessions) => {
+        const names = tmuxLiveNames(sessions);
+        if (names) for (const listener of feedListeners) listener.onLiveNames(names);
+      })
+      .catch(() => {});
+  }, LIVENESS_POLL_MS);
+  return () => {
+    disposed = true;
+    clearTimeout(debounce);
+    window.clearInterval(timer);
+    releaseClaim?.();
+  };
+}
+
+export function claimStripFeed(listener: StripFeedListener): () => void {
+  feedListeners.add(listener);
+  if (feedListeners.size === 1) stopFeed = startFeed();
+  return () => {
+    feedListeners.delete(listener);
+    if (feedListeners.size === 0) {
+      stopFeed?.();
+      stopFeed = null;
+    }
+  };
+}
+
 export interface AgentTreeState {
   // The tmux-joined flat node set, for hosts that index it themselves.
   nodes: AgentSessionNode[];
@@ -150,8 +223,8 @@ export interface AgentTreeState {
 }
 
 // The shared data path: rust rows + mail ledger -> frozen nodes -> tmux join ->
-// tree. Both strips call this; DocStripPanel adds a mail fs-watch live leg on
-// top and InTabStrip indexes the flat nodes into its own external-only tree.
+// tree. Every host shares the single-owner live feed through this hook;
+// InTabStrip indexes the flat nodes into its own external-only tree.
 export function useAgentTree(): AgentTreeState {
   useApp();
   const [flat, setFlat] = useState<AgentSessionNode[]>([]);
@@ -174,7 +247,9 @@ export function useAgentTree(): AgentTreeState {
     ])
       .then(async ([sessions, storeSeeds]) => {
         const names = tmuxLiveNames(sessions);
-        setLiveNames(names);
+        // null = learned nothing; one transient failure must not downgrade
+        // every routed lane to done (REVIEW-reactive finding 6).
+        setLiveNames((prev) => names ?? prev);
         const mail = await loadMailLedger();
         const liveTmux = new Set(names ?? store.get().sessions.map((s) => s.name));
         const seeds = [...storeSeeds, ...registrySeeds(mail.directory, storeSeeds, liveTmux)];
@@ -188,6 +263,7 @@ export function useAgentTree(): AgentTreeState {
   }, []);
   useEffect(() => {
     load();
+    return claimStripFeed({ onMail: load, onLiveNames: setLiveNames });
   }, [load]);
   const liveTmux = new Set(liveNames ?? store.get().sessions.map((s) => s.name));
   const nodes = settleRoutedStatus(attachTmux(flat, routeTmux), routeTmux, liveTmux);

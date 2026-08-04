@@ -130,3 +130,45 @@ test("a routed row whose tmux is dead never opens", async ({ page }) => {
   await expect.poll(opened).toBe("tmux-dock");
   expect(pageErrors).toEqual([]);
 });
+
+// Fail-first for the liveness poll (RCA (b)): a lane dying quietly sat at
+// "58min ago" because nothing re-read list_sessions after mount. The single-
+// owner feed polls it, so the row settles done with zero clicks.
+test("the liveness poll settles a routed lane done after its tmux dies", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const mailDir = "~/.agent/mail";
+  const registry = JSON.stringify({
+    "lane-y": { sessionId: "", harness: "shell", tmux: "lane-live", cwd: "~/projects/dock-other" },
+    version: 1,
+  });
+  await page.addInitScript(({ mailDir, registry }) => {
+    const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown>; __tmuxDead?: boolean };
+    w.__instantE2eNativeResults = {
+      harness_trace_rows: [],
+      list_sessions: () =>
+        w.__tmuxDead ? [] : [{ name: "lane-live", windows: 1, attached: false, activity: 1, created: 1, paths: [], commands: [] }],
+      list_dir: (args?: Record<string, unknown>) => {
+        if (args?.path === mailDir) {
+          return { entries: [{ name: "registry.json", path: `${mailDir}/registry.json`, is_dir: false }] };
+        }
+        throw new Error("no such dir");
+      },
+      read_text: (args?: Record<string, unknown>) => {
+        if (args?.path === `${mailDir}/registry.json`) return registry;
+        throw new Error("no such file");
+      },
+    };
+  }, { mailDir, registry });
+  await page.goto("/e2e-dock-strip.html?e2e=1");
+
+  await page.locator('#actbar [data-panel="dock-strip"]').click();
+  const laneRow = page.locator("tr").filter({ hasText: "lane-y" });
+  await expect(laneRow).toBeVisible();
+  await expect(laneRow).toContainText("live");
+
+  // The lane's tmux vanishes; the next poll tick grades it done, no clicks.
+  await page.evaluate(() => ((window as Window & { __tmuxDead?: boolean }).__tmuxDead = true));
+  await expect(laneRow).toContainText("done", { timeout: 9000 });
+  expect(pageErrors).toEqual([]);
+});
