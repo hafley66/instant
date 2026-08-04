@@ -34,16 +34,15 @@ setDockStrip({ onOpen: (name) => { w.__dockStripOpened = name; } });
 // bottom edge, and silence the rest of the time.
 setDockHooks({ onTermLayout: () => { w.__termRefits = (w.__termRefits ?? 0) + 1; } });
 
-// Two tmux sessions: s1 rooted at this tab's claude cwd, s2 rooted at the other
-// tree's cwd. The terminal's sid is "s1", so the strip keeps the externals of
-// tree 1 (the opencode lane and its subagent), hides tree 1's claude rows (the
-// tab's own TUI lists those), and drops tree 2 until the scope widens.
+// s1 = this tab's claude cwd, s2 = the other tree's claude, s2-codex = that
+// tree's dispatched codex lane (one going session per pane, so it needs one).
 store.set({
   sessions: [
     { name: "s1", windows: 1, attached: true, activity: 1, created: 1, paths: ["/Users/e2e/projects/demo"], commands: ["claude"] },
     { name: "s2", windows: 1, attached: true, activity: 1, created: 1, paths: ["/Users/e2e/projects/other"], commands: ["claude"] },
+    { name: "s2-codex", windows: 1, attached: false, activity: 1, created: 1, paths: ["/Users/e2e/projects/other"], commands: ["codex"] },
   ],
-  sessionWorktrees: { "s1": ["/Users/e2e/projects/demo"], "s2": ["/Users/e2e/projects/other"] },
+  sessionWorktrees: { "s1": ["/Users/e2e/projects/demo"], "s2": ["/Users/e2e/projects/other"], "s2-codex": ["/Users/e2e/projects/other"] },
 });
 
 mountReactDock(document.getElementById("dock")!);

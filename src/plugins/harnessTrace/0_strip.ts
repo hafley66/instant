@@ -46,12 +46,18 @@ function tmuxNameOf(sid: string): string {
 }
 
 // Scope + native subtraction, shared by the going-on table and history mode.
-// Related is parent links only: a same-cwd tab is not a relation (b50346c).
-function inScope(nodes: AgentSessionNode[], tmux: string, scope: "related" | "all"): AgentSessionNode[] {
-  const native = nativeClaudeIds(nodes, tmux);
-  if (scope === "all") return nodes.filter((node) => !native.has(node.id));
-  const related = descendantsOf(nodes, native);
-  return nodes.filter((node) => related.has(node.id) && !native.has(node.id));
+// Native and parent links resolve over ALL nodes: a native session that lost
+// its pane (or finished) still anchors its descendants' related scope.
+function inScope(
+  all: AgentSessionNode[],
+  subset: AgentSessionNode[],
+  tmux: string,
+  scope: "related" | "all",
+): AgentSessionNode[] {
+  const native = nativeClaudeIds(all, tmux);
+  if (scope === "all") return subset.filter((node) => !native.has(node.id));
+  const related = descendantsOf(all, native);
+  return subset.filter((node) => related.has(node.id) && !native.has(node.id));
 }
 
 export const StripPolicy: IStripPolicy = {
@@ -86,13 +92,13 @@ export const StripPolicy: IStripPolicy = {
         node.parentKind !== "subagent" &&
         node.tmuxSession !== null,
     );
-    return inScope(going, tmuxNameOf(sid), scope);
+    return inScope(nodes, going, tmuxNameOf(sid), scope);
   },
 
   // History keeps done/dead and subagent threads (the waterfall draws them),
   // but the native exclusion and the scope hold like everywhere else.
   history(nodes, sid, scope) {
-    return inScope(nodes, tmuxNameOf(sid), scope);
+    return inScope(nodes, nodes, tmuxNameOf(sid), scope);
   },
 
   setActivation(entry, showActive) {

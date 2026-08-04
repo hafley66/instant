@@ -13,7 +13,7 @@ import { store } from "../../state";
 import { enrichRows, registrySeeds, resolveRouteSessions, routeTmuxBySession, settleRoutedStatus, tmuxLiveNames } from "./0_mail";
 import { loadMailLedger } from "./HarnessTracePanel";
 import { buildAgentTree, toAgentNodes, type AgentTreeNode } from "./0_tree";
-import { joinTmuxSession, joinTmuxSessions } from "./2_join";
+import { assignTmuxPanes, joinTmuxSessions } from "./2_join";
 import type { HarnessTraceSeed, AgentSessionNode, MailRegistry } from "./0_types";
 import type { Session } from "../../state";
 
@@ -124,20 +124,33 @@ function tmuxJoinRows(
   }));
 }
 
-// Join each flat node to its tmux session: a registry route's recorded tmux
-// name wins (the cwd guess cannot tell apart sessions sharing a directory),
-// else untildify and match.
+// Join each flat node to its tmux session: routes pin, then going sessions
+// claim panes exclusively via assignTmuxPanes (bar count == distinct panes).
 function attachTmux(
   nodes: AgentSessionNode[],
   routeTmux: Map<string, string>,
   rows: ReturnType<typeof tmuxJoinRows>,
 ): AgentSessionNode[] {
   const home = getHomeDir();
+  const untilde = (p: string) => (p.startsWith("~") ? home + p.slice(1) : p);
+  const assigned = assignTmuxPanes(
+    nodes.map((n) => ({
+      id: n.id,
+      harness: n.harness,
+      cwd: untilde(n.cwd),
+      lastActivity: n.lastActivity,
+      routedTmux: routeTmux.get(n.id) ?? null,
+      going: (n.status === "live" || n.status === "idle") && n.parentKind !== "subagent",
+    })),
+    rows,
+  );
   return nodes.map((n) => {
     const routed = routeTmux.get(n.id);
-    if (routed !== undefined) return { ...n, tmuxSession: routed, tmuxMatches: [routed] };
-    const cwd = n.cwd.startsWith("~") ? home + n.cwd.slice(1) : n.cwd;
-    return { ...n, tmuxSession: joinTmuxSession(cwd, rows), tmuxMatches: joinTmuxSessions(cwd, rows) };
+    return {
+      ...n,
+      tmuxSession: assigned.get(n.id) ?? null,
+      tmuxMatches: routed !== undefined ? [routed] : joinTmuxSessions(untilde(n.cwd), rows),
+    };
   });
 }
 

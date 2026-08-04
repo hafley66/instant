@@ -215,6 +215,10 @@ test("waterfall stress: 300 sessions x 50 messages stays inside the node and IPC
   await seedStress(page);
   await page.goto("/e2e-waterfall.html?e2e=1");
 
+  // 300 pane-less sessions leave the going-on bar empty (one going session
+  // per pane), so the strip needs the summon hotkey; history draws them all.
+  await expect(page.getByTestId("term-stub")).toBeVisible();
+  await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Period`);
   await expect(page.getByTestId("in-tab-strip")).toBeVisible();
   await page.getByText("Show active").click();
   const waterfall = page.getByTestId("waterfall");

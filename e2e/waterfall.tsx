@@ -31,8 +31,9 @@ setDockHooks({ onTermLayout: () => { w.__termRefits = (w.__termRefits ?? 0) + 1;
 store.set({
   sessions: [
     { name: "s1", windows: 1, attached: true, activity: 1, created: 1, paths: ["/Users/e2e/projects/demo"], commands: ["claude"] },
+    { name: "s1-lane", windows: 1, attached: false, activity: 1, created: 1, paths: ["/Users/e2e/projects/demo"], commands: ["opencode"] },
   ],
-  sessionWorktrees: { "s1": ["/Users/e2e/projects/demo"] },
+  sessionWorktrees: { "s1": ["/Users/e2e/projects/demo"], "s1-lane": ["/Users/e2e/projects/demo"] },
 });
 
 mountReactDock(document.getElementById("dock")!);

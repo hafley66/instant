@@ -117,6 +117,21 @@ describe("StripPolicy.external", () => {
     expect(StripPolicy.history(day, "s1", "all").map((n) => n.id)).toContain("oc-orphan");
   });
 
+  // The pane assignment can starve this tab's own claude session (a routed
+  // lane claims the shared pane); native must still anchor its descendants.
+  it("keeps related anchored on a native session that lost its pane", () => {
+    const day = TAB_TREE.map((n) =>
+      n.id === "claude-s1" ? { ...n, tmuxSession: null, tmuxMatches: ["s1"] } : n,
+    );
+    expect(StripPolicy.external(day, "s1", "related").map((n) => n.id)).toEqual(["oc-lane"]);
+    expect(StripPolicy.effectiveScope(day, "s1", null)).toBe("related");
+  });
+
+  it("keeps related anchored on a native session that finished", () => {
+    const day = TAB_TREE.map((n) => (n.id === "claude-s1" ? { ...n, status: "done" as const } : n));
+    expect(StripPolicy.external(day, "s1", "related").map((n) => n.id)).toEqual(["oc-lane"]);
+  });
+
   it("drops the other terminal's tree from the related scope", () => {
     const ids = StripPolicy.external(TAB_TREE, "s1", "related").map((n) => n.id);
     expect(ids).not.toContain("codex-s2");
