@@ -1,6 +1,8 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
-import DOMPurify from "dompurify";
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
+import { DiagramLightbox, diagramSvgMarkup } from "./mdview/0_DiagramLightbox";
 import { renderD2 } from "./mdview/d2";
 
 type DiagramLanguage = "mermaid" | "d2";
@@ -123,6 +125,7 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
   mermaid.initialize({
     startOnLoad: false,
     theme: dark ? "dark" : "default",
+    flowchart: { htmlLabels: false },
     securityLevel: "strict",
     suppressErrorRendering: true,
   });
@@ -135,7 +138,8 @@ export class TerminalDiagramOverlay {
   generation = 0;
   frame = 0;
   cache = new Map<string, Promise<string>>();
-  lightbox: HTMLDivElement | null = null;
+  lightboxRoot: Root | null = null;
+  lightboxMount: HTMLDivElement | null = null;
 
   constructor(readonly term: Terminal, readonly host: HTMLElement) {
     this.root = document.createElement("div");
@@ -200,7 +204,7 @@ export class TerminalDiagramOverlay {
       if (error) element.textContent = error;
       else {
         element.title = "Click to expand diagram";
-        element.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+        element.innerHTML = diagramSvgMarkup(svg);
         element.addEventListener("click", () => this.openLarge(svg, fence.language));
       }
       return element;
@@ -208,34 +212,35 @@ export class TerminalDiagramOverlay {
   }
 
   openLarge(svg: string, language: DiagramLanguage) {
-    this.lightbox?.remove();
-    const lightbox = document.createElement("div");
-    lightbox.className = "term-diagram-lightbox";
-    lightbox.dataset.language = language;
-    lightbox.innerHTML =
-      `<button type="button" aria-label="Close diagram">×</button><div>${DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })}</div>`;
+    this.closeLarge();
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const root = createRoot(mount);
     const close = () => {
-      if (this.lightbox !== lightbox) return;
-      this.lightbox = null;
-      lightbox.remove();
-      document.removeEventListener("keydown", onKey);
+      if (this.lightboxMount === mount) this.closeLarge();
     };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    lightbox.addEventListener("click", (event) => {
-      if (event.target === lightbox || (event.target as HTMLElement).closest("button")) close();
-    });
-    document.addEventListener("keydown", onKey);
-    this.host.appendChild(lightbox);
-    this.lightbox = lightbox;
+    this.lightboxMount = mount;
+    this.lightboxRoot = root;
+    root.render(createElement(DiagramLightbox, {
+      svg,
+      language,
+      label: `${language === "d2" ? "d2" : "Mermaid"} diagram`,
+      onClose: close,
+    }));
+  }
+
+  closeLarge() {
+    this.lightboxRoot?.unmount();
+    this.lightboxMount?.remove();
+    this.lightboxRoot = null;
+    this.lightboxMount = null;
   }
 
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
-    this.lightbox?.remove();
+    this.closeLarge();
     this.root.remove();
   }
 }

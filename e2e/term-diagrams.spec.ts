@@ -56,22 +56,27 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     await expect(diagrams).toHaveCount(2);
     await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
+    await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("PTY");
+    await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("xterm");
+    await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("PTY");
+    await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("xterm");
 
-    const boxes = await diagrams.evaluateAll((elements) =>
-      elements.map((element) => {
-        const rect = element.getBoundingClientRect();
-        return { width: rect.width, height: rect.height };
-      }),
-    );
-    expect(boxes).toEqual([
-      { width: 665, height: 75 },
-      { width: 665, height: 60 },
-    ]);
     await page.locator('.term-diagram[data-language="d2"]').click();
-    const expanded = page.locator('.term-diagram-lightbox[data-language="d2"]');
+    const expanded = page.locator('.diagram-lightbox[data-language="d2"]');
     await expect(expanded).toBeVisible();
-    const expandedBox = await expanded.locator("> div > svg").boundingBox();
-    expect(expandedBox).toEqual({ x: 158.703125, y: 79, width: 607, height: 556 });
+    await expect(expanded).toContainText("PTY");
+    await expect(expanded.getByTitle("Zoom in")).toBeVisible();
+    await expect(expanded.getByTitle("Reset zoom and pan")).toBeVisible();
+    await testInfo.attach(`${harness.toLowerCase().replaceAll(" ", "-")}-diagram-lightbox`, {
+      body: await expanded.screenshot(),
+      contentType: "image/png",
+    });
+    await page.keyboard.press("Escape");
+    await expect(expanded).toHaveCount(0);
+    await expect(page.locator(".term-host")).toBeVisible();
+    await expect(diagrams).toHaveCount(2);
+    await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("PTY");
+    await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("PTY");
     await page.evaluate(() => new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
     ));
@@ -87,5 +92,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
 
     await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
+    await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("D2 renderer");
+    await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("Mermaid");
   });
 }
