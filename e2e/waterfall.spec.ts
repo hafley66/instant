@@ -88,3 +88,45 @@ test("waterfall: default is today's going-on table; unchecking draws the history
   await strip.screenshot({ path: "test-results/waterfall.png" });
   expect(pageErrors).toEqual([]);
 });
+
+test("waterfall: dragging the brush narrows the visible sessions and ticks", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await seed(page);
+  await page.goto("/e2e-waterfall.html?e2e=1");
+
+  // Show the history waterfall first.
+  await page.getByText("Show active").click();
+  const waterfall = page.getByTestId("waterfall");
+  await expect(waterfall).toBeVisible();
+  await expect(page.getByTestId("waterfall-count")).toHaveText("4 sessions");
+  await expect(page.locator(".waterfall-tick")).toHaveCount(MESSAGES.length);
+
+  // Drag the brush's right edge to ~15% of the plot: that range covers only the
+  // early history session (sess-hist, 08:00-08:30), so the other three sessions
+  // and their ticks fall out of range.
+  const sel = page.locator(".waterfall-overview .selection");
+  const selBox = await sel.boundingBox();
+  const y0 = selBox!.y + selBox!.height / 2;
+  const x0 = selBox!.x + selBox!.width - 2;
+  const x1 = selBox!.x + selBox!.width * 0.15;
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  await page.mouse.move(x1, y0, { steps: 10 });
+  await page.mouse.up();
+
+  // The brush selection shrank from the full plot.
+  expect(Number(await sel.getAttribute("width"))).toBeLessThan(selBox!.width * 0.5);
+
+  // Only the early session remains: one bar, one table row, two ticks.
+  await expect(page.getByTestId("waterfall-count")).toHaveText("1 session");
+  await expect(page.locator(".waterfall-bar")).toHaveCount(1);
+  await expect(page.locator("tr").filter({ hasText: "sess-hist" })).toBeVisible();
+  await expect(page.locator("tr").filter({ hasText: "sess-live" })).toHaveCount(0);
+  await expect(page.locator("tr").filter({ hasText: "sess-lane" })).toHaveCount(0);
+  await expect(page.locator("tr").filter({ hasText: "sess-dead" })).toHaveCount(0);
+  await expect(page.locator(".waterfall-tick")).toHaveCount(2);
+
+  await waterfall.screenshot({ path: "test-results/waterfall-brushed.png" });
+  expect(pageErrors).toEqual([]);
+});
