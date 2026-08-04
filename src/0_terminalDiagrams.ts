@@ -242,7 +242,25 @@ export class TerminalDiagramOverlay {
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(120),
     ).subscribe(() => this.scheduleFrame());
-    const onWheel = () => this.viewportScrolled();
+    const onWheel = (event: WheelEvent) => {
+      this.viewportScrolled();
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest(".term-diagram")) return;
+      host.querySelector<HTMLElement>(".xterm")?.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        deltaMode: event.deltaMode,
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaZ: event.deltaZ,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      }));
+    };
     host.addEventListener("wheel", onWheel, { capture: true, passive: true });
     this.disposables = [
       { dispose: () => host.removeEventListener("wheel", onWheel, { capture: true }) },

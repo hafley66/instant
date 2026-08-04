@@ -191,7 +191,9 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
   const tether = await page.evaluate(async () => {
     const before = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
     const beforeTop = before.getBoundingClientRect().top;
-    document.querySelector<HTMLElement>(".term-host")!.dispatchEvent(new WheelEvent("wheel", {
+    let forwardedWheelCount = 0;
+    document.querySelector<HTMLElement>(".xterm")!.addEventListener("wheel", () => forwardedWheelCount++, { once: true });
+    before.dispatchEvent(new WheelEvent("wheel", {
       bubbles: true,
       deltaY: -100,
     }));
@@ -206,6 +208,7 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const afterDebounce = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
     return {
+      forwardedWheelCount,
       hiddenOnWheel,
       movedImmediately: immediateTop !== beforeTop,
       sameAfterImmediateMove: immediate === before,
@@ -215,6 +218,7 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
     };
   });
   expect(tether).toEqual({
+    forwardedWheelCount: 1,
     hiddenOnWheel: true,
     movedImmediately: true,
     sameAfterImmediateMove: true,
