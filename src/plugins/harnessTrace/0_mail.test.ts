@@ -261,7 +261,7 @@ describe("registrySeeds", () => {
         JSON.stringify({ id: "m-1", from: "coord", to: "lane", ts: "2026-08-03T11:00:00Z", kind: "dispatch" }),
       ].join("\n"),
     );
-    const [row] = registrySeeds(routes, [], new Set(["lane"]), envs, NOW);
+    const row = registrySeeds(routes, [], new Set(["lane"]), envs, NOW).find((r) => r.id === "lane");
     expect(row).toMatchObject({ parentId: "sess-c", parentKind: "dispatch" });
   });
 
