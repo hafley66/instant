@@ -86,9 +86,11 @@ export function locateMessageDiagrams(term: Terminal, diagrams: MessageDiagram[]
       }
     }
     if (!hit) continue;
-    const estimatedStart = lines[hit.terminalIndex].start - hit.sourceIndex;
-    const start = Math.max(viewportTop, estimatedStart);
-    const end = Math.min(viewportEnd, estimatedStart + Math.max(0, sourceLines.length - 1));
+    const estimatedStartIndex = hit.terminalIndex - hit.sourceIndex;
+    const firstLine = lines[Math.max(0, estimatedStartIndex)];
+    const lastLine = lines[Math.min(lines.length - 1, estimatedStartIndex + sourceLines.length - 1)];
+    const start = Math.max(viewportTop, firstLine.start);
+    const end = Math.min(viewportEnd, lastLine.end);
     found.push({
       language: diagram.language,
       code: diagram.code,

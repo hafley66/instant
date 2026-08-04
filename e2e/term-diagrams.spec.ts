@@ -160,6 +160,17 @@ test("renders full ledger diagrams when the viewport contains only one source li
   await expect(mermaid).toContainText("Mermaid");
 });
 
+test("covers physical terminal rows used by wrapped ledger source lines", async ({ page }) => {
+  await openTerminal(page);
+  await page.evaluate(() => window.__term!.resize(12, 24));
+  await writeFixture(page, renderedCliOutput("Codex"));
+  await settleScroll(page);
+
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(mermaid).toContainText("Mermaid");
+  await expect(mermaid).toHaveAttribute("data-source-rows", "8");
+});
+
 test("does not repaint the committed diagram during PTY writes", async ({ page }) => {
   await openTerminal(page);
   await page.evaluate(() => window.__term!.resize(80, 12));
