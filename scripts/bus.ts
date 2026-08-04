@@ -117,6 +117,9 @@ function dispatch(args) {
     return 1;
   }
   const harness = args.harness ?? "opencode";
+  // Fallback reads the invoke string itself when the caller does not say.
+  const model = args.model ?? cmd.match(/(?:^|\s)-m\s+(\S+)/)?.[1] ?? null;
+  const mode = args.mode ?? (cmd.includes("--auto") ? "auto" : null);
   const tmux = args.tmux ?? to;
   const socket = args.socket ?? null;
   const body = args.body ?? cmd;
@@ -158,7 +161,7 @@ function dispatch(args) {
   }
 
   const dir = mailDirOf(args);
-  mergeRoute(dir, to, { harness, tmux, cwd });
+  mergeRoute(dir, to, { harness, tmux, cwd, model, mode });
 
   append(join(dir, DEFAULT_BOX), message);
   console.log(`dispatched ${message.id} -> ${to} (tmux ${tmux})`);
@@ -303,6 +306,17 @@ function list(args) {
   const dir = mailDirOf(args);
   const messages = allMessages(readBoxes(dir));
   if (!args.agent) {
+    const registry = readRegistryRaw(dir);
+    for (const [name, route] of Object.entries(registry)) {
+      console.log([
+        name.padEnd(16),
+        (route.harness ?? "-").padEnd(10),
+        (route.mode ?? "-").padEnd(6),
+        (route.model ?? "-").padEnd(46),
+        (route.tmux ?? "-").padEnd(16),
+        route.cwd ?? "-",
+      ].join(" "));
+    }
     for (const message of MailStore.fold(messages)) console.log(MailStore.line(message));
     return 0;
   }
@@ -353,7 +367,7 @@ function lane(args) {
     return 0;
   }
 
-  const dispatchArgs = { to, cwd, cmd, harness: "opencode", tmux, body };
+  const dispatchArgs = { to, cwd, cmd, harness: "opencode", tmux, body, model, mode: "auto" };
   if (args["mail-dir"]) dispatchArgs["mail-dir"] = args["mail-dir"];
   if (args["resolve-wait"]) dispatchArgs["resolve-wait"] = args["resolve-wait"];
   return dispatch(dispatchArgs);
@@ -363,7 +377,7 @@ function adopt(args) {
   const name = args.name;
   const tmux = args.tmux;
   if (!name || !tmux) {
-    console.log("usage: bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--mail-dir <dir>]");
+    console.log("usage: bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--model <id>] [--mode <m>] [--mail-dir <dir>]");
     return 1;
   }
   // The route is only writable for a session that actually exists right now;
@@ -374,7 +388,13 @@ function adopt(args) {
     return 1;
   }
   const dir = mailDirOf(args);
-  mergeRoute(dir, name, { harness: args.harness ?? null, tmux, cwd: args.cwd ?? null });
+  mergeRoute(dir, name, {
+    harness: args.harness ?? null,
+    tmux,
+    cwd: args.cwd ?? null,
+    model: args.model ?? null,
+    mode: args.mode ?? null,
+  });
   console.log(`adopted ${name} -> tmux ${tmux}`);
   return 0;
 }
