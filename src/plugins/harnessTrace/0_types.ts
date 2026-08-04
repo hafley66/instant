@@ -281,6 +281,10 @@ export interface IStripPolicy {
   // parent promotes its external children to roots (indexAgentTree's orphan
   // law), which is how a dispatched lane surfaces as a top-level shell.
   external(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
+  // The checkbox write: flip the strip between today's going-on table and the
+  // history waterfall, keeping whatever open state the entry holds (an absent
+  // entry that is on screen by auto-appear stays open).
+  setActivation(entry: ITermStripEntry | null, showActive: boolean): ITermStripEntry;
 }
 
 // ---------------------------------------------------------------------------

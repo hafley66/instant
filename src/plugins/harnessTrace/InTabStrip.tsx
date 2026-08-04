@@ -72,6 +72,15 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
   }, [sid]);
 
+  const showActive = entry?.showActive ?? true;
+  const setShowActive = (next: boolean) =>
+    store.set({
+      termStrip: {
+        ...store.get().termStrip,
+        [sid]: StripPolicy.setActivation(store.get().termStrip[sid] ?? null, next),
+      },
+    });
+
   const visible = StripPolicy.visible(entry, index.size, !!current);
   // The xterm owes a refit exactly when this strip's rendered height moved the
   // term slot's bottom edge — appearance, disappearance, a router push/pop, a
@@ -160,6 +169,15 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
         </span>
         {viewing && <span className="spy-viewing">{viewing}</span>}
         <span className="spy-spacer" />
+        <label className="act-check" title="uncheck to see the session history waterfall">
+          <input
+            type="checkbox"
+            data-testid="strip-showactive"
+            checked={showActive}
+            onChange={(e) => setShowActive(e.target.checked)}
+          />
+          Show active
+        </label>
         <button
           type="button"
           data-testid="strip-scope"

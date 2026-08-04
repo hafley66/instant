@@ -72,4 +72,8 @@ export const StripPolicy: IStripPolicy = {
     const related = forestIds(filterForestByTmux(buildAgentTree(going), tmux), new Set<string>());
     return going.filter((node) => related.has(node.id) && !native.has(node.id));
   },
+
+  setActivation(entry, showActive) {
+    return { open: entry ? entry.open : true, showActive };
+  },
 };
