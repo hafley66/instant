@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+// Waterfall is parked: InTabStrip comments out the Show active checkbox and
+// the render branch after an unvirtualized full-history render seized the
+// webview. Un-skip together with re-enabling that branch; the DOM-budget
+// assert below is the gate that must hold at real session counts.
+test.skip(true, "waterfall entry point commented out in InTabStrip");
+
 // The session waterfall is history mode of the in-tab strip: unchecking
 // "Show active" swaps today's going-on table for the devtools-network-style
 // waterfall (brush overview on top, one bar per session, a tick per message)
@@ -84,6 +90,12 @@ test("waterfall: default is today's going-on table; unchecking draws the history
   // seeded session, including the done history row the default view hides.
   await expect(page.locator("tr").filter({ hasText: "sess-hist" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "sess-dead" })).toBeVisible();
+
+  // DOM budget: the waterfall must stay linear in sessions+messages with a
+  // small constant. The unvirtualized version blew past any such bound at
+  // real history sizes (hundreds of sessions), which froze the webview.
+  const domNodes = await waterfall.evaluate((el) => el.querySelectorAll("*").length);
+  expect(domNodes).toBeLessThan(ROWS.length * 30 + MESSAGES.length * 3 + 100);
 
   await strip.screenshot({ path: "test-results/waterfall.png" });
   expect(pageErrors).toEqual([]);

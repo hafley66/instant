@@ -260,6 +260,7 @@ export function Waterfall({ nodes, nowMs, onOpen, onLayout }: WaterfallProps) {
         columns={COLUMNS}
         data={rows}
         getRowId={(r) => r.id}
+        virtual
         searchPlaceholder="filter sessions…"
         rowTitle={(r) => r.why || r.cwd}
         rowClass={(r) => (r.tmuxSession ? "dock-strip-row" : "dock-strip-row unjoined")}
