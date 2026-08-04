@@ -85,4 +85,8 @@ export const StripPolicy: IStripPolicy = {
   setActivation(entry, showActive) {
     return { open: entry ? entry.open : true, showActive };
   },
+
+  openAction(row, liveTmux) {
+    return row.tmuxSession !== null && liveTmux.has(row.tmuxSession) ? "open" : "ignore";
+  },
 };

@@ -50,7 +50,7 @@ export function toggleTermStripFor(sid: string): void {
 }
 
 export function InTabStrip({ sid, onLayout }: InTabStripProps) {
-  const { nodes, registry, error, load } = useAgentTree();
+  const { nodes, liveTmux, registry, error, load } = useAgentTree();
   const [, setVersion] = useState(0);
   useEffect(() => termViewRouter.subscribe(() => setVersion((v) => v + 1)), []);
 
@@ -148,14 +148,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   if (!visible) return null;
 
   const onRowClick = (r: AgentTreeNode) => {
-    // Click = go there (joins only) AND push the row as the tab's current view.
-    if (r.tmuxSession) openSession(r.tmuxSession);
+    // Click = go there (live joins only) AND push the row as the tab's current view.
+    openSession(r.tmuxSession, liveTmux);
     termViewRouter.push(sid, { kind: "agent-session", agentSessionId: r.id });
   };
 
   const openWaterfallId = (id: string) => {
     const n = nodes.find((x) => x.id === id);
-    if (n?.tmuxSession) openSession(n.tmuxSession);
+    openSession(n?.tmuxSession ?? null, liveTmux);
     termViewRouter.push(sid, { kind: "agent-session", agentSessionId: id });
   };
 

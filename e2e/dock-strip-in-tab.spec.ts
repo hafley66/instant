@@ -76,30 +76,27 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   expect(stripBox!.height).toBeLessThanOrEqual(240);
 
   // The ruling: the tab's own claude session and its native subagent are NOT
-  // duplicated here, and neither is the other terminal's tree. What remains is
-  // the dispatched opencode lane, counted in the bar label.
+  // duplicated here, and neither is the other terminal's tree. Subagent threads
+  // run inside their parent's pane, so they are not shells either (b50346c).
+  // What remains is the dispatched opencode lane, counted in the bar label.
   await expect(page.locator("tr").filter({ hasText: "parent-s1" })).toHaveCount(0);
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveCount(0);
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
-  await expect(page.getByTestId("strip-count")).toHaveText("2 external shells");
+  await expect(page.locator("tr").filter({ hasText: "oc-sub" })).toHaveCount(0);
+  await expect(page.getByTestId("strip-count")).toHaveText("1 external shells");
   const laneRow = page.locator("tr").filter({ hasText: "oc-lane" });
   await expect(laneRow).toBeVisible();
   // The dispatch link the mail ledger resolved rides the row.
   await expect(laneRow).toContainText("dispatch");
-
-  // Lazy tree: the lane's child is unmaterialized until its twisty opens.
-  await expect(page.locator("tr").filter({ hasText: "oc-sub" })).toHaveCount(0);
-  await laneRow.locator(".tt-twisty").click();
-  await expect(page.locator("tr").filter({ hasText: "oc-sub" })).toBeVisible();
   await strip.screenshot({ path: "test-results/strip-tree.png" });
 
   // Row click = join the tmux session + push the agent-session view.
   await page.evaluate(() => ((window as Window & { __dockStripOpened?: string }).__dockStripOpened = undefined));
-  await page.locator("tr").filter({ hasText: "oc-sub" }).locator(".s-name").click();
-  await expect(page.getByText("viewing: oc-sub")).toBeVisible();
+  await laneRow.locator(".s-name").click();
+  await expect(page.getByText("viewing: oc-lane")).toBeVisible();
   await expect.poll(opened).toBe("s1");
   await page.locator(".term-strip .strip-back").click();
-  await expect(page.getByText("viewing: oc-sub")).toHaveCount(0);
+  await expect(page.getByText("viewing: oc-lane")).toHaveCount(0);
 
   // The mail action re-anchors the queue preview INSIDE the strip: it replaces
   // the table while it is the router's top, and back pops to the tree.
@@ -121,7 +118,7 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   await page.getByTestId("strip-scope").click();
   const otherRow = page.locator("tr").filter({ hasText: "parent-other" });
   await expect(otherRow).toBeVisible();
-  await expect(page.getByTestId("strip-count")).toHaveText("4 external shells");
+  await expect(page.getByTestId("strip-count")).toHaveText("3 external shells");
   await otherRow.locator(".tt-twisty").click();
   await expect(page.locator("tr").filter({ hasText: "codex-other" })).toBeVisible();
   // This tab's own claude rows stay out at every scope.

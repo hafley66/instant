@@ -317,6 +317,7 @@ pub fn open_session(
     graphics: Option<bool>,
     cell_w: Option<u16>,
     cell_h: Option<u16>,
+    attach_only: Option<bool>,
 ) -> Result<(), String> {
     let graphics = graphics.unwrap_or(false);
     {
@@ -328,6 +329,18 @@ pub fn open_session(
                 enable_mouse(&name);
             }
             return resize_pty(store, id, cols, rows, cell_w, cell_h);
+        }
+    }
+    // A viewer tab only watches an existing lane; `new-session -A` on a dead
+    // one would resurrect it as an empty shell, so refuse instead.
+    if attach_only.unwrap_or(false) && !graphics && !direct_pty_mode() {
+        let alive = tmux_cmd()
+            .args(["has-session", "-t", &format!("={name}")])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !alive {
+            return Err(format!("tmux session '{name}' is not running (viewer tabs attach only)"));
         }
     }
 

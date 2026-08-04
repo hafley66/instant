@@ -290,6 +290,9 @@ export interface IStripPolicy {
   // history waterfall, keeping whatever open state the entry holds (an absent
   // entry that is on screen by auto-appear stays open).
   setActivation(entry: ITermStripEntry | null, showActive: boolean): ITermStripEntry;
+  // "open" only when the row's tmux is in the live list: opening a dead lane
+  // would mint an empty shell under its name (tmux new-session -A).
+  openAction(row: { tmuxSession: string | null }, liveTmux: Set<string>): "open" | "ignore";
 }
 
 // ---------------------------------------------------------------------------

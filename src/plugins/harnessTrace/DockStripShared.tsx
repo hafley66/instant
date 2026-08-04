@@ -140,6 +140,9 @@ export interface AgentTreeState {
   // The tmux-joined flat node set, for hosts that index it themselves.
   nodes: AgentSessionNode[];
   tree: AgentTreeNode[];
+  // The tmux names the last list_sessions reported; a row click checks it
+  // (StripPolicy.openAction) before openSession may reach the bridge.
+  liveTmux: Set<string>;
   // Mail agent name -> session id, for row actions that address the mailbox.
   registry: MailRegistry;
   error: string;
@@ -188,7 +191,7 @@ export function useAgentTree(): AgentTreeState {
   }, [load]);
   const liveTmux = new Set(liveNames ?? store.get().sessions.map((s) => s.name));
   const nodes = settleRoutedStatus(attachTmux(flat, routeTmux), routeTmux, liveTmux);
-  return { nodes, tree: buildAgentTree(nodes), registry, error, load };
+  return { nodes, tree: buildAgentTree(nodes), liveTmux, registry, error, load };
 }
 
 export interface AgentStripTableProps {

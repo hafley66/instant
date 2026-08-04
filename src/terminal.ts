@@ -798,7 +798,7 @@ export function openTab(
     fit.fit();
     const { cols, rows } = term;
     invoke("open_session", {
-      id, name, command, cwd, cols, rows, graphics, ...cellDims(term),
+      id, name, command, cwd, cols, rows, graphics, attachOnly: opts.viewer ?? false, ...cellDims(term),
     }).catch(console.error);
   });
 

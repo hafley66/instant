@@ -10,6 +10,7 @@ import { invoke } from "../../generated/native";
 import { readPluginState, savePluginState } from "../../pluginState";
 import { claimFsWatch } from "../../fsWatch";
 import { AgentStripTable, useAgentTree, type AgentTreeState } from "./DockStripShared";
+import { StripPolicy } from "./0_strip";
 import type { AgentTreeNode } from "./0_tree";
 
 export interface DockStripBridge {
@@ -22,9 +23,11 @@ export function setDockStrip(bridge: DockStripBridge) {
 }
 
 // Click = go there: open the joined tmux session through the bridge both strips
-// share. No-op for unjoined rows (bridge not called).
-export function openSession(sessionName: string) {
-  dockStripBridge?.onOpen(sessionName);
+// share. The guard lives here so no host (row click, waterfall bar) can reach
+// the bridge for an unjoined or dead-tmux row.
+export function openSession(sessionName: string | null, liveTmux: Set<string>) {
+  if (StripPolicy.openAction({ tmuxSession: sessionName }, liveTmux) !== "open") return;
+  dockStripBridge?.onOpen(sessionName!);
 }
 
 const PLUGIN_ID = "dock-strip";
@@ -57,7 +60,7 @@ function useMailLiveLeg(load: () => void) {
 }
 
 export function DockStripPanel() {
-  const { tree, error, load } = useAgentTree();
+  const { tree, liveTmux, error, load } = useAgentTree();
   const [sorting, setSorting] = useState<SortingState>(
     () => readPluginState<StripState>(PLUGIN_ID, {}).sorting ?? [],
   );
@@ -76,9 +79,7 @@ export function DockStripPanel() {
   };
 
   const onRowClick = (r: AgentTreeNode) => {
-    // Click = go there: only rows joined to a tmux session open it. Unjoined
-    // rows are a no-op (no error, no toast).
-    if (r.tmuxSession) openSession(r.tmuxSession);
+    openSession(r.tmuxSession, liveTmux);
   };
 
   return (

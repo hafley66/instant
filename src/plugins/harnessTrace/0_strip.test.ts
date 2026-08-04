@@ -202,6 +202,22 @@ describe("StripPolicy.external with a subagent thread of an external session", (
   });
 });
 
+describe("StripPolicy.openAction", () => {
+  // Fail-first receipt (RCA 2026-08-03): a routed row whose tmux died passed
+  // `if (r.tmuxSession)` and `new-session -A` minted an empty shell on click.
+  it("ignores a routed row whose tmux is missing from the live list", () => {
+    expect(StripPolicy.openAction({ tmuxSession: "lane-dead" }, new Set(["other"]))).toBe("ignore");
+  });
+
+  it("opens a row whose tmux is live", () => {
+    expect(StripPolicy.openAction({ tmuxSession: "lane-a" }, new Set(["lane-a"]))).toBe("open");
+  });
+
+  it("ignores an unjoined row", () => {
+    expect(StripPolicy.openAction({ tmuxSession: null }, new Set(["lane-a"]))).toBe("ignore");
+  });
+});
+
 describe("StripPolicy.external with a cwd shared by several tmux sessions", () => {
   // Defect receipt: a repo directory hosts tmux sessions "demo" and "demo-3".
   // The cwd guess pinned the node's tmuxSession to "demo", so a viewer on

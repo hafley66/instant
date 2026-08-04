@@ -79,3 +79,54 @@ test("dock strip mounts below, shows children under parents, opens joined rows",
   await expect(strip).toHaveScreenshot("dock-strip.png", { animations: "disabled" });
   expect(pageErrors).toEqual([]);
 });
+
+// Sabotage twin (RCA 2026-08-03): a registry-routed lane whose tmux is dead
+// renders as a history row, and its click must never reach the bridge — before
+// the openAction guard, `tmux new-session -A` minted an empty shell under the
+// lane's name.
+test("a routed row whose tmux is dead never opens", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
+  const mailDir = "~/.agent/mail";
+  const registry = JSON.stringify({
+    "lane-x": { sessionId: "", harness: "shell", tmux: "lane-dead", cwd: "~/projects/dock-other" },
+    version: 1,
+  });
+  await page.addInitScript(({ mailDir, registry }) => {
+    const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+    w.__instantE2eNativeResults = {
+      harness_trace_rows: [
+        { id: "parent-uuid", harness: "claude", sessionId: "parent-uuid", parentId: null, parentKind: null, ts: "2026-08-02T20:00:00Z", lastActivity: "2026-08-02T23:00:00Z", status: "live", cwd: "~/projects/dock-demo" },
+      ],
+      list_dir: (args?: Record<string, unknown>) => {
+        if (args?.path === mailDir) {
+          return { entries: [{ name: "registry.json", path: `${mailDir}/registry.json`, is_dir: false }] };
+        }
+        throw new Error("no such dir");
+      },
+      read_text: (args?: Record<string, unknown>) => {
+        if (args?.path === `${mailDir}/registry.json`) return registry;
+        throw new Error("no such file");
+      },
+    };
+  }, { mailDir, registry });
+  await page.goto("/e2e-dock-strip.html?e2e=1");
+
+  const opened = () => page.evaluate(() => (window as Window & { __dockStripOpened?: string }).__dockStripOpened ?? null);
+  await page.locator('#actbar [data-panel="dock-strip"]').click();
+  await expect(page.getByTestId("dock-strip")).toBeVisible();
+
+  // The dead-routed lane renders (status done, tmux name shown) but a click
+  // leaves the bridge untouched.
+  const deadRow = page.locator("tr").filter({ hasText: "lane-x" });
+  await expect(deadRow).toBeVisible();
+  await expect(deadRow).toContainText("done");
+  await deadRow.locator(".s-name").click();
+  expect(await opened()).toBe(null);
+
+  // Positive control: the live-joined row still opens through the same guard.
+  await page.locator("tr").filter({ hasText: "parent-uuid" }).locator(".s-name").click();
+  await expect.poll(opened).toBe("tmux-dock");
+  expect(pageErrors).toEqual([]);
+});
