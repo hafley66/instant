@@ -129,7 +129,11 @@ function darkBackground(host: HTMLElement): boolean {
 }
 
 async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string> {
-  if (fence.language === "d2") return renderD2(fence.code, dark);
+  if (fence.language === "d2") {
+    const rendered = await renderD2(fence.code, dark);
+    if (typeof rendered !== "string") throw new Error("D2 renderer returned no SVG markup");
+    return rendered;
+  }
   const mermaid = await loadMermaid();
   mermaid.initialize({
     startOnLoad: false,
@@ -142,7 +146,9 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
   let lastError: unknown;
   for (let length = lines.length; length > 0; length--) {
     try {
-      return (await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, lines.slice(0, length).join("\n"))).svg;
+      const rendered = await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, lines.slice(0, length).join("\n"));
+      if (typeof rendered?.svg !== "string") throw new Error("Mermaid renderer returned no SVG markup");
+      return rendered.svg;
     } catch (reason) {
       lastError = reason;
       if (!fence.inferred) throw reason;
@@ -151,7 +157,8 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
   throw lastError;
 }
 
-function svgAspectRatio(svg: string): number | null {
+export function svgAspectRatio(svg: unknown): number | null {
+  if (typeof svg !== "string") return null;
   const viewBox = svg.match(/\bviewBox=["']\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)\s*["']/i);
   if (viewBox) {
     const width = Number(viewBox[1]);
