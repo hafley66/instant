@@ -140,6 +140,10 @@ export function Waterfall({ nodes, nowMs, onOpen, onLayout }: WaterfallProps) {
   // parent's nodes array churns identity), they land and populate the cache.
   const cache = useRef(new Map<string, ISessionTick[]>());
   const loading = useRef(new Set<string>());
+  // The node.lastActivity seen when each session's messages were last fetched,
+  // so a live session refetches when a refresh brings newer activity, and only
+  // then (render churn with unchanged data triggers no re-read).
+  const fetchedActivity = useRef(new Map<string, string>());
   const alive = useRef(true);
   const [, bump] = useState(0);
   const nodesRef = useRef(nodes);
@@ -153,23 +157,30 @@ export function Waterfall({ nodes, nowMs, onOpen, onLayout }: WaterfallProps) {
   useEffect(() => {
     const visible = visibleSessionIds(spans, range);
     for (const id of visible) {
-      if (cache.current.has(id) || loading.current.has(id)) continue;
+      if (loading.current.has(id)) continue;
       const node = nodesRef.current.find((n) => n.id === id);
       if (!node || !ADAPTER_HARNESSES.has(node.harness as HarnessId)) {
         cache.current.set(id, []);
         continue;
       }
+      const cached = cache.current.get(id);
+      const lastFetched = fetchedActivity.current.get(id);
+      // Fetch when never loaded, or a live session's activity advanced.
+      const stale = cached === undefined || (node.status === "live" && lastFetched !== node.lastActivity);
+      if (!stale) continue;
       loading.current.add(id);
       const cwd = node.cwd.startsWith("~") ? getHomeDir() + node.cwd.slice(1) : node.cwd;
       harnessAdapter(node.harness as HarnessId)
         .read(node.id, cwd)
         .then((msgs: AiMessage[]) => {
           cache.current.set(id, msgs.map(tickFrom));
+          fetchedActivity.current.set(id, node.lastActivity);
           loading.current.delete(id);
           if (alive.current) bump(1);
         })
         .catch(() => {
           cache.current.set(id, []);
+          fetchedActivity.current.set(id, node.lastActivity);
           loading.current.delete(id);
           if (alive.current) bump(1);
         });
