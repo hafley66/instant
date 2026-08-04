@@ -26,6 +26,7 @@ import {
   resizeTerm,
   termCellPoint,
   termDims,
+  tabs,
 } from "../src/terminal";
 import { setHomeDir, sessionId } from "../src/core";
 import { store } from "../src/state";
@@ -195,12 +196,20 @@ type TermHooks = {
   point: (row: number, col: number) => { x: number; y: number } | null;
   resize: (cols: number, rows: number) => void;
   dims: () => { cols: number; rows: number } | null;
+  scroll: (lines: number) => void;
 };
 (window as Window & { __term?: TermHooks }).__term = {
   write: (data) => writeTerm(sessionId("e2e"), data),
   point: (row, col) => termCellPoint(sessionId("e2e"), row, col),
   resize: (cols, rows) => resizeTerm(sessionId("e2e"), cols, rows),
   dims: () => termDims(sessionId("e2e")),
+  scroll: (lines) => {
+    const tab = tabs.get(sessionId("e2e"));
+    const term = tab?.term;
+    if (lines < 0) term?.scrollToTop();
+    else term?.scrollToBottom();
+    tab?.diagrams?.viewportScrolled();
+  },
 };
 
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {

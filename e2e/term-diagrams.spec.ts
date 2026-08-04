@@ -5,6 +5,7 @@ type TermHooks = {
   point: (row: number, col: number) => { x: number; y: number } | null;
   resize: (cols: number, rows: number) => void;
   dims: () => { cols: number; rows: number } | null;
+  scroll: (lines: number) => void;
 };
 
 declare global {
@@ -56,10 +57,25 @@ async function openTerminal(page: Page) {
   await page.waitForFunction(() => !!window.__term?.point(0, 0));
 }
 
+async function writeFixture(page: Page, text: string) {
+  await page.evaluate((fixture) => {
+    window.__term!.write(`\x1b[2J\x1b[H${"\r\n".repeat(30)}${fixture}`);
+  }, text);
+}
+
+async function settleScroll(page: Page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    window.__term!.scroll(-1);
+    window.__term!.scroll(1);
+  });
+}
+
 for (const harness of ["Codex", "Claude Code"] as const) {
   test(`renders plain fenced Mermaid and D2 output from ${harness}`, async ({ page }, testInfo) => {
     await openTerminal(page);
-    await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), output(harness));
+    await writeFixture(page, output(harness));
+    await settleScroll(page);
 
     const diagrams = page.locator(".term-diagram");
     await expect(diagrams).toHaveCount(2);
@@ -97,7 +113,8 @@ for (const harness of ["Codex", "Claude Code"] as const) {
 
   test(`matches ${harness} viewport lines to ledger Mermaid and D2`, async ({ page }) => {
     await openTerminal(page);
-    await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), renderedCliOutput(harness));
+    await writeFixture(page, renderedCliOutput(harness));
+    await settleScroll(page);
 
     await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
@@ -114,7 +131,8 @@ for (const harness of ["Codex", "Claude Code"] as const) {
 
 test("keeps later scrolled prose outside the ledger Mermaid source", async ({ page }) => {
   await openTerminal(page);
-  await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), scrolledMermaidOutput);
+  await writeFixture(page, scrolledMermaidOutput);
+  await settleScroll(page);
 
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
   await expect(mermaid).toContainText("PTY");
@@ -125,10 +143,11 @@ test("keeps later scrolled prose outside the ledger Mermaid source", async ({ pa
 
 test("renders full ledger diagrams when the viewport contains only one source line", async ({ page }) => {
   await openTerminal(page);
-  await page.evaluate(() => window.__term!.write("\x1b[2J\x1b[Htmux -> xterm\r\nPTY --> tmux"));
+  await writeFixture(page, "tmux -> xterm\r\nPTY --> tmux");
+  await settleScroll(page);
 
   await page.waitForTimeout(500);
-  await expect(page.locator(".term-diagram")).toHaveCount(0);
+  expect(await page.locator(".term-diagram").count()).toBe(0);
 
   const d2 = page.locator('.term-diagram[data-language="d2"]');
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
@@ -136,25 +155,30 @@ test("renders full ledger diagrams when the viewport contains only one source li
   await expect(mermaid).toContainText("Mermaid");
 });
 
-test("keeps the committed diagram visible during throttled PTY writes", async ({ page }) => {
+test("does not repaint the committed diagram during PTY writes", async ({ page }) => {
   await openTerminal(page);
-  await page.evaluate((text) => window.__term!.write(`\x1b[2J\x1b[H${text}`), renderedCliOutput("Codex"));
+  await writeFixture(page, renderedCliOutput("Codex"));
+  await settleScroll(page);
 
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
   await expect(mermaid).toContainText("Mermaid");
-  const visibility = await page.evaluate(async () => {
+  const result = await page.evaluate(async () => {
     const samples: boolean[] = [];
+    const root = document.querySelector<HTMLElement>(".term-diagrams")!;
+    let mutations = 0;
+    const observer = new MutationObserver((records) => { mutations += records.length; });
+    observer.observe(root, { childList: true, subtree: true });
     for (let index = 0; index < 30; index++) {
       window.__term!.write(`\rworking ${index}`);
       await new Promise((resolve) => setTimeout(resolve, 80));
-      const root = document.querySelector<HTMLElement>(".term-diagrams");
       const diagram = root?.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]');
       const svg = diagram?.querySelector<SVGElement>("svg");
       const box = svg?.getBoundingClientRect();
       samples.push(Boolean(root && !root.hidden && diagram?.textContent?.includes("Mermaid") && box?.width && box.height));
     }
-    return samples;
+    observer.disconnect();
+    return { samples, mutations };
   });
 
-  expect(visibility).toEqual(Array(30).fill(true));
+  expect(result).toEqual({ samples: Array(30).fill(true), mutations: 0 });
 });

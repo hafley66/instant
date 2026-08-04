@@ -1,7 +1,7 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { asyncScheduler, Subject, throttleTime, type Subscription } from "rxjs";
+import { debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup } from "./mdview/0_DiagramLightbox";
 import { renderD2 } from "./mdview/d2";
@@ -217,8 +217,8 @@ export class TerminalDiagramOverlay {
   disposables: IDisposable[];
   generation = 0;
   frame = 0;
-  messageEvents = new Subject<void>();
-  messageSubscription: Subscription | null = null;
+  scrollEvents = new Subject<void>();
+  scrollSubscription: Subscription | null = null;
   cache = new Map<string, Promise<string>>();
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
@@ -233,23 +233,27 @@ export class TerminalDiagramOverlay {
     this.root.className = "term-diagrams";
     host.appendChild(this.root);
     if (messages) {
-      this.messageSubscription = this.messageEvents.pipe(
-        throttleTime(1000, asyncScheduler, { leading: false, trailing: true }),
+      this.scrollSubscription = this.scrollEvents.pipe(
+        debounceTime(1000),
       ).subscribe(() => this.scheduleFrame());
     }
-    const scheduleOutput = () => {
-      if (!this.messages) {
-        this.scheduleFrame();
-        return;
-      }
-      this.messageEvents.next();
-    };
     this.disposables = [
-      term.onWriteParsed(scheduleOutput),
-      term.onScroll(scheduleOutput),
+      term.onWriteParsed(() => {
+        if (!this.messages) this.scheduleFrame();
+      }),
+      term.onScroll(() => this.viewportScrolled()),
       term.onResize(() => this.scheduleFrame()),
     ];
     this.scheduleFrame();
+  }
+
+  viewportScrolled() {
+    if (this.messages) {
+      this.root.hidden = true;
+      this.scrollEvents.next();
+    } else {
+      this.scheduleFrame();
+    }
   }
 
   scheduleFrame() {
@@ -361,8 +365,8 @@ export class TerminalDiagramOverlay {
 
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
-    this.messageSubscription?.unsubscribe();
-    this.messageEvents.complete();
+    this.scrollSubscription?.unsubscribe();
+    this.scrollEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
     this.closeLarge();
