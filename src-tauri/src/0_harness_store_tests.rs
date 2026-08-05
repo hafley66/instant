@@ -156,6 +156,61 @@ fn opencode_tokens_take_max_not_latest() {
 }
 
 #[test]
+fn claude_session_ids_use_metadata_without_parsing_transcripts() {
+    let home = fixture_home();
+    let cwd = "/fixture";
+    let dir = home.join(".claude/projects/-fixture");
+    fs::create_dir_all(dir.join("parent/subagents")).unwrap();
+    fs::write(dir.join("broken.jsonl"), "{ this transcript is intentionally invalid").unwrap();
+    fs::write(
+        dir.join("parent/subagents/child.jsonl"),
+        "{ this transcript is intentionally invalid",
+    )
+    .unwrap();
+
+    let mut ids = session_ids(&home, HarnessId::Claude, cwd);
+    ids.sort();
+
+    assert_eq!(ids, vec!["broken", "child"]);
+}
+
+#[test]
+fn codex_session_ids_use_the_index_without_parsing_rollouts() {
+    let home = fixture_home();
+    let dir = home.join(".codex");
+    fs::create_dir_all(&dir).unwrap();
+    let db = Connection::open(dir.join("state_5.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE threads (id TEXT, cwd TEXT, archived INTEGER, updated_at_ms INTEGER);
+         INSERT INTO threads VALUES ('older', '/fixture', 0, 100);
+         INSERT INTO threads VALUES ('newer', '/fixture', 0, 200);
+         INSERT INTO threads VALUES ('archived', '/fixture', 1, 300);
+         INSERT INTO threads VALUES ('elsewhere', '/other', 0, 400);",
+    )
+    .unwrap();
+    drop(db);
+
+    assert_eq!(
+        session_ids(&home, HarnessId::Codex, "/fixture"),
+        vec!["newer", "older"]
+    );
+}
+
+#[test]
+fn kimi_session_ids_do_not_parse_wire_history() {
+    let home = fixture_home();
+    let dir = home.join(".kimi-code/sessions/work/session_kimi-fast");
+    fs::create_dir_all(dir.join("agents/main")).unwrap();
+    fs::write(dir.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
+    fs::write(dir.join("agents/main/wire.jsonl"), "not JSON and deliberately irrelevant").unwrap();
+
+    assert_eq!(
+        session_ids(&home, HarnessId::Kimi, "/fixture"),
+        vec!["kimi-fast"]
+    );
+}
+
+#[test]
 fn kimi_wire_usage_sums_inputs() {
     // wire.jsonl carries per-turn usage; input = inputOther + cache read + cache
     // creation, taken from the last line that has it, with the model beside it.

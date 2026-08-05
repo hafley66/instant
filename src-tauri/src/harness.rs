@@ -167,10 +167,7 @@ fn harness_sessions_blocking(tool: String, cwd: String) -> Vec<String> {
     let (Some(home), Some(id)) = (home(), crate::harness_store::HarnessId::parse(&tool)) else {
         return vec![];
     };
-    crate::harness_store::sessions(&home, id, Some(&cwd))
-        .into_iter()
-        .map(|session| session.id)
-        .collect()
+    crate::harness_store::session_ids(&home, id, &cwd)
 }
 
 #[tauri::command]

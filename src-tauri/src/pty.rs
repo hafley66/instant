@@ -3,7 +3,7 @@
 // claude/opencode process inside survives detach.
 //
 // Storage: PtyStore holds id -> live writer + master, behind a Mutex.
-// Reads happen on a per-pty thread that emits `pty-data` events to the webview.
+// Reads happen on per-pty threads that feed the bounded app-wide event pump.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -15,6 +15,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::kitty::{KittyScanner, ScanOut};
+use crate::pty_events::{PtyData, PtyEvents};
 
 // GUI apps don't inherit the login shell PATH, so tmux/claude/opencode won't be
 // found without this. Prepend the usual homebrew + system locations.
@@ -67,13 +68,6 @@ pub struct Session {
     /// (#{pane_current_command}): claude, opencode, nvim, zsh… The frontend
     /// shows these so you can see what bot/tool a session is actually running.
     commands: Vec<String>,
-}
-
-/// Emitted to the webview as `pty-data`.
-#[derive(Serialize, Clone)]
-struct PtyData {
-    id: String,
-    chunk: String,
 }
 
 /// Emitted to the webview as `pty-graphics` (one resolved kitty frame). v1 ships
@@ -308,6 +302,7 @@ pub fn reap_orphan_graphics() {
 pub async fn open_session(
     app: AppHandle,
     store: State<'_, PtyStore>,
+    events: State<'_, PtyEvents>,
     id: String,
     name: String,
     command: Option<String>,
@@ -419,7 +414,8 @@ pub async fn open_session(
         enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
     }
 
-    // Reader thread: pump pty -> webview until EOF (session detached/killed).
+    // Reader thread: pump pty -> bounded event queue until EOF (session detached/killed).
+    let events = events.inner().sender();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         // Bytes left over when a multibyte UTF-8 char straddles a read boundary;
@@ -435,7 +431,7 @@ pub async fn open_session(
                         pending.extend_from_slice(&buf[..n]);
                         let chunk = drain_utf8(&mut pending);
                         if !chunk.is_empty() {
-                            let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                            let _ = events.send(PtyData { id: id.clone(), chunk });
                         }
                     }
                 }
@@ -456,7 +452,7 @@ pub async fn open_session(
                                 if chunk.is_empty() {
                                     continue;
                                 }
-                                let _ = app.emit("pty-data", PtyData { id: id.clone(), chunk });
+                                let _ = events.send(PtyData { id: id.clone(), chunk });
                             }
                             ScanOut::Graphics(g) => {
                                 let _ = app.emit(

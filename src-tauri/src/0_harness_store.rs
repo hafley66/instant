@@ -52,6 +52,12 @@ pub struct HarnessSession {
 pub trait HarnessStore: Sync {
     fn id(&self) -> HarnessId;
     fn sessions(&self, home: &Path, cwd: Option<&str>) -> Vec<HarnessSession>;
+    fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
+        self.sessions(home, Some(cwd))
+            .into_iter()
+            .map(|session| session.id)
+            .collect()
+    }
     fn messages(
         &self,
         session_id: &str,
@@ -240,6 +246,43 @@ impl HarnessStore for ClaudeStore {
         }
         sorted(out)
     }
+    fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
+        let projects = home.join(".claude/projects");
+        let dir = projects.join(
+            cwd.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>(),
+        );
+        let Ok(entries) = fs::read_dir(dir) else {
+            return vec![];
+        };
+        let mut ids = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+                if let Some(id) = path.file_stem().and_then(|value| value.to_str()) {
+                    ids.push((mtime(&path), id.to_string()));
+                }
+                continue;
+            }
+            if !path.is_dir() {
+                continue;
+            }
+            let Ok(subagents) = fs::read_dir(path.join("subagents")) else {
+                continue;
+            };
+            for subagent in subagents.flatten() {
+                let path = subagent.path();
+                if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+                    if let Some(id) = path.file_stem().and_then(|value| value.to_str()) {
+                        ids.push((mtime(&path), id.to_string()));
+                    }
+                }
+            }
+        }
+        ids.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        ids.into_iter().map(|(_, id)| id).collect()
+    }
     fn messages(
         &self,
         session_id: &str,
@@ -390,6 +433,24 @@ impl HarnessStore for CodexStore {
         }
         sorted(out)
     }
+    fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
+        let db = home.join(".codex/state_5.sqlite");
+        if let Ok(conn) = Connection::open_with_flags(
+            db,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            let sql = "SELECT id FROM threads WHERE archived=0 AND cwd=?1 ORDER BY updated_at_ms DESC,id DESC";
+            if let Ok(mut stmt) = conn.prepare(sql) {
+                if let Ok(rows) = stmt.query_map([cwd], |row| row.get::<_, String>(0)) {
+                    return rows.flatten().collect();
+                }
+            }
+        }
+        self.sessions(home, Some(cwd))
+            .into_iter()
+            .map(|session| session.id)
+            .collect()
+    }
     fn messages(
         &self,
         session_id: &str,
@@ -485,6 +546,40 @@ impl HarnessStore for KimiStore {
         }
         sorted(out)
     }
+    fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
+        let Ok(workspaces) = fs::read_dir(home.join(".kimi-code/sessions")) else {
+            return vec![];
+        };
+        let mut ids = Vec::new();
+        for workspace in workspaces.flatten() {
+            let Ok(sessions) = fs::read_dir(workspace.path()) else {
+                continue;
+            };
+            for session in sessions.flatten() {
+                let path = session.path();
+                let state = path.join("state.json");
+                let Some(meta) = fs::read_to_string(&state).ok().and_then(|value| json(&value))
+                else {
+                    continue;
+                };
+                if meta.get("workDir").and_then(Value::as_str) != Some(cwd) {
+                    continue;
+                }
+                let Some(id) = session
+                    .file_name()
+                    .to_string_lossy()
+                    .strip_prefix("session_")
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                let wire = path.join("agents/main/wire.jsonl");
+                ids.push((mtime(&state).max(mtime(&wire)), id));
+            }
+        }
+        ids.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        ids.into_iter().map(|(_, id)| id).collect()
+    }
     fn messages(
         &self,
         session_id: &str,
@@ -518,6 +613,9 @@ pub fn store(id: HarnessId) -> &'static dyn HarnessStore {
 }
 pub fn sessions(home: &Path, id: HarnessId, cwd: Option<&str>) -> Vec<HarnessSession> {
     store(id).sessions(home, cwd)
+}
+pub fn session_ids(home: &Path, id: HarnessId, cwd: &str) -> Vec<String> {
+    store(id).session_ids(home, cwd)
 }
 pub fn resolve(home: &Path, id: HarnessId, cwd: &str) -> Option<HarnessSession> {
     sessions(home, id, Some(cwd)).into_iter().next()

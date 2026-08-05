@@ -330,9 +330,11 @@ async function main() {
   refreshRogue();
   setInterval(refreshRogue, 8000);
 
-  await listen<{ id: string; chunk: string }>("pty-data", (e) => {
-    observeTerminalOutput(e.payload.id, e.payload.chunk);
-    tabs.get(e.payload.id)?.term.write(e.payload.chunk);
+  await listen<{ chunks: { id: string; chunk: string }[] }>("pty-data-batch", (e) => {
+    for (const chunk of e.payload.chunks) {
+      observeTerminalOutput(chunk.id, chunk.chunk);
+      tabs.get(chunk.id)?.term.write(chunk.chunk);
+    }
   });
 
   // Kitty graphics frames resolved by the Rust proxy (graphics sessions only).

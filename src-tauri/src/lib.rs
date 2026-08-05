@@ -1,3 +1,5 @@
+#[path = "0_pty_events.rs"]
+mod pty_events;
 mod activity;
 mod capture;
 mod cdp;
@@ -668,6 +670,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(pty::PtyStore::default())
+        .manage(pty_events::PtyEvents::default())
         .manage(cdp::CdpStore::default())
         .manage(cdp::ChromeEngine::default())
         .manage(workspace::Workspaces::default())
@@ -685,6 +688,7 @@ pub fn run() {
         )
         .setup(move |app| {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            app.state::<pty_events::PtyEvents>().start(app.handle().clone());
             if !no_globals {
                 app.global_shortcut().register(summon)?;
             }
@@ -864,6 +868,7 @@ pub fn run() {
             pty::kill_session,
             pty::scroll_session,
             pty::rogue_agent_sessions,
+            pty_events::pty_event_stats,
             cdp::cdp_open,
             cdp::cdp_send,
             cdp::cdp_resize,
