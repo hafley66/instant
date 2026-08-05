@@ -39,8 +39,12 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. keep backend sources and nested Git worktrees out of the frontend watcher
+      ignored: [
+        "**/src-tauri/**",
+        "**/.worktrees/**",
+        "**/.claude/worktrees/**",
+      ],
     },
   },
 }));
