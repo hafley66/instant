@@ -283,6 +283,17 @@ describe("StripPolicy.effectiveScope", () => {
   it("stays related when both scopes are empty (the empty state names the sid)", () => {
     expect(StripPolicy.effectiveScope([], "s9", null)).toBe("related");
   });
+
+  // Leak receipt 2026-08-05: a rooted tab (native claude session present) with
+  // no children widened to "all" and showed sibling roots from other projects.
+  it("stays related for a rooted tab with a native session but no children", () => {
+    const rooted = [
+      node({ id: "claude-here", tmuxSession: "s1" }),
+      node({ id: "claude-other-tree", tmuxSession: "s2", cwd: "~/projects/other" }),
+    ];
+    expect(StripPolicy.effectiveScope(rooted, "s1", null)).toBe("related");
+    expect(StripPolicy.external(rooted, "s1", "related")).toEqual([]);
+  });
 });
 
 describe("StripPolicy.external with a cwd shared by several tmux sessions", () => {

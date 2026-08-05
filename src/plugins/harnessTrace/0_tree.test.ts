@@ -104,7 +104,7 @@ describe("resolveDispatchParents", () => {
     expect(driver.parentId).toBeNull();
   });
 
-  it("leaves a session top-level when its sender is unknown or not in the set", () => {
+  it("marks the dispatch link even when the sender is unknown, but keeps the node top-level", () => {
     const nodes: AgentSessionNode[] = [
       node({ id: "sess-child", harness: "opencode" }),
       node({ id: "other", harness: "codex" }),
@@ -112,8 +112,9 @@ describe("resolveDispatchParents", () => {
     const envelopes = [env({ id: "m-1", from: "ghost", to: "oc-worker" })];
     const registry = { "oc-worker": "sess-child" }; // "ghost" maps nowhere
     const resolved = resolveDispatchParents(nodes, envelopes, registry);
-    expect(resolved.find((n) => n.id === "sess-child")!.parentId).toBeNull();
-    expect(resolved.find((n) => n.id === "sess-child")!.parentKind).toBeNull();
+    const child = resolved.find((n) => n.id === "sess-child")!;
+    expect(child.parentId).toBeNull();
+    expect(child.parentKind).toBe("dispatch");
   });
 
   it("does not overwrite a rust-attached subagent parent", () => {

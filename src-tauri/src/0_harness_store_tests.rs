@@ -130,3 +130,52 @@ fn four_stores_lower_into_one_session_shape() {
 ]"#
     );
 }
+
+#[test]
+fn opencode_tokens_take_max_not_latest() {
+    // The newest assistant turn carries tokens.input 0; MAX across the session
+    // is the live context reading, not the trailing zero.
+    let home = fixture_home();
+    let cwd = "/fixture";
+    let dir = home.join(".local/share/opencode");
+    fs::create_dir_all(&dir).unwrap();
+    let db = Connection::open(dir.join("opencode.db")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+         CREATE TABLE message (session_id TEXT, time_created INTEGER, data TEXT);
+         INSERT INTO session VALUES ('oc-1', '/fixture', NULL, 100, 300, NULL);
+         INSERT INTO message VALUES ('oc-1', 100, '{\"tokens\":{\"input\":50},\"modelID\":\"a-model\"}');
+         INSERT INTO message VALUES ('oc-1', 200, '{\"tokens\":{\"input\":0}}');",
+    )
+    .unwrap();
+    drop(db);
+    let session = resolve(&home, HarnessId::Opencode, cwd).unwrap();
+    assert_eq!(session.id, "oc-1");
+    assert_eq!(session.input_tokens, Some(50));
+    assert_eq!(session.model.as_deref(), Some("a-model"));
+}
+
+#[test]
+fn kimi_wire_usage_sums_inputs() {
+    // wire.jsonl carries per-turn usage; input = inputOther + cache read + cache
+    // creation, taken from the last line that has it, with the model beside it.
+    let home = fixture_home();
+    let cwd = "/fixture";
+    let dir = home.join(".kimi-code/sessions/work/session_kimi-2");
+    fs::create_dir_all(dir.join("agents/main")).unwrap();
+    fs::write(dir.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
+    fs::write(
+        dir.join("agents/main/wire.jsonl"),
+        concat!(
+            r#"{"type":"assistant","model":"kimi-code/k3","usage":{"inputOther":10,"output":1,"inputCacheRead":100,"inputCacheCreation":5},"usageScope":"turn"}"#,
+            "\n",
+            r#"{"type":"assistant","model":"kimi-code/k3","usage":{"inputOther":15,"output":2,"inputCacheRead":200,"inputCacheCreation":0},"usageScope":"turn"}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+    let session = resolve(&home, HarnessId::Kimi, cwd).unwrap();
+    assert_eq!(session.id, "kimi-2");
+    assert_eq!(session.input_tokens, Some(215));
+    assert_eq!(session.model.as_deref(), Some("kimi-code/k3"));
+}

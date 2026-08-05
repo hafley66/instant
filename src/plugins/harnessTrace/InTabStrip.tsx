@@ -49,6 +49,20 @@ export function toggleTermStripFor(sid: string): void {
   store.set({ termStrip: { ...store.get().termStrip, [sid]: StripPolicy.toggle(entry) } });
 }
 
+// Summon the strip open and flip the network (waterfall) view on it, so the
+// diagram is reachable even when the strip has zero related rows.
+export function toggleNetworkFor(sid: string): void {
+  const entries = store.get().termStrip;
+  const entry = entries[sid] ?? null;
+  const next = !(entry?.network);
+  store.set({
+    termStrip: {
+      ...entries,
+      [sid]: { open: true, showActive: entry?.showActive ?? true, network: next },
+    },
+  });
+}
+
 export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   const { nodes, liveTmux, registry, error, load } = useAgentTree();
   const [, setVersion] = useState(0);
@@ -59,7 +73,6 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   // null until the scope button is pressed; the policy widens an empty default.
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
-  const [networkView, setNetworkView] = useState(false);
 
   // Per-terminal open state (Toggle Relations Strip command).
   const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
@@ -67,6 +80,19 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     setEntry(store.get().termStrip[sid] ?? null);
     return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
   }, [sid]);
+
+  const networkView = entry?.network ?? false;
+  const setNetwork = (next: boolean) =>
+    store.set({
+      termStrip: {
+        ...store.get().termStrip,
+        [sid]: {
+          ...(store.get().termStrip[sid] ?? { open: true, showActive: true }),
+          open: true,
+          network: next,
+        },
+      },
+    });
 
   const scope = useMemo(
     () => StripPolicy.effectiveScope(nodes, sid, chosenScope),
@@ -203,7 +229,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           type="button"
           data-testid="strip-network-toggle"
           title={networkView ? "show table view" : "show network view"}
-          onClick={() => setNetworkView((shown) => !shown)}
+          onClick={() => setNetwork(!networkView)}
         >
           {networkView ? "table" : "network"}
         </button>

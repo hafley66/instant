@@ -273,6 +273,7 @@ export interface ITermViewRouter {
 export interface ITermStripEntry {
   open: boolean;
   showActive?: boolean;
+  network?: boolean;
 }
 
 // How wide the strip casts. "related" = trees joined to this terminal's tmux

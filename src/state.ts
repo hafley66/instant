@@ -139,6 +139,7 @@ export interface TermSidebarState {
 export interface TermStripState {
   open: boolean;
   showActive?: boolean;
+  network?: boolean;
 }
 
 // A favorited turn (Rust favorites::Fav) — a snapshot persisted to favorites.db,
