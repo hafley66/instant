@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-// The session waterfall is history mode of the in-tab strip: unchecking
-// "Show active" swaps today's going-on table for the devtools-network-style
-// waterfall (brush overview on top, one bar per session, a tick per message)
-// with the TreeTable below constrained to the brush's range. Fixtures: four
+// The session waterfall is the network view of the in-tab strip. "Show active"
+// selects today's going-on rows versus history, while the network button swaps
+// the table for the waterfall (brush overview on top, one bar per session, a
+// tick per message) with the TreeTable below constrained to the brush's range. Fixtures: four
 // sessions across the harnesses (one live claude, one idle opencode lane, one
 // done codex history, one dead kimi), each with a handful of seeded messages.
 const MAIL_DIR = "~/.agent/mail";
@@ -41,7 +41,7 @@ async function seed(page: import("@playwright/test").Page) {
   }, { mailDir: MAIL_DIR, rows: ROWS, messages: MESSAGES });
 }
 
-test("waterfall: default is today's going-on table; unchecking draws the history waterfall", async ({ page }) => {
+test("waterfall: network toggle renders the same active or history row set as the table", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await seed(page);
@@ -59,11 +59,22 @@ test("waterfall: default is today's going-on table; unchecking draws the history
   await expect(page.locator("tr").filter({ hasText: "sess-hist" })).toHaveCount(0);
   await expect(page.locator("tr").filter({ hasText: "sess-dead" })).toHaveCount(0);
 
-  // Uncheck => history waterfall. The scope holds in history too: related
-  // keeps only the dispatch lane descending from this tab's session, and the
-  // tab's own claude row (the TUI's own list) never draws a bar.
+  // Network view is available while active-only remains checked and receives
+  // the same one-row dataset as the table.
+  await page.getByTestId("strip-network-toggle").click();
+  let waterfall = page.getByTestId("waterfall");
+  await expect(waterfall).toBeVisible();
+  await expect(page.getByTestId("waterfall-count")).toHaveText("1 session");
+  await page.getByTestId("strip-network-toggle").click();
+  await expect(waterfall).toHaveCount(0);
+
+  // Uncheck => history table. The scope holds in history too: related keeps
+  // only the dispatch lane descending from this tab's session, and the tab's
+  // own claude row (the TUI's own list) never appears.
   await page.getByText("Show active").click();
-  const waterfall = page.getByTestId("waterfall");
+  await expect(page.locator(".waterfall")).toHaveCount(0);
+  await page.getByTestId("strip-network-toggle").click();
+  waterfall = page.getByTestId("waterfall");
   await expect(waterfall).toBeVisible();
   await expect(page.getByTestId("waterfall-count")).toHaveText("1 session");
   await expect(page.locator(".waterfall-plot text").filter({ hasText: "sess-live" })).toHaveCount(0);
@@ -109,8 +120,9 @@ test("waterfall: dragging the brush narrows the visible sessions and ticks", asy
   await seed(page);
   await page.goto("/e2e-waterfall.html?e2e=1");
 
-  // Show the history waterfall at the widest scope first.
+  // Show the history network at the widest scope first.
   await page.getByText("Show active").click();
+  await page.getByTestId("strip-network-toggle").click();
   const waterfall = page.getByTestId("waterfall");
   await expect(waterfall).toBeVisible();
   await page.getByTestId("strip-scope").click();
@@ -221,6 +233,7 @@ test("waterfall stress: 300 sessions x 50 messages stays inside the node and IPC
   await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+Period`);
   await expect(page.getByTestId("in-tab-strip")).toBeVisible();
   await page.getByText("Show active").click();
+  await page.getByTestId("strip-network-toggle").click();
   const waterfall = page.getByTestId("waterfall");
   await expect(waterfall).toBeVisible();
 

@@ -19,6 +19,7 @@ import { dirname, join, resolve as resolvePath } from "node:path";
 import { MailDirectory, MailStore } from "../src/plugins/harnessTrace/0_bus.ts";
 import { MailLeg, injectedLine } from "../src/plugins/harnessTrace/1_leg.ts";
 import { casUpdateJson, CorruptJsonError } from "./0_atomicJson.ts";
+import { harnessDefinitionById, harnessIds } from "../src/0_harnessDefinitions.ts";
 
 const DEFAULT_MAIL_DIR = "~/.agent/mail";
 const DEFAULT_BOX = "bus.ndjson";
@@ -216,6 +217,47 @@ function claudeTranscriptFor(cwd) {
   return newest?.path ?? null;
 }
 
+function kimiSessionFor(cwd) {
+  const root = join(homedir(), ".kimi-code", "sessions");
+  let newest = null;
+  let workspaces;
+  try {
+    workspaces = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const workspace of workspaces) {
+    if (!workspace.isDirectory()) continue;
+    const workspacePath = join(root, workspace.name);
+    let sessions;
+    try {
+      sessions = readdirSync(workspacePath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const session of sessions) {
+      if (!session.isDirectory() || !session.name.startsWith("session_")) continue;
+      const sessionPath = join(workspacePath, session.name);
+      const state = join(sessionPath, "state.json");
+      let meta;
+      try {
+        meta = JSON.parse(readFileSync(state, "utf8"));
+      } catch {
+        continue;
+      }
+      if (meta?.workDir !== cwd) continue;
+      const mtime = statSync(state).mtimeMs;
+      if (newest && newest.mtime >= mtime) continue;
+      newest = {
+        id: session.name.slice("session_".length),
+        path: join(sessionPath, "agents", "main", "wire.jsonl"),
+        mtime,
+      };
+    }
+  }
+  return newest;
+}
+
 // Current context size: the last assistant usage's input side (input + cache
 // read + cache creation). The transcript has no cumulative field.
 function claudeTokens(path) {
@@ -361,7 +403,7 @@ function resolve(args) {
   const route = readRegistryRaw(dir)[to];
   const harness = route?.harness ?? null;
   const cwd = route?.cwd ?? null;
-  if (harness !== "opencode" && harness !== "claude" && harness !== "codex") {
+  if (harness !== "opencode" && harness !== "claude" && harness !== "codex" && harness !== "kimi") {
     console.log(`unresolved ${to}: harness ${harness ?? "none"} has no resolve leg`);
     return 1;
   }
@@ -404,6 +446,16 @@ function resolve(args) {
     const model = codexModel(rollout.path) ?? route.model ?? null;
     mergeRoute(dir, to, { ...route, sessionId: rollout.id, model });
     console.log(`resolved ${to} -> ${rollout.id} (${model ?? "?"})`);
+    return 0;
+  }
+  if (harness === "kimi") {
+    const session = kimiSessionFor(cwd);
+    if (!session) {
+      console.log(`unresolved ${to}: no kimi session for ${cwd} yet`);
+      return 2;
+    }
+    mergeRoute(dir, to, { ...route, sessionId: session.id, sourcePath: session.path });
+    console.log(`resolved ${to} -> ${session.id}`);
     return 0;
   }
   // NUL bytes cannot survive argv, so refuse them. A single quote is fine: the
@@ -578,18 +630,22 @@ function lane(args) {
   const to = args.name;
   const cwd = args.cwd;
   if (!to || !cwd) {
-    console.log("usage: bus.ts lane --cwd <dir> --name <lane-id> [--brief <path>] [--model <id>] [--tmux <name>] [--parent <agent>] [--mail-dir <dir>] [--resolve-wait <seconds>] [--dry-run]");
+    console.log("usage: bus.ts lane --cwd <dir> --name <lane-id> [--harness claude|opencode|codex|kimi] [--brief <path>] [--model <id>] [--tmux <name>] [--parent <agent>] [--mail-dir <dir>] [--resolve-wait <seconds>] [--dry-run]");
     return 1;
   }
-  const brief = args.brief ?? join(cwd, "brief.md");
+  const harness = args.harness ?? "opencode";
+  if (!harnessIds.includes(harness)) {
+    console.log(`unsupported lane harness: ${harness}`);
+    return 1;
+  }
+  const brief = resolvePath(args.brief ?? join(cwd, "brief.md"));
   if (!existsSync(brief)) {
     console.log(`brief file not found: ${brief}`);
     return 1;
   }
-  const body = readFileSync(brief, "utf8").split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
-  const model = args.model ?? "openrouter/deepseek/deepseek-v4-flash-0731";
+  const launch = harnessDefinitionById[harness].lane(brief, args.model);
   const tmux = args.tmux ?? to;
-  let cmd = `opencode run -m ${model} --auto "$(cat ${brief})"`;
+  let cmd = launch.command;
 
   if (args.parent) {
     // The wrapped cmd appends a completion hail, never replaces the original
@@ -604,15 +660,25 @@ function lane(args) {
     console.log(`cmd: ${cmd}`);
     console.log(`to: ${to}`);
     console.log(`cwd: ${cwd}`);
-    console.log(`harness: opencode`);
+    console.log(`harness: ${harness}`);
     console.log(`tmux: ${tmux}`);
-    console.log(`body: ${body}`);
+    console.log(`body: ${launch.body}`);
     console.log(`mail-dir: ${args["mail-dir"] ?? DEFAULT_MAIL_DIR}`);
     console.log(`resolve-wait: ${args["resolve-wait"] ?? 3}`);
     return 0;
   }
 
-  const dispatchArgs = { to, cwd, cmd, harness: "opencode", tmux, body, model, mode: "auto" };
+  const dispatchArgs = {
+    to,
+    cwd,
+    cmd,
+    harness,
+    tmux,
+    body: launch.body,
+    ref: launch.ref,
+    model: launch.model,
+    mode: launch.mode,
+  };
   if (args["mail-dir"]) dispatchArgs["mail-dir"] = args["mail-dir"];
   if (args["resolve-wait"]) dispatchArgs["resolve-wait"] = args["resolve-wait"];
   return dispatch(dispatchArgs);

@@ -59,6 +59,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   // null until the scope button is pressed; the policy widens an empty default.
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
+  const [networkView, setNetworkView] = useState(false);
+
+  // Per-terminal open state (Toggle Relations Strip command).
+  const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
+  useEffect(() => {
+    setEntry(store.get().termStrip[sid] ?? null);
+    return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
+  }, [sid]);
 
   const scope = useMemo(
     () => StripPolicy.effectiveScope(nodes, sid, chosenScope),
@@ -66,7 +74,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   );
   const external = useMemo(() => StripPolicy.external(nodes, sid, scope), [nodes, sid, scope]);
   const historyNodes = useMemo(() => StripPolicy.history(nodes, sid, scope), [nodes, sid, scope]);
-  const index = useMemo(() => indexAgentTree(external), [external]);
+  const showActive = entry?.showActive ?? true;
+  const visibleNodes = showActive ? external : historyNodes;
+  const index = useMemo(() => indexAgentTree(visibleNodes), [visibleNodes]);
   // The search box forces every branch open (TreeTable's `true` sentinel),
   // which a lazy tree cannot honor for unmaterialized children; the filter
   // therefore reaches loaded rows only.
@@ -76,14 +86,6 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   );
   const tree = useMemo(() => materializeAgentTree(index, openIds), [index, openIds]);
 
-  // Per-terminal open state (Toggle Relations Strip command).
-  const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
-  useEffect(() => {
-    setEntry(store.get().termStrip[sid] ?? null);
-    return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
-  }, [sid]);
-
-  const showActive = entry?.showActive ?? true;
   const setShowActive = (next: boolean) =>
     store.set({
       termStrip: {
@@ -183,11 +185,11 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           </button>
         )}
         <span className="spy-title" data-testid="strip-count">
-          {index.size} external shells
+          {index.size} {showActive ? "external shells" : "sessions"}
         </span>
         {viewing && <span className="spy-viewing">{viewing}</span>}
         <span className="spy-spacer" />
-        <span className="act-check" title="uncheck to see the session history waterfall">
+        <span className="act-check" title="check for active shells only; uncheck to include session history">
           <input
             type="checkbox"
             id={"showactive-" + sid}
@@ -197,6 +199,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           />
           <label htmlFor={"showactive-" + sid}>Show active</label>
         </span>
+        <button
+          type="button"
+          data-testid="strip-network-toggle"
+          title={networkView ? "show table view" : "show network view"}
+          onClick={() => setNetworkView((shown) => !shown)}
+        >
+          {networkView ? "table" : "network"}
+        </button>
         <button
           type="button"
           data-testid="strip-scope"
@@ -215,10 +225,10 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
       </div>
       {current?.kind === "mail-preview" ? (
         <MailPreview agentId={current.agentId} />
-      ) : !showActive ? (
-        <Waterfall nodes={historyNodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
       ) : error ? (
         <div className="session-empty">{error}</div>
+      ) : networkView ? (
+        <Waterfall nodes={visibleNodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
       ) : index.size === 0 ? (
         <div className="session-empty strip-empty" data-testid="strip-empty">
           {scope === "related"
