@@ -1,7 +1,5 @@
 import { D2 } from "@terrastruct/d2";
-
-const LIGHT_THEME_ID = 0;
-const DARK_THEME_ID = 200;
+import { d2ThemeId } from "./0_diagramTheme";
 
 let instance: D2 | null = null;
 let renderQueue = Promise.resolve();
@@ -17,7 +15,7 @@ export async function renderD2(code: string, dark: boolean): Promise<string> {
     const compiled = await d2.compile(code);
     return d2.render(compiled.diagram, {
       ...compiled.renderOptions,
-      themeID: dark ? DARK_THEME_ID : LIGHT_THEME_ID,
+      themeID: d2ThemeId(dark),
     });
   });
   renderQueue = rendering.then(() => undefined, () => undefined);

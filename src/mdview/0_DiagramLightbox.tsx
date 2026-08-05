@@ -10,11 +10,13 @@ export function DiagramLightbox({
   svg,
   label,
   language,
+  dark,
   onClose,
 }: {
   svg: string;
   label: string;
   language: "mermaid" | "d2";
+  dark: boolean;
   onClose: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
@@ -62,7 +64,7 @@ export function DiagramLightbox({
   };
 
   return createPortal(
-    <div className="diagram-lightbox" data-language={language} role="dialog" aria-modal="true" aria-label={label} onClick={onClose}>
+    <div className="diagram-lightbox" data-language={language} data-diagram-theme={dark ? "dark" : "light"} role="dialog" aria-modal="true" aria-label={label} onClick={onClose}>
       <div className="diagram-lightbox-tools" onClick={(event) => event.stopPropagation()}>
         <button type="button" title="Zoom out" onClick={() => setZoom((current) => Math.max(0.25, current / 1.2))}>−</button>
         <button type="button" title="Reset zoom and pan" onClick={reset}>Reset</button>

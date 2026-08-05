@@ -1303,6 +1303,14 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
   pointer-events: auto;
   cursor: zoom-in;
 }
+.term-diagram[data-diagram-theme="light"] {
+  color: #111827;
+  background: #f8fafc;
+}
+.term-diagram[data-diagram-theme="dark"] {
+  color: #f8fafc;
+  background: #0f172a;
+}
 .term-diagram svg {
   display: block;
   max-width: 100%;

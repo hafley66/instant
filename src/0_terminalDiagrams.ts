@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup } from "./mdview/0_DiagramLightbox";
+import { mermaidTheme } from "./mdview/0_diagramTheme";
 import { renderD2 } from "./mdview/d2";
 import { diagramsFromMessageTail, normalizedDiagramLines, type MessageDiagram } from "./0_terminalDiagramMessages";
 import type { AiMessage } from "./state";
@@ -190,7 +191,7 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
   const mermaid = await loadMermaid();
   mermaid.initialize({
     startOnLoad: false,
-    theme: dark ? "dark" : "default",
+    ...mermaidTheme(dark),
     flowchart: { htmlLabels: false },
     securityLevel: "strict",
     suppressErrorRendering: true,
@@ -380,6 +381,7 @@ export class TerminalDiagramOverlay {
       const created = !element.dataset.diagramKey;
       element.dataset.diagramKey = diagramKey;
       element.dataset.language = fence.language;
+      element.dataset.diagramTheme = dark ? "dark" : "light";
       const aspectRatio = svg ? svgAspectRatio(svg) : null;
       const sourceRows = fence.end - fence.start + 1;
       const requestedHeight = aspectRatio
@@ -408,7 +410,7 @@ export class TerminalDiagramOverlay {
         element.className = "term-diagram";
         element.title = "Click to expand diagram";
         element.innerHTML = diagramSvgMarkup(svg);
-        element.addEventListener("click", () => this.openLarge(svg, fence.language));
+        element.addEventListener("click", () => this.openLarge(svg, fence.language, dark));
       }
       return element;
     });
@@ -419,7 +421,7 @@ export class TerminalDiagramOverlay {
     this.positionElements(screen);
   }
 
-  openLarge(svg: string, language: DiagramLanguage) {
+  openLarge(svg: string, language: DiagramLanguage, dark: boolean) {
     this.closeLarge();
     const mount = document.createElement("div");
     document.body.appendChild(mount);
@@ -432,6 +434,7 @@ export class TerminalDiagramOverlay {
     root.render(createElement(DiagramLightbox, {
       svg,
       language,
+      dark,
       label: `${language === "d2" ? "d2" : "Mermaid"} diagram`,
       onClose: close,
     }));
