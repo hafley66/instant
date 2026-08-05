@@ -6,11 +6,16 @@ import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup } from "./mdview/0_DiagramLightbox";
 import { mermaidTheme } from "./mdview/0_diagramTheme";
 import { renderD2 } from "./mdview/d2";
-import { diagramsFromMessageTail, normalizedDiagramLines, type MessageDiagram } from "./0_terminalDiagramMessages";
+import {
+  diagramsFromMessageTail,
+  isGenericMermaidDeclaration,
+  normalizedDiagramLines,
+  type MessageDiagram,
+} from "./0_terminalDiagramMessages";
 import type { AiMessage } from "./state";
 
 type DiagramLanguage = "mermaid" | "d2";
-type DiagramFence = { language: DiagramLanguage; code: string; start: number; end: number; inferred: boolean };
+export type DiagramFence = { language: DiagramLanguage; code: string; start: number; end: number; inferred: boolean };
 type LogicalLine = { text: string; start: number; end: number };
 export type TerminalDiagramLayout = {
   maxViewportHeightRatio: number;
@@ -85,6 +90,7 @@ export function locateMessageDiagrams(term: Terminal, diagrams: MessageDiagram[]
     const sourceLines = normalizedDiagramLines(diagram.code);
     const anchors = sourceLines
       .map((text, sourceIndex) => ({ text, sourceIndex }))
+      .filter(({ text }) => diagram.language !== "mermaid" || !isGenericMermaidDeclaration(text))
       .filter(({ text }) => anchorOwners.get(text)?.size === 1 && anchorOwners.get(text)?.has(diagramIndex))
       .sort((a, b) => b.text.length - a.text.length);
     let hit: { terminalIndex: number; sourceIndex: number } | null = null;
@@ -164,6 +170,18 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
     index = end;
   }
   return found;
+}
+
+export function mergeLocatedDiagrams(direct: DiagramFence[], ledger: DiagramFence[]): DiagramFence[] {
+  const fences = [...direct];
+  for (const candidate of ledger) {
+    if (!fences.some((fence) =>
+      fence.language === candidate.language &&
+      fence.start <= candidate.end &&
+      candidate.start <= fence.end
+    )) fences.push(candidate);
+  }
+  return fences;
 }
 
 function stripTuiBullet(line: string): string {
@@ -386,14 +404,7 @@ export class TerminalDiagramOverlay {
     // authoritative; ledger matching fills only blocks whose fences the TUI
     // stripped. This also keeps a failed/empty native ledger from disabling
     // rendering that is fully present in xterm.
-    const fences = [...ledger];
-    for (const candidate of direct) {
-      if (!fences.some((fence) =>
-        fence.language === candidate.language &&
-        fence.start <= candidate.end &&
-        candidate.start <= fence.end
-      )) fences.push(candidate);
-    }
+    const fences = mergeLocatedDiagrams(direct, ledger);
     const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AiMessage } from "./state";
-import { diagramsFromMessageTail, normalizedDiagramLines } from "./0_terminalDiagramMessages";
+import { diagramsFromMessageTail, isGenericMermaidDeclaration, normalizedDiagramLines } from "./0_terminalDiagramMessages";
 
 const message = (id: string, role: string, text: string): AiMessage => ({
   editor: "codex",
@@ -41,5 +41,18 @@ describe("terminal message diagrams", () => {
       "flowchart lr",
       "pty --> tmux",
     ]);
+    expect([
+      "flowchart lr",
+      "graph TD",
+      "sequenceDiagram",
+      "1 --> 2 --> 3",
+    ].map(isGenericMermaidDeclaration)).toMatchInlineSnapshot(`
+      [
+        true,
+        true,
+        true,
+        false,
+      ]
+    `);
   });
 });

@@ -30,3 +30,8 @@ export function normalizedDiagramLines(code: string): string[] {
     .map((line) => line.toLowerCase().replace(/^\s*[•●]\s?/, "").replace(/\s+/g, " ").trim())
     .filter((line) => /[a-z0-9]/.test(line) && line.length >= 4);
 }
+
+export function isGenericMermaidDeclaration(line: string): boolean {
+  return /^(?:flowchart|graph)(?:\s+(?:tb|td|bt|rl|lr))?$/i.test(line)
+    || /^(?:sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|C4Context|sankey-beta|xychart-beta)$/i.test(line);
+}
