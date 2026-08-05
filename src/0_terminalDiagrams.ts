@@ -150,7 +150,14 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
         : null;
     if (!language) continue;
     let end = index;
-    while (end + 1 < lines.length && stripTuiBullet(lines[end + 1].text).trim()) end++;
+    if (language === "d2") {
+      while (
+        end + 1 < lines.length &&
+        isD2ArrowLine(stripTuiBullet(lines[end + 1].text).trimStart())
+      ) end++;
+    } else {
+      while (end + 1 < lines.length && stripTuiBullet(lines[end + 1].text).trim()) end++;
+    }
     const block = lines.slice(index, end + 1);
     const code = dedent(block.map((line) => stripTuiBullet(line.text)));
     found.push({ language, code, start: block[0].start, end: block[block.length - 1].end, inferred: true });
@@ -174,7 +181,10 @@ function isMermaidStart(line: string): boolean {
 }
 
 function isD2ArrowLine(line: string): boolean {
-  return !/-->|<--/.test(line) && /(?:^|\s)(?:<?->|<-)(?:\s|$)/.test(line);
+  if (/\/\/|[;{}]|-->|<--/.test(line)) return false;
+  const atom = String.raw`(?:"[^"\n]+"|[A-Za-z_][\w.-]*)`;
+  const arrow = String.raw`(?:<?->|<-)`;
+  return new RegExp(String.raw`^\s*${atom}(?:\s+${arrow}\s+${atom})+(?:\s*:\s*.+)?\s*$`).test(line);
 }
 
 function darkBackground(host: HTMLElement): boolean {
@@ -352,12 +362,27 @@ export class TerminalDiagramOverlay {
     const dark = darkBackground(this.host);
     const messages = await this.messages?.();
     if (generation !== this.generation) return;
-    const fences = (messages
+    const direct = findDiagramFences(this.term);
+    const ledger = messages
       ? locateMessageDiagrams(this.term, diagramsFromMessageTail(messages))
-      : findDiagramFences(this.term)).filter(
+      : [];
+    // A resolved harness can still point at a stale sibling session, or its
+    // message tail can omit the visible turn. Complete terminal fences remain
+    // authoritative; ledger matching fills only blocks whose fences the TUI
+    // stripped. This also keeps a failed/empty native ledger from disabling
+    // rendering that is fully present in xterm.
+    const fences = [...ledger];
+    for (const candidate of direct) {
+      if (!fences.some((fence) =>
+        fence.language === candidate.language &&
+        fence.start <= candidate.end &&
+        candidate.start <= fence.end
+      )) fences.push(candidate);
+    }
+    const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
-    const rendered = await Promise.all(fences.map(async (fence) => {
+    const rendered = await Promise.all(visibleFences.map(async (fence) => {
       const key = `${dark}:${fence.language}:${fence.code}`;
       let pending = this.cache.get(key);
       if (!pending) {

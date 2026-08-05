@@ -135,6 +135,39 @@ for (const harness of ["Codex", "Claude Code"] as const) {
   });
 }
 
+test("renders visible fences when the native harness ledger returns no matching turn", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __instantE2eNativeResults?: Record<string, unknown>;
+    };
+    if (target.__instantE2eNativeResults) {
+      target.__instantE2eNativeResults.read_ai_messages = [];
+    }
+  });
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
+  await writeFixture(page, output("Codex"));
+
+  await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
+  await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
+});
+
+test("does not infer D2 from Rust return types and arrow comments", async ({ page }) => {
+  await openTerminal(page);
+  await writeFixture(page, [
+    "struct Pair(u64);                    // (u:u32)<<32 | v:u32",
+    "impl Pair { fn new(u:u32,v:u32)->Self; fn u(&self)->u32; fn v(&self)->u32 }",
+    "struct Loaded { edges:u64, index: FxHashMap<u32, Vec<u32>>, // y -> [z]",
+    "derived: FxHashSet<Pair>, delta: Vec<Pair> }",
+    "",
+    "trait Operator { fn on_batch(&mut self, rows: &[Pair], out: &mut Vec<Pair>); }",
+    "struct Node { op: Box<dyn Operator>, downstream: Vec<usize> }",
+  ].join("\r\n"));
+
+  await expect(page.locator(".term-diagram")).toHaveCount(0);
+});
+
 test("keeps later scrolled prose outside the ledger Mermaid source", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, scrolledMermaidOutput);
