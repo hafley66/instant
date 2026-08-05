@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+zero=0000000000000000000000000000000000000000
+
+archive() {
+  sha=$1
+  prefix=$2
+  [ "$sha" = "$zero" ] && return
+  if git for-each-ref --format='%(objectname)' "$prefix/" | grep -Fx "$sha" >/dev/null; then return; fi
+  count=$(git for-each-ref --format='%(refname)' "$prefix/" | wc -l | tr -d ' ')
+  git update-ref "$prefix/$((count + 1))" "$sha"
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${INSTANT_PATCHSET_EVENT_LOG:-}" ] && printf '%s %s %s %s\n' "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" >> "$INSTANT_PATCHSET_EVENT_LOG"
+  case "$remote_ref" in
+    refs/heads/*)
+      prefix="refs/instant/changes/${remote_ref#refs/heads/}"
+      archive "$remote_sha" "$prefix"
+      archive "$local_sha" "$prefix"
+      ;;
+  esac
+done
