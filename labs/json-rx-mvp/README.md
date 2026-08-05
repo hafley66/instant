@@ -105,6 +105,15 @@ against the object selected by `from`; missing expressions omit their fields.
 ## Run
 
 ```sh
+just json-rx-lab
+```
+
+Chromium receipt: [`13_receipt.spec.ts-snapshots/json-rx-lab-gate-darwin.png`](./13_receipt.spec.ts-snapshots/json-rx-lab-gate-darwin.png)
+
+The recipe expands to:
+
+```sh
 corepack pnpm@10.12.4 exec vitest run --config labs/json-rx-mvp/5_vitest.config.ts
 corepack pnpm@10.12.4 exec tsc --project labs/json-rx-mvp/6_tsconfig.json
+corepack pnpm@10.12.4 exec playwright test --config labs/json-rx-mvp/14_playwright.config.ts
 ```

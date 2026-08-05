@@ -1,4 +1,4 @@
-import claudeUsageRule from "../../src/plugins/metrics/0_claude-usage.rule.json";
+import claudeUsageRule from "../../src/plugins/metrics/0_claude-usage.rule.json" with { type: "json" };
 import type { AutomationV2 } from "./7_v2-schema";
 
 export const claudeUsageV1 = claudeUsageRule;
