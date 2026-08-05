@@ -111,7 +111,13 @@ pub fn cass_status() -> CassStatus {
 /// Read CASS's bounded, redacted swarm status snapshot for one workspace. CASS
 /// owns provider discovery and redaction; Instant only transports its JSON.
 #[tauri::command]
-pub fn cass_swarm_status(cwd: String) -> Result<Value, String> {
+pub async fn cass_swarm_status(cwd: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || cass_swarm_status_blocking(cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn cass_swarm_status_blocking(cwd: String) -> Result<Value, String> {
     let cass = cass_path().ok_or("cass is not installed")?;
     let output = std::process::Command::new(cass)
         .args(["swarm", "status", "--robot-format", "json"])
@@ -673,7 +679,20 @@ pub(crate) fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiM
 /// All turns in one session, oldest first. `after_seq` returns only newer turns
 /// (the watcher's incremental read).
 #[tauri::command]
-pub fn read_ai_messages(
+pub async fn read_ai_messages(
+    editor: String,
+    session_id: String,
+    cwd: String,
+    after_seq: Option<u64>,
+) -> Result<Vec<AiMessage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        read_ai_messages_blocking(editor, session_id, cwd, after_seq)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn read_ai_messages_blocking(
     editor: String,
     session_id: String,
     cwd: String,
@@ -685,19 +704,29 @@ pub fn read_ai_messages(
 
 /// The newest turn in a session (drives "favorite current turn" + the watcher).
 #[tauri::command]
-pub fn latest_ai_message(
+pub async fn latest_ai_message(
     editor: String,
     session_id: String,
     cwd: String,
 ) -> Result<Option<AiMessage>, String> {
-    let mut msgs = read_ai_messages(editor, session_id, cwd, None)?;
-    Ok(msgs.pop())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut msgs = read_ai_messages_blocking(editor, session_id, cwd, None)?;
+        Ok(msgs.pop())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Sessions for a cwd (or all, when cwd is None), newest first. Lightweight
 /// browse list; reading the turns is a separate call.
 #[tauri::command]
-pub fn list_ai_sessions(editor: String, cwd: Option<String>) -> Result<Vec<AiSession>, String> {
+pub async fn list_ai_sessions(editor: String, cwd: Option<String>) -> Result<Vec<AiSession>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_ai_sessions_blocking(editor, cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn list_ai_sessions_blocking(editor: String, cwd: Option<String>) -> Result<Vec<AiSession>, String> {
     let editor = Editor::parse(&editor).ok_or("unknown editor")?;
     let harness = crate::harness_store::HarnessId::parse(editor.tag()).ok_or("unknown editor")?;
     let Some(home) = home() else { return Ok(Vec::new()) };

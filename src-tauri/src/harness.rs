@@ -141,7 +141,13 @@ fn trace_rows(home: &Path) -> Vec<HarnessTraceRow> {
 }
 
 #[tauri::command]
-pub fn harness_trace_rows() -> Vec<HarnessTraceRow> {
+pub async fn harness_trace_rows() -> Vec<HarnessTraceRow> {
+    tauri::async_runtime::spawn_blocking(harness_trace_rows_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+fn harness_trace_rows_blocking() -> Vec<HarnessTraceRow> {
     match home() {
         Some(h) => trace_rows(&h),
         None => vec![],
@@ -151,7 +157,13 @@ pub fn harness_trace_rows() -> Vec<HarnessTraceRow> {
 // Newest-first list of resumable session ids for a cwd. Callers that just want the
 // single latest take the first element (harness_session below).
 #[tauri::command]
-pub fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
+pub async fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(move || harness_sessions_blocking(tool, cwd))
+        .await
+        .unwrap_or_default()
+}
+
+fn harness_sessions_blocking(tool: String, cwd: String) -> Vec<String> {
     let (Some(home), Some(id)) = (home(), crate::harness_store::HarnessId::parse(&tool)) else {
         return vec![];
     };
@@ -162,8 +174,12 @@ pub fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn harness_session(tool: String, cwd: String) -> Option<String> {
-    harness_sessions(tool, cwd).into_iter().next()
+pub async fn harness_session(tool: String, cwd: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        harness_sessions_blocking(tool, cwd).into_iter().next()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[cfg(test)]

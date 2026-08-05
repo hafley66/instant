@@ -67,7 +67,13 @@ fn ext_of(path: &Path, is_dir: bool) -> String {
 }
 
 #[tauri::command]
-pub fn list_dir(path: Option<String>) -> Result<DirListing, String> {
+pub async fn list_dir(path: Option<String>) -> Result<DirListing, String> {
+    tauri::async_runtime::spawn_blocking(move || list_dir_blocking(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn list_dir_blocking(path: Option<String>) -> Result<DirListing, String> {
     let dir = resolve(path);
     let canon = dir.canonicalize().unwrap_or(dir);
     let rd = std::fs::read_dir(&canon).map_err(|e| format!("{}: {e}", canon.display()))?;
@@ -106,7 +112,13 @@ pub fn list_dir(path: Option<String>) -> Result<DirListing, String> {
 /// Like `list_dir`, but omits directories that don't contain at least one image
 /// file somewhere inside them. Files are also filtered to known image types.
 #[tauri::command]
-pub fn list_dir_meme(path: Option<String>) -> Result<DirListing, String> {
+pub async fn list_dir_meme(path: Option<String>) -> Result<DirListing, String> {
+    tauri::async_runtime::spawn_blocking(move || list_dir_meme_blocking(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn list_dir_meme_blocking(path: Option<String>) -> Result<DirListing, String> {
     let dir = resolve(path);
     let canon = dir.canonicalize().unwrap_or(dir);
     let rd = std::fs::read_dir(&canon).map_err(|e| format!("{}: {e}", canon.display()))?;
@@ -185,7 +197,20 @@ fn dir_has_image(dir: &Path, depth: usize) -> bool {
 /// `exts` optionally filters to the given extensions (case-insensitive).
 /// `max_depth` defaults to 6; `max_files` defaults to 2000.
 #[tauri::command]
-pub fn list_dir_recursive(
+pub async fn list_dir_recursive(
+    path: Option<String>,
+    exts: Option<Vec<String>>,
+    max_depth: Option<usize>,
+    max_files: Option<usize>,
+) -> Result<DirListing, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        list_dir_recursive_blocking(path, exts, max_depth, max_files)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn list_dir_recursive_blocking(
     path: Option<String>,
     exts: Option<Vec<String>>,
     max_depth: Option<usize>,
@@ -218,7 +243,13 @@ pub fn list_dir_recursive(
 /// ignore semantics. Directories are excluded because FileSearchTree retains
 /// its lazy expandable directory browser beside search results.
 #[tauri::command]
-pub fn search_files(path: Option<String>, max_files: Option<usize>) -> Result<Vec<Entry>, String> {
+pub async fn search_files(path: Option<String>, max_files: Option<usize>) -> Result<Vec<Entry>, String> {
+    tauri::async_runtime::spawn_blocking(move || search_files_blocking(path, max_files))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn search_files_blocking(path: Option<String>, max_files: Option<usize>) -> Result<Vec<Entry>, String> {
     let dir = resolve(path);
     let canon = dir.canonicalize().unwrap_or(dir);
     let cap = max_files.unwrap_or(20_000);
@@ -318,7 +349,13 @@ fn mime_for(ext: &str) -> Option<&'static str> {
 /// Read a (small) image file as a `data:` URL for the preview pane. Errors if
 /// the extension isn't a known image type or the file is over the size cap.
 #[tauri::command]
-pub fn read_image(path: String) -> Result<String, String> {
+pub async fn read_image(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || read_image_blocking(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_image_blocking(path: String) -> Result<String, String> {
     let p = PathBuf::from(&path);
     let ext = ext_of(&p, false);
     let mime = mime_for(&ext).ok_or_else(|| "not an image".to_string())?;
@@ -332,7 +369,13 @@ pub fn read_image(path: String) -> Result<String, String> {
 
 /// Write UTF-8 text to a user-selected path, creating missing parent directories.
 #[tauri::command]
-pub fn save_text(path: String, contents: String) -> Result<(), String> {
+pub async fn save_text(path: String, contents: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || save_text_blocking(path, contents))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn save_text_blocking(path: String, contents: String) -> Result<(), String> {
     let resolved = resolve(Some(path));
     if let Some(parent) = resolved.parent() {
         if !parent.as_os_str().is_empty() {
@@ -346,7 +389,13 @@ pub fn save_text(path: String, contents: String) -> Result<(), String> {
 /// Delete one user-selected file. Directories are rejected so a Paint recent
 /// entry can never remove a tree by mistake.
 #[tauri::command]
-pub fn delete_file(path: String) -> Result<(), String> {
+pub async fn delete_file(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || delete_file_blocking(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn delete_file_blocking(path: String) -> Result<(), String> {
     let resolved = resolve(Some(path));
     let meta = std::fs::metadata(&resolved)
         .map_err(|e| format!("{}: {e}", resolved.display()))?;
@@ -360,7 +409,13 @@ pub fn delete_file(path: String) -> Result<(), String> {
 /// (any NUL in the first 8 KB) and non-UTF-8 so the webview never gets a blob
 /// it can't render.
 #[tauri::command]
-pub fn read_text(path: String) -> Result<String, String> {
+pub async fn read_text(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || read_text_blocking(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_text_blocking(path: String) -> Result<String, String> {
     let p = resolve(Some(path));
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     if meta.len() > 2 * 1024 * 1024 {

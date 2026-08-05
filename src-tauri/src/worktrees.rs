@@ -61,7 +61,13 @@ fn basename(p: &str) -> String {
 /// Spaces convention). Returns the new worktree path; the caller rescans.
 // api(http POST /api/v1/worktrees): add_worktree
 #[tauri::command]
-pub fn add_worktree(repo: String, branch: String) -> Result<String, String> {
+pub async fn add_worktree(repo: String, branch: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || add_worktree_blocking(repo, branch))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn add_worktree_blocking(repo: String, branch: String) -> Result<String, String> {
     let repo_path = Path::new(&repo);
     git(repo_path, &["rev-parse", "--is-inside-work-tree"])
         .map_err(|_| format!("{repo} is not a git repository"))?;
@@ -85,7 +91,13 @@ pub fn add_worktree(repo: String, branch: String) -> Result<String, String> {
 /// frontend renders it with shiki's `diff` grammar. Read-only.
 // api(http GET /api/v1/worktrees/diff): git_diff
 #[tauri::command]
-pub fn git_diff(path: String) -> Result<String, String> {
+pub async fn git_diff(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || git_diff_blocking(path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn git_diff_blocking(path: String) -> Result<String, String> {
     let p = Path::new(&path);
     git(p, &["rev-parse", "--is-inside-work-tree"])
         .map_err(|_| format!("{path} is not a git repository"))?;
@@ -112,7 +124,13 @@ pub fn git_diff(path: String) -> Result<String, String> {
 /// The main worktree cannot be removed. Caller rescans on success.
 // api(http DELETE /api/v1/worktrees): remove_worktree
 #[tauri::command]
-pub fn remove_worktree(repo: String, worktree: String, force: bool) -> Result<(), String> {
+pub async fn remove_worktree(repo: String, worktree: String, force: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remove_worktree_blocking(repo, worktree, force))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn remove_worktree_blocking(repo: String, worktree: String, force: bool) -> Result<(), String> {
     let repo_path = Path::new(&repo);
     if std::fs::canonicalize(&repo).ok() == std::fs::canonicalize(&worktree).ok() {
         return Err("cannot remove the main worktree".into());
@@ -165,7 +183,13 @@ fn walk(dir: &Path, depth: usize, max: usize, out: &mut Vec<PathBuf>) {
 /// Scan `roots` (default ["~/projects"]) for git worktrees, one row each.
 // api(http GET /api/v1/worktrees): scan_worktrees
 #[tauri::command]
-pub fn scan_worktrees(roots: Vec<String>, max_depth: Option<usize>) -> Vec<WorktreeRow> {
+pub async fn scan_worktrees(roots: Vec<String>, max_depth: Option<usize>) -> Vec<WorktreeRow> {
+    tauri::async_runtime::spawn_blocking(move || scan_worktrees_blocking(roots, max_depth))
+        .await
+        .unwrap_or_default()
+}
+
+fn scan_worktrees_blocking(roots: Vec<String>, max_depth: Option<usize>) -> Vec<WorktreeRow> {
     let max = max_depth.unwrap_or(4);
     let roots = if roots.is_empty() {
         vec!["~/projects".to_string()]
@@ -261,7 +285,13 @@ fn worktree_rows_for_clone(probe: &Path) -> Vec<WorktreeRow> {
 /// calls this on demand for any session cwd that didn't match a scanned row.
 /// None when `path` isn't inside a git work tree.
 #[tauri::command]
-pub fn worktree_at(path: String) -> Option<WorktreeRow> {
+pub async fn worktree_at(path: String) -> Option<WorktreeRow> {
+    tauri::async_runtime::spawn_blocking(move || worktree_at_blocking(path))
+        .await
+        .unwrap_or_default()
+}
+
+fn worktree_at_blocking(path: String) -> Option<WorktreeRow> {
     let p = Path::new(&path);
     git(p, &["rev-parse", "--is-inside-work-tree"]).ok()?;
     let canon_target = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());

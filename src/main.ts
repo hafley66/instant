@@ -309,7 +309,10 @@ async function main() {
   // handler) so ctxItemsFor can map it to a terminal buffer row for turn-identify.
   document.addEventListener("contextmenu", (e) => setLastCtxY(e.clientY), true);
   wireContextMenu(ctxItemsFor);
-  await refreshSessions();
+  // Harness discovery walks the on-disk Claude/Codex session stores. Large
+  // stores can take seconds to scan, so never hold boot, PTY listeners, summon,
+  // or Escape-to-hide behind it. The sessions panel updates when this settles.
+  void refreshSessions();
   // Scan worktrees in the background so session rows can show which worktrees
   // they've touched; re-relate sessions once the scan lands.
   scanWorktrees().then(refreshSessions).catch(() => {});

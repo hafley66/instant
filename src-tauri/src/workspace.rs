@@ -86,9 +86,9 @@ pub fn list_workspaces(store: State<Workspaces>) -> Vec<Workspace> {
 
 /// Create a worktree+branch off the repo's HEAD and register it.
 #[tauri::command]
-pub fn create_workspace(
+pub async fn create_workspace(
     app: AppHandle,
-    store: State<Workspaces>,
+    store: State<'_, Workspaces>,
     repo: String,
     branch: String,
     agent: String,
@@ -134,9 +134,9 @@ pub fn create_workspace(
 
 /// Forget a Space; optionally remove its worktree from disk.
 #[tauri::command]
-pub fn remove_workspace(
+pub async fn remove_workspace(
     app: AppHandle,
-    store: State<Workspaces>,
+    store: State<'_, Workspaces>,
     id: String,
     delete_tree: bool,
 ) -> Result<(), String> {

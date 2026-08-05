@@ -575,8 +575,8 @@ fn collect_network_diagnostics(db: &ActivityDb) -> Result<String, String> {
 /// Most-recent events first, capped at `limit` (default 2000), optionally
 /// filtered to one source.
 #[tauri::command]
-pub fn activity_events(
-    db: State<ActivityDb>,
+pub async fn activity_events(
+    db: State<'_, ActivityDb>,
     limit: Option<i64>,
     source: Option<String>,
 ) -> Result<Vec<Event>, String> {
@@ -625,7 +625,7 @@ pub fn activity_events(
 }
 
 #[tauri::command]
-pub fn activity_clear(db: State<ActivityDb>) -> Result<(), String> {
+pub async fn activity_clear(db: State<'_, ActivityDb>) -> Result<(), String> {
     // Drop screenshot files first, then the rows.
     {
         let conn = db.0.lock().unwrap();
@@ -645,9 +645,9 @@ pub fn activity_clear(db: State<ActivityDb>) -> Result<(), String> {
 /// Log a non-capture row (the Files panel logs `open` rows here so file
 /// references join the unified history).
 #[tauri::command]
-pub fn activity_log(
-    db: State<ActivityDb>,
-    cfg: State<crate::config::ConfigState>,
+pub async fn activity_log(
+    db: State<'_, ActivityDb>,
+    cfg: State<'_, crate::config::ConfigState>,
     app: AppHandle,
     source: String,
     kind: String,
@@ -677,7 +677,7 @@ pub fn rules_get(state: State<RulesState>) -> Vec<Rule> {
 /// Replace the rule set, persist to rules.json, return the stored list. The
 /// extension picks the change up on its next /config tick (<= 1 min).
 #[tauri::command]
-pub fn rules_set(state: State<RulesState>, rules: Vec<Rule>) -> Result<Vec<Rule>, String> {
+pub async fn rules_set(state: State<'_, RulesState>, rules: Vec<Rule>) -> Result<Vec<Rule>, String> {
     write_rules(&state.path, &rules).map_err(|e| e.to_string())?;
     *state.rules.lock().unwrap() = rules.clone();
     state.revision.fetch_add(1, Ordering::Relaxed);
@@ -685,7 +685,7 @@ pub fn rules_set(state: State<RulesState>, rules: Vec<Rule>) -> Result<Vec<Rule>
 }
 
 #[tauri::command]
-pub fn activity_rule_matches(state: State<ActivityDb>, limit: Option<i64>) -> Result<Vec<RuleMatch>, String> {
+pub async fn activity_rule_matches(state: State<'_, ActivityDb>, limit: Option<i64>) -> Result<Vec<RuleMatch>, String> {
     let cap = limit.unwrap_or(100).clamp(1, 500);
     let conn = state.0.lock().unwrap();
     let mut stmt = conn

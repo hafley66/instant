@@ -2,7 +2,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,6 +82,47 @@ fn json(line: &str) -> Option<Value> {
     serde_json::from_str(line).ok()
 }
 
+// Session discovery is called when the harness strip mounts. Rollout files can
+// be hundreds of megabytes, while their identity lives at the head and their
+// latest usage lives at the tail. Keep discovery bounded instead of reading
+// every transcript into memory before the first frame can finish booting.
+const SESSION_HEAD_LINES: usize = 128;
+const SESSION_TAIL_BYTES: u64 = 256 * 1024;
+
+fn head_values(path: &Path) -> Vec<Value> {
+    let Ok(file) = fs::File::open(path) else {
+        return vec![];
+    };
+    BufReader::new(file)
+        .lines()
+        .take(SESSION_HEAD_LINES)
+        .map_while(Result::ok)
+        .filter_map(|line| json(&line))
+        .collect()
+}
+
+fn tail_values(path: &Path) -> Vec<Value> {
+    let Ok(mut file) = fs::File::open(path) else {
+        return vec![];
+    };
+    let Ok(len) = file.seek(SeekFrom::End(0)) else {
+        return vec![];
+    };
+    let start = len.saturating_sub(SESSION_TAIL_BYTES);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return vec![];
+    }
+    let mut text = String::new();
+    if file.read_to_string(&mut text).is_err() {
+        return vec![];
+    }
+    let mut lines = text.lines();
+    if start > 0 {
+        lines.next(); // the bounded read may begin in the middle of a JSON line
+    }
+    lines.filter_map(json).collect()
+}
+
 fn usage(value: &Value, depth: usize) -> Option<&Value> {
     if depth > 6 {
         return None;
@@ -96,13 +137,12 @@ fn usage(value: &Value, depth: usize) -> Option<&Value> {
 pub struct ClaudeStore;
 fn claude_session(path: &Path, parent_id: Option<String>) -> Option<HarnessSession> {
     let id = path.file_stem()?.to_str()?.to_string();
-    let file = fs::File::open(path).ok()?;
     let mut cwd = String::new();
     let mut created_at_ms = 0;
     let mut input_tokens = None;
     let mut sidechain = false;
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let Some(value) = json(&line) else { continue };
+    let head = head_values(path);
+    for value in &head {
         sidechain |= value.get("isSidechain").and_then(Value::as_bool) == Some(true);
         if cwd.is_empty() {
             cwd = value
@@ -118,17 +158,19 @@ fn claude_session(path: &Path, parent_id: Option<String>) -> Option<HarnessSessi
                 .map(crate::ledger::iso_to_ms)
                 .unwrap_or(0);
         }
-        if let Some(u) = usage(&value, 0) {
-            input_tokens = Some(
-                u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0)
-                    + u.get("cache_read_input_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0)
-                    + u.get("cache_creation_input_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
-            );
-        }
+    }
+    for value in tail_values(path).iter().rev().chain(head.iter().rev()) {
+        let Some(u) = usage(value, 0) else { continue };
+        input_tokens = Some(
+            u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0)
+                + u.get("cache_read_input_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                + u.get("cache_creation_input_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+        );
+        break;
     }
     if sidechain && parent_id.is_none() {
         return None;
@@ -289,11 +331,8 @@ impl HarnessStore for CodexStore {
         collect_jsonl(&home.join(".codex/sessions"), &mut files);
         let mut out = Vec::new();
         for path in files {
-            let Ok(file) = fs::File::open(&path) else {
-                continue;
-            };
-            let lines: Vec<String> = BufReader::new(file).lines().map_while(Result::ok).collect();
-            let Some(first) = lines.first().and_then(|line| json(line)) else {
+            let head = head_values(&path);
+            let Some(first) = head.first() else {
                 continue;
             };
             if first.get("type").and_then(Value::as_str) != Some("session_meta") {
@@ -309,7 +348,7 @@ impl HarnessStore for CodexStore {
             };
             let mut model = None;
             let mut input_tokens = None;
-            for value in lines.iter().filter_map(|line| json(line)) {
+            for value in head.iter().chain(tail_values(&path).iter()) {
                 if value.get("type").and_then(Value::as_str) == Some("turn_context") {
                     model = value
                         .pointer("/payload/model")

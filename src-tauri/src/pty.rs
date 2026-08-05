@@ -305,9 +305,9 @@ pub fn reap_orphan_graphics() {
 /// pty reports a real pixel size to graphics apps.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn open_session(
+pub async fn open_session(
     app: AppHandle,
-    store: State<PtyStore>,
+    store: State<'_, PtyStore>,
     id: String,
     name: String,
     command: Option<String>,
@@ -539,7 +539,7 @@ pub fn close_pty(store: State<PtyStore>, id: String) {
 /// (claude/opencode do), so this forces tmux copy-mode and scrolls there. `-e`
 /// makes copy-mode auto-exit when scrolled back to the bottom (live view).
 #[tauri::command]
-pub fn scroll_session(name: String, up: bool, lines: u32) {
+pub async fn scroll_session(name: String, up: bool, lines: u32) {
     if direct_pty_mode() { return; }
     let n = lines.max(1).to_string();
     let dir = if up { "scroll-up" } else { "scroll-down" };
@@ -557,7 +557,7 @@ pub fn scroll_session(name: String, up: bool, lines: u32) {
 
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
 #[tauri::command]
-pub fn kill_session(store: State<PtyStore>, name: String) -> Result<(), String> {
+pub async fn kill_session(store: State<'_, PtyStore>, name: String) -> Result<(), String> {
     if direct_pty_mode() {
         let mut map = store.0.lock().unwrap();
         let id = map.iter().find(|(_, h)| h.name == name).map(|(id, _)| id.clone());

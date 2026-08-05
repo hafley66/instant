@@ -471,7 +471,13 @@ fn resolve_path(raw: &str, cwd: &str) -> Result<std::path::PathBuf, String> {
 /// summon window so the opened app comes forward. Returns "url" | "path" for the
 /// front to log, or Err when nothing resolved (the caller ignores it silently).
 #[tauri::command]
-fn open_target(app: AppHandle, target: String, cwd: String) -> Result<String, String> {
+async fn open_target(app: AppHandle, target: String, cwd: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || open_target_blocking(app, target, cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn open_target_blocking(app: AppHandle, target: String, cwd: String) -> Result<String, String> {
     let t = target.trim();
     if t.is_empty() {
         return Err("empty".into());
@@ -516,7 +522,13 @@ fn open_target(app: AppHandle, target: String, cwd: String) -> Result<String, St
 /// Returns stdout (capped); the caller opens a panel only when it's non-empty, so
 /// launchers (open/code) just launch and producers (rg) show results.
 #[tauri::command]
-fn run_click(command: String, cwd: String) -> Result<String, String> {
+async fn run_click(command: String, cwd: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_click_blocking(command, cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn run_click_blocking(command: String, cwd: String) -> Result<String, String> {
     let dir = match cwd.trim() {
         "" => std::env::var("HOME").unwrap_or_else(|_| ".".into()),
         c => c.to_string(),
@@ -560,7 +572,11 @@ fn log_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 /// can reach, so errors/events are mirrored here. Best-effort: logging never
 /// throws back into the app. Caps the file so it can't grow unbounded.
 #[tauri::command]
-fn log_append(app: AppHandle, line: String) {
+async fn log_append(app: AppHandle, line: String) {
+    let _ = tauri::async_runtime::spawn_blocking(move || log_append_blocking(app, line)).await;
+}
+
+fn log_append_blocking(app: AppHandle, line: String) {
     let Ok(path) = log_file_path(&app) else { return };
     // Trim from the front if it crosses the cap (cheap: rewrite tail on overflow).
     const CAP: u64 = 2_000_000;
@@ -585,7 +601,13 @@ fn log_path(app: AppHandle) -> Result<String, String> {
 
 /// Reveal the log file in Finder. Best-effort.
 #[tauri::command]
-fn log_reveal(app: AppHandle) -> Result<(), String> {
+async fn log_reveal(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || log_reveal_blocking(app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn log_reveal_blocking(app: AppHandle) -> Result<(), String> {
     let p = log_file_path(&app)?;
     std::process::Command::new("/usr/bin/open")
         .arg("-R")
@@ -600,7 +622,13 @@ fn log_reveal(app: AppHandle) -> Result<(), String> {
 /// Esc no file is written, which we report as an error so the front skips it.
 /// Needs Screen Recording permission for the app, granted on first use.
 #[tauri::command]
-fn screenshot() -> Result<String, String> {
+async fn screenshot() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(screenshot_blocking)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn screenshot_blocking() -> Result<String, String> {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?

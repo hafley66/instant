@@ -186,8 +186,8 @@ pub fn config_get(state: State<ConfigState>) -> ConfigView {
 /// Replace the rule lists, persist to config.json, return the fresh view.
 // api(http PUT /api/v1/config): config_set
 #[tauri::command]
-pub fn config_set(
-    state: State<ConfigState>,
+pub async fn config_set(
+    state: State<'_, ConfigState>,
     exclude_sites: Vec<String>,
     exclude_files: Vec<String>,
     exclude_apps: Vec<String>,
@@ -209,17 +209,17 @@ pub fn config_set(
 /// Re-read config.json from disk (for external edits).
 // api(http POST /api/v1/config/reload): config_reload
 #[tauri::command]
-pub fn config_reload(state: State<ConfigState>) -> ConfigView {
+pub async fn config_reload(state: State<'_, ConfigState>) -> Result<ConfigView, String> {
     let (cfg, status) = read_or_default(&state.path);
     *state.config.lock().unwrap() = cfg;
     *state.status.lock().unwrap() = status;
-    view(&state)
+    Ok(view(&state))
 }
 
 /// Open config.json in the default editor.
 // api(shell): config_open
 #[tauri::command]
-pub fn config_open(state: State<ConfigState>) -> Result<(), String> {
+pub async fn config_open(state: State<'_, ConfigState>) -> Result<(), String> {
     if !state.path.exists() {
         let cfg = state.config.lock().unwrap().clone();
         write_file(&state.path, &cfg).map_err(|e| e.to_string())?;

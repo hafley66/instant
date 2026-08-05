@@ -94,9 +94,9 @@ fn list(conn: &rusqlite::Connection) -> Vec<Fav> {
 /// Snapshot a ledger message as a favorite (upsert on its identity). Emits
 /// "favorites-changed" with the fresh list so any open panel re-renders.
 #[tauri::command]
-pub fn fav_add(
+pub async fn fav_add(
     app: AppHandle,
-    store: State<Favorites>,
+    store: State<'_, Favorites>,
     msg: AiMessage,
     cwd: String,
 ) -> Result<Vec<Fav>, String> {
@@ -128,9 +128,9 @@ pub fn fav_add(
 }
 
 #[tauri::command]
-pub fn fav_remove(
+pub async fn fav_remove(
     app: AppHandle,
-    store: State<Favorites>,
+    store: State<'_, Favorites>,
     editor: String,
     session_id: String,
     message_id: String,
@@ -148,7 +148,7 @@ pub fn fav_remove(
 }
 
 #[tauri::command]
-pub fn fav_list(store: State<Favorites>) -> Result<Vec<Fav>, String> {
+pub async fn fav_list(store: State<'_, Favorites>) -> Result<Vec<Fav>, String> {
     let guard = store.0.lock().unwrap();
     let conn = guard.as_ref().ok_or("favorites db not open")?;
     Ok(list(conn))

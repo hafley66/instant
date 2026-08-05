@@ -39,7 +39,7 @@ fn is_on_path(name: &str) -> bool {
 /// short-lived child process) rather than trusting the cached `magick_bin()`
 /// OnceLock, so a mid-session `brew install` is picked up without a restart.
 #[tauri::command]
-pub fn magick_available() -> bool {
+pub async fn magick_available() -> bool {
     is_on_path("magick") || is_on_path("convert")
 }
 
@@ -150,7 +150,13 @@ fn command_display(args: &[String]) -> String {
 /// complete arguments including input/output paths. We do not validate paths
 /// beyond making sure the binary exists.
 #[tauri::command]
-pub fn magick_run(args: Vec<String>) -> Result<MagickResult, String> {
+pub async fn magick_run(args: Vec<String>) -> Result<MagickResult, String> {
+    tauri::async_runtime::spawn_blocking(move || magick_run_blocking(args))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn magick_run_blocking(args: Vec<String>) -> Result<MagickResult, String> {
     // Verify ImageMagick is available.
     let bin = magick_bin();
     let probe = std::process::Command::new(bin)
@@ -181,7 +187,13 @@ pub fn magick_run(args: Vec<String>) -> Result<MagickResult, String> {
 /// We resize to fit inside 128x128, pad to square with transparency, and
 /// fall back to reducing colors/quality if the file is still too large.
 #[tauri::command]
-pub fn make_slack_emoji(input: String, output: String) -> Result<MagickResult, String> {
+pub async fn make_slack_emoji(input: String, output: String) -> Result<MagickResult, String> {
+    tauri::async_runtime::spawn_blocking(move || make_slack_emoji_blocking(input, output))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn make_slack_emoji_blocking(input: String, output: String) -> Result<MagickResult, String> {
     let input = PathBuf::from(input);
     let output = PathBuf::from(output);
     if !input.exists() {
@@ -261,7 +273,7 @@ pub fn make_slack_emoji(input: String, output: String) -> Result<MagickResult, S
 }
 
 fn run_magick(args: &[String]) -> Result<MagickResult, String> {
-    magick_run(args.to_vec())
+    magick_run_blocking(args.to_vec())
 }
 
 fn file_size(path: &Path) -> Result<u64, String> {
@@ -275,7 +287,13 @@ fn file_size(path: &Path) -> Result<u64, String> {
 /// is otherwise not expanded by the OS) and creates any missing parent
 /// directories, so saving into a folder that doesn't exist yet just works.
 #[tauri::command]
-pub fn save_meme(path: String, data_url: String) -> Result<(), String> {
+pub async fn save_meme(path: String, data_url: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || save_meme_blocking(path, data_url))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn save_meme_blocking(path: String, data_url: String) -> Result<(), String> {
     let prefix = "data:image/png;base64,";
     let b64 = data_url
         .strip_prefix(prefix)
@@ -307,7 +325,13 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 /// `writeText` still works from JS, but image bytes have to go through a
 /// native command instead, hence this decode-and-set-clipboard round trip.
 #[tauri::command]
-pub fn copy_meme_image(data_url: String) -> Result<(), String> {
+pub async fn copy_meme_image(data_url: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || copy_meme_image_blocking(data_url))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn copy_meme_image_blocking(data_url: String) -> Result<(), String> {
     let prefix = "data:image/png;base64,";
     let b64 = data_url
         .strip_prefix(prefix)
