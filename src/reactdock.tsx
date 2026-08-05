@@ -31,6 +31,7 @@ import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 import { SessionSidebar } from "./sessionSidebar";
 import { InTabStrip } from "./plugins/harnessTrace/InTabStrip";
+import { restoredTerminalSessionIds } from "./0_dockRestore";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -157,6 +158,7 @@ export const mdPanelId = (path: string) => MD + encodeURIComponent(path);
 // Both terminals and previews adopt a content node owned by JS (not in the dock
 // JSON), keyed by full panel id.
 const dynamicNodes = new Map<string, HTMLElement>();
+const terminalSlots = new Map<string, HTMLDivElement>();
 
 // A restored layout carries only the husk of a preview tab: the content node
 // lived in JS, not in the dock JSON. preview.ts registers a rehydrator that
@@ -220,9 +222,20 @@ function sbDefault() {
 }
 
 function TerminalPanel(props: IDockviewPanelProps) {
-  const slotRef = useRef<HTMLDivElement>(null);
   const sid = termSid(props.params.panelId as string);
   const id = props.params.panelId as string;
+  const setSlot = useCallback(
+    (slot: HTMLDivElement | null) => {
+      if (!slot) {
+        terminalSlots.delete(id);
+        return;
+      }
+      terminalSlots.set(id, slot);
+      const node = dynamicNodes.get(id);
+      if (node) slot.appendChild(node);
+    },
+    [id],
+  );
   // Per-terminal right "session sidebar" (file explorer now; touched files +
   // agent turns layer in later). Open + width persist in the store keyed by
   // session id, so each panel remembers its own. sb is the reactive snapshot;
@@ -239,15 +252,13 @@ function TerminalPanel(props: IDockviewPanelProps) {
   const sizes = sb.sizes ?? ([62, 38] as [number, number]);
 
   useEffect(() => {
-    const node = dynamicNodes.get(id);
-    if (node && slotRef.current) slotRef.current.appendChild(node);
-
     const sub = props.api.onDidDimensionsChange(() => hooks.onTermLayout(sid));
     hooks.onTermLayout(sid);
 
     return () => {
       sub.dispose();
       const pool = document.getElementById("panel-pool");
+      const node = dynamicNodes.get(id);
       if (pool && node) pool.appendChild(node);
     };
   }, [id]);
@@ -275,7 +286,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
   return (
     <div className="dv-host dv-host-term term-panel" data-sidebar-placement={placement} style={{ display: "flex", flexDirection: "column" }}>
       <div className="term-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
-        <div className="term-slot" ref={slotRef} />
+        <div className="term-slot" ref={setSlot} />
         {open && (
           <SessionSidebar
             sid={sid}
@@ -343,18 +354,19 @@ function buildDefault() {
   });
 }
 
-// Drop the husks a restored layout can't bring back to life. Terminals always
-// go (a dead session can't be re-attached). A preview stays if the rehydrator
-// can rebuild it from its key — a file tab re-reads the file — and goes if it
-// can't. Instance panels (md, paint) stay when they declare `restorable`, since
-// their params carry everything the component needs to reload itself.
+// Drop the husks a restored layout can't bring back to life. Terminal panels
+// listed in openTabs stay in place so their group, split, and tab index survive
+// until the recreated xterm node attaches. A preview stays if the rehydrator
+// can rebuild it from its key. Instance panels stay when they declare
+// `restorable`, since their params carry everything needed to reload them.
 function stripDynamicHusks() {
   if (!api) return;
+  const openTerminalSessions = restoredTerminalSessionIds(store.get().openTabs);
   suppressClosedPanelCapture = true;
   try {
     for (const p of [...api.panels]) {
       if (isTerm(p.id)) {
-        api.removePanel(p);
+        if (!openTerminalSessions.has(termSid(p.id))) api.removePanel(p);
       } else if (isPreview(p.id)) {
         if (!previewRehydration?.canRestore(p.id.slice(PREVIEW.length))) api.removePanel(p);
       } else {
@@ -457,6 +469,7 @@ export function addTermPanel(sid: string, title: string, el: HTMLElement) {
   dynamicNodes.set(pid, el);
   const existing = api.getPanel(pid);
   if (existing) {
+    terminalSlots.get(pid)?.appendChild(el);
     existing.api.setActive();
     return;
   }

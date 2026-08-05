@@ -8,7 +8,7 @@ import { invoke } from "./generated/native";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 
-export const sessionId = (name: string) => `s:${name}`;
+export { sessionId } from "./0_ids";
 export const activeId = () => store.get().active;
 export const setActive = (id: string | null) => store.set({ active: id });
 

@@ -7,6 +7,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { store } from "./state";
 import { flashStatus } from "./core";
+import { overlaySizeTransition } from "./0_overlaySize";
 
 // ---- webview zoom (chrome: rail + toolbars + non-terminal panels) ----
 const ZOOM_MIN = 0.5;
@@ -40,11 +41,12 @@ export function applyOverlay() {
   app?.classList.toggle("overlay-faded", s.overlayFade);
   app?.classList.toggle("mini", s.miniMode);
   const win = getCurrentWindow();
-  // Resize only on an actual mini flip, not every store change.
-  if (overlayMiniApplied !== s.miniMode) {
-    overlayMiniApplied = s.miniMode;
-    win.setSize(s.miniMode ? OVERLAY_MINI : OVERLAY_NORMAL).catch(() => {});
-  }
+  // A normal-mode boot keeps the native restored size. Persisted mini mode and
+  // later user toggles still apply their authored sizes.
+  const sizeTransition = overlaySizeTransition(overlayMiniApplied, s.miniMode);
+  overlayMiniApplied = s.miniMode;
+  if (sizeTransition)
+    win.setSize(sizeTransition === "mini" ? OVERLAY_MINI : OVERLAY_NORMAL).catch(() => {});
   // Ride along over the target's desktop across Spaces while an overlay is active.
   win.setVisibleOnAllWorkspaces(s.overlayMode !== "off").catch(() => {});
   // Follow: mirror the target's focus (self-focus is filtered from frontmostApp).

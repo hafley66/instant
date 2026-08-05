@@ -680,6 +680,15 @@ pub fn run() {
         .manage(fs_watch::FsWatchClaims::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .with_filter(move |label| !skip_shared_globals && label == "main")
+                .build(),
+        )
+        .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &summon && event.state() == ShortcutState::Pressed {
