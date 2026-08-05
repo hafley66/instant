@@ -130,15 +130,6 @@ pub fn cass_swarm_status(cwd: String) -> Result<Value, String> {
         .map_err(|error| format!("cass swarm status returned invalid JSON: {error}"))
 }
 
-fn claude_dir(cwd: &str) -> Option<PathBuf> {
-    Some(
-        home()?
-            .join(".claude")
-            .join("projects")
-            .join(cwd.replace('/', "-")),
-    )
-}
-
 fn codex_session_path(session_id: &str) -> Option<PathBuf> {
     fn walk(dir: &PathBuf, id: &str) -> Option<PathBuf> {
         for entry in fs::read_dir(dir).ok()?.flatten() {
@@ -163,7 +154,7 @@ fn kimi_session_path(session_id: &str) -> Option<PathBuf> {
     None
 }
 
-fn read_codex(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
+pub(crate) fn read_codex(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
     let Some(path) = codex_session_path(session_id) else { return Vec::new() };
     let Ok(file) = fs::File::open(&path) else { return Vec::new() };
     let mut out = Vec::new();
@@ -223,7 +214,7 @@ fn codex_value_text(value: &Value) -> String {
     }
 }
 
-fn read_kimi(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
+pub(crate) fn read_kimi(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
     let Some(path) = kimi_session_path(session_id) else { return Vec::new() };
     let Ok(file) = fs::File::open(&path) else { return Vec::new() };
     let mut out = Vec::new();
@@ -362,7 +353,7 @@ fn claude_text(content: &Value) -> Extracted {
     }
 }
 
-fn iso_to_ms(s: &str) -> u64 {
+pub(crate) fn iso_to_ms(s: &str) -> u64 {
     // Avoid a chrono dependency: ledger timestamps are only used for display and
     // ordering (seq is the real order key), so a lenient parse is fine. Fall back
     // to 0 when absent.
@@ -495,7 +486,7 @@ fn classify_user_line(v: &Value, content: &Value) -> (String, Option<String>) {
 // (the watcher passes the last line index). Only user/assistant rows become
 // messages; system/mode/snapshot lines are skipped but still advance `seq` so
 // the line index stays an exact file offset.
-fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
+pub(crate) fn read_claude(path: &PathBuf, session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
     let Ok(file) = fs::File::open(path) else {
         return Vec::new();
     };
@@ -632,7 +623,7 @@ fn opencode_message_text(conn: &rusqlite::Connection, message_id: &str) -> Extra
     }
 }
 
-fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
+pub(crate) fn read_opencode(session_id: &str, after_seq: Option<u64>) -> Vec<AiMessage> {
     let Some(conn) = open_opencode() else {
         return Vec::new();
     };
@@ -688,16 +679,8 @@ pub fn read_ai_messages(
     cwd: String,
     after_seq: Option<u64>,
 ) -> Result<Vec<AiMessage>, String> {
-    match Editor::parse(&editor).ok_or("unknown editor")? {
-        Editor::Claude => {
-            let dir = claude_dir(&cwd).ok_or("no HOME")?;
-            let path = dir.join(format!("{session_id}.jsonl"));
-            Ok(read_claude(&path, &session_id, after_seq))
-        }
-        Editor::Opencode => Ok(read_opencode(&session_id, after_seq)),
-        Editor::Codex => Ok(read_codex(&session_id, after_seq)),
-        Editor::Kimi => Ok(read_kimi(&session_id, after_seq)),
-    }
+    let id = crate::harness_store::HarnessId::parse(&editor).ok_or("unknown editor")?;
+    Ok(crate::harness_store::messages(id, &session_id, &cwd, after_seq))
 }
 
 /// The newest turn in a session (drives "favorite current turn" + the watcher).
@@ -715,92 +698,29 @@ pub fn latest_ai_message(
 /// browse list; reading the turns is a separate call.
 #[tauri::command]
 pub fn list_ai_sessions(editor: String, cwd: Option<String>) -> Result<Vec<AiSession>, String> {
-    match Editor::parse(&editor).ok_or("unknown editor")? {
-        Editor::Claude => Ok(list_claude_sessions(cwd)),
-        Editor::Opencode => Ok(list_opencode_sessions(cwd)),
-        Editor::Codex => Ok(Vec::new()),
-        Editor::Kimi => Ok(Vec::new()),
-    }
-}
-
-fn list_claude_sessions(cwd: Option<String>) -> Vec<AiSession> {
-    let Some(cwd) = cwd else { return Vec::new() }; // claude is keyed by cwd; no global list
-    let Some(dir) = claude_dir(&cwd) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let updated = entry
-            .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        // Title = first user turn's preview (cheap: read until the first one).
-        let title = read_claude(&path, id, None)
-            .into_iter()
-            .find(|m| m.role == "user")
-            .map(|m| m.preview)
-            .unwrap_or_default();
-        out.push(AiSession {
-            editor: Editor::Claude,
-            id: id.to_string(),
-            cwd: cwd.clone(),
-            title,
-            updated,
-            path: Some(path.to_string_lossy().to_string()),
-        });
-    }
-    out.sort_by(|a, b| b.updated.cmp(&a.updated));
-    out
-}
-
-fn list_opencode_sessions(cwd: Option<String>) -> Vec<AiSession> {
-    let Some(conn) = open_opencode() else {
-        return Vec::new();
-    };
-    let (sql, params): (&str, Vec<String>) = match &cwd {
-        Some(c) => (
-            "SELECT id, directory, title, time_updated FROM session \
-             WHERE directory = ?1 AND time_archived IS NULL ORDER BY time_updated DESC",
-            vec![c.clone()],
-        ),
-        None => (
-            "SELECT id, directory, title, time_updated FROM session \
-             WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT 200",
-            vec![],
-        ),
-    };
-    let Ok(mut stmt) = conn.prepare(sql) else {
-        return Vec::new();
-    };
-    let map = |row: &rusqlite::Row| {
-        Ok(AiSession {
-            editor: Editor::Opencode,
-            id: row.get::<_, String>(0)?,
-            cwd: row.get::<_, String>(1)?,
-            title: row.get::<_, String>(2)?,
-            updated: row.get::<_, i64>(3)? as u64,
-            path: None,
+    let editor = Editor::parse(&editor).ok_or("unknown editor")?;
+    let harness = crate::harness_store::HarnessId::parse(editor.tag()).ok_or("unknown editor")?;
+    let Some(home) = home() else { return Ok(Vec::new()) };
+    Ok(crate::harness_store::sessions(&home, harness, cwd.as_deref())
+        .into_iter()
+        .map(|session| {
+            let title = session.title.clone().unwrap_or_else(|| {
+                crate::harness_store::messages(harness, &session.id, &session.cwd, None)
+                    .into_iter()
+                    .find(|message| message.role == "user")
+                    .map(|message| message.preview)
+                    .unwrap_or_default()
+            });
+            AiSession {
+                editor,
+                id: session.id,
+                cwd: session.cwd,
+                title,
+                updated: session.last_activity_ms,
+                path: session.source_path,
+            }
         })
-    };
-    let rows = if params.is_empty() {
-        stmt.query_map([], map)
-    } else {
-        stmt.query_map([&params[0]], map)
-    };
-    rows.map(|r| r.flatten().collect()).unwrap_or_default()
+        .collect())
 }
 
 // Re-export the editor tag for the favorites module's identity strings.
@@ -832,7 +752,7 @@ mod tests {
 
     #[test]
     fn title_lookup_skips_leading_tool_and_meta_rows() {
-        // Mirrors list_claude_sessions' `.find(|m| m.role == "user")`: a
+        // Mirrors list_ai_sessions' `.find(|m| m.role == "user")`: a
         // session whose first lines are tool output / injected content must
         // still resolve its title to the first real typed message.
         let path = write_temp(&[

@@ -6,8 +6,11 @@ mod favorites;
 mod fs;
 mod fs_watch;
 mod harness;
+#[path = "0_harness_store.rs"]
+pub mod harness_store;
 mod kitty;
 mod ledger;
+pub use ledger::AiMessage;
 mod meme;
 mod pty;
 // sprefa integration disabled for now (2026-07-18): commands kept compiling

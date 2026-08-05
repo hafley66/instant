@@ -35,6 +35,7 @@ export function D2Diagram({ code, dark }: { code: string; dark: boolean }) {
         role="button"
         tabIndex={0}
         className="mdview-d2"
+        data-diagram-theme={dark ? "dark" : "light"}
         title="Open diagram"
         onClick={() => setOpen(true)}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
@@ -45,7 +46,7 @@ export function D2Diagram({ code, dark }: { code: string; dark: boolean }) {
         }}
         dangerouslySetInnerHTML={{ __html: diagramSvgMarkup(svg) }}
       />
-      {open && <DiagramLightbox svg={svg} label="d2 diagram" language="d2" onClose={() => setOpen(false)} />}
+      {open && <DiagramLightbox svg={svg} label="d2 diagram" language="d2" dark={dark} onClose={() => setOpen(false)} />}
     </>
   );
 }

@@ -6,12 +6,9 @@
 //   - opencode: ~/.local/share/opencode/opencode.db, session table by directory
 // Returns None when no session exists (fresh worktree) -> caller launches blank.
 
-use std::fs;
-use std::io::{BufRead, BufReader};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use serde::Serialize;
-use serde_json::Value;
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
@@ -22,129 +19,14 @@ fn home() -> Option<PathBuf> {
 // into '-worktrees'), then stores one <session-uuid>.jsonl per conversation.
 // Returns every session id in the cwd, NEWEST FIRST (mtime desc) — the caller
 // disambiguates when several tabs share a cwd.
-fn claude_sessions(cwd: &str) -> Vec<String> {
-    let enc: String = cwd
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let dir = match home() {
-        Some(h) => h.join(".claude").join("projects").join(enc),
-        None => return vec![],
-    };
-    let rd = match fs::read_dir(&dir) {
-        Ok(r) => r,
-        Err(_) => return vec![],
-    };
-    let mut items: Vec<(SystemTime, String)> = vec![];
-    for entry in rd.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let mtime = match entry.metadata().ok().and_then(|m| m.modified().ok()) {
-            Some(t) => t,
-            None => continue,
-        };
-        items.push((mtime, stem));
-    }
-    items.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
-    items.into_iter().map(|(_, id)| id).collect()
-}
-
 // opencode stores sessions in a SQLite db; `session.directory` is the plain cwd.
 // time_archived IS NULL filters out deleted/archived sessions. Newest first.
-fn opencode_sessions(cwd: &str) -> Vec<String> {
-    let db = match home() {
-        Some(h) => h
-            .join(".local")
-            .join("share")
-            .join("opencode")
-            .join("opencode.db"),
-        None => return vec![],
-    };
-    let conn = match rusqlite::Connection::open_with_flags(
-        &db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    let mut stmt = match conn.prepare(
-        "SELECT id FROM session \
-         WHERE directory = ?1 AND time_archived IS NULL \
-         ORDER BY time_updated DESC",
-    ) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    let ids: Vec<String> = match stmt.query_map([cwd], |row| row.get::<_, String>(0)) {
-        Ok(rows) => rows.flatten().collect(),
-        Err(_) => vec![],
-    };
-    ids
-}
-
 // Codex CLI stores rollout JSONL files under ~/.codex/sessions/<Y>/<M>/<D>.
 // The first session_meta record carries the authoritative cwd and id; scan only
 // metadata, keeping this probe cheap enough for tab/session discovery.
-fn codex_sessions(cwd: &str) -> Vec<String> {
-    let Some(root) = home().map(|h| h.join(".codex").join("sessions")) else { return vec![] };
-    let mut files = Vec::new();
-    collect_jsonl(&root, &mut files);
-    let mut items: Vec<(SystemTime, String)> = Vec::new();
-    for path in files {
-        let Ok(file) = fs::File::open(&path) else { continue };
-        let Some(Ok(line)) = BufReader::new(file).lines().next() else { continue };
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-        let meta = if v.get("type").and_then(Value::as_str) == Some("session_meta") {
-            v.get("payload").unwrap_or(&v)
-        } else { continue };
-        if meta.get("cwd").and_then(Value::as_str) != Some(cwd) { continue; }
-        let Some(id) = meta.get("id").and_then(Value::as_str) else { continue };
-        let mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
-        items.push((mtime, id.to_string()));
-    }
-    items.sort_by(|a, b| b.0.cmp(&a.0));
-    items.into_iter().map(|(_, id)| id).collect()
-}
-
 // Kimi Code stores sessions as ~/.kimi-code/sessions/<workspace>/session_<id>/.
 // The state file carries the workspace and update timestamp; only its main-agent
 // wire.jsonl is read later by ledger.rs.
-fn kimi_sessions(cwd: &str) -> Vec<String> {
-    let Some(root) = home().map(|h| h.join(".kimi-code").join("sessions")) else { return vec![] };
-    let Ok(workspaces) = fs::read_dir(root) else { return vec![] };
-    let mut items = Vec::new();
-    for workspace in workspaces.flatten() {
-        let Ok(sessions) = fs::read_dir(workspace.path()) else { continue };
-        for session in sessions.flatten() {
-            let state = session.path().join("state.json");
-            let Ok(text) = fs::read_to_string(&state) else { continue };
-            let Ok(meta) = serde_json::from_str::<Value>(&text) else { continue };
-            if meta.get("workDir").and_then(Value::as_str) != Some(cwd) { continue; }
-            let name = session.file_name().to_string_lossy().strip_prefix("session_").map(str::to_string);
-            let Some(name) = name else { continue };
-            let mtime = fs::metadata(&state).ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
-            items.push((mtime, name));
-        }
-    }
-    items.sort_by(|a, b| b.0.cmp(&a.0));
-    items.into_iter().map(|(_, id)| id).collect()
-}
-
-fn collect_jsonl(dir: &PathBuf, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() { collect_jsonl(&path, out); }
-        else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") { out.push(path); }
-    }
-}
-
 // ---- harness-trace: cross-harness session enumeration for the trace panel ----
 // One row per interactive session across all four stores, no cwd filter. The
 // frontend row model adds from/why (mail-ledger join happens there); this struct
@@ -173,15 +55,6 @@ const TRACE_IDLE_MS: u64 = 60 * 60 * 1000;
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn mtime_ms(path: &Path) -> u64 {
-    fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
@@ -237,243 +110,32 @@ fn tildify(path: &str, home: &Path) -> String {
     }
 }
 
-fn trace_row(
-    harness: &'static str,
-    session_id: String,
-    ts: String,
-    last_ms: u64,
-    cwd: &str,
-    home: &Path,
-    now: u64,
-) -> (u64, HarnessTraceRow) {
-    trace_row_with_parent(harness, session_id, ts, last_ms, cwd, home, now, None, None)
-}
-
-fn trace_row_with_parent(
-    harness: &'static str,
-    session_id: String,
-    ts: String,
-    last_ms: u64,
-    cwd: &str,
-    home: &Path,
-    now: u64,
-    parent_id: Option<String>,
-    parent_kind: Option<&'static str>,
-) -> (u64, HarnessTraceRow) {
-    (
-        last_ms,
-        HarnessTraceRow {
-            id: session_id.clone(),
-            harness,
-            session_id,
-            ts,
-            last_activity: ms_to_iso(last_ms),
-            status: trace_status(cwd, last_ms, now),
-            cwd: tildify(cwd, home),
-            parent_id,
-            parent_kind,
-        },
-    )
-}
-
-// Read the leading transcript records of a claude jsonl: the first cwd-bearing
-// record yields the session cwd + start ts; a sidechain marker, when present,
-// is reused (the duel filter's evidence) to keep the top-level walk excluding
-// subagent transcripts.
-fn read_claude_transcript(path: &Path) -> (String, String, bool) {
-    let mut cwd = String::new();
-    let mut ts = String::new();
-    let mut sidechain = false;
-    if let Ok(file) = fs::File::open(path) {
-        // Leading lines can be summary records without cwd; scan a few.
-        for line in BufReader::new(file).lines().take(10).flatten() {
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-            if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-                sidechain = true;
-                break;
-            }
-            if let Some(dir) = v.get("cwd").and_then(Value::as_str) {
-                cwd = dir.to_string();
-                ts = v
-                    .get("timestamp")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                break;
-            }
-        }
-    }
-    (cwd, ts, sidechain)
-}
-
-// CONTRACT2: the top-level walk still drops sidechains (the duel filter rule,
-// superseded per CONTRACT2 tree law — they return below as children). The
-// subagent walk re-emits them as child seeds under <project>/<parentSessionId>/
-// subagents/agent-*.jsonl, parent_id = the parent session id.
-fn trace_claude(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
-    let projects = home.join(".claude").join("projects");
-    let Ok(project_dirs) = fs::read_dir(&projects) else { return vec![] };
-    let mut out = Vec::new();
-    for project in project_dirs.flatten() {
-        let Ok(sessions) = fs::read_dir(project.path()) else { continue };
-        for entry in sessions.flatten() {
-            let path = entry.path();
-            let name = entry
-                .file_name()
-                .to_str()
-                .unwrap_or("")
-                .to_string();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-                let (cwd, ts, sidechain) = read_claude_transcript(&path);
-                if sidechain {
-                    continue;
-                }
-                out.push(trace_row_with_parent(
-                    "claude", id.to_string(), ts, mtime_ms(&path), &cwd, home, now, None, None,
-                ));
-            } else if path.is_dir() {
-                // <parentSessionId>/subagents/agent-*.jsonl
-                let subdir = path.join("subagents");
-                let Ok(subagents) = fs::read_dir(&subdir) else { continue };
-                for sub in subagents.flatten() {
-                    let sp = sub.path();
-                    if !sp.is_file() || sp.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                        continue;
-                    }
-                    let Some(id) = sp.file_stem().and_then(|s| s.to_str()) else { continue };
-                    let (cwd, ts, _sidechain) = read_claude_transcript(&sp);
-                    out.push(trace_row_with_parent(
-                        "claude",
-                        id.to_string(),
-                        ts,
-                        mtime_ms(&sp),
-                        &cwd,
-                        home,
-                        now,
-                        Some(name.clone()),
-                        Some("subagent"),
-                    ));
-                }
-            }
-        }
-    }
-    out
-}
-
-fn trace_opencode(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
-    let db = home
-        .join(".local")
-        .join("share")
-        .join("opencode")
-        .join("opencode.db");
-    let Ok(conn) = rusqlite::Connection::open_with_flags(
-        &db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) else {
-        return vec![];
-    };
-    let Ok(mut stmt) = conn.prepare(
-        "SELECT id, directory, time_created, time_updated FROM session \
-         WHERE time_archived IS NULL ORDER BY time_updated DESC",
-    ) else {
-        return vec![];
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)? as u64,
-            row.get::<_, i64>(3)? as u64,
-        ))
-    });
-    let Ok(rows) = rows else { return vec![] };
-    rows.flatten()
-        .map(|(id, dir, created, updated)| {
-            trace_row("opencode", id, ms_to_iso(created), updated, &dir, home, now)
-        })
-        .collect()
-}
-
-fn trace_codex(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
-    let root = home.join(".codex").join("sessions");
-    let mut files = Vec::new();
-    collect_jsonl(&root, &mut files);
-    let mut out = Vec::new();
-    for path in files {
-        let Ok(file) = fs::File::open(&path) else { continue };
-        let Some(Ok(line)) = BufReader::new(file).lines().next() else { continue };
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-        let meta = if v.get("type").and_then(Value::as_str) == Some("session_meta") {
-            v.get("payload").unwrap_or(&v)
-        } else {
-            continue;
-        };
-        let Some(id) = meta.get("id").and_then(Value::as_str) else { continue };
-        let cwd = meta.get("cwd").and_then(Value::as_str).unwrap_or("");
-        let ts = meta
-            .get("timestamp")
-            .or_else(|| v.get("timestamp"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        // A guardian/subagent thread shares the parent's pane: same cwd, same
-        // tmux, and codex writes it as its own rollout file with its own id.
-        let parent = meta.get("parent_thread_id").and_then(Value::as_str);
-        let is_sub = meta.get("thread_source").and_then(Value::as_str) == Some("subagent");
-        let kind = (is_sub || parent.is_some()).then_some("subagent");
-        out.push(trace_row_with_parent(
-            "codex",
-            id.to_string(),
-            ts,
-            mtime_ms(&path),
-            cwd,
-            home,
-            now,
-            parent.map(str::to_string),
-            kind,
-        ));
-    }
-    out
-}
-
-fn trace_kimi(home: &Path, now: u64) -> Vec<(u64, HarnessTraceRow)> {
-    let root = home.join(".kimi-code").join("sessions");
-    let Ok(workspaces) = fs::read_dir(&root) else { return vec![] };
-    let mut out = Vec::new();
-    for workspace in workspaces.flatten() {
-        let Ok(sessions) = fs::read_dir(workspace.path()) else { continue };
-        for session in sessions.flatten() {
-            let state = session.path().join("state.json");
-            let Ok(text) = fs::read_to_string(&state) else { continue };
-            let Ok(meta) = serde_json::from_str::<Value>(&text) else { continue };
-            let cwd = meta.get("workDir").and_then(Value::as_str).unwrap_or("");
-            let name = session
-                .file_name()
-                .to_string_lossy()
-                .strip_prefix("session_")
-                .map(str::to_string);
-            let Some(id) = name else { continue };
-            let created = fs::metadata(&state)
-                .ok()
-                .and_then(|m| m.created().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            out.push(trace_row("kimi", id, ms_to_iso(created), mtime_ms(&state), cwd, home, now));
-        }
-    }
-    out
-}
-
 // Every session across the four stores, newest activity first.
 fn trace_rows(home: &Path) -> Vec<HarnessTraceRow> {
     let now = now_ms();
-    let mut keyed: Vec<(u64, HarnessTraceRow)> = Vec::new();
-    keyed.extend(trace_claude(home, now));
-    keyed.extend(trace_opencode(home, now));
-    keyed.extend(trace_codex(home, now));
-    keyed.extend(trace_kimi(home, now));
+    let mut keyed: Vec<(u64, HarnessTraceRow)> = [
+        crate::harness_store::HarnessId::Claude,
+        crate::harness_store::HarnessId::Opencode,
+        crate::harness_store::HarnessId::Codex,
+        crate::harness_store::HarnessId::Kimi,
+    ]
+    .into_iter()
+    .flat_map(|id| crate::harness_store::sessions(home, id, None))
+    .map(|session| {
+        let row = HarnessTraceRow {
+            id: session.id.clone(),
+            harness: session.harness,
+            session_id: session.id,
+            ts: ms_to_iso(session.created_at_ms),
+            last_activity: ms_to_iso(session.last_activity_ms),
+            status: trace_status(&session.cwd, session.last_activity_ms, now),
+            cwd: tildify(&session.cwd, home),
+            parent_id: session.parent_id,
+            parent_kind: session.parent_kind,
+        };
+        (session.last_activity_ms, row)
+    })
+    .collect();
     keyed.sort_by(|a, b| b.0.cmp(&a.0));
     keyed.into_iter().map(|(_, row)| row).collect()
 }
@@ -490,16 +152,13 @@ pub fn harness_trace_rows() -> Vec<HarnessTraceRow> {
 // single latest take the first element (harness_session below).
 #[tauri::command]
 pub fn harness_sessions(tool: String, cwd: String) -> Vec<String> {
-    // `tool` is the launch command's first token (claude/opencode); strip a path
-    // so "/usr/local/bin/claude" still matches.
-    let bin = tool.rsplit('/').next().unwrap_or(&tool);
-    match bin {
-        "claude" => claude_sessions(&cwd),
-        "opencode" => opencode_sessions(&cwd),
-        "codex" => codex_sessions(&cwd),
-        "kimi" => kimi_sessions(&cwd),
-        _ => vec![],
-    }
+    let (Some(home), Some(id)) = (home(), crate::harness_store::HarnessId::parse(&tool)) else {
+        return vec![];
+    };
+    crate::harness_store::sessions(&home, id, Some(&cwd))
+        .into_iter()
+        .map(|session| session.id)
+        .collect()
 }
 
 #[tauri::command]
@@ -510,16 +169,21 @@ pub fn harness_session(tool: String, cwd: String) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     // S1 sabotage receipt: a HOME with no harness stores (nonexistent dir) must
     // yield an empty list from every reader and the aggregate, never an error.
     #[test]
     fn trace_rows_from_nonexistent_home_is_empty() {
         let home = Path::new("/nonexistent-home-for-harness-trace-test");
-        assert!(trace_claude(home, 0).is_empty());
-        assert!(trace_opencode(home, 0).is_empty());
-        assert!(trace_codex(home, 0).is_empty());
-        assert!(trace_kimi(home, 0).is_empty());
+        for id in [
+            crate::harness_store::HarnessId::Claude,
+            crate::harness_store::HarnessId::Opencode,
+            crate::harness_store::HarnessId::Codex,
+            crate::harness_store::HarnessId::Kimi,
+        ] {
+            assert!(crate::harness_store::sessions(home, id, None).is_empty());
+        }
         assert!(trace_rows(home).is_empty());
     }
 
@@ -545,7 +209,10 @@ mod tests {
         let home = Path::new("/Users/someone");
         assert_eq!(tildify("/Users/someone/projects/a", home), "~/projects/a");
         assert_eq!(tildify("/Users/someone", home), "~");
-        assert_eq!(tildify("/Users/someoneelse/x", home), "/Users/someoneelse/x");
+        assert_eq!(
+            tildify("/Users/someoneelse/x", home),
+            "/Users/someoneelse/x"
+        );
     }
 
     // Defect receipt 2026-08-04: guardian rollout read as top-level = 2 shells for 1 pane.
@@ -553,7 +220,12 @@ mod tests {
     fn codex_subagent_thread_carries_parent_id() {
         let home = std::env::temp_dir().join(format!("dock-strip-codex-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
-        let day = home.join(".codex").join("sessions").join("2026").join("08").join("04");
+        let day = home
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("08")
+            .join("04");
         fs::create_dir_all(&day).unwrap();
         fs::write(
             day.join("rollout-a.jsonl"),
@@ -565,13 +237,14 @@ mod tests {
             r#"{"type":"session_meta","payload":{"id":"guard-1","parent_thread_id":"main-1","cwd":"/","thread_source":"subagent","timestamp":"2026-08-04T00:00:00Z"}}"#,
         )
         .unwrap();
-        let rows = trace_codex(&home, 0);
-        let main = rows.iter().find(|(_, r)| r.id == "main-1").unwrap();
-        let guard = rows.iter().find(|(_, r)| r.id == "guard-1").unwrap();
-        assert_eq!(main.1.parent_id, None);
-        assert_eq!(main.1.parent_kind, None);
-        assert_eq!(guard.1.parent_id.as_deref(), Some("main-1"));
-        assert_eq!(guard.1.parent_kind, Some("subagent"));
+        let rows =
+            crate::harness_store::sessions(&home, crate::harness_store::HarnessId::Codex, None);
+        let main = rows.iter().find(|r| r.id == "main-1").unwrap();
+        let guard = rows.iter().find(|r| r.id == "guard-1").unwrap();
+        assert_eq!(main.parent_id, None);
+        assert_eq!(main.parent_kind, None);
+        assert_eq!(guard.parent_id.as_deref(), Some("main-1"));
+        assert_eq!(guard.parent_kind, Some("subagent"));
         let _ = fs::remove_dir_all(&home);
     }
 
@@ -581,7 +254,10 @@ mod tests {
     fn claude_subagent_child_carries_parent_id() {
         let home = std::env::temp_dir().join(format!("dock-strip-harness-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
-        let project = home.join(".claude").join("projects").join("home-projects-x");
+        let project = home
+            .join(".claude")
+            .join("projects")
+            .join("home-projects-x");
         let parent_id = "parent-session-1";
         let subdir = project.join(parent_id).join("subagents");
         fs::create_dir_all(&subdir).unwrap();
@@ -596,17 +272,18 @@ mod tests {
         )
         .unwrap();
 
-        let rows = trace_claude(&home, now_ms());
-        let children: Vec<_> = rows.iter().filter(|r| r.1.parent_id.is_some()).collect();
+        let rows =
+            crate::harness_store::sessions(&home, crate::harness_store::HarnessId::Claude, None);
+        let children: Vec<_> = rows.iter().filter(|r| r.parent_id.is_some()).collect();
         assert_eq!(children.len(), 1);
-        assert_eq!(children[0].1.session_id, "agent-1234");
-        assert_eq!(children[0].1.harness, "claude");
-        assert_eq!(children[0].1.parent_id.as_deref(), Some(parent_id));
-        assert_eq!(children[0].1.parent_kind, Some("subagent"));
+        assert_eq!(children[0].id, "agent-1234");
+        assert_eq!(children[0].harness, "claude");
+        assert_eq!(children[0].parent_id.as_deref(), Some(parent_id));
+        assert_eq!(children[0].parent_kind, Some("subagent"));
 
-        let tops: Vec<_> = rows.iter().filter(|r| r.1.parent_id.is_none()).collect();
+        let tops: Vec<_> = rows.iter().filter(|r| r.parent_id.is_none()).collect();
         assert_eq!(tops.len(), 1);
-        assert_eq!(tops[0].1.session_id, parent_id);
+        assert_eq!(tops[0].id, parent_id);
 
         fs::remove_dir_all(&home).ok();
     }

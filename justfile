@@ -107,6 +107,10 @@ test:
 cargo-check:
     cargo check --manifest-path src-tauri/Cargo.toml
 
+# Build the shared harness-store CLI consumed by scripts/bus.ts.
+harness-cli:
+    cargo build --manifest-path src-tauri/Cargo.toml --bin instant-harness
+
 # run the Rust backend tests
 cargo-test:
     cargo test --manifest-path src-tauri/Cargo.toml

@@ -232,6 +232,18 @@ body[data-mode="dark"] .mdview-root .md-body a {
   cursor: zoom-in;
 }
 
+.mdview-mermaid[data-diagram-theme="light"],
+.mdview-d2[data-diagram-theme="light"] {
+  background: #f8fafc;
+  color: #111827;
+}
+
+.mdview-mermaid[data-diagram-theme="dark"],
+.mdview-d2[data-diagram-theme="dark"] {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
 .mdview-d2 svg {
   display: block;
   max-width: 100%;

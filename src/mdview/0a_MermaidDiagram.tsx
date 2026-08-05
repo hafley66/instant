@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import mermaid from "mermaid";
 import { DiagramLightbox, diagramSvgMarkup } from "./0_DiagramLightbox";
+import { mermaidTheme } from "./0_diagramTheme";
 
 let nextDiagramId = 0;
 
@@ -14,7 +15,7 @@ export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) 
     const id = `instant-mermaid-${nextDiagramId++}`;
     mermaid.initialize({
       startOnLoad: false,
-      theme: dark ? "dark" : "default",
+      ...mermaidTheme(dark),
       fontFamily: "Inter, -apple-system, BlinkMacSystemFont, Arial, sans-serif",
       flowchart: { htmlLabels: false },
       securityLevel: "strict",
@@ -46,6 +47,7 @@ export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) 
         role="button"
         tabIndex={0}
         className="mdview-mermaid"
+        data-diagram-theme={dark ? "dark" : "light"}
         title="Open diagram"
         onClick={() => setOpen(true)}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
@@ -56,7 +58,7 @@ export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) 
         }}
         dangerouslySetInnerHTML={{ __html: diagramSvgMarkup(svg) }}
       />
-      {open && <DiagramLightbox svg={svg} label="Mermaid diagram" language="mermaid" onClose={() => setOpen(false)} />}
+      {open && <DiagramLightbox svg={svg} label="Mermaid diagram" language="mermaid" dark={dark} onClose={() => setOpen(false)} />}
     </>
   );
 }
