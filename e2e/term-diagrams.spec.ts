@@ -82,6 +82,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("PTY");
     await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("xterm");
+    await expect(page.locator('.term-diagram[data-language="mermaid"]')).not.toContainText("old diagram");
     await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("PTY");
     await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("xterm");
     const inlineBoxes = await page.locator(".term-diagram > svg").evaluateAll((svgs) => svgs.map((svg) => {

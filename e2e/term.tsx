@@ -135,6 +135,11 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
       editor: E2E_HARNESS, session_id: `e2e-${E2E_HARNESS}-1`, id: "m7", seq: 7, role: "assistant", ts: NOW - 60_000,
       preview: "terminal diagrams",
       text: [
+        "```mermaid",
+        "flowchart LR",
+        "LEGACY[old diagram] --> UNUSED[not visible in this terminal viewport]",
+        "```",
+        "",
         "```d2",
         "PTY -> tmux",
         "tmux -> xterm",

@@ -71,11 +71,20 @@ export function locateMessageDiagrams(term: Terminal, diagrams: MessageDiagram[]
   const viewportEnd = Math.min(buffer.length - 1, viewportTop + term.rows - 1);
   const lines = logicalLines(term, viewportTop, viewportEnd);
   const normalized = lines.map((line) => normalizeTerminalLine(line.text));
+  const anchorOwners = new Map<string, Set<number>>();
+  diagrams.forEach((diagram, diagramIndex) => {
+    normalizedDiagramLines(diagram.code).forEach((text) => {
+      const owners = anchorOwners.get(text) ?? new Set<number>();
+      owners.add(diagramIndex);
+      anchorOwners.set(text, owners);
+    });
+  });
   const found: DiagramFence[] = [];
-  for (const diagram of diagrams) {
+  for (const [diagramIndex, diagram] of diagrams.entries()) {
     const sourceLines = normalizedDiagramLines(diagram.code);
     const anchors = sourceLines
       .map((text, sourceIndex) => ({ text, sourceIndex }))
+      .filter(({ text }) => anchorOwners.get(text)?.size === 1 && anchorOwners.get(text)?.has(diagramIndex))
       .sort((a, b) => b.text.length - a.text.length);
     let hit: { terminalIndex: number; sourceIndex: number } | null = null;
     for (const anchor of anchors) {
