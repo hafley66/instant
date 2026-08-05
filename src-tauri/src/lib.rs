@@ -1,5 +1,7 @@
 #[path = "0_pty_events.rs"]
 mod pty_events;
+#[path = "0a_harness_trace_index.rs"]
+mod harness_trace_index;
 mod activity;
 mod capture;
 mod cdp;

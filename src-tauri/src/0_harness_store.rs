@@ -52,6 +52,9 @@ pub struct HarnessSession {
 pub trait HarnessStore: Sync {
     fn id(&self) -> HarnessId;
     fn sessions(&self, home: &Path, cwd: Option<&str>) -> Vec<HarnessSession>;
+    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
+        self.sessions(home, None)
+    }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         self.sessions(home, Some(cwd))
             .into_iter()
@@ -196,6 +199,26 @@ fn claude_session(path: &Path, parent_id: Option<String>) -> Option<HarnessSessi
     })
 }
 
+fn claude_project_dir(home: &Path, cwd: &str) -> PathBuf {
+    home.join(".claude/projects").join(
+        cwd.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>(),
+    )
+}
+
+fn claude_session_path(home: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
+    let project = claude_project_dir(home, cwd);
+    let direct = project.join(format!("{session_id}.jsonl"));
+    if direct.is_file() {
+        return Some(direct);
+    }
+    fs::read_dir(project).ok()?.flatten().find_map(|entry| {
+        let path = entry.path().join("subagents").join(format!("{session_id}.jsonl"));
+        path.is_file().then_some(path)
+    })
+}
+
 impl HarnessStore for ClaudeStore {
     fn id(&self) -> HarnessId {
         HarnessId::Claude
@@ -203,11 +226,7 @@ impl HarnessStore for ClaudeStore {
     fn sessions(&self, home: &Path, cwd: Option<&str>) -> Vec<HarnessSession> {
         let projects = home.join(".claude/projects");
         let dirs: Vec<PathBuf> = match cwd {
-            Some(cwd) => vec![projects.join(
-                cwd.chars()
-                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                    .collect::<String>(),
-            )],
+            Some(cwd) => vec![claude_project_dir(home, cwd)],
             None => fs::read_dir(projects)
                 .into_iter()
                 .flatten()
@@ -246,13 +265,11 @@ impl HarnessStore for ClaudeStore {
         }
         sorted(out)
     }
+    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
+        crate::harness_trace_index::claude(home)
+    }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
-        let projects = home.join(".claude/projects");
-        let dir = projects.join(
-            cwd.chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                .collect::<String>(),
-        );
+        let dir = claude_project_dir(home, cwd);
         let Ok(entries) = fs::read_dir(dir) else {
             return vec![];
         };
@@ -292,15 +309,10 @@ impl HarnessStore for ClaudeStore {
         let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
             return vec![];
         };
-        let Some(path) = self
-            .sessions(&home, Some(cwd))
-            .into_iter()
-            .find(|session| session.id == session_id)
-            .and_then(|session| session.source_path)
-        else {
+        let Some(path) = claude_session_path(&home, cwd, session_id) else {
             return vec![];
         };
-        crate::ledger::read_claude(&PathBuf::from(path), session_id, after_seq)
+        crate::ledger::read_claude(&path, session_id, after_seq)
     }
 }
 
@@ -341,6 +353,9 @@ impl HarnessStore for OpencodeStore {
             return vec![];
         };
         rows.flatten().collect()
+    }
+    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
+        crate::harness_trace_index::opencode(home)
     }
     fn messages(
         &self,
@@ -432,6 +447,9 @@ impl HarnessStore for CodexStore {
             });
         }
         sorted(out)
+    }
+    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
+        crate::harness_trace_index::codex(home)
     }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         let db = home.join(".codex/state_5.sqlite");
@@ -546,6 +564,9 @@ impl HarnessStore for KimiStore {
         }
         sorted(out)
     }
+    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
+        crate::harness_trace_index::kimi(home)
+    }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         let Ok(workspaces) = fs::read_dir(home.join(".kimi-code/sessions")) else {
             return vec![];
@@ -616,6 +637,9 @@ pub fn sessions(home: &Path, id: HarnessId, cwd: Option<&str>) -> Vec<HarnessSes
 }
 pub fn session_ids(home: &Path, id: HarnessId, cwd: &str) -> Vec<String> {
     store(id).session_ids(home, cwd)
+}
+pub fn trace_sessions(home: &Path, id: HarnessId) -> Vec<HarnessSession> {
+    store(id).trace_sessions(home)
 }
 pub fn resolve(home: &Path, id: HarnessId, cwd: &str) -> Option<HarnessSession> {
     sessions(home, id, Some(cwd)).into_iter().next()

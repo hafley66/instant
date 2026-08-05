@@ -252,10 +252,28 @@ export interface AgentTreeState {
   load: () => void;
 }
 
+let traceSeeds: HarnessTraceSeed[] | null = null;
+let traceSeedsRequest: Promise<HarnessTraceSeed[]> | null = null;
+
+function loadTraceSeeds(refresh = false): Promise<HarnessTraceSeed[]> {
+  if (refresh) traceSeeds = null;
+  if (traceSeeds) return Promise.resolve(traceSeeds);
+  if (traceSeedsRequest) return traceSeedsRequest;
+  traceSeedsRequest = invoke<HarnessTraceSeed[]>("harness_trace_rows")
+    .then((rows) => {
+      traceSeeds = rows;
+      return rows;
+    })
+    .finally(() => {
+      traceSeedsRequest = null;
+    });
+  return traceSeedsRequest;
+}
+
 // The shared data path: rust rows + mail ledger -> frozen nodes -> tmux join ->
 // tree. Every host shares the single-owner live feed through this hook;
 // InTabStrip indexes the flat nodes into its own external-only tree.
-export function useAgentTree(): AgentTreeState {
+export function useAgentTree(enabled = true): AgentTreeState {
   // Narrow store read: the join consumes sessions + sessionWorktrees only, so
   // unrelated store writes must not rebuild every node identity downstream.
   const sessions = useSyncExternalStore(
@@ -274,7 +292,8 @@ export function useAgentTree(): AgentTreeState {
   // answers, and on hosts that have no list to give (the e2e page), which is
   // when the store's seeded sessions stand in.
   const [liveNames, setLiveNames] = useState<string[] | null>(null);
-  const load = useCallback(() => {
+  const loadRows = useCallback((refresh = false) => {
+    if (!enabled) return;
     // The live tmux list is what grades a routed lane done (settleRoutedStatus),
     // so it is read WITH the rows: a lane spawned since boot is missing from the
     // store's list and would render done. Read straight through list_sessions —
@@ -282,7 +301,7 @@ export function useAgentTree(): AgentTreeState {
     // and session-list DOM render, neither of which a strip load owes.
     Promise.all([
       invoke<Session[]>("list_sessions").catch(() => null),
-      invoke<HarnessTraceSeed[]>("harness_trace_rows"),
+      loadTraceSeeds(refresh),
     ])
       .then(async ([sessions, storeSeeds]) => {
         const names = tmuxLiveNames(sessions);
@@ -312,11 +331,13 @@ export function useAgentTree(): AgentTreeState {
         setError("");
       })
       .catch((reason: unknown) => setError(String(reason)));
-  }, []);
+  }, [enabled]);
+  const load = useCallback(() => loadRows(true), [loadRows]);
   useEffect(() => {
-    load();
-    return claimStripFeed({ onMail: load, onLiveNames: setLiveNames });
-  }, [load]);
+    if (!enabled) return;
+    loadRows();
+    return claimStripFeed({ onMail: () => loadRows(), onLiveNames: setLiveNames });
+  }, [enabled, loadRows]);
   // Memoized on honest deps: every consumer memo (external, index, spans, row
   // models) keys on node identity, so it must move only when the inputs move.
   const liveTmux = useMemo(

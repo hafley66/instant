@@ -15,6 +15,54 @@ fn fixture_home() -> PathBuf {
 }
 
 #[test]
+fn claude_messages_resolve_one_exact_file_without_session_discovery() {
+    let home = fixture_home();
+    let cwd = "/fixture";
+    let project = claude_project_dir(&home, cwd);
+    fs::create_dir_all(project.join("parent/subagents")).unwrap();
+    fs::write(project.join("unrelated.jsonl"), "{ invalid and intentionally unreadable\n").unwrap();
+    fs::write(
+        project.join("wanted.jsonl"),
+        r#"{"type":"user","uuid":"message-1","timestamp":"2026-07-20T10:00:10.000Z","promptSource":"typed","origin":{"kind":"human"},"message":{"role":"user","content":"direct"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("parent/subagents/agent-1.jsonl"),
+        r#"{"type":"user","uuid":"message-2","timestamp":"2026-07-20T10:00:11.000Z","promptSource":"typed","origin":{"kind":"human"},"message":{"role":"user","content":"subagent"}}"#,
+    )
+    .unwrap();
+
+    let direct_path = claude_session_path(&home, cwd, "wanted").unwrap();
+    let subagent_path = claude_session_path(&home, cwd, "agent-1").unwrap();
+    let direct = crate::ledger::read_claude(&direct_path, "wanted", None);
+    let subagent = crate::ledger::read_claude(&subagent_path, "agent-1", None);
+    let receipt = json!({
+        "direct": direct.iter().map(|message| (&message.id, &message.text)).collect::<Vec<_>>(),
+        "subagent": subagent.iter().map(|message| (&message.id, &message.text)).collect::<Vec<_>>(),
+        "missing": claude_session_path(&home, cwd, "absent"),
+    });
+
+    assert_eq!(
+        serde_json::to_string_pretty(&receipt).unwrap(),
+        r#"{
+  "direct": [
+    [
+      "message-1",
+      "direct"
+    ]
+  ],
+  "missing": null,
+  "subagent": [
+    [
+      "message-2",
+      "subagent"
+    ]
+  ]
+}"#
+    );
+}
+
+#[test]
 fn four_stores_lower_into_one_session_shape() {
     let home = fixture_home();
     let cwd = "/fixture";

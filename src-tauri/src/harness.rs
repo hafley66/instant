@@ -120,7 +120,7 @@ fn trace_rows(home: &Path) -> Vec<HarnessTraceRow> {
         crate::harness_store::HarnessId::Kimi,
     ]
     .into_iter()
-    .flat_map(|id| crate::harness_store::sessions(home, id, None))
+    .flat_map(|id| crate::harness_store::trace_sessions(home, id))
     .map(|session| {
         let row = HarnessTraceRow {
             id: session.id.clone(),

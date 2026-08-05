@@ -64,7 +64,6 @@ export function toggleNetworkFor(sid: string): void {
 }
 
 export function InTabStrip({ sid, onLayout }: InTabStripProps) {
-  const { nodes, liveTmux, registry, error, load } = useAgentTree();
   const [, setVersion] = useState(0);
   useEffect(() => termViewRouter.subscribe(() => setVersion((v) => v + 1)), []);
 
@@ -80,6 +79,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     setEntry(store.get().termStrip[sid] ?? null);
     return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
   }, [sid]);
+
+  const dataEnabled = entry?.open === true || current !== null;
+  const { nodes, liveTmux, registry, error, load } = useAgentTree(dataEnabled);
 
   const networkView = entry?.network ?? false;
   const setNetwork = (next: boolean) =>

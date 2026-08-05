@@ -121,8 +121,8 @@ cargo-test:
 audit:
     cd src-tauri && cargo audit
 
-# full preflight before a commit: tsc + vite build + cargo check + tests
-verify: check build cargo-check test
+# full preflight before a commit: tsc + vite build + Rust check + both test suites
+verify: check build cargo-check test cargo-test
 
 # build the VS Code extension (corepack pnpm 10 install + tsc -> vscode-ext/out)
 vscode-build:
