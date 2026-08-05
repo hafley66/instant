@@ -79,7 +79,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     hasExplicitSession: (s) => /\s+resume(?:\s|$)/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*(?:OpenAI Codex|╭─[^\n]*Codex)/.test(s),
     resume: (sessionId) => `codex resume ${sessionId}`,
-    lane: (brief, model) => interactiveLane("codex --no-alt-screen", "interactive", brief, model),
+    lane: (brief, model) => interactiveLane("codex", "interactive", brief, model),
   },
   {
     id: "kimi", label: "Kimi Code",
@@ -90,7 +90,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     hasExplicitSession: (s) => /\s--session\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*(?:Kimi Code|Moonshot AI)/.test(s),
     resume: (sessionId) => `kimi --session ${sessionId}`,
-    lane: (brief, model) => interactiveLane("kimi --auto", "auto", brief, model),
+    lane: (brief, model) => interactiveLane("kimi", "interactive", brief, model),
   },
 ];
 

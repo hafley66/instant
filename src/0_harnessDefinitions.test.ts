@@ -19,15 +19,15 @@ describe("HarnessDefinition.lane", () => {
         },
         {
           "body": "Read and execute the lane brief at /tmp/lane's brief.md",
-          "command": "codex --no-alt-screen -m 'gpt-5.6-terra'",
+          "command": "codex -m 'gpt-5.6-terra'",
           "mode": "interactive",
           "model": "gpt-5.6-terra",
           "ref": "/tmp/lane's brief.md",
         },
         {
           "body": "Read and execute the lane brief at /tmp/kimi.md",
-          "command": "kimi --auto -m 'kimi-k2.5'",
-          "mode": "auto",
+          "command": "kimi -m 'kimi-k2.5'",
+          "mode": "interactive",
           "model": "kimi-k2.5",
           "ref": "/tmp/kimi.md",
         },
