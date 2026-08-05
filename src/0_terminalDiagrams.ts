@@ -351,7 +351,7 @@ export class TerminalDiagramOverlay {
     });
   }
 
-  async paint() {
+  async paint(suppliedMessages?: AiMessage[] | null) {
     const generation = ++this.generation;
     const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) return;
@@ -360,9 +360,24 @@ export class TerminalDiagramOverlay {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
-    const messages = await this.messages?.();
-    if (generation !== this.generation) return;
     const direct = findDiagramFences(this.term);
+    let messages = suppliedMessages;
+    if (messages === undefined && this.messages) {
+      const pending = this.messages();
+      if (direct.length) {
+        // The native ledger may scan several harness stores and cwd candidates.
+        // Paint complete xterm source now; enrich it with ledger-only matches
+        // when that independent read finishes. Passing the result back into
+        // paint avoids starting another native read and a refresh loop.
+        void pending
+          .then((result) => this.paint(result))
+          .catch(() => {});
+        messages = null;
+      } else {
+        messages = await pending;
+        if (generation !== this.generation) return;
+      }
+    }
     const ledger = messages
       ? locateMessageDiagrams(this.term, diagramsFromMessageTail(messages))
       : [];

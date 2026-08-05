@@ -168,6 +168,37 @@ test("does not infer D2 from Rust return types and arrow comments", async ({ pag
   await expect(page.locator(".term-diagram")).toHaveCount(0);
 });
 
+test("renders fence-stripped Mermaid before a slow native ledger finishes", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.evaluate(() => {
+    const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+    if (target.__instantE2eNativeResults) {
+      target.__instantE2eNativeResults.read_ai_messages = () =>
+        new Promise((resolve) => setTimeout(() => resolve([]), 2500));
+    }
+  });
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
+  await writeFixture(page, [
+    "mermaid",
+    "flowchart TB",
+    "  subgraph round[one round, repeated 2580 times]",
+    "    delta[delta: ~7k pairs, FLAT all run] --> join[join: index lookup per pair<br/>cost flat, cheap]",
+    "    join --> insert[insert into derived FxHashSet<br/>set grows 0 to 10M entries / 128MB]",
+    "  end",
+    "  insert --> tax[late rounds: every probe misses cache<br/>0ms early, 2-3ms by round 500]",
+    "  insert --> rehash[power-of-2 doublings rehash the whole table<br/>spikes: 41ms, 147ms]",
+    "  tax --> total[2580 rounds x growing tax = 10.2s<br/>~1us per derived row]",
+    "  rehash --> total",
+    "",
+    "The work per round never grows; the COST per row does.",
+  ].join("\r\n"));
+
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(mermaid.locator("svg")).toBeVisible({ timeout: 2200 });
+  await expect(mermaid).toContainText("one round, repeated 2580 times");
+});
+
 test("keeps later scrolled prose outside the ledger Mermaid source", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, scrolledMermaidOutput);
