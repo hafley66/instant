@@ -21,6 +21,8 @@ import { MailLeg, injectedLine } from "../src/plugins/harnessTrace/1_leg.ts";
 import { casUpdateJson, CorruptJsonError } from "./0_atomicJson.ts";
 import { harnessDefinitionById, harnessIds } from "../src/0_harnessDefinitions.ts";
 import { harnessInputTokens, resolveHarnessSession } from "./0_harnessStore.ts";
+import { inferHarnessFromEnv, laneEnvStamp } from "./0_harnessEnv.ts";
+import { harnessStoreBinary } from "./0_harnessStore.ts";
 
 const DEFAULT_MAIL_DIR = "~/.agent/mail";
 const DEFAULT_BOX = "bus.ndjson";
@@ -43,6 +45,13 @@ function flags(argv) {
 
 function mailDirOf(args) {
   return untildify(args["mail-dir"] ?? DEFAULT_MAIL_DIR);
+}
+
+// A bare --flag (no value) parses as "true"; treat that as absent for the
+// optional value flags so a bare --harness never overwrites a real inference.
+function flagValue(args, name) {
+  const v = args[name];
+  return typeof v === "string" && v !== "true" ? v : null;
 }
 
 function readDirectory(dir) {
@@ -121,13 +130,15 @@ function dispatch(args) {
   const cwd = args.cwd;
   const cmd = args.cmd;
   if (!to || !cwd || !cmd) {
-    console.log("usage: bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command> [--from <agent>] [--harness <default opencode>] [--tmux <session name>] [--socket <tmux -L socket>] [--body <text>] [--ref <path>] [--mail-dir <dir>] [--resolve-wait <seconds>]");
+    console.log("usage: bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command> [--from <agent>] [--harness <h>] [--session-id <id>] [--model <id>] [--tokens <n>] [--mode <m>] [--tmux <session name>] [--socket <tmux -L socket>] [--body <text>] [--ref <path>] [--mail-dir <dir>] [--resolve-wait <seconds>]");
     return 1;
   }
-  const harness = args.harness ?? "opencode";
+  const inferred = inferHarnessFromEnv();
+  const harness = flagValue(args, "harness") ?? inferred?.harness ?? "opencode";
+  const sessionId = flagValue(args, "session-id") ?? inferred?.sessionId ?? null;
   // Fallback reads the invoke string itself when the caller does not say.
-  const model = args.model ?? cmd.match(/(?:^|\s)-m\s+(\S+)/)?.[1] ?? null;
-  const mode = args.mode ?? (cmd.includes("--auto") ? "auto" : null);
+  const model = flagValue(args, "model") ?? cmd.match(/(?:^|\s)-m\s+(\S+)/)?.[1] ?? inferred?.model ?? null;
+  const mode = flagValue(args, "mode") ?? (cmd.includes("--auto") ? "auto" : null);
   const tmux = args.tmux ?? to;
   const socket = args.socket ?? null;
   const body = args.body ?? cmd;
@@ -145,9 +156,12 @@ function dispatch(args) {
     ref,
   });
 
+  // Prefix the lane cmd with an env stamp so the pane self-identifies its
+  // harness/session/model for every later bus call inside it (no --harness).
+  const stampedCmd = laneEnvStamp(harness, sessionId, model) + cmd;
   const create = run("tmux", [
     ...(socket ? ["-L", socket] : []),
-    "new-session", "-d", "-s", tmux, "-c", cwd, cmd,
+    "new-session", "-d", "-s", tmux, "-c", cwd, stampedCmd,
   ]);
   if (!create.ok) {
     console.log(`tmux new-session failed (${create.status}): ${create.stderr.trim()}`);
@@ -169,7 +183,11 @@ function dispatch(args) {
   }
 
   const dir = mailDirOf(args);
-  mergeRoute(dir, to, { harness, tmux, cwd, model, mode });
+  const route = { harness, tmux, cwd, model, mode };
+  if (sessionId) route.sessionId = sessionId;
+  const tokensIn = flagValue(args, "tokens");
+  if (tokensIn && Number.isFinite(Number(tokensIn))) route.tokens = { in: Number(tokensIn), at: nowIso() };
+  mergeRoute(dir, to, route);
 
   append(join(dir, DEFAULT_BOX), message);
   console.log(`dispatched ${message.id} -> ${to} (tmux ${tmux})`);
@@ -199,6 +217,12 @@ function resolve(args) {
   if (cwd.includes("\0")) {
     console.log(`unresolved ${to}: cwd contains a NUL byte, refusing`);
     return 1;
+  }
+  // A self-reported session id (env stamp at dispatch, or --session-id) is
+  // already resolved; the binary read only enriches unknown lanes.
+  if (route?.sessionId) {
+    console.log(`resolved ${to} -> ${route.sessionId} (self-reported)`);
+    return 0;
   }
   let session;
   try {
@@ -273,6 +297,9 @@ function sweep(args) {
   // artifact. A live set is required to call a route live; a route whose
   // artifact cannot be read keeps the field absent (no guess, never an error).
   const live = liveSessions();
+  if (!harnessStoreBinary()) {
+    console.log("warning: instant-harness binary not built; token stamps skipped (cargo build --manifest-path src-tauri/Cargo.toml --bin instant-harness)");
+  }
   if (live !== null) {
     casUpdateJson(join(dir, "registry.json"), (registry) => {
       for (const id of Object.keys(registry)) {
@@ -381,7 +408,7 @@ function lane(args) {
     console.log("usage: bus.ts lane --cwd <dir> --name <lane-id> [--harness claude|opencode|codex|kimi] [--brief <path>] [--model <id>] [--tmux <name>] [--parent <agent>] [--mail-dir <dir>] [--resolve-wait <seconds>] [--dry-run]");
     return 1;
   }
-  const harness = args.harness ?? "opencode";
+  const harness = flagValue(args, "harness") ?? inferHarnessFromEnv()?.harness ?? "opencode";
   if (!harnessIds.includes(harness)) {
     console.log(`unsupported lane harness: ${harness}`);
     return 1;
@@ -436,7 +463,7 @@ function adopt(args) {
   const name = args.name;
   const tmux = args.tmux;
   if (!name || !tmux) {
-    console.log("usage: bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--model <id>] [--mode <m>] [--mail-dir <dir>]");
+    console.log("usage: bus.ts adopt --name <agent> --tmux <session> [--harness <h>] [--session-id <id>] [--cwd <dir>] [--model <id>] [--mode <m>] [--tokens <n>] [--mail-dir <dir>]");
     return 1;
   }
   // The route is only writable for a session that actually exists right now;
@@ -446,14 +473,20 @@ function adopt(args) {
     console.log(`refusing adopt ${name}: no such tmux session ${tmux} (${check.status})`);
     return 1;
   }
+  const inferred = inferHarnessFromEnv();
+  const sessionId = flagValue(args, "session-id") ?? inferred?.sessionId ?? null;
   const dir = mailDirOf(args);
-  mergeRoute(dir, name, {
-    harness: args.harness ?? null,
+  const route = {
+    harness: flagValue(args, "harness") ?? inferred?.harness ?? null,
     tmux,
-    cwd: args.cwd ?? null,
-    model: args.model ?? null,
-    mode: args.mode ?? null,
-  });
+    cwd: flagValue(args, "cwd") ?? null,
+    model: flagValue(args, "model") ?? inferred?.model ?? null,
+    mode: flagValue(args, "mode") ?? null,
+  };
+  if (sessionId) route.sessionId = sessionId;
+  const tokensIn = flagValue(args, "tokens");
+  if (tokensIn && Number.isFinite(Number(tokensIn))) route.tokens = { in: Number(tokensIn), at: nowIso() };
+  mergeRoute(dir, name, route);
   console.log(`adopted ${name} -> tmux ${tmux}`);
   return 0;
 }

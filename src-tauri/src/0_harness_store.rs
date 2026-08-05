@@ -232,7 +232,9 @@ impl HarnessStore for OpencodeStore {
         ) else {
             return vec![];
         };
-        let sql = "SELECT s.id,s.directory,s.title,s.time_created,s.time_updated,(SELECT json_extract(m.data,'$.tokens.input') FROM message m WHERE m.session_id=s.id ORDER BY m.time_created DESC LIMIT 1) FROM session s WHERE s.time_archived IS NULL AND (?1 IS NULL OR s.directory=?1) ORDER BY s.time_updated DESC";
+        // MAX not latest: the newest row is often a 0-token assistant turn; the
+        // peak input across the session is the live context reading.
+        let sql = "SELECT s.id,s.directory,s.title,s.time_created,s.time_updated,(SELECT MAX(json_extract(m.data,'$.tokens.input')) FROM message m WHERE m.session_id=s.id),(SELECT json_extract(m.data,'$.modelID') FROM message m WHERE m.session_id=s.id AND json_extract(m.data,'$.modelID') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1) FROM session s WHERE s.time_archived IS NULL AND (?1 IS NULL OR s.directory=?1) ORDER BY s.time_updated DESC";
         let Ok(mut stmt) = conn.prepare(sql) else {
             return vec![];
         };
@@ -243,7 +245,7 @@ impl HarnessStore for OpencodeStore {
                 cwd: row.get(1)?,
                 source_path: None,
                 title: row.get(2)?,
-                model: None,
+                model: row.get::<_, Option<String>>(6)?,
                 input_tokens: row.get::<_, Option<i64>>(5)?.map(|n| n as u64),
                 parent_id: None,
                 parent_kind: None,
@@ -359,6 +361,36 @@ impl HarnessStore for CodexStore {
     }
 }
 
+// Sum the input-side usage from the last kimi wire.jsonl line that carries one,
+// plus the model on that line; output tokens are not the context reading.
+fn kimi_wire_meta(wire: &Path) -> (Option<u64>, Option<String>) {
+    let mut tokens = None;
+    let mut model = None;
+    let Ok(file) = fs::File::open(wire) else {
+        return (tokens, model);
+    };
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Some(value) = json(&line) else {
+            continue;
+        };
+        if let Some(usage) = value.get("usage") {
+            tokens = Some(
+                wire_num(usage, "inputOther")
+                    + wire_num(usage, "inputCacheRead")
+                    + wire_num(usage, "inputCacheCreation"),
+            );
+        }
+        if let Some(name) = value.get("model").and_then(Value::as_str) {
+            model = Some(name.to_string());
+        }
+    }
+    (tokens, model)
+}
+
+fn wire_num(value: &Value, key: &str) -> u64 {
+    value.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
 pub struct KimiStore;
 impl HarnessStore for KimiStore {
     fn id(&self) -> HarnessId {
@@ -396,18 +428,19 @@ impl HarnessStore for KimiStore {
                     continue;
                 };
                 let wire = path.join("agents/main/wire.jsonl");
+                let (input_tokens, model) = kimi_wire_meta(&wire);
                 out.push(HarnessSession {
                     id,
                     harness: self.id().as_str(),
                     cwd: found_cwd.to_string(),
                     source_path: Some(wire.to_string_lossy().into_owned()),
                     title: None,
-                    model: None,
-                    input_tokens: None,
+                    model,
+                    input_tokens,
                     parent_id: None,
                     parent_kind: None,
                     created_at_ms: created(&state),
-                    last_activity_ms: mtime(&state),
+                    last_activity_ms: mtime(&state).max(mtime(&wire)),
                 });
             }
         }

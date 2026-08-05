@@ -22,7 +22,7 @@ import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
-import { toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
+import { toggleNetworkFor, toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { registerMdview } from "./mdview";
@@ -133,6 +133,13 @@ function toggleTermStrip() {
   toggleTermStripFor(id);
 }
 
+// Summon the strip and flip its network (waterfall) view on the focused terminal.
+function toggleNetwork() {
+  const id = getFocusedTermId();
+  if (!id) return;
+  toggleNetworkFor(id);
+}
+
 const TAB_COMMANDS: Command[] = [
   // The palette lists every command below that carries a `title`. ⌘⇧P, the
   // VSCode-standard binding.
@@ -154,6 +161,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
   { id: "term.strip", keys: ["$mod+Shift+Period"], title: "Toggle Relations Strip", group: "View", run: toggleTermStrip },
+  { id: "term.network", keys: ["$mod+Shift+N"], title: "Toggle Network View", group: "View", run: toggleNetwork },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting

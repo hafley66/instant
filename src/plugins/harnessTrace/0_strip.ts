@@ -109,11 +109,12 @@ export const StripPolicy: IStripPolicy = {
     return row.tmuxSession !== null && liveTmux.has(row.tmuxSession) ? "open" : "ignore";
   },
 
-  // Coordinator defect (m-36e96eb8): related is parent links only, so a tab
-  // with no linked lanes read "0 external shells" while dispatched lanes ran.
+  // Leak fix 2026-08-05: a tab WITH a native session but no children stays empty;
+  // the widen to "all" only helps a spy tab joining no session of its own.
   effectiveScope(nodes, sid, chosen) {
     if (chosen !== null) return chosen;
     if (StripPolicy.external(nodes, sid, "related").length > 0) return "related";
+    if (StripPolicy.nativeIds(nodes, sid).size > 0) return "related";
     return StripPolicy.external(nodes, sid, "all").length > 0 ? "all" : "related";
   },
 };
