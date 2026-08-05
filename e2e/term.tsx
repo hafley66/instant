@@ -38,7 +38,9 @@ import { wireContextMenu } from "../src/ctxmenu";
 // undefined, which the app tolerates in e2e (all invokes are .catch'd).
 type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
 const NOW = Date.now();
-const E2E_HARNESS = new URLSearchParams(window.location.search).get("harness") === "kimi" ? "kimi" : "codex";
+const E2E_PARAMS = new URLSearchParams(window.location.search);
+const E2E_HARNESS = E2E_PARAMS.get("harness") === "kimi" ? "kimi" : "codex";
+const E2E_WHEEL_HARNESS = E2E_PARAMS.get("wheelHarness");
 const ROOT = "/tmp/term-e2e";
 const entry = (path: string, is_dir = false) => ({
   name: path.split("/").pop()!,
@@ -216,7 +218,7 @@ type TermHooks = {
 };
 
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
-  openTab("e2e", { cwd: ROOT });
+  openTab("e2e", { cwd: ROOT, command: E2E_WHEEL_HARNESS || undefined });
   // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
   // Seed the pane split. Touched is derived from the session transcript; Turns
   // is the initial source.

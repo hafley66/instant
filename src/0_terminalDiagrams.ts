@@ -276,6 +276,8 @@ export class TerminalDiagramOverlay {
   scrollSubscription: Subscription;
   cache = new Map<string, Promise<string>>();
   elementCache = new Map<string, HTMLElement>();
+  wheelDeltaRows = 0;
+  wheelFrame = 0;
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
 
@@ -284,6 +286,8 @@ export class TerminalDiagramOverlay {
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
     readonly messages?: () => Promise<AiMessage[] | null>,
+    readonly scrollTmux?: (up: boolean, lines: number) => void,
+    readonly wheelMode: () => "application" | "tmux-copy" = () => "application",
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
@@ -296,8 +300,30 @@ export class TerminalDiagramOverlay {
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(120),
     ).subscribe(() => this.scheduleFrame());
-    const onWheel = () => {
+    const onWheel = (event: WheelEvent) => {
+      if (!this.scrollTmux || this.wheelMode() === "application") {
+        this.viewportScrolled();
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
       this.viewportScrolled();
+      const screen = host.querySelector<HTMLElement>(".xterm-screen");
+      const cellHeight = screen ? screen.getBoundingClientRect().height / term.rows : 1;
+      const pixels = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
+        ? event.deltaY
+        : event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? event.deltaY * cellHeight
+          : event.deltaY * cellHeight * term.rows;
+      this.wheelDeltaRows += pixels / Math.max(1, cellHeight);
+      if (!this.wheelFrame) {
+        this.wheelFrame = requestAnimationFrame(() => {
+          this.wheelFrame = 0;
+          const rows = this.wheelDeltaRows;
+          this.wheelDeltaRows = 0;
+          if (rows) this.scrollTmux?.(rows < 0, Math.min(50, Math.max(1, Math.round(Math.abs(rows)))));
+        });
+      }
     };
     const onClick = (event: MouseEvent) => {
       const diagram = Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
@@ -316,7 +342,7 @@ export class TerminalDiagramOverlay {
         diagram.dataset.diagramTheme === "dark",
       );
     };
-    host.addEventListener("wheel", onWheel, { capture: true, passive: true });
+    host.addEventListener("wheel", onWheel, { capture: true, passive: false });
     host.addEventListener("click", onClick, { capture: true });
     this.disposables = [
       { dispose: () => host.removeEventListener("wheel", onWheel, { capture: true }) },
@@ -517,6 +543,7 @@ export class TerminalDiagramOverlay {
 
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
+    if (this.wheelFrame) cancelAnimationFrame(this.wheelFrame);
     this.activitySubscription?.unsubscribe();
     this.activityEvents.complete();
     this.scrollSubscription.unsubscribe();

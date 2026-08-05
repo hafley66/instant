@@ -50,8 +50,8 @@ const scrolledMermaidOutput = [
   "This prose arrived later without a blank separator (click)",
 ].join("\r\n");
 
-async function openTerminal(page: Page) {
-  await page.goto("/e2e-term.html?e2e=1");
+async function openTerminal(page: Page, params = "e2e=1") {
+  await page.goto(`/e2e-term.html?${params}`);
   await page.getByTestId("open-term").click();
   await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
   await page.waitForFunction(() => !!window.__term?.point(0, 0));
@@ -137,7 +137,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
   });
 }
 
-test("native wheel reaches xterm through an inline diagram", async ({ page }) => {
+test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, output("Claude Code"));
   const diagram = page.locator('.term-diagram[data-language="mermaid"]');
@@ -145,19 +145,52 @@ test("native wheel reaches xterm through an inline diagram", async ({ page }) =>
   const box = await diagram.boundingBox();
   expect(box).not.toBeNull();
   await page.evaluate(() => {
-    const host = document.querySelector<HTMLElement>(".term-host")!;
-    host.addEventListener("wheel", (event) => {
-      const target = event.target instanceof Element ? event.target : null;
-      host.dataset.wheelTarget = target?.closest(".xterm") ? "xterm" : target?.className || "unknown";
-      host.dataset.wheelTrusted = String(event.isTrusted);
-    }, { capture: true, once: true });
+    const target = window as Window & {
+      __instantE2eNativeResults?: Record<string, unknown>;
+      __scrollSessionArgs?: Record<string, unknown>;
+      __viewportBeforeWheel?: number;
+    };
+    target.__viewportBeforeWheel = window.__term!.dims() ? document.querySelector<HTMLElement>(".xterm-viewport")!.scrollTop : -1;
+    if (target.__instantE2eNativeResults) {
+      target.__instantE2eNativeResults.scroll_session = (args: Record<string, unknown>) => {
+        target.__scrollSessionArgs = args;
+      };
+    }
   });
 
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.wheel(0, -100);
 
-  await expect(page.locator(".term-host")).toHaveAttribute("data-wheel-target", "xterm");
-  await expect(page.locator(".term-host")).toHaveAttribute("data-wheel-trusted", "true");
+  await expect.poll(() => page.evaluate(() => (window as Window & { __scrollSessionArgs?: Record<string, unknown> }).__scrollSessionArgs))
+    .toEqual({ name: "e2e", up: true, lines: expect.any(Number) });
+  const localScroll = await page.evaluate(() => {
+    const target = window as Window & { __viewportBeforeWheel?: number };
+    return {
+      before: target.__viewportBeforeWheel,
+      after: document.querySelector<HTMLElement>(".xterm-viewport")!.scrollTop,
+    };
+  });
+  expect(localScroll.after).toBe(localScroll.before);
+  await expect(page.locator(".term-diagrams")).toBeHidden();
+});
+
+test("Claude Code retains application wheel handling", async ({ page }) => {
+  await openTerminal(page, "e2e=1&wheelHarness=claude");
+  await writeFixture(page, output("Claude Code"));
+  const diagram = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(diagram).toBeVisible();
+  const box = await diagram.boundingBox();
+  expect(box).not.toBeNull();
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(50);
+
+  const scrollCalls = await page.evaluate(() =>
+    ((window as Window & { __instantE2eNativeCalls?: string[] }).__instantE2eNativeCalls ?? [])
+      .filter((command) => command === "scroll_session"),
+  );
+  expect(scrollCalls).toEqual([]);
   await expect(page.locator(".term-diagrams")).toBeHidden();
 });
 
