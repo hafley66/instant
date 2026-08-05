@@ -175,13 +175,26 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
 export function mergeLocatedDiagrams(direct: DiagramFence[], ledger: DiagramFence[]): DiagramFence[] {
   const fences = [...direct];
   for (const candidate of ledger) {
-    if (!fences.some((fence) =>
+    const overlapIndex = fences.findIndex((fence) =>
       fence.language === candidate.language &&
       fence.start <= candidate.end &&
       candidate.start <= fence.end
-    )) fences.push(candidate);
+    );
+    if (overlapIndex < 0) {
+      fences.push(candidate);
+      continue;
+    }
+    const visibleLines = normalizedDiagramLines(fences[overlapIndex].code);
+    const ledgerLines = normalizedDiagramLines(candidate.code);
+    const visibleIsClippedPrefix = visibleLines.length < ledgerLines.length
+      && visibleLines.every((line, index) => line === ledgerLines[index]);
+    if (visibleIsClippedPrefix) fences[overlapIndex] = candidate;
   }
   return fences;
+}
+
+export function diagramElementKey(fence: DiagramFence, dark: boolean): string {
+  return `${dark}:${fence.language}:${fence.start}:${normalizedDiagramLines(fence.code).join("\n")}`;
 }
 
 function stripTuiBullet(line: string): string {
@@ -262,6 +275,7 @@ export class TerminalDiagramOverlay {
   scrollEvents = new Subject<void>();
   scrollSubscription: Subscription;
   cache = new Map<string, Promise<string>>();
+  elementCache = new Map<string, HTMLElement>();
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
 
@@ -282,28 +296,31 @@ export class TerminalDiagramOverlay {
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(120),
     ).subscribe(() => this.scheduleFrame());
-    const onWheel = (event: WheelEvent) => {
+    const onWheel = () => {
       this.viewportScrolled();
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest(".term-diagram")) return;
-      host.querySelector<HTMLElement>(".xterm")?.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        deltaMode: event.deltaMode,
-        deltaX: event.deltaX,
-        deltaY: event.deltaY,
-        deltaZ: event.deltaZ,
-        ctrlKey: event.ctrlKey,
-        shiftKey: event.shiftKey,
-        altKey: event.altKey,
-        metaKey: event.metaKey,
-      }));
+    };
+    const onClick = (event: MouseEvent) => {
+      const diagram = Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
+        .find((element) => {
+          if (element.hidden || element.classList.contains("term-diagram-error")) return false;
+          const rect = element.getBoundingClientRect();
+          return event.clientX >= rect.left && event.clientX <= rect.right
+            && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        });
+      if (!diagram) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.openLarge(
+        diagram.innerHTML,
+        diagram.dataset.language as DiagramLanguage,
+        diagram.dataset.diagramTheme === "dark",
+      );
     };
     host.addEventListener("wheel", onWheel, { capture: true, passive: true });
+    host.addEventListener("click", onClick, { capture: true });
     this.disposables = [
       { dispose: () => host.removeEventListener("wheel", onWheel, { capture: true }) },
+      { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.messages) {
           this.positionElements();
@@ -427,9 +444,10 @@ export class TerminalDiagramOverlay {
     const existing = new Map(Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
       .map((element) => [element.dataset.diagramKey ?? "", element]));
     const elements = rendered.map(({ fence, svg, error }) => {
-      const diagramKey = `${dark}:${fence.language}:${fence.code}`;
-      const element = existing.get(diagramKey) ?? document.createElement("div");
+      const diagramKey = diagramElementKey(fence, dark);
+      const element = existing.get(diagramKey) ?? this.elementCache.get(diagramKey) ?? document.createElement("div");
       const created = !element.dataset.diagramKey;
+      this.elementCache.set(diagramKey, element);
       element.dataset.diagramKey = diagramKey;
       element.dataset.language = fence.language;
       element.dataset.diagramTheme = dark ? "dark" : "light";
@@ -461,7 +479,6 @@ export class TerminalDiagramOverlay {
         element.className = "term-diagram";
         element.title = "Click to expand diagram";
         element.innerHTML = diagramSvgMarkup(svg);
-        element.addEventListener("click", () => this.openLarge(svg, fence.language, dark));
       }
       return element;
     });
@@ -506,6 +523,7 @@ export class TerminalDiagramOverlay {
     this.scrollEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
+    this.elementCache.clear();
     this.closeLarge();
     this.root.remove();
   }

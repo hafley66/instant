@@ -92,7 +92,9 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     expect(inlineBoxes).toHaveLength(2);
     expect(inlineBoxes.every(({ width, height }) => width > 500 && height > 40)).toBe(true);
 
-    await page.locator('.term-diagram[data-language="d2"]').click();
+    const d2Box = await page.locator('.term-diagram[data-language="d2"]').boundingBox();
+    expect(d2Box).not.toBeNull();
+    await page.mouse.click(d2Box!.x + d2Box!.width / 2, d2Box!.y + d2Box!.height / 2);
     const expanded = page.locator('.diagram-lightbox[data-language="d2"]');
     await expect(expanded).toBeVisible();
     await expect(expanded).toContainText("PTY");
@@ -134,6 +136,30 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     expect(allocation.allocatedRows).toBeGreaterThan(allocation.sourceRows);
   });
 }
+
+test("native wheel reaches xterm through an inline diagram", async ({ page }) => {
+  await openTerminal(page);
+  await writeFixture(page, output("Claude Code"));
+  const diagram = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(diagram).toBeVisible();
+  const box = await diagram.boundingBox();
+  expect(box).not.toBeNull();
+  await page.evaluate(() => {
+    const host = document.querySelector<HTMLElement>(".term-host")!;
+    host.addEventListener("wheel", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      host.dataset.wheelTarget = target?.closest(".xterm") ? "xterm" : target?.className || "unknown";
+      host.dataset.wheelTrusted = String(event.isTrusted);
+    }, { capture: true, once: true });
+  });
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, -100);
+
+  await expect(page.locator(".term-host")).toHaveAttribute("data-wheel-target", "xterm");
+  await expect(page.locator(".term-host")).toHaveAttribute("data-wheel-trusted", "true");
+  await expect(page.locator(".term-diagrams")).toBeHidden();
+});
 
 test("renders visible fences when the native harness ledger returns no matching turn", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
@@ -266,14 +292,8 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
 
   const tether = await page.evaluate(async () => {
     const before = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
+    const beforeKey = before.dataset.diagramKey;
     const beforeTop = before.getBoundingClientRect().top;
-    let forwardedWheelCount = 0;
-    document.querySelector<HTMLElement>(".xterm")!.addEventListener("wheel", () => forwardedWheelCount++, { once: true });
-    before.dispatchEvent(new WheelEvent("wheel", {
-      bubbles: true,
-      deltaY: -100,
-    }));
-    const hiddenOnWheel = document.querySelector<HTMLElement>(".term-diagrams")!.hidden;
     window.__term!.scroll(-2);
     await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     const immediate = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
@@ -284,19 +304,18 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const afterDebounce = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
     return {
-      forwardedWheelCount,
-      hiddenOnWheel,
       movedImmediately: immediateTop !== beforeTop,
+      keys: [beforeKey, immediate.dataset.diagramKey, afterScrollIdle.dataset.diagramKey, afterDebounce.dataset.diagramKey],
       sameAfterImmediateMove: immediate === before,
       visibleAfterScrollIdle,
       sameAfterScrollIdle: afterScrollIdle === before,
       sameAfterDebouncedScan: afterDebounce === before,
     };
   });
+  expect(new Set(tether.keys).size).toBe(1);
   expect(tether).toEqual({
-    forwardedWheelCount: 1,
-    hiddenOnWheel: true,
     movedImmediately: true,
+    keys: tether.keys,
     sameAfterImmediateMove: true,
     visibleAfterScrollIdle: true,
     sameAfterScrollIdle: true,
