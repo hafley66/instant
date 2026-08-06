@@ -152,6 +152,43 @@ for (const harness of ["Codex", "Claude Code"] as const) {
   });
 }
 
+test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ page }) => {
+  await openTerminal(page);
+  await writeFixture(page, output("Claude Code"));
+  const diagram = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(diagram).toBeVisible();
+  const box = await diagram.boundingBox();
+  expect(box).not.toBeNull();
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __instantE2eNativeResults?: Record<string, unknown>;
+      __scrollSessionArgs?: Record<string, unknown>;
+      __viewportBeforeWheel?: number;
+    };
+    target.__viewportBeforeWheel = window.__term!.dims() ? document.querySelector<HTMLElement>(".xterm-viewport")!.scrollTop : -1;
+    if (target.__instantE2eNativeResults) {
+      target.__instantE2eNativeResults.scroll_session = (args: Record<string, unknown>) => {
+        target.__scrollSessionArgs = args;
+      };
+    }
+  });
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, -100);
+
+  await expect.poll(() => page.evaluate(() => (window as Window & { __scrollSessionArgs?: Record<string, unknown> }).__scrollSessionArgs))
+    .toEqual({ name: "e2e", up: true, lines: expect.any(Number) });
+  const localScroll = await page.evaluate(() => {
+    const target = window as Window & { __viewportBeforeWheel?: number };
+    return {
+      before: target.__viewportBeforeWheel,
+      after: document.querySelector<HTMLElement>(".xterm-viewport")!.scrollTop,
+    };
+  });
+  expect(localScroll.after).toBe(localScroll.before);
+  await expect(page.locator(".term-diagrams")).toBeHidden();
+});
+
 test("does not render terminal fences when the AI ledger has no matching visible message", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
