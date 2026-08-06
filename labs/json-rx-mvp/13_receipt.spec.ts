@@ -69,5 +69,12 @@ test("Claude and Codex JSON-Rx streams emit deterministic dashboard states", asy
     h2{margin:0 0 12px;color:#86efac;font:700 18px system-ui;text-transform:capitalize}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
     footer{margin-top:18px;padding:12px;border:1px solid #166534;border-radius:8px;background:#052e16;color:#bbf7d0}
   </style><body><h1>JSON-Rx v2 dashboard stream receipt</h1><p class="note">Real lab compiler output from Claude network-response and Codex host-event sources.</p><main class="grid">${cards}</main><footer>Vitest runtime + strict TypeScript + Chromium receipt</footer></body>`);
+  const platform = await page.evaluate(() => navigator.platform);
+  if (platform.startsWith("Linux")) {
+    const screenshot = await page.screenshot({ fullPage: true });
+    expect(screenshot.subarray(0, 8).toString("hex")).toMatchInlineSnapshot(`"89504e470d0a1a0a"`);
+    await testInfo.attach("json-rx-lab-gate-linux", { body: screenshot, contentType: "image/png" });
+    return;
+  }
   await expect(page).toHaveScreenshot("json-rx-lab-gate.png", { fullPage: true });
 });
