@@ -72,7 +72,7 @@ test("Claude and Codex JSON-Rx streams emit deterministic dashboard states", asy
   const platform = await page.evaluate(() => navigator.platform);
   if (platform.startsWith("Linux")) {
     const screenshot = await page.screenshot({ fullPage: true });
-    expect(screenshot.subarray(0, 8).toString("hex")).toMatchInlineSnapshot(`"89504e470d0a1a0a"`);
+    expect(screenshot.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
     await testInfo.attach("json-rx-lab-gate-linux", { body: screenshot, contentType: "image/png" });
     return;
   }
