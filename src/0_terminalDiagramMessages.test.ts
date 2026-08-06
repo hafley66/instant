@@ -27,12 +27,14 @@ describe("terminal message diagrams", () => {
         {
           "code": "a -> b",
           "language": "d2",
+          "locator": "m2",
           "messageId": "m2",
         },
         {
           "code": "flowchart LR
       PTY --> tmux",
           "language": "mermaid",
+          "locator": "m3",
           "messageId": "m3",
         },
       ]
