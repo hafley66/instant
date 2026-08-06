@@ -258,7 +258,9 @@ export function wireWindowResize() {
 // wireContextMenu's bubble handler, so ctxItemsFor can map it to a terminal
 // buffer row for turn-identify.
 let lastCtxY = 0;
-export const setLastCtxY = (y: number) => {
+let lastCtxX = 0;
+export const setLastCtxPoint = (x: number, y: number) => {
+  lastCtxX = x;
   lastCtxY = y;
 };
 
@@ -308,9 +310,22 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
     ];
   }
 
-  // Inside a terminal.
-  if (target.closest(".term-host")) {
-    const id = activeId();
+  const pointedTab = Array.from(tabs.entries()).find(([, tab]) => {
+    const host = tab.el.matches(".term-host")
+      ? tab.el
+      : tab.el.querySelector<HTMLElement>(".term-host");
+    if (!host) return false;
+    const rect = host.getBoundingClientRect();
+    return rect.left <= lastCtxX && lastCtxX <= rect.right
+      && rect.top <= lastCtxY && lastCtxY <= rect.bottom;
+  });
+
+  // Inside a terminal. Coordinate ownership covers pointer-transparent SVG
+  // overlays whose event target may be retargeted outside the terminal subtree.
+  if (target.closest(".term-host") || pointedTab) {
+    const id = pointedTab?.[0] ?? activeId();
+    const diagram = pointedTab?.[1].diagrams?.diagramAtClientY(lastCtxY)
+      ?? (id ? tabs.get(id)?.diagrams?.diagramAtClientY(lastCtxY) : null);
     const meta = id ? tabMetaById(id) : null;
     const turns = id ? tabTurns.get(id) ?? [] : [];
     const matches = id && meta ? searchTurns(turns, ledgerQuery(id, lastCtxY)) : [];
@@ -345,6 +360,10 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
       turnItems.push({ sep: true });
     }
     return [
+      ...(diagram ? [{
+        label: `Expand ${diagram.language === "d2" ? "D2" : "Mermaid"} diagram`,
+        action: () => { if (id) tabs.get(id)?.diagrams?.openAtClientY(lastCtxY); },
+      } satisfies CtxItem, { sep: true } satisfies CtxItem] : []),
       ...turnItems,
       {
         label: "Paste",

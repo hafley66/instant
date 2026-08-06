@@ -1303,8 +1303,7 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
   padding: 3px 8px;
   color: var(--panel-fg);
   background: var(--term-bg);
-  pointer-events: auto;
-  cursor: zoom-in;
+  pointer-events: none;
 }
 .term-diagram[data-diagram-theme="light"] {
   color: #111827;

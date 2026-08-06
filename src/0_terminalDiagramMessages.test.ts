@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { AiMessage } from "./state";
 import { diagramsFromMessageTail, isGenericMermaidDeclaration, normalizedDiagramLines } from "./0_terminalDiagramMessages";
 
-const message = (id: string, role: string, text: string): AiMessage => ({
+const message = (id: string, role: string, text: string, subtype?: string): AiMessage => ({
   editor: "codex",
   session_id: "session-1",
   id,
   seq: Number(id.slice(1)),
   role,
+  subtype,
   ts: 0,
   preview: text.slice(0, 20),
   text,
@@ -20,6 +21,7 @@ describe("terminal message diagrams", () => {
       message("m1", "user", "```mermaid\ngraph LR\nA --> B\n```"),
       message("m2", "assistant", "before\n```d2\na -> b\n```\nafter"),
       message("m3", "assistant", "```mermaid\nflowchart LR\nPTY --> tmux\n```"),
+      message("m4", "assistant", "```d2\nfile -> write\n```", "tool_use"),
     ];
 
     expect(diagramsFromMessageTail(messages)).toMatchInlineSnapshot(`

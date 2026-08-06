@@ -32,6 +32,7 @@ import { setHomeDir, sessionId } from "../src/core";
 import { store } from "../src/state";
 import { installKeymap } from "../src/keymap";
 import { wireContextMenu } from "../src/ctxmenu";
+import { ctxItemsFor, setLastCtxPoint } from "../src/chrome";
 import { closeActiveTab, reopenLastTab } from "../src/tabs";
 import { openPreviewPanel } from "../src/preview";
 
@@ -43,6 +44,7 @@ const NOW = Date.now();
 const E2E_PARAMS = new URLSearchParams(window.location.search);
 const E2E_HARNESS = E2E_PARAMS.get("harness") === "kimi" ? "kimi" : "codex";
 const E2E_WHEEL_HARNESS = E2E_PARAMS.get("wheelHarness");
+const E2E_NO_HARNESS = E2E_PARAMS.has("noHarness");
 const ROOT = "/tmp/term-e2e";
 const entry = (path: string, is_dir = false) => ({
   name: path.split("/").pop()!,
@@ -93,7 +95,7 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
   // transcript node renders. A function
   // fixture uses the args-aware path in nativeTransport's e2e branch.
   harness_session: (args: Record<string, unknown> | undefined) =>
-    args?.tool === E2E_HARNESS ? `e2e-${E2E_HARNESS}-1` : undefined,
+    !E2E_NO_HARNESS && args?.tool === E2E_HARNESS ? `e2e-${E2E_HARNESS}-1` : undefined,
   // Codex writes support records before the visible assistant response. The
   // fixture preserves that sequence so its expanded response proves the rollup.
   read_ai_messages: [
@@ -241,4 +243,5 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-file]")!.onclick = 
 
 mountReactDock(document.getElementById("dock")!);
 initRail();
-wireContextMenu(() => []);
+document.addEventListener("contextmenu", (event) => setLastCtxPoint(event.clientX, event.clientY), true);
+wireContextMenu(ctxItemsFor);
