@@ -21,10 +21,8 @@ const run: Run = async (bin, args, encoding) => {
   return payload.stdout as string;
 };
 
-const highlighter = await createHighlighter({
-  themes: ["github-dark"],
-  langs: ["text", "typescript"],
-});
+// Grammars arrive per file via refractor.ensure, so none are preloaded.
+const highlighter = await createHighlighter({ themes: ["github-dark"], langs: ["text"] });
 const { refractor, install } = shikiRefractor(highlighter, "github-dark");
 install();
 

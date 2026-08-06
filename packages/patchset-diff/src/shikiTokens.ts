@@ -3,6 +3,9 @@ import type { HighlighterGeneric } from "shiki";
 /** Shape react-diff-view's `tokenize({highlight: true, refractor})` calls. */
 export interface RefractorLike {
   highlight(value: string, language: string): TokenNode[];
+  /** `highlight` is sync, so a grammar must be resident before it runs.
+   *  False = no such grammar. Callers re-render on true. */
+  ensure?(language: string): Promise<boolean>;
 }
 
 export interface TokenNode {
@@ -58,10 +61,28 @@ export function shikiRefractor(
   const rules = () =>
     [...classOf].map(([color, name]) => `.${name}{color:${color}}`).join("\n");
 
+  const loading = new Map<string, Promise<boolean>>();
+  const resident = (language: string) =>
+    language === "text" || highlighter.getLoadedLanguages().includes(language);
+
   return {
     refractor: {
+      ensure(language) {
+        if (resident(language)) return Promise.resolve(true);
+        let pending = loading.get(language);
+        if (!pending) {
+          pending = highlighter
+            .loadLanguage(language as never)
+            .then(() => true)
+            .catch(() => false);
+          loading.set(language, pending);
+        }
+        return pending;
+      },
       highlight(value, language) {
-        const hast = highlighter.codeToHast(value, { lang: language, theme });
+        // An unloaded grammar throws, so fall back rather than losing the file.
+        const lang = resident(language) ? language : "text";
+        const hast = highlighter.codeToHast(value, { lang, theme });
         const lines = codeLines(hast);
         const out: TokenNode[] = [];
         lines.forEach((line, i) => {

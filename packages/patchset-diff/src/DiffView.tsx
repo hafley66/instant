@@ -171,6 +171,19 @@ function LazyFile({ file, viewType, refractor, widgets, image, imageDiff }: Lazy
   }, [visible]);
 
   const path = file.newPath || file.oldPath;
+  const language = languageOf(path);
+
+  // Grammars load per language, so paint once more when this file's arrives.
+  const [grammar, setGrammar] = useState(0);
+  useEffect(() => {
+    if (!visible || !refractor?.ensure) return;
+    let live = true;
+    refractor.ensure(language).then((ok) => ok && live && setGrammar((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, [visible, refractor, language]);
+
   // markEdits narrows the paint to the changed words; without it a one-token
   // edit lights the whole line.
   const tokens = useMemo(() => {
@@ -178,12 +191,13 @@ function LazyFile({ file, viewType, refractor, widgets, image, imageDiff }: Lazy
     const enhancers = [markEdits(file.hunks, { type: "block" })];
     try {
       return refractor
-        ? tokenize(file.hunks, { highlight: true, refractor, language: languageOf(path), enhancers })
+        ? tokenize(file.hunks, { highlight: true, refractor, language, enhancers })
         : tokenize(file.hunks, { highlight: false, enhancers });
-    } catch {
+    } catch (failure) {
+      console.warn(`patchset-diff: tokenize failed for ${path}`, failure);
       return undefined;
     }
-  }, [visible, refractor, file.hunks, path]);
+  }, [visible, refractor, file.hunks, path, language, grammar]);
 
   return (
     <div ref={host} className="patchset-diff-file" style={{ minHeight: visible ? undefined : lines * 20 }}>

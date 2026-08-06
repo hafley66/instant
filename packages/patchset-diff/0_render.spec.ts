@@ -20,8 +20,11 @@ test("patch-range selector reads live jj patch sets and diffs between them", asy
   await expect(page.locator(".patchset-diff-path")).toHaveText("sum.ts");
   await expect(page.locator(".patchset-diff-adds")).toBeVisible();
 
-  // shiki colours survive the style-to-class remap.
-  expect(await page.locator("span[class^='pds']").count()).toBeGreaterThan(10);
+  // shiki colours survive the style-to-class remap. The grammar loads per file,
+  // so first paint is plain and colour arrives a tick later.
+  await expect
+    .poll(() => page.locator("span[class^='pds']").count())
+    .toBeGreaterThan(10);
 
   // Patch set 3 -> 4 was a pure rebase, so the author changed nothing.
   await selects.nth(0).selectOption("3");
