@@ -25,8 +25,8 @@ const highlighter = await createHighlighter({
   themes: ["github-dark"],
   langs: ["text", "typescript"],
 });
-const { refractor, css } = shikiRefractor(highlighter, "github-dark");
-document.head.append(Object.assign(document.createElement("style"), { textContent: css() }));
+const { refractor, install } = shikiRefractor(highlighter, "github-dark");
+install();
 
 createRoot(document.querySelector("#app")!).render(
   createElement(PatchRange, {

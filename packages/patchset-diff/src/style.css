@@ -11,10 +11,20 @@
 }
 
 .patchset-diff-file {
-  margin-block-end: 1rem;
   border: 1px solid var(--pd-line);
-  border-radius: 6px;
+  border-block-end: 0;
   overflow: hidden;
+}
+
+.patchset-diff-file:first-child {
+  border-start-start-radius: 6px;
+  border-start-end-radius: 6px;
+}
+
+.patchset-diff-file:last-child {
+  border-block-end: 1px solid var(--pd-line);
+  border-end-start-radius: 6px;
+  border-end-end-radius: 6px;
 }
 
 .patchset-diff-head {
@@ -24,9 +34,28 @@
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.45rem 0.75rem;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
   background: var(--pd-head);
+  border: 0;
   border-block-end: 1px solid var(--pd-line);
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.patchset-diff-head:hover {
+  background: #1c2129;
+}
+
+.patchset-diff-head[aria-expanded="false"] {
+  border-block-end-color: transparent;
+}
+
+.patchset-diff-caret {
+  width: 0.7rem;
+  opacity: 0.65;
 }
 
 .patchset-diff-path {

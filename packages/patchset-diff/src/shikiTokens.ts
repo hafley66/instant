@@ -14,8 +14,10 @@ export interface TokenNode {
 
 export interface ShikiRefractor {
   refractor: RefractorLike;
-  /** Emit into a <style>; regenerate after each highlight call. */
+  /** Current rules. Colours are minted lazily, so this grows as files render. */
   css(): string;
+  /** Keeps a <style> in sync as new colours appear. Returns a remover. */
+  install(target?: Document): () => void;
 }
 
 type AnyHighlighter = HighlighterGeneric<string, string>;
@@ -49,6 +51,13 @@ export function shikiRefractor(
     };
   };
 
+  let sheet: HTMLStyleElement | null = null;
+  const paint = () => {
+    if (sheet) sheet.textContent = rules();
+  };
+  const rules = () =>
+    [...classOf].map(([color, name]) => `.${name}{color:${color}}`).join("\n");
+
   return {
     refractor: {
       highlight(value, language) {
@@ -59,13 +68,18 @@ export function shikiRefractor(
           if (i > 0) out.push({ type: "text", value: "\n" });
           for (const child of line.children ?? []) out.push(convert(child));
         });
+        paint();
         return out;
       },
     },
-    css: () =>
-      [...classOf]
-        .map(([color, name]) => `.${name}{color:${color}}`)
-        .join("\n"),
+    css: rules,
+    install(target = document) {
+      sheet ??= target.createElement("style");
+      sheet.dataset.patchsetDiff = "shiki";
+      target.head.append(sheet);
+      paint();
+      return () => sheet?.remove();
+    },
   };
 }
 

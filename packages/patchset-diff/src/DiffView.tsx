@@ -71,6 +71,7 @@ function StatBar({ added, removed }: { added: number; removed: number }) {
 function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
   const host = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [open, setOpen] = useState(true);
   const lines = file.hunks.reduce((n, h) => n + h.changes.length + 1, 0);
   const { added, removed } = useMemo(() => {
     let added = 0;
@@ -112,13 +113,19 @@ function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
 
   return (
     <div ref={host} className="patchset-diff-file" style={{ minHeight: visible ? undefined : lines * 20 }}>
-      <div className="patchset-diff-head">
+      <button
+        type="button"
+        className="patchset-diff-head"
+        aria-expanded={open}
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+      >
+        <span className="patchset-diff-caret" aria-hidden="true">{open ? "\u25be" : "\u25b8"}</span>
         <span className="patchset-diff-path">{path}</span>
         <span className="patchset-diff-adds">+{added}</span>
         <span className="patchset-diff-dels">&minus;{removed}</span>
         <StatBar added={added} removed={removed} />
-      </div>
-      {visible && (
+      </button>
+      {visible && open && (
         <Diff
           viewType={viewType}
           diffType={file.type}
