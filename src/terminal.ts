@@ -53,6 +53,7 @@ import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
 import { refreshTurns, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import { harnessDefinitionById } from "./0_harnessDefinitions";
@@ -522,6 +523,10 @@ export function openTab(
     fontSize: termFontSize(id), // persisted per-tab zoom (default 13)
     cursorBlink: true,
     allowProposedApi: true,
+    // tmux owns history. Keeping a second xterm scrollback creates a competing
+    // XP scrollbar and lets the browser consume wheel input before tmux or the
+    // active TUI receives it.
+    scrollback: 0,
     // tmux mouse mode is on (wheel-scroll + forwarding to claude/opencode), which
     // makes a plain drag go to tmux copy-mode and fight native selection. Hold
     // Option to force xterm's own selection instead, iTerm-style.
@@ -869,7 +874,7 @@ export function closeTab(id: string) {
 // survives a tab close, so reopen reattaches by name and the agent is still
 // alive; the stored command/cwd only matter if the session was actually killed.
 // Timestamped + TTL'd (see reopenLastTab).
-export const closedTabs: { tab: OpenTab; ts: number }[] = [];
+export const closedTabs: { tab: OpenTab; ts: number; order: number }[] = [];
 // Runs close-time agent teardown one-at-a-time; see onTermClosed for why.
 let closeChain: Promise<unknown> = Promise.resolve();
 // Await all in-flight close teardown (kill_session / close_pty). Reopen paths
@@ -918,6 +923,7 @@ export function onTermClosed(id: string) {
   closedTabs.push({
     tab: { name, command: meta?.command ?? null, cwd: meta?.cwd ?? null },
     ts: Date.now(),
+    order: nextClosedOrder(),
   });
   forgetTab(id); // don't reattach a tab the user closed
   // Agent tab → kill the tmux session so claude/opencode isn't left burning RAM

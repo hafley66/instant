@@ -12,10 +12,12 @@ import {
   setTermTitle,
   moveTermPanel,
   reopenClosedPanel,
+  latestClosedPanel,
 } from "./reactdock";
-import { sessionId, activeId, flashStatus, baseName, tmuxName } from "./core";
+import { sessionId, activeId, flashStatus, baseName, tmuxName, logLine } from "./core";
 import { tabs, openTab, closedTabs, settleClosures } from "./terminal";
 import { refreshSessions, resumeIdIsLive, resumeLaunch, dropResumeTab } from "./worktrees";
+import { reopenKind } from "./0_reopenOrder";
 
 // ---- tab commands (driven by the central keymap) ----
 // Visual tab nav walks EVERY panel across ALL panes (dockview order), not just
@@ -102,14 +104,24 @@ export function reflowPinnedTabs() {
 // reopening as a "random old session out of nowhere".
 const CLOSED_TAB_TTL_MS = 30 * 60 * 1000;
 export async function reopenLastTab() {
-  if (reopenClosedPanel()) return;
-  let entry = closedTabs.pop();
-  while (entry && Date.now() - entry.ts > CLOSED_TAB_TTL_MS) entry = closedTabs.pop();
+  while (closedTabs.length && Date.now() - closedTabs[closedTabs.length - 1].ts > CLOSED_TAB_TTL_MS) {
+    closedTabs.pop();
+  }
+  const panel = latestClosedPanel();
+  const terminal = closedTabs[closedTabs.length - 1];
+  if (panel && reopenKind(panel.order, terminal?.order ?? null) === "panel") {
+    logLine(`[tab.reopen] selected=panel id=${JSON.stringify(panel.id)}`);
+    reopenClosedPanel();
+    return;
+  }
+  const entry = closedTabs.pop();
   if (!entry) {
+    logLine("[tab.reopen] selected=none");
     flashStatus("nothing to reopen");
     return;
   }
   const last = entry.tab;
+  logLine(`[tab.reopen] selected=terminal name=${JSON.stringify(last.name)}`);
   // Wait for the close's teardown to finish before recreating this name. The
   // close runs exitOrDetachTab on closeChain (async kill_session / close_pty); if
   // we recreate first, either tmux -A reattaches the dying corpse (dropping the

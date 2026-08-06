@@ -176,10 +176,11 @@ test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ 
 
 test("Claude Code retains application wheel handling", async ({ page }) => {
   await openTerminal(page, "e2e=1&wheelHarness=claude");
-  await writeFixture(page, output("Claude Code"));
-  const diagram = page.locator('.term-diagram[data-language="mermaid"]');
-  await expect(diagram).toBeVisible();
-  const box = await diagram.boundingBox();
+  await writeFixture(page, [
+    ...Array.from({ length: 120 }, (_, index) => `Claude history row ${index}`),
+  ]);
+  const host = page.locator(".term-host");
+  const box = await host.boundingBox();
   expect(box).not.toBeNull();
 
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
@@ -191,6 +192,12 @@ test("Claude Code retains application wheel handling", async ({ page }) => {
       .filter((command) => command === "scroll_session"),
   );
   expect(scrollCalls).toEqual([]);
+  await expect(host).toHaveAttribute("data-harness", "claude");
+  expect(await page.locator(".xterm-viewport").evaluate((viewport) => ({
+    overflowY: getComputedStyle(viewport).overflowY,
+    scrollTop: viewport.scrollTop,
+    hasLocalScrollback: viewport.scrollHeight > viewport.clientHeight,
+  }))).toEqual({ overflowY: "hidden", scrollTop: 0, hasLocalScrollback: false });
   await expect(page.locator(".term-diagrams")).toBeHidden();
 });
 

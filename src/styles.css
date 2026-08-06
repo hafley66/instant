@@ -1283,6 +1283,9 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
 .term-host .xterm-viewport {
   height: 100% !important;
 }
+.term-host .xterm-viewport {
+  overflow-y: hidden !important;
+}
 .term-diagrams {
   position: absolute;
   inset: 0;

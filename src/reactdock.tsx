@@ -32,6 +32,7 @@ import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 import { SessionSidebar } from "./sessionSidebar";
 import { InTabStrip } from "./plugins/harnessTrace/InTabStrip";
 import { restoredTerminalSessionIds } from "./0_dockRestore";
+import { nextClosedOrder } from "./0_reopenOrder";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -180,6 +181,7 @@ interface ClosedPanel {
   params: Record<string, unknown>;
   title: string;
   renderer?: "always";
+  order: number;
 }
 const closedPanels: ClosedPanel[] = [];
 let suppressClosedPanelCapture = false;
@@ -417,13 +419,14 @@ function onReady(e: DockviewReadyEvent) {
       dropDirtyProbe(p.id);
       const definition = getPanel(p.id);
       const instance = panelInstanceForId(p.id);
-      if (!suppressClosedPanelCapture && (definition || instance)) {
+      if (!suppressClosedPanelCapture && !isTerm(p.id) && (definition || instance)) {
         closedPanels.push({
           id: p.id,
           component: instance?.componentName ?? p.id,
           params: { ...(p.params ?? {}) },
           title: p.title ?? p.id,
           renderer: definition?.keepAlive || instance?.keepAlive ? "always" : undefined,
+          order: nextClosedOrder(),
         });
       }
       getPanel(p.id)?.onRemove?.(p.id);
@@ -645,6 +648,11 @@ export function reopenClosedPanel(): boolean {
     console.error("reopenClosedPanel", error);
     return false;
   }
+}
+
+export function latestClosedPanel(): { id: string; order: number } | null {
+  const panel = closedPanels[closedPanels.length - 1];
+  return panel ? { id: panel.id, order: panel.order } : null;
 }
 
 // Terminal tab ids (the sid, i.e. the "s:name") in visual left-to-right order,

@@ -43,8 +43,8 @@ export const harnessDefinitions: HarnessDefinition[] = [
   {
     id: "claude", label: "Claude Code",
     matchesCommand: (s) => /(?:^|[\\/\s])(?:claude|ccz)(?:\s|$)/i.test(s),
-    matchesProcess: (s) => /^(?:claude|\d+\.\d+)$/.test(s),
-    isAgentProcess: (s) => /^(?:claude|\d+\.\d+)$/.test(s),
+    matchesProcess: (s) => /^(?:claude|\d+(?:\.\d+){1,3})$/.test(s),
+    isAgentProcess: (s) => /^(?:claude|\d+(?:\.\d+){1,3})$/.test(s),
     resumeFlag: "--resume", stableSessionIdFlag: "--session-id",
     wheelMode: "application",
     hasExplicitSession: (s) => /\s--(?:resume|session-id|continue|from-pr)\b/.test(s),

@@ -24,6 +24,59 @@ test.afterAll(() => {
   }
 });
 
+test("reopen chooses the most recently closed shell and preserves its sidebar", async ({ page }, testInfo) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-sidebar")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("open-file").click();
+  await expect(page.locator(".dv-default-tab-content", { hasText: "README.md" })).toBeVisible();
+  await page.keyboard.press("Meta+w");
+  await expect(page.locator(".dv-default-tab-content", { hasText: "README.md" })).toHaveCount(0);
+
+  await page.locator(".dv-default-tab-content", { hasText: "e2e" }).click();
+  await expect(page.locator(".term-sidebar")).toBeVisible();
+  await page.keyboard.press("Meta+w");
+  await expect(page.locator(".dv-default-tab-content", { hasText: "e2e" })).toHaveCount(0);
+
+  await page.keyboard.press("Meta+Shift+t");
+  await expect(page.locator(".dv-default-tab-content", { hasText: "e2e" })).toBeVisible();
+  await expect(page.locator(".dv-default-tab-content", { hasText: "README.md" })).toHaveCount(0);
+  await expect(page.locator(".term-sidebar")).toBeVisible();
+  await expect(page.locator('[data-testid="sidebar-turns"]')).toBeVisible();
+  await page.evaluate(() => {
+    const terminal = (window as Window & { __term?: { write: (data: string) => void } }).__term;
+    terminal?.write([
+      "REOPEN RECEIPT: newest closed item restored",
+      "restored tab: shell e2e",
+      "older README.md preview remains closed",
+      "sidebar state: restored with Turns and Touched",
+      "",
+    ].join("\r\n"));
+  });
+  await expect(page.locator(".xterm-screen")).toContainText("REOPEN RECEIPT: newest closed item restored");
+  await page.locator("#dock").screenshot({ path: "test-results/reopen-shell-sidebar.png" });
+  await testInfo.attach("reopened-shell-sidebar", {
+    body: await page.locator("#dock").screenshot(),
+    contentType: "image/png",
+  });
+});
+
+test("reopen chooses a panel closed after the shell", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.getByTestId("open-term").click();
+  await page.keyboard.press("Meta+w");
+  await expect(page.locator(".dv-default-tab-content", { hasText: "e2e" })).toHaveCount(0);
+
+  await expect(page.locator(".dv-default-tab-content", { hasText: "Sessions" })).toBeVisible();
+  await page.keyboard.press("Meta+w");
+  await expect(page.locator(".dv-default-tab-content", { hasText: "Sessions" })).toHaveCount(0);
+
+  await page.keyboard.press("Meta+Shift+t");
+  await expect(page.locator(".dv-default-tab-content", { hasText: "Sessions" })).toBeVisible();
+  await expect(page.locator(".dv-default-tab-content", { hasText: "e2e" })).toHaveCount(0);
+});
+
 test("session sidebar Files view: explorer over session-derived Touched (resizable)", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.getByTestId("open-term").click();
