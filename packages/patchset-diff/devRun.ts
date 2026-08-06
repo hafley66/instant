@@ -29,15 +29,17 @@ export function devRun({ cwd, allow = ["jj", "git"], route = "/_run" }: DevRunOp
           let bin = "";
           let args: string[] = [];
           let root: string | undefined;
+          let encoding: BufferEncoding | undefined;
           try {
-            ({ bin, args, cwd: root } = JSON.parse(Buffer.concat(chunks).toString("utf8")));
+            ({ bin, args, cwd: root, encoding } = JSON.parse(Buffer.concat(chunks).toString("utf8")));
           } catch {
             return send(400, { error: "bad json" });
           }
           if (!allow.includes(bin)) return send(403, { error: `blocked: ${bin}` });
           const runIn = root ?? roots[0];
           if (!roots.includes(runIn)) return send(403, { error: `blocked cwd: ${runIn}` });
-          execFile(bin, args, { cwd: runIn, maxBuffer: 32 << 20 }, (failure, stdout, stderr) => {
+          const encode = encoding === "base64" ? "base64" : "utf8";
+          execFile(bin, args, { cwd: runIn, maxBuffer: 64 << 20, encoding: encode }, (failure, stdout, stderr) => {
             if (failure) return send(500, { error: stderr || String(failure) });
             send(200, { stdout });
           });

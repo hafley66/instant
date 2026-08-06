@@ -11,10 +11,12 @@ export interface PatchsetSource {
   interdiff(from: string, to: string): Promise<string>;
   /** Unified diff of one patch set against its own base. */
   diff(commitId: string): Promise<string>;
+  /** Base64 file bytes at a patch set, for diffs git reports as binary. */
+  blob(commitId: string, path: string): Promise<string>;
 }
 
 /** Supply exec, Tauri invoke, or a stub. */
-export type Run = (bin: string, args: string[]) => Promise<string>;
+export type Run = (bin: string, args: string[], encoding?: "utf8" | "base64") => Promise<string>;
 
 const SEP = " ";
 
@@ -49,6 +51,8 @@ export function jjSource(run: Run): PatchsetSource {
       jj(["interdiff", "--from", from, "--to", to, "--git"]),
 
     diff: (commitId) => jj(["diff", "-r", commitId, "--git"]),
+
+    blob: (commitId, path) => run("git", ["show", `${commitId}:${path}`], "base64"),
   };
 }
 
@@ -76,6 +80,8 @@ export function gitSource(run: Run, upstream = "main"): PatchsetSource {
     },
 
     interdiff: (from, to) => git([...DIFF, from, to]),
+
+    blob: (commitId, path) => run("git", ["show", `${commitId}:${path}`], "base64"),
 
     async diff(commitId) {
       const base = (await git(["merge-base", upstream, commitId])).trim();

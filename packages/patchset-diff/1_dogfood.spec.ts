@@ -39,6 +39,21 @@ test("reads this PR's own force-pushed patch sets through gitSource", async ({ p
   await header.click();
   await expect(firstFile.locator("table")).toBeVisible();
 
+  // Binary files carry no hunks, so the image pair is the only view of them.
+  // Patch sets 3 -> 4 are the pair that touched screenshots.
+  await selects.nth(0).selectOption("3");
+  await selects.nth(1).selectOption("4");
+  const images = page.locator(".patchset-diff-images img");
+  await expect(images.first()).toBeVisible();
+  expect(
+    await images.first().evaluate((node) => (node as HTMLImageElement).naturalWidth),
+  ).toBeGreaterThan(0);
+
+  // Back to the pair the screenshot pins.
+  await selects.nth(0).selectOption("2");
+  await selects.nth(1).selectOption("3");
+  await expect(page.locator(".patchset-diff-path").first()).toBeVisible();
+
   expect(failures).toEqual([]);
 
   const box = await page.locator("#app").boundingBox();

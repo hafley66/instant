@@ -11,6 +11,8 @@ export interface PatchsetDiffProps {
   widgets?: Record<string, ReactNode>;
   /** Rendered when the diff text is empty, i.e. a pure rebase. */
   empty?: ReactNode;
+  /** Data URL for a binary file on one side, used when git reports no hunks. */
+  image?: (path: string, side: "a" | "b") => Promise<string | undefined>;
 }
 
 const LANG_OF: Record<string, string> = {
@@ -22,12 +24,16 @@ const LANG_OF: Record<string, string> = {
 const languageOf = (path: string): string =>
   LANG_OF[path.split(".").pop()?.toLowerCase() ?? ""] ?? "text";
 
+const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico"]);
+const isImage = (path: string) => IMAGE_EXT.has(path.split(".").pop()?.toLowerCase() ?? "");
+
 export function PatchsetDiff({
   diffText,
   viewType = "split",
   refractor,
   widgets,
   empty = null,
+  image,
 }: PatchsetDiffProps) {
   const files = useMemo(
     () => (diffText.trim() ? parseDiff(diffText) : []),
@@ -43,6 +49,7 @@ export function PatchsetDiff({
           viewType={viewType}
           refractor={refractor}
           widgets={widgets}
+          image={image}
         />
       ))}
     </div>
@@ -68,7 +75,29 @@ function StatBar({ added, removed }: { added: number; removed: number }) {
 }
 
 /** Mounting every file at once is what makes large diffs slow, so defer. */
-function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
+function ImagePair({ path, load }: { path: string; load: NonNullable<PatchsetDiffProps["image"]> }) {
+  const [pair, setPair] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
+  useEffect(() => {
+    let live = true;
+    Promise.all([load(path, "a"), load(path, "b")]).then(
+      ([before, after]) => live && setPair([before, after]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [path, load]);
+  return (
+    <div className="patchset-diff-images">
+      {(["a", "b"] as const).map((side, index) => (
+        <figure key={side} className={side === "a" ? "before" : "after"}>
+          {pair[index] ? <img src={pair[index]} alt={`${path} ${side}`} /> : <span>absent</span>}
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function LazyFile({ file, viewType, refractor, widgets, image }: LazyFileProps) {
   const host = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [open, setOpen] = useState(true);
@@ -125,7 +154,10 @@ function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
         <span className="patchset-diff-dels">&minus;{removed}</span>
         <StatBar added={added} removed={removed} />
       </button>
-      {visible && open && (
+      {visible && open && file.hunks.length === 0 && image && isImage(path) && (
+        <ImagePair path={path} load={image} />
+      )}
+      {visible && open && file.hunks.length > 0 && (
         <Diff
           viewType={viewType}
           diffType={file.type}

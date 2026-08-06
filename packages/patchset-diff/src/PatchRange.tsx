@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { Patchset, PatchsetSource } from "./jj";
 import { PatchsetDiff, type PatchsetDiffProps } from "./DiffView";
 
+const MIME: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon",
+};
+
 export interface PatchRangeProps extends Omit<PatchsetDiffProps, "diffText" | "empty"> {
   source: PatchsetSource;
   changeId: string;
@@ -49,6 +54,22 @@ export function PatchRange({ source, changeId, ...view }: PatchRangeProps) {
     };
   }, [source, from, to, byIndex]);
 
+  // Binary sides come back base64, so the data URL is built here rather than
+  // pushing git knowledge into the view.
+  const image = useMemo<PatchsetDiffProps["image"]>(() => {
+    return async (path, side) => {
+      const set = side === "a" ? (from === null ? undefined : byIndex.get(from)) : to === null ? undefined : byIndex.get(to);
+      if (!set) return undefined;
+      const mime = MIME[path.split(".").pop()?.toLowerCase() ?? ""];
+      if (!mime) return undefined;
+      try {
+        return `data:${mime};base64,${await source.blob(set.commitId, path)}`;
+      } catch {
+        return undefined;
+      }
+    };
+  }, [source, from, to, byIndex]);
+
   if (failure) return <div className="patchset-diff-empty">{failure}</div>;
 
   return (
@@ -82,6 +103,7 @@ export function PatchRange({ source, changeId, ...view }: PatchRangeProps) {
       </div>
       <PatchsetDiff
         {...view}
+        image={image}
         diffText={diffText}
         empty={<div className="patchset-diff-empty">No change between these patch sets.</div>}
       />
