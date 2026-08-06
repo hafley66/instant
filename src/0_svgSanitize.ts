@@ -12,6 +12,8 @@ export function sanitizeSvgDocument(source: string): string {
     const fragment = DOMPurify.sanitize(match[1], {
       USE_PROFILES: { html: true },
       RETURN_DOM_FRAGMENT: true,
+      ADD_ATTR: ["d"],
+      ADD_URI_SAFE_ATTR: ["d"],
       ALLOWED_URI_REGEXP: DOCUMENT_URI,
     }) as unknown as DocumentFragment;
     return Array.from(fragment.childNodes, (node) => serializer.serializeToString(node)).join("");
@@ -19,7 +21,8 @@ export function sanitizeSvgDocument(source: string): string {
   const svg = DOMPurify.sanitize(normalized, {
     USE_PROFILES: { svg: true, svgFilters: true },
     ADD_TAGS: ["foreignObject"],
-    ADD_ATTR: ["requiredFeatures"],
+    ADD_ATTR: ["d", "requiredFeatures"],
+    ADD_URI_SAFE_ATTR: ["d"],
     ALLOWED_URI_REGEXP: DOCUMENT_URI,
   });
   let index = 0;
