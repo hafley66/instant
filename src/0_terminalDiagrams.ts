@@ -1,7 +1,7 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { debounceTime, Subject, type Subscription } from "rxjs";
+import { auditTime, debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, type DiagramLightboxEntry } from "./mdview/0_DiagramLightbox";
 import { mermaidTheme } from "./mdview/0_diagramTheme";
@@ -284,6 +284,10 @@ export class TerminalDiagramOverlay {
   activitySubscription: Subscription | null = null;
   scrollEvents = new Subject<void>();
   scrollSubscription: Subscription;
+  recoveryEvents = new Subject<void>();
+  recoverySubscription: Subscription;
+  scrolling = false;
+  lastScrollAt = Number.NEGATIVE_INFINITY;
   cache = new Map<string, Promise<string>>();
   elementCache = new Map<string, HTMLElement>();
   lightboxRoot: Root | null = null;
@@ -306,7 +310,13 @@ export class TerminalDiagramOverlay {
       ).subscribe(() => this.scheduleFrame());
     }
     this.scrollSubscription = this.scrollEvents.pipe(
-      debounceTime(120),
+      debounceTime(80),
+    ).subscribe(() => {
+      this.scrolling = false;
+      this.scheduleFrame();
+    });
+    this.recoverySubscription = this.recoveryEvents.pipe(
+      auditTime(80),
     ).subscribe(() => this.scheduleFrame());
     const onClick = (event: MouseEvent) => {
       if (event.button !== 0 || !this.openAtClientPoint(event.clientX, event.clientY)) return;
@@ -326,6 +336,9 @@ export class TerminalDiagramOverlay {
       term.onWriteParsed(() => {
         if (this.messages) {
           this.positionElements();
+          if (!this.scrolling && (
+            this.root.hidden || performance.now() - this.lastScrollAt < 600
+          )) this.recoveryEvents.next();
           this.activityEvents.next();
         }
         else this.scheduleFrame();
@@ -341,6 +354,8 @@ export class TerminalDiagramOverlay {
 
   viewportScrolled() {
     if (this.messages) {
+      this.scrolling = true;
+      this.lastScrollAt = performance.now();
       this.positionElements();
       this.root.hidden = true;
       this.scrollEvents.next();
@@ -558,6 +573,8 @@ export class TerminalDiagramOverlay {
     this.activityEvents.complete();
     this.scrollSubscription.unsubscribe();
     this.scrollEvents.complete();
+    this.recoverySubscription.unsubscribe();
+    this.recoveryEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
     this.elementCache.clear();
