@@ -46,7 +46,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     matchesProcess: (s) => /^(?:claude|\d+(?:\.\d+){1,3})$/.test(s),
     isAgentProcess: (s) => /^(?:claude|\d+(?:\.\d+){1,3})$/.test(s),
     resumeFlag: "--resume", stableSessionIdFlag: "--session-id",
-    wheelMode: "application",
+    wheelMode: "tmux-copy",
     hasExplicitSession: (s) => /\s--(?:resume|session-id|continue|from-pr)\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*Claude|(?:^|\n)\s*⏺\s+(?:I'll|I|Let|We)\b/.test(s),
     resume: (sessionId) => `claude --resume ${sessionId}`,
