@@ -189,7 +189,7 @@ test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ 
   await expect(page.locator(".term-diagrams")).toBeHidden();
 });
 
-test("Claude Code retains application wheel handling", async ({ page }) => {
+test("Claude Code routes wheel input through tmux copy-mode", async ({ page }) => {
   await openTerminal(page, "e2e=1&wheelHarness=claude");
   await writeFixture(page, [
     ...Array.from({ length: 120 }, (_, index) => `Claude history row ${index}`),
@@ -197,16 +197,23 @@ test("Claude Code retains application wheel handling", async ({ page }) => {
   const host = page.locator(".term-host");
   const box = await host.boundingBox();
   expect(box).not.toBeNull();
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __instantE2eNativeResults?: Record<string, unknown>;
+      __scrollSessionArgs?: Record<string, unknown>;
+    };
+    if (target.__instantE2eNativeResults) {
+      target.__instantE2eNativeResults.scroll_session = (args: Record<string, unknown>) => {
+        target.__scrollSessionArgs = args;
+      };
+    }
+  });
 
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.wheel(0, -100);
-  await page.waitForTimeout(50);
-
-  const scrollCalls = await page.evaluate(() =>
-    ((window as Window & { __instantE2eNativeCalls?: string[] }).__instantE2eNativeCalls ?? [])
-      .filter((command) => command === "scroll_session"),
-  );
-  expect(scrollCalls).toEqual([]);
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __scrollSessionArgs?: Record<string, unknown> }).__scrollSessionArgs,
+  )).toEqual({ name: "e2e", up: true, lines: expect.any(Number) });
   await expect(host).toHaveAttribute("data-harness", "claude");
   expect(await page.locator(".xterm-viewport").evaluate((viewport) => ({
     overflowY: getComputedStyle(viewport).overflowY,
