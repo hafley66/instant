@@ -47,7 +47,7 @@ describe("HarnessDefinition.lane", () => {
       Object.entries(harnessDefinitionById).map(([id, definition]) => [id, definition.wheelMode]),
     )).toMatchInlineSnapshot(`
       {
-        "claude": "tmux-copy",
+        "claude": "application",
         "codex": "tmux-copy",
         "kimi": "application",
         "opencode": "application",
