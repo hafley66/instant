@@ -17,7 +17,6 @@ export type HarnessDefinition = {
   isAgentProcess(process: string): boolean;
   resumeFlag: string;
   stableSessionIdFlag?: string;
-  wheelMode: "application" | "tmux-copy";
   hasExplicitSession(command: string): boolean;
   resume(sessionId: string): string;
   lane(brief: string, requestedModel?: string): HarnessLaneLaunch;
@@ -46,7 +45,6 @@ export const harnessDefinitions: HarnessDefinition[] = [
     matchesProcess: (s) => /^(?:claude|\d+(?:\.\d+){1,3})$/.test(s),
     isAgentProcess: (s) => /^(?:claude|\d+(?:\.\d+){1,3})$/.test(s),
     resumeFlag: "--resume", stableSessionIdFlag: "--session-id",
-    wheelMode: "application",
     hasExplicitSession: (s) => /\s--(?:resume|session-id|continue|from-pr)\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*Claude|(?:^|\n)\s*⏺\s+(?:I'll|I|Let|We)\b/.test(s),
     resume: (sessionId) => `claude --resume ${sessionId}`,
@@ -58,7 +56,6 @@ export const harnessDefinitions: HarnessDefinition[] = [
     matchesProcess: (s) => /^opencode(?:\.exe)?$/.test(s),
     isAgentProcess: (s) => /^(?:opencode(?:\.exe)?|node|bun)$/.test(s),
     resumeFlag: "--session",
-    wheelMode: "application",
     hasExplicitSession: (s) => /\s--session\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*(?:OpenCode|Open Code)|(?:^|\n)\s*┃[^\n]*(?:OpenCode|Open Code)/.test(s),
     resume: (sessionId) => `opencode --session ${sessionId}`,
@@ -79,7 +76,6 @@ export const harnessDefinitions: HarnessDefinition[] = [
     matchesProcess: (s) => /^codex(?:\.exe)?$/.test(s),
     isAgentProcess: (s) => /^(?:codex(?:\.exe)?|node|bun)$/.test(s),
     resumeFlag: "resume",
-    wheelMode: "tmux-copy",
     hasExplicitSession: (s) => /\s+resume(?:\s|$)/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*(?:OpenAI Codex|╭─[^\n]*Codex)/.test(s),
     resume: (sessionId) => `codex resume ${sessionId}`,
@@ -91,7 +87,6 @@ export const harnessDefinitions: HarnessDefinition[] = [
     matchesProcess: (s) => /^kimi(?:\.exe)?$/.test(s),
     isAgentProcess: (s) => /^(?:kimi(?:\.exe)?|node|bun)$/.test(s),
     resumeFlag: "--session",
-    wheelMode: "application",
     hasExplicitSession: (s) => /\s--session\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*(?:Kimi Code|Moonshot AI)/.test(s),
     resume: (sessionId) => `kimi --session ${sessionId}`,

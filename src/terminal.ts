@@ -9,6 +9,7 @@ import { commands, invoke } from "./generated/native";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
+import { TerminalWheelRouter } from "./0_terminalWheel";
 import { runMatchingCommand } from "./keymap";
 import {
   sessionId,
@@ -56,7 +57,6 @@ import { refreshTurns, warmTurns, tabSessions, unclaimedSession } from "./favori
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
-import { harnessDefinitionById } from "./0_harnessDefinitions";
 import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
 import {
   renderSessionActive,
@@ -75,6 +75,7 @@ export type Tab = {
   graphics?: boolean;
   overlay?: GraphicsOverlay;
   diagrams?: TerminalDiagramOverlay;
+  wheel?: TerminalWheelRouter;
   harness: HarnessObservation;
   outputTail: string;
 };
@@ -426,6 +427,7 @@ export function openTab(
     const stale = tabs.get(id);
     stale?.overlay?.dispose();
     stale?.diagrams?.dispose();
+    stale?.wheel?.dispose();
     stale?.term.dispose();
     stale?.el.remove();
     tabs.delete(id);
@@ -551,13 +553,13 @@ export function openTab(
     el,
     undefined,
     () => refreshTurns(id),
-    (up, lines) => { void invoke(commands.pty.scrollSession, { name, up, lines }).catch(() => {}); },
-    () => {
-      const harnessId = tabs.get(id)?.harness.id ?? harness.id;
-      return harnessId ? harnessDefinitionById[harnessId].wheelMode : "tmux-copy";
-    },
   );
-  tabs.set(id, { id, name, term, fit, el, graphics, overlay, diagrams, harness, outputTail: "" });
+  const wheel = graphics ? undefined : new TerminalWheelRouter(
+    term,
+    (up, lines) => { void invoke(commands.pty.scrollSession, { name, up, lines }).catch(() => {}); },
+    () => diagrams?.viewportScrolled(),
+  );
+  tabs.set(id, { id, name, term, fit, el, graphics, overlay, diagrams, wheel, harness, outputTail: "" });
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -915,6 +917,7 @@ export function onTermClosed(id: string) {
   const isViewer = store.get().openTabs.find((o) => o.name === name)?.viewer ?? false;
   t.overlay?.dispose();
   t.diagrams?.dispose();
+  t.wheel?.dispose();
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);

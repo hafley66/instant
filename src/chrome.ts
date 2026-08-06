@@ -324,8 +324,8 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
   // overlays whose event target may be retargeted outside the terminal subtree.
   if (target.closest(".term-host") || pointedTab) {
     const id = pointedTab?.[0] ?? activeId();
-    const diagram = pointedTab?.[1].diagrams?.diagramAtClientY(lastCtxY)
-      ?? (id ? tabs.get(id)?.diagrams?.diagramAtClientY(lastCtxY) : null);
+    const diagram = pointedTab?.[1].diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY)
+      ?? (id ? tabs.get(id)?.diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY) : null);
     const meta = id ? tabMetaById(id) : null;
     const turns = id ? tabTurns.get(id) ?? [] : [];
     const matches = id && meta ? searchTurns(turns, ledgerQuery(id, lastCtxY)) : [];

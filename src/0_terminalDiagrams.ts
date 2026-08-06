@@ -286,8 +286,6 @@ export class TerminalDiagramOverlay {
   scrollSubscription: Subscription;
   cache = new Map<string, Promise<string>>();
   elementCache = new Map<string, HTMLElement>();
-  wheelDeltaRows = 0;
-  wheelFrame = 0;
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
   lightboxEntries: DiagramLightboxEntry[] = [];
@@ -298,8 +296,6 @@ export class TerminalDiagramOverlay {
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
     readonly messages?: () => Promise<AiMessage[] | null>,
-    readonly scrollTmux?: (up: boolean, lines: number) => void,
-    readonly wheelMode: () => "application" | "tmux-copy" = () => "application",
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
@@ -312,34 +308,21 @@ export class TerminalDiagramOverlay {
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(120),
     ).subscribe(() => this.scheduleFrame());
-    const onWheel = (event: WheelEvent) => {
-      if (!this.scrollTmux || this.wheelMode() === "application") {
-        this.viewportScrolled();
-        return;
-      }
+    const onClick = (event: MouseEvent) => {
+      if (event.button !== 0 || !this.openAtClientPoint(event.clientX, event.clientY)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      this.viewportScrolled();
-      const screen = host.querySelector<HTMLElement>(".xterm-screen");
-      const cellHeight = screen ? screen.getBoundingClientRect().height / term.rows : 1;
-      const pixels = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
-        ? event.deltaY
-        : event.deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? event.deltaY * cellHeight
-          : event.deltaY * cellHeight * term.rows;
-      this.wheelDeltaRows += pixels / Math.max(1, cellHeight);
-      if (!this.wheelFrame) {
-        this.wheelFrame = requestAnimationFrame(() => {
-          this.wheelFrame = 0;
-          const rows = this.wheelDeltaRows;
-          this.wheelDeltaRows = 0;
-          if (rows) this.scrollTmux?.(rows < 0, Math.min(50, Math.max(1, Math.round(Math.abs(rows)))));
-        });
-      }
     };
-    host.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0 || !this.diagramAtClientPoint(event.clientX, event.clientY)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    host.addEventListener("mousedown", onMouseDown, { capture: true });
+    host.addEventListener("click", onClick, { capture: true });
     this.disposables = [
-      { dispose: () => host.removeEventListener("wheel", onWheel, { capture: true }) },
+      { dispose: () => host.removeEventListener("mousedown", onMouseDown, { capture: true }) },
+      { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.messages) {
           this.positionElements();
@@ -486,7 +469,7 @@ export class TerminalDiagramOverlay {
         element.textContent = error;
       } else if (!error && (created || element.classList.contains("term-diagram-error"))) {
         element.className = "term-diagram";
-        element.title = "Right-click to expand diagram";
+        element.title = "Click to expand diagram";
         element.innerHTML = diagramSvgMarkup(svg);
       }
       return element;
@@ -523,10 +506,14 @@ export class TerminalDiagramOverlay {
     render();
   }
 
-  diagramAtClientY(clientY: number): DiagramLightboxEntry | null {
+  diagramAtClientPoint(clientX: number | null, clientY: number): DiagramLightboxEntry | null {
     const target = Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram")).find((element) =>
       !element.hidden
       && !element.classList.contains("term-diagram-error")
+      && (clientX === null || (
+        element.getBoundingClientRect().left <= clientX
+        && clientX <= element.getBoundingClientRect().right
+      ))
       && element.getBoundingClientRect().top <= clientY
       && clientY <= element.getBoundingClientRect().bottom
     );
@@ -545,7 +532,14 @@ export class TerminalDiagramOverlay {
   }
 
   openAtClientY(clientY: number): boolean {
-    const entry = this.diagramAtClientY(clientY);
+    const entry = this.diagramAtClientPoint(null, clientY);
+    if (!entry) return false;
+    this.openLarge(entry);
+    return true;
+  }
+
+  openAtClientPoint(clientX: number, clientY: number): boolean {
+    const entry = this.diagramAtClientPoint(clientX, clientY);
     if (!entry) return false;
     this.openLarge(entry);
     return true;
@@ -560,7 +554,6 @@ export class TerminalDiagramOverlay {
 
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
-    if (this.wheelFrame) cancelAnimationFrame(this.wheelFrame);
     this.activitySubscription?.unsubscribe();
     this.activityEvents.complete();
     this.scrollSubscription.unsubscribe();
