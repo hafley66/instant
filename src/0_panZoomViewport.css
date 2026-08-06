@@ -15,6 +15,7 @@
   overflow: hidden;
   touch-action: none;
   cursor: grab;
+  outline: none;
 }
 
 .panzoom-stage:active {

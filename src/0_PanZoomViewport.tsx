@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent, type ReactNode, type WheelEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import "./0_panZoomViewport.css";
 
 export type PanZoomApi = {
@@ -12,8 +12,15 @@ export function clampPanZoom(value: number): number {
   return Math.min(64, Math.max(0.1, value));
 }
 
-export function wheelPanZoom(current: number, deltaY: number): number {
-  return clampPanZoom(current * (deltaY < 0 ? 1.12 : 1 / 1.12));
+export function wheelPanOffset(
+  current: { x: number; y: number },
+  deltaX: number,
+  deltaY: number,
+  shiftKey: boolean,
+): { x: number; y: number } {
+  return shiftKey && deltaX === 0
+    ? { x: current.x - deltaY, y: current.y }
+    : { x: current.x - deltaX, y: current.y - deltaY };
 }
 
 export function PanZoomViewport({
@@ -55,7 +62,16 @@ export function PanZoomViewport({
   };
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
-    setZoom((current) => wheelPanZoom(current, event.deltaY));
+    event.currentTarget.focus({ preventScroll: true });
+    setPan((current) => wheelPanOffset(current, event.deltaX, event.deltaY, event.shiftKey));
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!event.metaKey || !event.shiftKey) return;
+    if (event.key === "+" || event.key === "=") api.zoomIn();
+    else if (event.key === "-" || event.key === "_") api.zoomOut();
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   return (
@@ -64,11 +80,13 @@ export function PanZoomViewport({
       <div
         className="panzoom-stage"
         role="presentation"
+        tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
         onPointerCancel={onPointerEnd}
         onWheel={onWheel}
+        onKeyDown={onKeyDown}
       >
         <div className="panzoom-canvas" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
           {children}
