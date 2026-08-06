@@ -3,6 +3,8 @@
 // node and renders into it; reactdock hosts the node. No untitled buffers: every
 // preview names a path.
 import { invoke } from "./generated/native";
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { codeToHtml } from "shiki";
 import { store } from "./state";
 import { routePath } from "./plugin";
@@ -15,6 +17,7 @@ import {
 } from "./reactdock";
 import { claimFsWatch } from "./fsWatch";
 import { baseName, escapeHtml, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
+import { FileImageViewer } from "./1_FileImageViewer";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -25,6 +28,7 @@ export const previewInsts = new Map<string, PreviewInst>();
 // the meta-bar "copy" button can grab it without re-reading the file. Images
 // have no entry (and no copy button).
 const previewTextByNode = new WeakMap<HTMLElement, string>();
+const previewMediaRoots = new WeakMap<HTMLElement, Root>();
 
 // Internal routing: which panel a file preview was opened FROM (an rg results
 // panel), so the preview's "← back" returns there. Keyed by preview path, value
@@ -186,6 +190,8 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   const seq = (renderSeq.get(node) ?? 0) + 1;
   renderSeq.set(node, seq);
   const stale = () => renderSeq.get(node) !== seq;
+  previewMediaRoots.get(node)?.unmount();
+  previewMediaRoots.delete(node);
   // A re-render from a file change (or theme flip) must not yank the reader back
   // to the top, so carry the scroll offset across the innerHTML rewrite.
   const prevScroll = node.querySelector<HTMLElement>(SCROLLER)?.scrollTop ?? 0;
@@ -217,7 +223,12 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
     try {
       const url = await invoke<string>("read_image", { path });
       if (stale()) return;
-      node.innerHTML = meta + `<img class="fs-preview-img" src="${url}" alt="" />`;
+      node.innerHTML = meta + `<div class="fs-preview-media"></div>`;
+      const mount = node.querySelector<HTMLElement>(".fs-preview-media");
+      if (!mount) return;
+      const root = createRoot(mount);
+      previewMediaRoots.set(node, root);
+      root.render(createElement(FileImageViewer, { path, url }));
     } catch (e) {
       if (stale()) return;
       node.innerHTML = meta + empty(String(e));

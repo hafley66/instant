@@ -1783,7 +1783,43 @@ body[data-skin] .cmdp-input::placeholder {
 }
 /* Center an image preview in the tab instead of pinning it to the top-left. */
 .dv-host-scroll .fs-preview-img {
+  display: block;
+  max-width: 94%;
+  max-height: 90%;
+  width: auto;
+  height: auto;
   margin: auto;
+  user-select: none;
+}
+.dv-host-scroll .fs-preview-media {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.file-image-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--frame);
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+}
+.file-image-tools button {
+  min-height: 26px;
+  color: inherit;
+  background: var(--button-bg, transparent);
+  border: 1px solid var(--frame);
+  cursor: pointer;
+}
+.file-image-tools span {
+  min-width: 42px;
+  text-align: center;
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 /* Shiki sets overflow:auto + white-space:pre on its <pre>; let the .code-body
    wrapper own the (vertical) scroll and wrap long lines so they never scroll
