@@ -301,6 +301,26 @@ fn tool_result_text(content: Option<&Value>) -> String {
     }
 }
 
+fn diagram_write_fence(name: &str, input: &Value) -> Option<String> {
+    if !name.eq_ignore_ascii_case("write") && !name.eq_ignore_ascii_case("write_file") {
+        return None;
+    }
+    let path = input
+        .get("file_path")
+        .or_else(|| input.get("path"))
+        .and_then(Value::as_str)?;
+    let content = input.get("content").and_then(Value::as_str)?;
+    let lower = path.to_ascii_lowercase();
+    let language = if lower.ends_with(".d2") {
+        "d2"
+    } else if lower.ends_with(".mmd") || lower.ends_with(".mermaid") {
+        "mermaid"
+    } else {
+        return None;
+    };
+    Some(format!("[{name}] {path}\n```{language}\n{content}\n```"))
+}
+
 // Flatten a claude `message.content` (string OR array of typed blocks). thinking
 // carries its real text; tool_use serializes its input; tool_result its output —
 // all into `full`. Only text blocks feed `display`.
@@ -331,9 +351,15 @@ fn claude_text(content: &Value) -> Extracted {
                     }
                     Some("tool_use") => {
                         let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
-                        full.push_str(&format!("[{name}] "));
                         if let Some(input) = b.get("input") {
-                            full.push_str(&cap(&input.to_string(), 400));
+                            if let Some(fence) = diagram_write_fence(name, input) {
+                                full.push_str(&fence);
+                            } else {
+                                full.push_str(&format!("[{name}] "));
+                                full.push_str(&cap(&input.to_string(), 400));
+                            }
+                        } else {
+                            full.push_str(&format!("[{name}]"));
                         }
                         full.push('\n');
                     }
@@ -921,6 +947,16 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "assistant");
         assert_eq!(out[0].subtype, None);
+    }
+
+    #[test]
+    fn assistant_d2_write_retains_the_complete_fenced_file() {
+        let path = write_temp(&[
+            r#"{"type":"assistant","uuid":"a2","timestamp":"2026-07-20T10:00:06.000Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"/tmp/large.d2","content":"direction: right\na -> b\nb -> c"}}]}}"#,
+        ]);
+        let out = read_claude(&path, "s", None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "[Write] /tmp/large.d2\n```d2\ndirection: right\na -> b\nb -> c\n```");
     }
 
     #[test]

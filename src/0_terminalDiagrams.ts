@@ -275,6 +275,20 @@ export function svgAspectRatio(svg: unknown): number | null {
   return width > 0 && height > 0 ? width / height : null;
 }
 
+export function diagramElementAtPoint(
+  elements: HTMLElement[],
+  clientX: number | null,
+  clientY: number,
+): HTMLElement | null {
+  return elements.slice().reverse().find((element) => {
+    if (element.hidden || element.classList.contains("term-diagram-error")) return false;
+    const rect = element.getBoundingClientRect();
+    return (clientX === null || (rect.left <= clientX && clientX <= rect.right))
+      && rect.top <= clientY
+      && clientY <= rect.bottom;
+  }) ?? null;
+}
+
 export class TerminalDiagramOverlay {
   root: HTMLDivElement;
   disposables: IDisposable[];
@@ -522,15 +536,10 @@ export class TerminalDiagramOverlay {
   }
 
   diagramAtClientPoint(clientX: number | null, clientY: number): DiagramLightboxEntry | null {
-    const target = Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram")).find((element) =>
-      !element.hidden
-      && !element.classList.contains("term-diagram-error")
-      && (clientX === null || (
-        element.getBoundingClientRect().left <= clientX
-        && clientX <= element.getBoundingClientRect().right
-      ))
-      && element.getBoundingClientRect().top <= clientY
-      && clientY <= element.getBoundingClientRect().bottom
+    const target = diagramElementAtPoint(
+      Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram")),
+      clientX,
+      clientY,
     );
     if (!target) return null;
     return {

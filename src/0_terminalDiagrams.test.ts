@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diagramElementKey, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+import { diagramElementAtPoint, diagramElementKey, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
 
 describe("svgAspectRatio", () => {
   it("reads SVG dimensions and rejects missing renderer output", () => {
@@ -18,6 +18,22 @@ describe("svgAspectRatio", () => {
         null,
       ]
     `);
+  });
+});
+
+describe("diagramElementAtPoint", () => {
+  it("selects the last painted diagram when allocated rows overlap", () => {
+    const element = (key: string, top: number, bottom: number) => ({
+      dataset: { diagramKey: key },
+      hidden: false,
+      classList: { contains: () => false },
+      getBoundingClientRect: () => ({ left: 0, right: 800, top, bottom }),
+    }) as unknown as HTMLElement;
+    const lower = element("lower", 100, 500);
+    const visibleTop = element("visible-top", 300, 700);
+
+    expect(diagramElementAtPoint([lower, visibleTop], 400, 400)?.dataset.diagramKey)
+      .toMatchInlineSnapshot(`"visible-top"`);
   });
 });
 
