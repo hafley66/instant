@@ -32,6 +32,7 @@ createRoot(document.querySelector("#app")!).render(
   createElement(PatchRange, {
     source: useJj ? jjSource(run) : gitSource(run, "origin/main"),
     changeId: useJj ? "luovuknyzrmu" : "refs/patchsets/feat/patchset-diff",
+    repoHint: repo,
     viewType: "split",
     refractor,
   }),

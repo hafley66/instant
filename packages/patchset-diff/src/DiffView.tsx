@@ -13,6 +13,8 @@ export interface PatchsetDiffProps {
   empty?: ReactNode;
   /** Data URL for a binary file on one side, used when git reports no hunks. */
   image?: (path: string, side: "a" | "b") => Promise<string | undefined>;
+  /** Pixel difference of the two sides, plus how many pixels moved. */
+  imageDiff?: (path: string) => Promise<{ src: string; changed: number } | undefined>;
 }
 
 const LANG_OF: Record<string, string> = {
@@ -34,6 +36,7 @@ export function PatchsetDiff({
   widgets,
   empty = null,
   image,
+  imageDiff,
 }: PatchsetDiffProps) {
   const files = useMemo(
     () => (diffText.trim() ? parseDiff(diffText) : []),
@@ -50,6 +53,7 @@ export function PatchsetDiff({
           refractor={refractor}
           widgets={widgets}
           image={image}
+          imageDiff={imageDiff}
         />
       ))}
     </div>
@@ -75,8 +79,17 @@ function StatBar({ added, removed }: { added: number; removed: number }) {
 }
 
 /** Mounting every file at once is what makes large diffs slow, so defer. */
-function ImagePair({ path, load }: { path: string; load: NonNullable<PatchsetDiffProps["image"]> }) {
+type ImagePairProps = {
+  path: string;
+  load: NonNullable<PatchsetDiffProps["image"]>;
+  diff?: PatchsetDiffProps["imageDiff"];
+};
+
+function ImagePair({ path, load, diff }: ImagePairProps) {
   const [pair, setPair] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
+  const [delta, setDelta] = useState<{ src: string; changed: number } | undefined>();
+  const [mode, setMode] = useState<"pair" | "delta">("pair");
+
   useEffect(() => {
     let live = true;
     Promise.all([load(path, "a"), load(path, "b")]).then(
@@ -86,18 +99,50 @@ function ImagePair({ path, load }: { path: string; load: NonNullable<PatchsetDif
       live = false;
     };
   }, [path, load]);
+
+  useEffect(() => {
+    if (!diff) return;
+    let live = true;
+    diff(path).then((found) => live && setDelta(found));
+    return () => {
+      live = false;
+    };
+  }, [path, diff]);
+
+  const both = pair[0] && pair[1];
   return (
-    <div className="patchset-diff-images">
-      {(["a", "b"] as const).map((side, index) => (
-        <figure key={side} className={side === "a" ? "before" : "after"}>
-          {pair[index] ? <img src={pair[index]} alt={`${path} ${side}`} /> : <span>absent</span>}
-        </figure>
-      ))}
+    <div className="patchset-diff-imagewrap">
+      {both && delta && (
+        <div className="patchset-diff-imagebar">
+          <button type="button" aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>
+            side by side
+          </button>
+          <button type="button" aria-pressed={mode === "delta"} onClick={() => setMode("delta")}>
+            difference
+          </button>
+          <span className="patchset-diff-changed">{delta.changed.toLocaleString()} px changed</span>
+        </div>
+      )}
+      {mode === "delta" && delta ? (
+        <div className="patchset-diff-images one">
+          <figure className="delta">
+            <img src={delta.src} alt={`${path} difference`} />
+          </figure>
+        </div>
+      ) : (
+        <div className="patchset-diff-images">
+          {(["a", "b"] as const).map((side, index) => (
+            <figure key={side} className={side === "a" ? "before" : "after"}>
+              {pair[index] ? <img src={pair[index]} alt={`${path} ${side}`} /> : <span>absent</span>}
+            </figure>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function LazyFile({ file, viewType, refractor, widgets, image }: LazyFileProps) {
+function LazyFile({ file, viewType, refractor, widgets, image, imageDiff }: LazyFileProps) {
   const host = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [open, setOpen] = useState(true);
@@ -155,7 +200,7 @@ function LazyFile({ file, viewType, refractor, widgets, image }: LazyFileProps) 
         <StatBar added={added} removed={removed} />
       </button>
       {visible && open && file.hunks.length === 0 && image && isImage(path) && (
-        <ImagePair path={path} load={image} />
+        <ImagePair path={path} load={image} diff={imageDiff} />
       )}
       {visible && open && file.hunks.length > 0 && (
         <Diff

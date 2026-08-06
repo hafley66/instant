@@ -199,9 +199,11 @@
   padding: 0.75rem;
   background: var(--pd-bg, #0d1117);
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: center;
-  min-height: 4rem;
+  min-block-size: 4rem;
+  max-block-size: var(--pd-image-max, 22rem);
+  overflow: auto;
 }
 
 .patchset-diff-images figure.before {
@@ -213,12 +215,52 @@
 }
 
 .patchset-diff-images img {
-  max-width: 100%;
-  height: auto;
-  image-rendering: pixelated;
+  max-inline-size: 100%;
+  max-block-size: calc(var(--pd-image-max, 22rem) - 1.5rem);
+  inline-size: auto;
+  block-size: auto;
+  object-fit: contain;
 }
 
 .patchset-diff-images span {
   color: #6e7681;
   font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.patchset-diff-imagebar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  background: #11161d;
+  border-block-end: 1px solid var(--pd-line, #21262d);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.patchset-diff-imagebar button {
+  background: transparent;
+  color: #8b949e;
+  border: 1px solid var(--pd-line, #21262d);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.patchset-diff-imagebar button[aria-pressed="true"] {
+  background: #21262d;
+  color: #e6edf3;
+}
+
+.patchset-diff-changed {
+  margin-inline-start: auto;
+  color: #f85149;
+}
+
+.patchset-diff-images.one {
+  grid-template-columns: 1fr;
+}
+
+.patchset-diff-images figure.delta {
+  box-shadow: inset 2px 0 0 #d29922;
 }

@@ -10,10 +10,12 @@ const MIME: Record<string, string> = {
 export interface PatchRangeProps extends Omit<PatchsetDiffProps, "diffText" | "empty"> {
   source: PatchsetSource;
   changeId: string;
+  /** Passed to the compare route so it runs against the same repo. */
+  repoHint?: string;
 }
 
 /** Gerrit's patch-range selector: pick two patch sets, read what changed between. */
-export function PatchRange({ source, changeId, ...view }: PatchRangeProps) {
+export function PatchRange({ source, changeId, repoHint, ...view }: PatchRangeProps) {
   const [sets, setSets] = useState<Patchset[]>([]);
   const [from, setFrom] = useState<number | null>(null);
   const [to, setTo] = useState<number | null>(null);
@@ -70,6 +72,30 @@ export function PatchRange({ source, changeId, ...view }: PatchRangeProps) {
     };
   }, [source, from, to, byIndex]);
 
+  const imageDiff = useMemo<PatchsetDiffProps["imageDiff"]>(() => {
+    return async (path) => {
+      const base = from === null ? undefined : byIndex.get(from);
+      const target = to === null ? undefined : byIndex.get(to);
+      if (!base || !target) return undefined;
+      try {
+        const [a, b] = await Promise.all([
+          source.blob(base.commitId, path),
+          source.blob(target.commitId, path),
+        ]);
+        const response = await fetch("/_compare", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ a, b, cwd: repoHint }),
+        });
+        if (!response.ok) return undefined;
+        const payload = await response.json();
+        return { src: `data:image/png;base64,${payload.png}`, changed: payload.changedPixels ?? 0 };
+      } catch {
+        return undefined;
+      }
+    };
+  }, [source, from, to, byIndex, repoHint]);
+
   if (failure) return <div className="patchset-diff-empty">{failure}</div>;
 
   return (
@@ -104,6 +130,7 @@ export function PatchRange({ source, changeId, ...view }: PatchRangeProps) {
       <PatchsetDiff
         {...view}
         image={image}
+        imageDiff={imageDiff}
         diffText={diffText}
         empty={<div className="patchset-diff-empty">No change between these patch sets.</div>}
       />
