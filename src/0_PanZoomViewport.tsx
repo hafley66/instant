@@ -23,6 +23,10 @@ export function wheelPanOffset(
     : { x: current.x - deltaX, y: current.y - deltaY };
 }
 
+export function pinchPanZoom(current: number, deltaY: number): number {
+  return clampPanZoom(current * Math.exp(-deltaY * 0.01));
+}
+
 export function PanZoomViewport({
   children,
   controls,
@@ -63,7 +67,11 @@ export function PanZoomViewport({
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
-    setPan((current) => wheelPanOffset(current, event.deltaX, event.deltaY, event.shiftKey));
+    if (event.ctrlKey) {
+      setZoom((current) => pinchPanZoom(current, event.deltaY));
+    } else {
+      setPan((current) => wheelPanOffset(current, event.deltaX, event.deltaY, event.shiftKey));
+    }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!event.metaKey || !event.shiftKey) return;
