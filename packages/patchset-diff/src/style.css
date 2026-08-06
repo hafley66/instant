@@ -1,0 +1,39 @@
+@import "react-diff-view/style/index.css";
+
+.patchset-diff-file {
+  margin-block-end: 1.5rem;
+}
+
+.patchset-diff-path {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.35rem 0.6rem;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--patchset-diff-header-bg, #1e1e1e);
+  color: var(--patchset-diff-header-fg, #d4d4d4);
+}
+
+.patchset-diff .diff-gutter,
+.patchset-diff .diff-code {
+  background: var(--patchset-diff-bg, #0d1117);
+  color: var(--patchset-diff-fg, #c9d1d9);
+}
+.patchset-diff .diff-gutter-insert,
+.patchset-diff .diff-code-insert {
+  background: var(--patchset-diff-insert, #0f2f1c);
+}
+.patchset-diff .diff-gutter-delete,
+.patchset-diff .diff-code-delete {
+  background: var(--patchset-diff-delete, #3a1417);
+}
+.patchset-diff .diff-gutter-omit,
+.patchset-diff .diff-code-omit {
+  background: var(--patchset-diff-omit, #161b22);
+}
+
+.patchset-diff-empty {
+  padding: 1rem;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.7;
+}
