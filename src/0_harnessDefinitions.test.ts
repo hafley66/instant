@@ -54,4 +54,33 @@ describe("HarnessDefinition.lane", () => {
       }
     `);
   });
+
+  it("recognizes Claude's multi-part version process", () => {
+    const claude = harnessDefinitionById.claude;
+    expect([
+      ["2.1", claude.matchesProcess("2.1")],
+      ["2.1.220", claude.matchesProcess("2.1.220")],
+      ["2.1.220.4", claude.matchesProcess("2.1.220.4")],
+      ["bash", claude.matchesProcess("bash")],
+    ]).toMatchInlineSnapshot(`
+      [
+        [
+          "2.1",
+          true,
+        ],
+        [
+          "2.1.220",
+          true,
+        ],
+        [
+          "2.1.220.4",
+          true,
+        ],
+        [
+          "bash",
+          false,
+        ],
+      ]
+    `);
+  });
 });

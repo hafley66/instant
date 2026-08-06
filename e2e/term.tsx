@@ -32,6 +32,8 @@ import { setHomeDir, sessionId } from "../src/core";
 import { store } from "../src/state";
 import { installKeymap } from "../src/keymap";
 import { wireContextMenu } from "../src/ctxmenu";
+import { closeActiveTab, reopenLastTab } from "../src/tabs";
+import { openPreviewPanel } from "../src/preview";
 
 // Mock list_dir with a small fixture tree so the sidebar's file explorer has
 // rows to render. Other commands (open_session/resize_pty/write_pty) resolve
@@ -64,6 +66,7 @@ const REPORT = `${ROOT}/.worktrees/terminal-inline-diagrams/playwright-report/in
 DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
 
 (window as E2eWindow).__instantE2eNativeResults = {
+  list_sessions: [],
   cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
   list_dir: (args: Record<string, unknown> | undefined) => {
     const path = String(args?.path ?? ROOT);
@@ -184,6 +187,8 @@ setDockHooks({
 });
 
 installKeymap([
+  { id: "tab.close", keys: ["$mod+w"], run: closeActiveTab },
+  { id: "tab.reopen", keys: ["$mod+Shift+t"], run: () => void reopenLastTab() },
   {
     id: "term.sidebar",
     keys: ["$mod+Shift+Backslash"],
@@ -229,6 +234,9 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = 
       [sid]: { open: true, width: 460, source: "turns", sizes: [55, 45] },
     },
   });
+};
+document.querySelector<HTMLButtonElement>("[data-testid=open-file]")!.onclick = () => {
+  openPreviewPanel(`${ROOT}/README.md`);
 };
 
 mountReactDock(document.getElementById("dock")!);

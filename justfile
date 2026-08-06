@@ -29,6 +29,15 @@ dev-safe:
 dev-isolated:
     INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 run tauri dev -- --config '{"build":{"beforeDevCommand":"corepack pnpm@10.12.4 run dev --port 1422","devUrl":"http://localhost:1422"}}'
 
+# Print the combined frontend/backend app log. state=dev reads `tauri dev`;
+# state=prod reads the installed release bundle's isolated state directory.
+logs lines="200" state="dev":
+    instant_log_root="$HOME/Library/Application Support/com.instant.summon"; case "{{state}}" in dev) instant_log="$instant_log_root/instant.log" ;; prod) instant_log="$instant_log_root/prod/instant.log" ;; *) echo "state must be dev or prod" >&2; exit 2 ;; esac; echo "$instant_log"; test -f "$instant_log" && tail -n "{{lines}}" "$instant_log" || true
+
+# Follow the same combined app log until interrupted.
+logs-follow state="dev":
+    instant_log_root="$HOME/Library/Application Support/com.instant.summon"; case "{{state}}" in dev) instant_log="$instant_log_root/instant.log" ;; prod) instant_log="$instant_log_root/prod/instant.log" ;; *) echo "state must be dev or prod" >&2; exit 2 ;; esac; echo "$instant_log"; touch "$instant_log"; tail -n 200 -F "$instant_log"
+
 # one-time: install the Tauri CLI machine-global (~/.cargo/bin, on PATH across
 # all checkouts and nvm node versions) so any repo can run `cargo tauri …` /
 # `tauri …` without the per-checkout node_modules devDep.
