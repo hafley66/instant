@@ -53,11 +53,36 @@ interface LazyFileProps extends Omit<PatchsetDiffProps, "diffText" | "empty"> {
   file: FileData;
 }
 
+/** GitHub's five-block diffstat: filled blocks are proportional to the change. */
+function StatBar({ added, removed }: { added: number; removed: number }) {
+  const total = added + removed;
+  const filled = total === 0 ? 0 : Math.max(1, Math.min(5, Math.round(total / 12)));
+  const greens = total === 0 ? 0 : Math.round((added / total) * filled);
+  return (
+    <span className="patchset-diff-bar" aria-label={`${added} added, ${removed} removed`}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <i key={i} className={i < greens ? "add" : i < filled ? "del" : "none"} />
+      ))}
+    </span>
+  );
+}
+
 /** Mounting every file at once is what makes large diffs slow, so defer. */
 function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
   const host = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const lines = file.hunks.reduce((n, h) => n + h.changes.length + 1, 0);
+  const { added, removed } = useMemo(() => {
+    let added = 0;
+    let removed = 0;
+    for (const hunk of file.hunks) {
+      for (const change of hunk.changes) {
+        if (change.type === "insert") added += 1;
+        if (change.type === "delete") removed += 1;
+      }
+    }
+    return { added, removed };
+  }, [file.hunks]);
 
   useEffect(() => {
     const node = host.current;
@@ -86,7 +111,12 @@ function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
 
   return (
     <div ref={host} className="patchset-diff-file" style={{ minHeight: visible ? undefined : lines * 20 }}>
-      <div className="patchset-diff-path">{path}</div>
+      <div className="patchset-diff-head">
+        <span className="patchset-diff-path">{path}</span>
+        <span className="patchset-diff-adds">+{added}</span>
+        <span className="patchset-diff-dels">&minus;{removed}</span>
+        <StatBar added={added} removed={removed} />
+      </div>
       {visible && (
         <Diff
           viewType={viewType}

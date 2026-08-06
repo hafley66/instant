@@ -1,39 +1,108 @@
 @import "react-diff-view/style/index.css";
 
-.patchset-diff-file {
-  margin-block-end: 1.5rem;
+.patchset-diff {
+  --pd-bg: #0d1117; --pd-fg: #c9d1d9; --pd-line: #21262d;
+  --pd-head: #161b22; --pd-add: #3fb950; --pd-del: #f85149;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.patchset-diff-path {
+.patchset-diff-file {
+  margin-block-end: 1rem;
+  border: 1px solid var(--pd-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.patchset-diff-head {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 0.35rem 0.6rem;
-  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--patchset-diff-header-bg, #1e1e1e);
-  color: var(--patchset-diff-header-fg, #d4d4d4);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.75rem;
+  background: var(--pd-head);
+  border-block-end: 1px solid var(--pd-line);
+}
+
+.patchset-diff-path {
+  flex: 1;
+  color: var(--pd-fg);
+  font-weight: 600;
+}
+
+.patchset-diff-adds {
+  color: var(--pd-add);
+}
+
+.patchset-diff-dels {
+  color: var(--pd-del);
+}
+
+.patchset-diff-bar {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.patchset-diff-bar i {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--pd-line);
+  background: transparent;
+}
+
+.patchset-diff-bar i.add {
+  background: var(--pd-add);
+  border-color: var(--pd-add);
+}
+
+.patchset-diff-bar i.del {
+  background: var(--pd-del);
+  border-color: var(--pd-del);
 }
 
 .patchset-diff .diff-gutter,
 .patchset-diff .diff-code {
-  background: var(--patchset-diff-bg, #0d1117);
-  color: var(--patchset-diff-fg, #c9d1d9);
+  background: var(--pd-bg);
+  color: var(--pd-fg);
 }
+
+.patchset-diff .diff-gutter {
+  color: #6e7681;
+  min-width: 2.75rem;
+}
+
 .patchset-diff .diff-gutter-insert,
 .patchset-diff .diff-code-insert {
-  background: var(--patchset-diff-insert, #0f2f1c);
+  background: #0d2f1c;
 }
+
 .patchset-diff .diff-gutter-delete,
 .patchset-diff .diff-code-delete {
-  background: var(--patchset-diff-delete, #3a1417);
+  background: #3a1416;
 }
+
+.patchset-diff .diff-code-insert {
+  box-shadow: inset 2px 0 0 var(--pd-add);
+}
+
+.patchset-diff .diff-code-delete {
+  box-shadow: inset 2px 0 0 var(--pd-del);
+}
+
 .patchset-diff .diff-gutter-omit,
 .patchset-diff .diff-code-omit {
-  background: var(--patchset-diff-omit, #161b22);
+  background: var(--pd-head);
+}
+
+.patchset-diff .diff-gutter-omit:after {
+  background: none;
 }
 
 .patchset-diff-empty {
-  padding: 1rem;
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  opacity: 0.7;
+  padding: 0.75rem;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #6e7681;
+  border: 1px dashed var(--pd-line);
+  border-radius: 6px;
 }

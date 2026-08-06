@@ -18,13 +18,15 @@ const panels: Array<[string, string]> = [
 
 const app = document.querySelector("#app")!;
 for (const [title, diffText] of panels) {
+  const section = document.createElement("section");
   const h = document.createElement("h2");
   h.textContent = title;
   const el = document.createElement("patchset-diff");
   el.setAttribute("view-type", "split");
   el.refractor = refractor;
   el.diffText = diffText;
-  app.append(h, el);
+  section.append(h, el);
+  app.append(section);
 }
 
 const sheet = document.createElement("style");

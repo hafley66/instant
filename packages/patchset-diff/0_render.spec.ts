@@ -7,6 +7,8 @@ test("renders jj patch sets, syntax-highlighted, with a pure-rebase empty state"
   const els = page.locator("patchset-diff");
   await expect(els).toHaveCount(3);
   await expect(els.first().locator(".patchset-diff-path")).toHaveText("sum.ts");
+  await expect(els.first().locator(".patchset-diff-adds")).toHaveText("+3");
+  await expect(els.first().locator(".patchset-diff-dels")).toHaveText("\u22123");
 
   // shiki colours survive the style-to-class remap only if tokens carry a class.
   const coloured = els.first().locator("span[class^='pd-c']");
@@ -16,5 +18,7 @@ test("renders jj patch sets, syntax-highlighted, with a pure-rebase empty state"
   await expect(els.nth(1).locator("td", { hasText: "Math.hypot(b.x - a.x, b.y - a.y)" }).first()).toBeVisible();
   await expect(els.nth(2).locator(".patchset-diff-empty")).toHaveText(/No change/);
 
+  const box = await page.locator("#app").boundingBox();
+  await page.setViewportSize({ width: 1280, height: Math.ceil((box?.height ?? 800) + 32) });
   await expect(page).toHaveScreenshot("patchset-diff.png", { fullPage: true });
 });
