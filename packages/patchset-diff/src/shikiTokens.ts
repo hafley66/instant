@@ -20,7 +20,7 @@ export interface ShikiRefractor {
 
 type AnyHighlighter = HighlighterGeneric<string, string>;
 
-const CLASS_PREFIX = "pd-c";
+const CLASS_PREFIX = "pds";
 
 // defaultRenderToken reads properties.className and drops properties.style,
 // which is where shiki writes color, so colors are remapped onto classes.

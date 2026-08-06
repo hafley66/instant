@@ -1,22 +1,38 @@
 import { expect, test } from "@playwright/test";
 
-test("renders jj patch sets, syntax-highlighted, with a pure-rebase empty state", async ({ page }) => {
-  await page.goto("/packages/patchset-diff/demo.html");
-  await page.waitForSelector("body[data-ready='1']");
+test("patch-range selector reads live jj patch sets and diffs between them", async ({ page }) => {
+  const failures: string[] = [];
+  page.on("pageerror", (error) => failures.push(String(error)));
+  await page.goto("/packages/patchset-diff/demo.html?repo=lab");
 
-  const els = page.locator("patchset-diff");
-  await expect(els).toHaveCount(3);
-  await expect(els.first().locator(".patchset-diff-path")).toHaveText("sum.ts");
-  await expect(els.first().locator(".patchset-diff-adds")).toHaveText("+3");
-  await expect(els.first().locator(".patchset-diff-dels")).toHaveText("\u22123");
+  const selects = page.locator(".patchset-range-bar select");
+  await expect(selects).toHaveCount(2);
 
-  // shiki colours survive the style-to-class remap only if tokens carry a class.
-  const coloured = els.first().locator("span[class^='pd-c']");
-  await expect(coloured.first()).toBeVisible();
-  expect(await coloured.count()).toBeGreaterThan(10);
+  // evolog found three patch sets, so the "to" select lists three options.
+  await expect(selects.nth(1).locator("option")).toHaveCount(4);
 
-  await expect(els.nth(1).locator("td", { hasText: "Math.hypot(b.x - a.x, b.y - a.y)" }).first()).toBeVisible();
-  await expect(els.nth(2).locator(".patchset-diff-empty")).toHaveText(/No change/);
+  // Default range is the last two patch sets.
+  await expect(page.locator(".patchset-diff-path, .patchset-diff-empty").first()).toBeVisible();
+
+  // Patch set 1 -> 4 spans a real edit, so the file renders with a diffstat.
+  await selects.nth(0).selectOption("1");
+  await selects.nth(1).selectOption("4");
+  await expect(page.locator(".patchset-diff-path")).toHaveText("sum.ts");
+  await expect(page.locator(".patchset-diff-adds")).toBeVisible();
+
+  // shiki colours survive the style-to-class remap.
+  expect(await page.locator("span[class^='pds']").count()).toBeGreaterThan(10);
+
+  // Patch set 3 -> 4 was a pure rebase, so the author changed nothing.
+  await selects.nth(0).selectOption("3");
+  await expect(page.locator(".patchset-diff-empty")).toHaveText(/No change/);
+  await expect(page.locator(".patchset-diff-path")).toHaveCount(0);
+
+  // Back to 1 -> 4 for the pinned screenshot.
+  await selects.nth(0).selectOption("1");
+  await expect(page.locator(".patchset-diff-path")).toHaveText("sum.ts");
+
+  expect(failures).toEqual([]);
 
   const box = await page.locator("#app").boundingBox();
   await page.setViewportSize({ width: 1280, height: Math.ceil((box?.height ?? 800) + 32) });

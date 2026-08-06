@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Diff, Hunk, parseDiff, tokenize, type FileData, type ViewType } from "react-diff-view";
+import { Diff, Hunk, markEdits, parseDiff, tokenize, type FileData, type ViewType } from "react-diff-view";
 import type { RefractorLike } from "./shikiTokens";
 
 export interface PatchsetDiffProps {
@@ -96,14 +96,15 @@ function LazyFile({ file, viewType, refractor, widgets }: LazyFileProps) {
   }, [visible]);
 
   const path = file.newPath || file.oldPath;
+  // markEdits narrows the paint to the changed words; without it a one-token
+  // edit lights the whole line.
   const tokens = useMemo(() => {
-    if (!visible || !refractor) return undefined;
+    if (!visible) return undefined;
+    const enhancers = [markEdits(file.hunks, { type: "block" })];
     try {
-      return tokenize(file.hunks, {
-        highlight: true,
-        refractor,
-        language: languageOf(path),
-      });
+      return refractor
+        ? tokenize(file.hunks, { highlight: true, refractor, language: languageOf(path), enhancers })
+        : tokenize(file.hunks, { highlight: false, enhancers });
     } catch {
       return undefined;
     }

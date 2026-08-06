@@ -1,35 +1,38 @@
 import "./src/style.css";
-import "./src/element";
+import { createRoot } from "react-dom/client";
+import { createElement } from "react";
 import { createHighlighter } from "shiki";
 import { shikiRefractor } from "./src/shikiTokens";
-import * as fixture from "./src/fixture";
+import { gitSource, jjSource, type Run } from "./src/jj";
+import { PatchRange } from "./src/PatchRange";
+
+const params = new URLSearchParams(location.search);
+const repo = params.get("repo") === "lab" ? "/private/tmp/claude-501/-Users-chrishafley-projects-instant/40bf140a-130c-4bcf-99ed-7959b5287330/scratchpad/ts-lab" : "/Users/chrishafley/projects/instant/.worktrees/patchset-ui";
+const useJj = params.get("repo") === "lab";
+
+const run: Run = async (bin, args) => {
+  const response = await fetch("/_run", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ bin, args, cwd: repo }),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error ?? response.statusText);
+  return payload.stdout as string;
+};
 
 const highlighter = await createHighlighter({
   themes: ["github-dark"],
   langs: ["text", "typescript"],
 });
 const { refractor, css } = shikiRefractor(highlighter, "github-dark");
+document.head.append(Object.assign(document.createElement("style"), { textContent: css() }));
 
-const panels: Array<[string, string]> = [
-  ["patch set 1 of sum.ts (jj diff --git)", fixture.typescriptPatchset],
-  ["patch set 1 -> 2, real edit (jj interdiff --git)", fixture.typescriptInterdiff],
-  ["patch set N -> N+1, pure rebase", fixture.pureRebase],
-];
-
-const app = document.querySelector("#app")!;
-for (const [title, diffText] of panels) {
-  const section = document.createElement("section");
-  const h = document.createElement("h2");
-  h.textContent = title;
-  const el = document.createElement("patchset-diff");
-  el.setAttribute("view-type", "split");
-  el.refractor = refractor;
-  el.diffText = diffText;
-  section.append(h, el);
-  app.append(section);
-}
-
-const sheet = document.createElement("style");
-sheet.textContent = css();
-document.head.append(sheet);
-document.body.dataset.ready = "1";
+createRoot(document.querySelector("#app")!).render(
+  createElement(PatchRange, {
+    source: useJj ? jjSource(run) : gitSource(run, "origin/main"),
+    changeId: useJj ? "luovuknyzrmu" : "refs/patchsets/feat/patchset-diff",
+    viewType: "split",
+    refractor,
+  }),
+);

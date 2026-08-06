@@ -94,6 +94,21 @@
   box-shadow: inset 2px 0 0 var(--pd-del);
 }
 
+.patchset-diff .diff-code-edit {
+  border-radius: 2px;
+  padding: 1px 0;
+}
+
+.patchset-diff .diff-code-insert .diff-code-edit {
+  background: #1f6f34;
+  box-shadow: 0 0 0 1px #1f6f34;
+}
+
+.patchset-diff .diff-code-delete .diff-code-edit {
+  background: #7d2229;
+  box-shadow: 0 0 0 1px #7d2229;
+}
+
 .patchset-diff .diff-gutter-omit,
 .patchset-diff .diff-code-omit {
   background: var(--pd-head);
@@ -109,4 +124,36 @@
   color: #6e7681;
   border: 1px dashed var(--pd-line);
   border-radius: 6px;
+}
+
+.patchset-range-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin-block-end: 0.75rem;
+  background: var(--pd-head, #161b22);
+  border: 1px solid var(--pd-line, #21262d);
+  border-radius: 6px;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--pd-fg, #c9d1d9);
+}
+
+.patchset-range-bar select {
+  background: #0d1117;
+  color: inherit;
+  border: 1px solid var(--pd-line, #21262d);
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  font: inherit;
+  margin-inline-start: 0.35rem;
+}
+
+.patchset-range-arrow {
+  opacity: 0.6;
+}
+
+.patchset-range-id {
+  margin-inline-start: auto;
+  opacity: 0.6;
 }
