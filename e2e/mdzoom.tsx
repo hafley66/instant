@@ -42,7 +42,8 @@ import { wireContextMenu } from "../src/ctxmenu";
 
 const ROOT = "/tmp/mdzoom-e2e";
 const DOC = `${ROOT}/zoom.md`;
-const DOC_TEXT = "# Zoom target\n\nA paragraph of body text under the heading.\n";
+const DOC_TEXT = "# Zoom target\n\nA paragraph with an [external link](https://example.com/research) under the heading.\n";
+const openedHrefs: { href: string; sourcePath: string }[] = [];
 const entry = (path: string, is_dir = false): FsEntry => ({
   name: path.split("/").pop()!,
   path,
@@ -87,6 +88,7 @@ installMdviewHost({
   readText: (path) => invoke<string>("read_text", { path }),
   readImage: (path) => invoke<string>("read_image", { path }),
   listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
+  openHref: async (href, sourcePath) => { openedHrefs.push({ href, sourcePath }); },
   watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
   FileTree,
   registerZoomKind,
@@ -126,6 +128,7 @@ type ZoomHooks = {
   factors: () => Record<string, number>;
   focusedTerm: () => string | null;
   activePanel: () => string | null;
+  openedHrefs: () => typeof openedHrefs;
 };
 (window as Window & { __mdzoom?: ZoomHooks }).__mdzoom = {
   doc: DOC,
@@ -134,6 +137,7 @@ type ZoomHooks = {
   factors: () => store.get().panelZoom,
   focusedTerm: getFocusedTermId,
   activePanel: activePanelId,
+  openedHrefs: () => [...openedHrefs],
 };
 
 document.querySelector<HTMLButtonElement>("[data-testid=open-md]")!.onclick = () =>

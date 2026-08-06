@@ -46,7 +46,7 @@ import {
   mdPanelId,
 } from "./reactdock";
 import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, logLine } from "./core";
-import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore } from "./preview";
+import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore, openDocumentHrefInInstant } from "./preview";
 import { wireDomCmdClick } from "./clickrules";
 import {
   tabs,
@@ -271,6 +271,7 @@ async function main() {
     readText: (path) => invoke<string>("read_text", { path }),
     readImage: (path) => invoke<string>("read_image", { path }),
     listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
+    openHref: openDocumentHrefInInstant,
     watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
     FileTree,
     registerZoomKind,

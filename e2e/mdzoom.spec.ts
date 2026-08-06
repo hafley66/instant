@@ -15,6 +15,7 @@ type ZoomWindow = Window & {
     factors: () => Record<string, number>;
     focusedTerm: () => string | null;
     activePanel: () => string | null;
+    openedHrefs: () => { href: string; sourcePath: string }[];
   };
 };
 
@@ -104,4 +105,16 @@ test("a terminal the user is typing in still zooms its own font", async ({ page 
   await expect.poll(async () => (await state(page)).md).toBeCloseTo(1.1, 5);
 
   expect(pageErrors).toEqual([]);
+});
+
+test("rendered markdown links route through the host", async ({ page }) => {
+  await page.getByTestId("open-md").click();
+  await page.getByRole("button", { name: /Zoom target/ }).click();
+  const link = page.getByRole("link", { name: "external link" });
+  await expect(link).toBeVisible();
+  await link.click();
+
+  expect(await page.evaluate(() => (window as ZoomWindow).__mdzoom!.openedHrefs())).toEqual([
+    { href: "https://example.com/research", sourcePath: "/tmp/mdzoom-e2e/zoom.md" },
+  ]);
 });

@@ -83,6 +83,7 @@ export interface MdviewHost {
   readText(path: string): Promise<string>;
   readImage(path: string): Promise<string>;
   listDir(path: string): Promise<{ entries: MdviewFsEntry[] }>;
+  openHref(href: string, sourcePath: string): Promise<void>;
 
   // ---- file watching (src/fsWatch.ts's claimFsWatch) ----
   watchFile(path: string, onChange: () => void, recursive?: boolean): Promise<() => void>;
@@ -109,10 +110,9 @@ export interface MdviewHost {
   registerPlugin(plugin: MdviewPluginRegistration): void;
 }
 
-// Note: opening a path in the OS default app (the "↗ external" button, and
-// http(s) links clicked in a rendered doc) goes straight through
-// @tauri-apps/plugin-opener's openPath, a real peer dependency, not an app
-// coupling, so it isn't part of this host surface.
+// The toolbar's "↗ external" button opens the current document through the
+// peer opener. Rendered links use openHref so the host can route URLs, local
+// files, and file:line references through its existing document router.
 
 let host: MdviewHost | null = null;
 

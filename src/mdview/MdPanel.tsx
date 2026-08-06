@@ -264,7 +264,7 @@ export const MdPanel = SignalReact(function MdPanel({
             onNavigate(md.path);
             return;
           }
-          if (/^https?:\/\//i.test(href)) void openPath(href).catch(console.error);
+          void host.openHref(href, path).catch(console.error);
         };
         return (
           <a href={href} onClick={onClick}>
