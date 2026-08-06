@@ -88,6 +88,9 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.2.7
+      react-diff-view:
+        specifier: ^3.3.3
+        version: 3.3.3(react@19.2.7)
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
@@ -1061,6 +1064,9 @@ packages:
   character-reference-invalid@2.0.1:
     resolution: {integrity: sha512-iBZ4F4wRbyORVsu0jPV7gXkOsGYjGHPmAyv+HiHG8gi5PtC9KI2j1+v8/tlibRvjoWX027ypmG/n0HtO5t7unw==}
 
+  classnames@2.5.1:
+    resolution: {integrity: sha512-saHYOzhIQs6wy2sVxTM6bUDsQO4F50V9RQ22qBpEdCW+I+/Wmke2HOl6lS6dTpdxVhb88/I6+Hs+438c3lfUow==}
+
   cliui@9.0.1:
     resolution: {integrity: sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w==}
     engines: {node: '>=20'}
@@ -1296,6 +1302,9 @@ packages:
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
 
+  diff-match-patch@1.0.5:
+    resolution: {integrity: sha512-IayShXAgj/QMXgB0IWmKx+rOPuGMhqm5w6jvFxmVenXKIzRqTAAsbBPT3kWQeGANj3jGgvcvv4yK6SxqYmikgw==}
+
   dockview-core@6.6.1:
     resolution: {integrity: sha512-WuNoO2wl3rGI8MaTuvmfgViek4WafHLD9Kf//Hw69g8TgAHSpAWr6RW15kU6U9vwtQxIi/YBxQNcIA5RzQ46Fw==}
 
@@ -1403,6 +1412,9 @@ packages:
   get-east-asian-width@1.6.0:
     resolution: {integrity: sha512-QRbvDIbx6YklUe6RxeTeleMR0yv3cYH6PsPZHcnVn7xv7zO1BHN8r0XETu8n6Ye3Q+ahtSarc3WgtNWmehIBfA==}
     engines: {node: '>=18'}
+
+  gitdiff-parser@0.3.1:
+    resolution: {integrity: sha512-YQJnY8aew65id8okGxKCksH3efDCJ9HzV7M9rsvd65habf39Pkh4cgYJ27AaoDMqo1X98pgNJhNMrm/kpV7UVQ==}
 
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
@@ -1884,6 +1896,11 @@ packages:
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
+  react-diff-view@3.3.3:
+    resolution: {integrity: sha512-CPveApk6n7ZbkW7T6PoptR7LWAvD9hohTHZ7WnKnu3GZkTfUB5rvg486apPo94iYVi4fZd3Nt+rtBZ5877exoQ==}
+    peerDependencies:
+      react: '>=16.14.0'
+
   react-dom@19.2.7:
     resolution: {integrity: sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ==}
     peerDependencies:
@@ -1987,6 +2004,9 @@ packages:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
     engines: {node: '>=10'}
     hasBin: true
+
+  shallow-equal@3.1.0:
+    resolution: {integrity: sha512-pfVOw8QZIXpMbhBWvzBISicvToTiM5WBF1EeAUZDDSb5Dt29yl4AYbyywbJFSEsRUMr7gJaxqCdr4L3tQf9wVg==}
 
   shiki@4.3.1:
     resolution: {integrity: sha512-oR+qDVi2OjX1tmDpyv+3KviX01KzO6Af+0NNnKnsp9491UEGz2YpxTuJboS/6VhYpTdqzmuJBuiTlrAWWJAssw==}
@@ -2324,6 +2344,9 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  warning@4.0.3:
+    resolution: {integrity: sha512-rpJyN222KWIvHJ/F53XSZv0Zl/accqHR8et1kpaMTD/fLCRxtV8iX8czMzY7sVZupTI3zcUTg8eycS2kNF9l6w==}
 
   web-namespaces@2.0.1:
     resolution: {integrity: sha512-bKr1DkiNa2krS7qxNtdrtHAmzuYGFQLiQ13TsorsdT6ULTkPLKuu5+GsFpDlg6JFjUTwX2DyhMPG2be8uPrqsQ==}
@@ -3260,6 +3283,8 @@ snapshots:
 
   character-reference-invalid@2.0.1: {}
 
+  classnames@2.5.1: {}
+
   cliui@9.0.1:
     dependencies:
       string-width: 7.2.0
@@ -3515,6 +3540,8 @@ snapshots:
     dependencies:
       dequal: 2.0.3
 
+  diff-match-patch@1.0.5: {}
+
   dockview-core@6.6.1: {}
 
   dockview@6.6.1(react@19.2.7):
@@ -3588,6 +3615,8 @@ snapshots:
   get-caller-file@2.0.5: {}
 
   get-east-asian-width@1.6.0: {}
+
+  gitdiff-parser@0.3.1: {}
 
   hachure-fill@0.5.2: {}
 
@@ -4295,6 +4324,16 @@ snapshots:
 
   property-information@7.2.0: {}
 
+  react-diff-view@3.3.3(react@19.2.7):
+    dependencies:
+      classnames: 2.5.1
+      diff-match-patch: 1.0.5
+      gitdiff-parser: 0.3.1
+      lodash: 4.18.1
+      react: 19.2.7
+      shallow-equal: 3.1.0
+      warning: 4.0.3
+
   react-dom@19.2.7(react@19.2.7):
     dependencies:
       react: 19.2.7
@@ -4435,6 +4474,8 @@ snapshots:
   scheduler@0.27.0: {}
 
   semver@7.8.5: {}
+
+  shallow-equal@3.1.0: {}
 
   shiki@4.3.1:
     dependencies:
@@ -4893,6 +4934,10 @@ snapshots:
       why-is-node-running: 2.3.0
     transitivePeerDependencies:
       - msw
+
+  warning@4.0.3:
+    dependencies:
+      loose-envify: 1.4.0
 
   web-namespaces@2.0.1: {}
 

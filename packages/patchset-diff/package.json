@@ -1,0 +1,24 @@
+{
+  "name": "@hafley/patchset-diff",
+  "version": "0.0.0",
+  "description": "Read diffs between patch sets of one change, Gerrit-style, over plain git or jj.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": ["./src/element.ts"],
+  "exports": {
+    ".": "./src/index.ts",
+    "./jj": "./src/jj.ts",
+    "./react": "./src/DiffView.tsx",
+    "./element": "./src/element.ts",
+    "./style.css": "./src/style.css"
+  },
+  "peerDependencies": {
+    "react": ">=19",
+    "react-dom": ">=19",
+    "react-diff-view": "^3.3.3",
+    "shiki": "^4"
+  },
+  "peerDependenciesMeta": {
+    "shiki": { "optional": true }
+  }
+}
