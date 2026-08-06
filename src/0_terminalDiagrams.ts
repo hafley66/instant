@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
-import { DiagramLightbox, diagramSvgMarkup } from "./mdview/0_DiagramLightbox";
+import { DiagramLightbox, diagramSvgMarkup, type DiagramLightboxEntry } from "./mdview/0_DiagramLightbox";
 import { mermaidTheme } from "./mdview/0_diagramTheme";
 import { renderD2 } from "./mdview/d2";
 import {
@@ -15,7 +15,15 @@ import {
 import type { AiMessage } from "./state";
 
 type DiagramLanguage = "mermaid" | "d2";
-export type DiagramFence = { language: DiagramLanguage; code: string; start: number; end: number; inferred: boolean };
+export type DiagramFence = {
+  language: DiagramLanguage;
+  code: string;
+  start: number;
+  end: number;
+  inferred: boolean;
+  locator?: string;
+  messageId?: string;
+};
 type LogicalLine = { text: string; start: number; end: number };
 export type TerminalDiagramLayout = {
   maxViewportHeightRatio: number;
@@ -113,6 +121,8 @@ export function locateMessageDiagrams(term: Terminal, diagrams: MessageDiagram[]
       start,
       end: Math.max(start, end),
       inferred: false,
+      locator: diagram.locator,
+      messageId: diagram.messageId,
     });
   }
   return found;
@@ -280,6 +290,8 @@ export class TerminalDiagramOverlay {
   wheelFrame = 0;
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
+  lightboxEntries: DiagramLightboxEntry[] = [];
+  lightboxActive = 0;
 
   constructor(
     readonly term: Terminal,
@@ -326,21 +338,21 @@ export class TerminalDiagramOverlay {
       }
     };
     const onClick = (event: MouseEvent) => {
-      const diagram = Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
-        .find((element) => {
-          if (element.hidden || element.classList.contains("term-diagram-error")) return false;
-          const rect = element.getBoundingClientRect();
-          return event.clientX >= rect.left && event.clientX <= rect.right
-            && event.clientY >= rect.top && event.clientY <= rect.bottom;
-        });
-      if (!diagram) return;
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>(".term-diagram") : null;
+      if (!target || !this.root.contains(target) || target.hidden || target.classList.contains("term-diagram-error")) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      this.openLarge(
-        diagram.innerHTML,
-        diagram.dataset.language as DiagramLanguage,
-        diagram.dataset.diagramTheme === "dark",
-      );
+      this.openLarge({
+        id: `${target.dataset.diagramKey}:${Date.now()}:${this.lightboxEntries.length}`,
+        svg: target.innerHTML,
+        language: target.dataset.language as DiagramLanguage,
+        dark: target.dataset.diagramTheme === "dark",
+        code: target.dataset.diagramCode ?? "",
+        locator: target.dataset.diagramLocator ?? "terminal buffer",
+        bufferStart: Number(target.dataset.bufferStart),
+        bufferEnd: Number(target.dataset.bufferEnd),
+        inferred: target.dataset.diagramInferred === "true",
+      });
     };
     host.addEventListener("wheel", onWheel, { capture: true, passive: false });
     host.addEventListener("click", onClick, { capture: true });
@@ -477,6 +489,9 @@ export class TerminalDiagramOverlay {
       element.dataset.diagramKey = diagramKey;
       element.dataset.language = fence.language;
       element.dataset.diagramTheme = dark ? "dark" : "light";
+      element.dataset.diagramCode = fence.code;
+      element.dataset.diagramLocator = fence.locator ?? "terminal buffer";
+      element.dataset.diagramInferred = String(fence.inferred);
       const aspectRatio = svg ? svgAspectRatio(svg) : null;
       const sourceRows = fence.end - fence.start + 1;
       const requestedHeight = aspectRatio
@@ -515,8 +530,10 @@ export class TerminalDiagramOverlay {
     this.positionElements(screen);
   }
 
-  openLarge(svg: string, language: DiagramLanguage, dark: boolean) {
+  openLarge(entry: DiagramLightboxEntry) {
     this.closeLarge();
+    this.lightboxEntries.push(entry);
+    this.lightboxActive = this.lightboxEntries.length - 1;
     const mount = document.createElement("div");
     document.body.appendChild(mount);
     const root = createRoot(mount);
@@ -525,13 +542,17 @@ export class TerminalDiagramOverlay {
     };
     this.lightboxMount = mount;
     this.lightboxRoot = root;
-    root.render(createElement(DiagramLightbox, {
-      svg,
-      language,
-      dark,
-      label: `${language === "d2" ? "d2" : "Mermaid"} diagram`,
+    const render = () => root.render(createElement(DiagramLightbox, {
+      entries: this.lightboxEntries,
+      activeIndex: this.lightboxActive,
+      label: `${entry.language === "d2" ? "d2" : "Mermaid"} diagram`,
+      onSelect: (index: number) => {
+        this.lightboxActive = index;
+        render();
+      },
       onClose: close,
     }));
+    render();
   }
 
   closeLarge() {

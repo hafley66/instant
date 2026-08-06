@@ -2,6 +2,7 @@ import type { AiMessage } from "./state";
 
 export type MessageDiagram = {
   messageId: string;
+  locator: string;
   language: "mermaid" | "d2";
   code: string;
 };
@@ -16,6 +17,7 @@ export function diagramsFromMessageTail(messages: AiMessage[], tail = 30): Messa
       for (const match of message.text.matchAll(fences)) {
         diagrams.push({
           messageId: message.id,
+          locator: message.locator,
           language: match[2].toLowerCase() as MessageDiagram["language"],
           code: match[3].trimEnd(),
         });

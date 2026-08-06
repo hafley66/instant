@@ -155,3 +155,10 @@ vscode-install: vscode-build
 livespawn scratch=(justfile_directory() / ".livespawn"):
     node scripts/livespawn.ts --scratch {{scratch}}
     LIVESPAWN_RUN={{scratch}}/run.json npx vitest run --config vitest.livespawn.config.ts
+
+# Isolated JSON-Rx v2 lab: deterministic runtime tests, strict lab typecheck,
+# and a Chromium screenshot receipt for the Claude + Codex stream states.
+json-rx-lab:
+    corepack pnpm@10.12.4 exec vitest run --config labs/json-rx-mvp/5_vitest.config.ts
+    corepack pnpm@10.12.4 exec tsc --project labs/json-rx-mvp/6_tsconfig.json
+    corepack pnpm@10.12.4 exec playwright test --config labs/json-rx-mvp/14_playwright.config.ts
