@@ -110,6 +110,16 @@ just json-rx-lab
 
 Chromium receipt: [`13_receipt.spec.ts-snapshots/json-rx-lab-gate-darwin.png`](./13_receipt.spec.ts-snapshots/json-rx-lab-gate-darwin.png)
 
+Clean first-install and production-build audit:
+
+```sh
+docker build --pull --no-cache --target verify --file Dockerfile.release-audit .
+```
+
+The container pins the release workflow's Node and pnpm versions, installs the
+lockfile's Playwright Chromium revision plus its Linux system packages, and
+executes the frontend production build before the JSON-Rx gate.
+
 The recipe expands to:
 
 ```sh

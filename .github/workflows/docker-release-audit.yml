@@ -1,0 +1,17 @@
+name: Docker release audit
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build clean release verification image
+        run: docker build --pull --no-cache --target verify --file Dockerfile.release-audit .
