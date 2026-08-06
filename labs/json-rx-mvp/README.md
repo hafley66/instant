@@ -105,6 +105,25 @@ against the object selected by `from`; missing expressions omit their fields.
 ## Run
 
 ```sh
+just json-rx-lab
+```
+
+Chromium receipt: [`13_receipt.spec.ts-snapshots/json-rx-lab-gate-darwin.png`](./13_receipt.spec.ts-snapshots/json-rx-lab-gate-darwin.png)
+
+Clean first-install and production-build audit:
+
+```sh
+docker build --pull --no-cache --target verify --file Dockerfile.release-audit .
+```
+
+The container pins the release workflow's Node and pnpm versions, installs the
+lockfile's Playwright Chromium revision plus its Linux system packages, and
+executes the frontend production build before the JSON-Rx gate.
+
+The recipe expands to:
+
+```sh
 corepack pnpm@10.12.4 exec vitest run --config labs/json-rx-mvp/5_vitest.config.ts
 corepack pnpm@10.12.4 exec tsc --project labs/json-rx-mvp/6_tsconfig.json
+corepack pnpm@10.12.4 exec playwright test --config labs/json-rx-mvp/14_playwright.config.ts
 ```
