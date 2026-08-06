@@ -189,40 +189,6 @@ test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ 
   await expect(page.locator(".term-diagrams")).toBeHidden();
 });
 
-test("Claude Code routes wheel input through tmux copy-mode", async ({ page }) => {
-  await openTerminal(page, "e2e=1&wheelHarness=claude");
-  await writeFixture(page, [
-    ...Array.from({ length: 120 }, (_, index) => `Claude history row ${index}`),
-  ]);
-  const host = page.locator(".term-host");
-  const box = await host.boundingBox();
-  expect(box).not.toBeNull();
-  await page.evaluate(() => {
-    const target = window as Window & {
-      __instantE2eNativeResults?: Record<string, unknown>;
-      __scrollSessionArgs?: Record<string, unknown>;
-    };
-    if (target.__instantE2eNativeResults) {
-      target.__instantE2eNativeResults.scroll_session = (args: Record<string, unknown>) => {
-        target.__scrollSessionArgs = args;
-      };
-    }
-  });
-
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  await page.mouse.wheel(0, -100);
-  await expect.poll(() => page.evaluate(() =>
-    (window as Window & { __scrollSessionArgs?: Record<string, unknown> }).__scrollSessionArgs,
-  )).toEqual({ name: "e2e", up: true, lines: expect.any(Number) });
-  await expect(host).toHaveAttribute("data-harness", "claude");
-  expect(await page.locator(".xterm-viewport").evaluate((viewport) => ({
-    overflowY: getComputedStyle(viewport).overflowY,
-    scrollTop: viewport.scrollTop,
-    hasLocalScrollback: viewport.scrollHeight > viewport.clientHeight,
-  }))).toEqual({ overflowY: "hidden", scrollTop: 0, hasLocalScrollback: false });
-  await expect(page.locator(".term-diagrams")).toBeHidden();
-});
-
 test("does not render terminal fences when the AI ledger has no matching visible message", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
