@@ -71,6 +71,22 @@ async function settleScroll(page: Page) {
   });
 }
 
+async function visibleDiagramPoint(diagram: ReturnType<Page["locator"]>) {
+  return diagram.evaluate((element) => {
+    const diagramRect = element.getBoundingClientRect();
+    const screenRect = element.closest(".term-host")!.querySelector(".xterm-screen")!.getBoundingClientRect();
+    return {
+      x: Math.max(diagramRect.left, screenRect.left) + 20,
+      y: (Math.max(diagramRect.top, screenRect.top) + Math.min(diagramRect.bottom, screenRect.bottom)) / 2,
+    };
+  });
+}
+
+async function rightClickVisibleDiagram(page: Page, diagram: ReturnType<Page["locator"]>) {
+  const point = await visibleDiagramPoint(diagram);
+  await page.mouse.click(point.x, point.y, { button: "right" });
+}
+
 for (const harness of ["Codex", "Claude Code"] as const) {
   test(`renders plain fenced Mermaid and D2 output from ${harness}`, async ({ page }, testInfo) => {
     await openTerminal(page);
@@ -92,9 +108,8 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     expect(inlineBoxes).toHaveLength(2);
     expect(inlineBoxes.every(({ width, height }) => width > 500 && height > 40)).toBe(true);
 
-    const d2Box = await page.locator('.term-diagram[data-language="d2"]').boundingBox();
-    expect(d2Box).not.toBeNull();
-    await page.mouse.click(d2Box!.x + d2Box!.width / 2, d2Box!.y + d2Box!.height / 2);
+    await rightClickVisibleDiagram(page, page.locator('.term-diagram[data-language="d2"]'));
+    await page.locator(".ctx-item", { hasText: "Expand D2 diagram" }).click();
     const expanded = page.locator('.diagram-lightbox[data-language="d2"]');
     await expect(expanded).toBeVisible();
     await expect(expanded).toContainText("PTY");
@@ -201,7 +216,7 @@ test("Claude Code retains application wheel handling", async ({ page }) => {
   await expect(page.locator(".term-diagrams")).toBeHidden();
 });
 
-test("renders visible fences when the native harness ledger returns no matching turn", async ({ page }) => {
+test("does not render terminal fences when the AI ledger has no matching visible message", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
     const target = window as Window & {
@@ -215,12 +230,11 @@ test("renders visible fences when the native harness ledger returns no matching 
   await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
   await writeFixture(page, output("Codex"));
 
-  await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
-  await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
+  await expect(page.locator(".term-diagram")).toHaveCount(0);
 });
 
 test("opens a viewport-tall D2 target and retains clicked source entries", async ({ page }, testInfo) => {
-  await openTerminal(page);
+  await openTerminal(page, "e2e=1&noHarness=1");
   const d2Lines = Array.from({ length: 28 }, (_, index) => `node_${index} -> node_${index + 1}: step ${index + 1}`);
   await writeFixture(page, [
     "```d2",
@@ -234,7 +248,11 @@ test("opens a viewport-tall D2 target and retains clicked source entries", async
 
   const d2 = page.locator('.term-diagram[data-language="d2"]');
   await expect(d2).toBeVisible();
-  await d2.click({ position: { x: 20, y: 10 } });
+  const d2Point = await visibleDiagramPoint(d2);
+  await page.mouse.click(d2Point.x, d2Point.y);
+  await expect(page.locator(".diagram-lightbox")).toHaveCount(0);
+  await rightClickVisibleDiagram(page, d2);
+  await page.locator(".ctx-item", { hasText: "Expand D2 diagram" }).click();
 
   const lightbox = page.locator('.diagram-lightbox[data-language="d2"]');
   await expect(lightbox).toBeVisible();
@@ -248,7 +266,8 @@ test("opens a viewport-tall D2 target and retains clicked source entries", async
 
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
   await expect(mermaid).toBeVisible();
-  await mermaid.click({ position: { x: 20, y: 10 } });
+  await rightClickVisibleDiagram(page, mermaid);
+  await page.locator(".ctx-item", { hasText: "Expand Mermaid diagram" }).click();
   const second = page.locator('.diagram-lightbox[data-language="mermaid"]');
   await expect(second.locator(".diagram-lightbox-count")).toHaveText("2/2");
   await second.getByTitle("Previous clicked diagram").click();
@@ -275,13 +294,35 @@ test("does not infer D2 from Rust return types and arrow comments", async ({ pag
   await expect(page.locator(".term-diagram")).toHaveCount(0);
 });
 
-test("renders fence-stripped Mermaid before a slow native ledger finishes", async ({ page }) => {
+test("waits for a slow AI ledger before rendering fence-stripped Mermaid", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
-    const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+    const target = window as Window & {
+      __instantE2eNativeResults?: Record<string, unknown>;
+      __resolveDiagramLedger?: () => void;
+    };
     if (target.__instantE2eNativeResults) {
-      target.__instantE2eNativeResults.read_ai_messages = () =>
-        new Promise((resolve) => setTimeout(() => resolve([]), 2500));
+      let resolveLedger!: (messages: unknown[]) => void;
+      const pending = new Promise<unknown[]>((resolve) => { resolveLedger = resolve; });
+      target.__instantE2eNativeResults.read_ai_messages = () => pending;
+      target.__resolveDiagramLedger = () => resolveLedger([{
+          editor: "codex",
+          session_id: "e2e-codex-1",
+          id: "slow-ledger-diagram",
+          seq: 1,
+          role: "assistant",
+          ts: Date.now(),
+          preview: "one round, repeated 2580 times",
+          text: [
+            "```mermaid",
+            "flowchart TB",
+            "  subgraph round[one round, repeated 2580 times]",
+            "    delta --> join",
+            "  end",
+            "```",
+          ].join("\n"),
+          locator: "codex:/tmp/slow-ledger.jsonl#L1",
+        }]);
     }
   });
   await page.getByTestId("open-term").click();
@@ -290,19 +331,17 @@ test("renders fence-stripped Mermaid before a slow native ledger finishes", asyn
     "mermaid",
     "flowchart TB",
     "  subgraph round[one round, repeated 2580 times]",
-    "    delta[delta: ~7k pairs, FLAT all run] --> join[join: index lookup per pair<br/>cost flat, cheap]",
-    "    join --> insert[insert into derived FxHashSet<br/>set grows 0 to 10M entries / 128MB]",
+    "    delta --> join",
     "  end",
-    "  insert --> tax[late rounds: every probe misses cache<br/>0ms early, 2-3ms by round 500]",
-    "  insert --> rehash[power-of-2 doublings rehash the whole table<br/>spikes: 41ms, 147ms]",
-    "  tax --> total[2580 rounds x growing tax = 10.2s<br/>~1us per derived row]",
-    "  rehash --> total",
-    "",
-    "The work per round never grows; the COST per row does.",
   ].join("\r\n"));
 
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
-  await expect(mermaid.locator("svg")).toBeVisible({ timeout: 2200 });
+  await page.waitForTimeout(500);
+  await expect(mermaid).toHaveCount(0);
+  await page.evaluate(() => {
+    (window as Window & { __resolveDiagramLedger?: () => void }).__resolveDiagramLedger?.();
+  });
+  await expect(mermaid.locator("svg")).toBeVisible({ timeout: 4000 });
   await expect(mermaid).toContainText("one round, repeated 2580 times");
 });
 

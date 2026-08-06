@@ -337,28 +337,9 @@ export class TerminalDiagramOverlay {
         });
       }
     };
-    const onClick = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target.closest<HTMLElement>(".term-diagram") : null;
-      if (!target || !this.root.contains(target) || target.hidden || target.classList.contains("term-diagram-error")) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.openLarge({
-        id: `${target.dataset.diagramKey}:${Date.now()}:${this.lightboxEntries.length}`,
-        svg: target.innerHTML,
-        language: target.dataset.language as DiagramLanguage,
-        dark: target.dataset.diagramTheme === "dark",
-        code: target.dataset.diagramCode ?? "",
-        locator: target.dataset.diagramLocator ?? "terminal buffer",
-        bufferStart: Number(target.dataset.bufferStart),
-        bufferEnd: Number(target.dataset.bufferEnd),
-        inferred: target.dataset.diagramInferred === "true",
-      });
-    };
     host.addEventListener("wheel", onWheel, { capture: true, passive: false });
-    host.addEventListener("click", onClick, { capture: true });
     this.disposables = [
       { dispose: () => host.removeEventListener("wheel", onWheel, { capture: true }) },
-      { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.messages) {
           this.positionElements();
@@ -433,33 +414,20 @@ export class TerminalDiagramOverlay {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
-    const direct = findDiagramFences(this.term);
+    const direct = findDiagramFences(this.term).filter((fence) => !fence.inferred);
     let messages = suppliedMessages;
     if (messages === undefined && this.messages) {
-      const pending = this.messages();
-      if (direct.length) {
-        // The native ledger may scan several harness stores and cwd candidates.
-        // Paint complete xterm source now; enrich it with ledger-only matches
-        // when that independent read finishes. Passing the result back into
-        // paint avoids starting another native read and a refresh loop.
-        void pending
-          .then((result) => this.paint(result))
-          .catch(() => {});
-        messages = null;
-      } else {
-        messages = await pending;
-        if (generation !== this.generation) return;
-      }
+      messages = await this.messages();
+      if (generation !== this.generation) return;
     }
     const ledger = messages
       ? locateMessageDiagrams(this.term, diagramsFromMessageTail(messages))
       : [];
-    // A resolved harness can still point at a stale sibling session, or its
-    // message tail can omit the visible turn. Complete terminal fences remain
-    // authoritative; ledger matching fills only blocks whose fences the TUI
-    // stripped. This also keeps a failed/empty native ledger from disabling
-    // rendering that is fully present in xterm.
-    const fences = mergeLocatedDiagrams(direct, ledger);
+    // Once an AI ledger resolves, it owns diagram provenance. Terminal parsing
+    // is used only for a plain shell with no harness session, and then only for
+    // explicit fences. Raw arrow-shaped output and tool/write payloads remain
+    // terminal text.
+    const fences = messages === null ? direct : ledger;
     const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
@@ -518,7 +486,7 @@ export class TerminalDiagramOverlay {
         element.textContent = error;
       } else if (!error && (created || element.classList.contains("term-diagram-error"))) {
         element.className = "term-diagram";
-        element.title = "Click to expand diagram";
+        element.title = "Right-click to expand diagram";
         element.innerHTML = diagramSvgMarkup(svg);
       }
       return element;
@@ -553,6 +521,34 @@ export class TerminalDiagramOverlay {
       onClose: close,
     }));
     render();
+  }
+
+  diagramAtClientY(clientY: number): DiagramLightboxEntry | null {
+    const target = Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram")).find((element) =>
+      !element.hidden
+      && !element.classList.contains("term-diagram-error")
+      && element.getBoundingClientRect().top <= clientY
+      && clientY <= element.getBoundingClientRect().bottom
+    );
+    if (!target) return null;
+    return {
+      id: `${target.dataset.diagramKey}:${this.lightboxEntries.length}`,
+      svg: target.innerHTML,
+      language: target.dataset.language as DiagramLanguage,
+      dark: target.dataset.diagramTheme === "dark",
+      code: target.dataset.diagramCode ?? "",
+      locator: target.dataset.diagramLocator ?? "terminal buffer",
+      bufferStart: Number(target.dataset.bufferStart),
+      bufferEnd: Number(target.dataset.bufferEnd),
+      inferred: false,
+    };
+  }
+
+  openAtClientY(clientY: number): boolean {
+    const entry = this.diagramAtClientY(clientY);
+    if (!entry) return false;
+    this.openLarge(entry);
+    return true;
   }
 
   closeLarge() {

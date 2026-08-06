@@ -108,7 +108,7 @@ import {
   wireWindowResize,
   wireRailResize,
   ctxItemsFor,
-  setLastCtxY,
+  setLastCtxPoint,
 } from "./chrome";
 import { wireContextMenu } from "./ctxmenu";
 import { isDraggingIn, wireOsDrop } from "./dnd";
@@ -315,7 +315,7 @@ async function main() {
   wireOsDrop().catch((e) => showError("wireOsDrop", e));
   // Capture the right-click Y (capture phase, before wireContextMenu's bubble
   // handler) so ctxItemsFor can map it to a terminal buffer row for turn-identify.
-  document.addEventListener("contextmenu", (e) => setLastCtxY(e.clientY), true);
+  document.addEventListener("contextmenu", (e) => setLastCtxPoint(e.clientX, e.clientY), true);
   wireContextMenu(ctxItemsFor);
   // Harness discovery walks the on-disk Claude/Codex session stores. Large
   // stores can take seconds to scan, so never hold boot, PTY listeners, summon,

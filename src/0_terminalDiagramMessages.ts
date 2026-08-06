@@ -9,7 +9,7 @@ export type MessageDiagram = {
 
 export function diagramsFromMessageTail(messages: AiMessage[], tail = 30): MessageDiagram[] {
   return messages
-    .filter((message) => message.role === "assistant")
+    .filter((message) => message.role === "assistant" && message.subtype == null)
     .slice(-tail)
     .flatMap((message) => {
       const diagrams: MessageDiagram[] = [];
