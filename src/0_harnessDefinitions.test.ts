@@ -42,19 +42,6 @@ describe("HarnessDefinition.lane", () => {
     `);
   });
 
-  it("declares terminal wheel ownership per harness", () => {
-    expect(Object.fromEntries(
-      Object.entries(harnessDefinitionById).map(([id, definition]) => [id, definition.wheelMode]),
-    )).toMatchInlineSnapshot(`
-      {
-        "claude": "application",
-        "codex": "tmux-copy",
-        "kimi": "application",
-        "opencode": "application",
-      }
-    `);
-  });
-
   it("recognizes Claude's multi-part version process", () => {
     const claude = harnessDefinitionById.claude;
     expect([

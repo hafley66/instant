@@ -5,7 +5,7 @@
 // with browser tabs.
 import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { commands, invoke } from "./generated/native";
+import { invoke } from "./generated/native";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
@@ -56,7 +56,6 @@ import { refreshTurns, warmTurns, tabSessions, unclaimedSession } from "./favori
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
-import { harnessDefinitionById } from "./0_harnessDefinitions";
 import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
 import {
   renderSessionActive,
@@ -551,11 +550,6 @@ export function openTab(
     el,
     undefined,
     () => refreshTurns(id),
-    (up, lines) => { void invoke(commands.pty.scrollSession, { name, up, lines }).catch(() => {}); },
-    () => {
-      const harnessId = tabs.get(id)?.harness.id ?? harness.id;
-      return harnessId ? harnessDefinitionById[harnessId].wheelMode : "tmux-copy";
-    },
   );
   tabs.set(id, { id, name, term, fit, el, graphics, overlay, diagrams, harness, outputTail: "" });
   el.dataset.harness = harness.id ?? "unknown";
