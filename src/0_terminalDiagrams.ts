@@ -314,6 +314,7 @@ export class TerminalDiagramOverlay {
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
     readonly messages?: () => Promise<AiMessage[] | null>,
+    readonly enabled: () => boolean = () => true,
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
@@ -386,7 +387,20 @@ export class TerminalDiagramOverlay {
     this.scheduleFrame();
   }
 
+  syncEnabled() {
+    if (!this.enabled()) {
+      this.generation++;
+      this.root.hidden = true;
+      return;
+    }
+    this.activate();
+  }
+
   scheduleFrame() {
+    if (!this.enabled()) {
+      this.root.hidden = true;
+      return;
+    }
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
@@ -418,6 +432,10 @@ export class TerminalDiagramOverlay {
   }
 
   async paint(suppliedMessages?: AiMessage[] | null) {
+    if (!this.enabled()) {
+      this.root.hidden = true;
+      return;
+    }
     const generation = ++this.generation;
     const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) return;

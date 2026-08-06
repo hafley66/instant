@@ -1,7 +1,23 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import { PanZoomViewport } from "./0_PanZoomViewport";
+import { SvgDocumentViewer } from "./1_SvgDocumentViewer";
+import { PdfDocumentViewer } from "./1_PdfDocumentViewer";
 
-export function FileImageViewer({ path, url }: { path: string; url: string }) {
+export function FileImageViewer({
+  path,
+  url,
+  svg,
+  pdf,
+  onOpenHref,
+}: {
+  path: string;
+  url?: string;
+  svg?: string;
+  pdf?: string;
+  onOpenHref?: (href: string) => void | Promise<void>;
+}) {
+  if (pdf) return <PdfDocumentViewer path={path} url={pdf} onOpenHref={onOpenHref} />;
+  if (svg) return <SvgDocumentViewer path={path} source={svg} onOpenHref={onOpenHref} />;
   return (
     <PanZoomViewport
       className="file-image-viewer"

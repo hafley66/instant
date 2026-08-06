@@ -16,8 +16,13 @@ import {
   setPreviewRehydration,
 } from "./reactdock";
 import { claimFsWatch } from "./fsWatch";
-import { baseName, escapeHtml, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
+import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
 import { FileImageViewer } from "./1_FileImageViewer";
+import { renderD2 } from "./mdview/d2";
+import { resolveD2Preview } from "./0_d2Preview";
+import { browserFileUrl } from "./0_htmlFileUrl";
+import { documentHref } from "./0_documentHref";
+import { openExternalUrl } from "./0_openExternal";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -52,6 +57,25 @@ export function openPreviewPanel(
   });
   watchPreview(path);
   renderPathInto(inst.el, path, line);
+}
+
+export async function openPathInInstant(path: string, line?: number): Promise<void> {
+  const browserUrl = browserFileUrl(path, getHomeDir());
+  if (browserUrl) {
+    const { openBrowserTab } = await import("./browser");
+    await openBrowserTab(browserUrl);
+    return;
+  }
+  openPreviewPanel(path, line);
+}
+
+export async function openDocumentHrefInInstant(href: string, sourcePath: string): Promise<void> {
+  const target = documentHref(href, sourcePath);
+  if (target) {
+    await openPathInInstant(target.path, target.line);
+    return;
+  }
+  await openExternalUrl(href);
 }
 
 // The content node for `path`, created on first use. Also used by the restore
@@ -184,6 +208,19 @@ const renderSeq = new WeakMap<HTMLElement, number>();
 // The pane itself is overflow:hidden — the inner body owns the single scroll.
 const SCROLLER = ".src-pre, .code-body, .code-plain";
 
+function mountMediaViewer(node: HTMLElement, path: string, media: { url?: string; svg?: string; pdf?: string }) {
+  node.insertAdjacentHTML("beforeend", `<div class="fs-preview-media"></div>`);
+  const mount = node.querySelector<HTMLElement>(".fs-preview-media");
+  if (!mount) return;
+  const root = createRoot(mount);
+  previewMediaRoots.set(node, root);
+  root.render(createElement(FileImageViewer, {
+    path,
+    ...media,
+    onOpenHref: (href: string) => openDocumentHrefInInstant(href, path),
+  }));
+}
+
 // Render `path` into `node`: images via read_image, markdown via marked, a
 // `line` request via the line-numbered source view, everything else via shiki.
 async function renderPathInto(node: HTMLElement, path: string, line?: number) {
@@ -210,25 +247,67 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
     ? `<button class="fs-back" data-origin="${escapeHtml(origin)}" title="back to ${escapeHtml(origin)}">← back</button> `
     : "";
   const isImage = !line && IMAGE_EXTS.has(ext);
+  const isPdf = !line && ext === "pdf";
   // Copy the rendered text to the clipboard (text previews only; the handler in
   // openPreviewPanel reads previewTextByNode). Images get no button.
-  const copy = isImage ? "" : `<button class="fs-copy" title="copy text">copy</button> `;
+  const copy = isImage || isPdf ? "" : `<button class="fs-copy" title="copy text">copy</button> `;
   const meta =
     `<div class="fs-preview-meta">${back}${copy}<span class="fs-preview-name">${escapeHtml(name)}</span>` +
     `<br><span>${escapeHtml(line ? `${path}:${line}` : path)}</span></div>`;
   previewTextByNode.delete(node); // cleared until the new text loads
   node.innerHTML = meta + empty("loading…");
 
+  if (isPdf) {
+    try {
+      const pdf = await invoke<string>("read_image", { path });
+      if (stale()) return;
+      node.innerHTML = meta;
+      mountMediaViewer(node, path, { pdf });
+    } catch (error) {
+      if (!stale()) node.innerHTML = meta + empty(String(error));
+    }
+    return;
+  }
+
+  if (isImage && ext === "svg") {
+    try {
+      const svg = await invoke<string>("read_text", { path });
+      if (stale()) return;
+      node.innerHTML = meta;
+      mountMediaViewer(node, path, { svg });
+    } catch (error) {
+      if (!stale()) node.innerHTML = meta + empty(String(error));
+    }
+    return;
+  }
+
+  if (!line && ext === "d2") {
+    try {
+      const preview = await resolveD2Preview(
+        path,
+        (sibling) => invoke<string>("read_text", { path: sibling }),
+        (sibling) => invoke<string>("read_image", { path: sibling }),
+        async (sourcePath) => {
+          const source = await invoke<string>("read_text", { path: sourcePath });
+          return { source, svg: await renderD2(source, store.get().mode === "dark") };
+        },
+      );
+      if (stale()) return;
+      if (preview.source) previewTextByNode.set(node, preview.source);
+      node.innerHTML = meta;
+      mountMediaViewer(node, preview.path, { url: preview.url, svg: preview.svg });
+    } catch (error) {
+      if (!stale()) node.innerHTML = meta + empty(String(error));
+    }
+    return;
+  }
+
   if (isImage) {
     try {
       const url = await invoke<string>("read_image", { path });
       if (stale()) return;
-      node.innerHTML = meta + `<div class="fs-preview-media"></div>`;
-      const mount = node.querySelector<HTMLElement>(".fs-preview-media");
-      if (!mount) return;
-      const root = createRoot(mount);
-      previewMediaRoots.set(node, root);
-      root.render(createElement(FileImageViewer, { path, url }));
+      node.innerHTML = meta;
+      mountMediaViewer(node, path, { url });
     } catch (e) {
       if (stale()) return;
       node.innerHTML = meta + empty(String(e));

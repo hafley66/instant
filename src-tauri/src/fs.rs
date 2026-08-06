@@ -342,12 +342,12 @@ fn mime_for(ext: &str) -> Option<&'static str> {
         "svg" => Some("image/svg+xml"),
         "ico" => Some("image/x-icon"),
         "avif" => Some("image/avif"),
+        "pdf" => Some("application/pdf"),
         _ => None,
     }
 }
 
-/// Read a (small) image file as a `data:` URL for the preview pane. Errors if
-/// the extension isn't a known image type or the file is over the size cap.
+/// Read a bounded image or PDF file as a `data:` URL for the preview pane.
 #[tauri::command]
 pub async fn read_image(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || read_image_blocking(path))
@@ -356,7 +356,7 @@ pub async fn read_image(path: String) -> Result<String, String> {
 }
 
 fn read_image_blocking(path: String) -> Result<String, String> {
-    let p = PathBuf::from(&path);
+    let p = resolve(Some(path));
     let ext = ext_of(&p, false);
     let mime = mime_for(&ext).ok_or_else(|| "not an image".to_string())?;
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;

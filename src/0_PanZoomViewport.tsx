@@ -27,6 +27,10 @@ export function pinchPanZoom(current: number, deltaY: number): number {
   return clampPanZoom(current * Math.exp(-deltaY * 0.01));
 }
 
+export function wheelZooms(ctrlKey: boolean, metaKey: boolean): boolean {
+  return ctrlKey || metaKey;
+}
+
 export function PanZoomViewport({
   children,
   controls,
@@ -67,7 +71,7 @@ export function PanZoomViewport({
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
-    if (event.ctrlKey) {
+    if (wheelZooms(event.ctrlKey, event.metaKey)) {
       setZoom((current) => pinchPanZoom(current, event.deltaY));
     } else {
       setPan((current) => wheelPanOffset(current, event.deltaX, event.deltaY, event.shiftKey));

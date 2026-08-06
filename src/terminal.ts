@@ -83,6 +83,10 @@ export type Tab = {
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 export const tabs = new Map<string, Tab>();
+
+export function syncInlineDiagramOverlays() {
+  for (const tab of tabs.values()) tab.diagrams?.syncEnabled();
+}
 const inspectorTextCache = new Map<string, string>();
 
 export function observeTerminalOutput(id: string, chunk: string) {
@@ -553,6 +557,7 @@ export function openTab(
     el,
     undefined,
     () => refreshTurns(id),
+    () => store.get().inlineDiagrams,
   );
   const wheel = graphics ? undefined : new TerminalWheelRouter(
     term,

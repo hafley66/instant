@@ -101,6 +101,7 @@ import {
   syncSkin,
   syncXpPixel,
   syncMode,
+  syncInlineDiagrams,
   applyToolbar,
   syncSidebar,
   syncToggles,
@@ -158,6 +159,7 @@ const TAB_COMMANDS: Command[] = [
   // The top toolbar is opt-in; these keep its actions reachable when it's hidden.
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
+  { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
   { id: "term.strip", keys: ["$mod+Shift+Period"], title: "Toggle Relations Strip", group: "View", run: toggleTermStrip },
@@ -218,6 +220,7 @@ async function main() {
   store.subscribe(syncSkin, ["skin"]);
   store.subscribe(syncXpPixel, ["xpPixel"]);
   store.subscribe(syncMode, ["mode"]);
+  store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
   store.subscribe(applyToolbar, ["showToolbar"]);
   store.subscribe(syncSidebar, ["sidebar"]);
   // dockview owns the layout; we only react: refit the active terminal
@@ -243,6 +246,7 @@ async function main() {
   syncSkin(store.get());
   syncXpPixel(store.get());
   syncMode(store.get());
+  syncInlineDiagrams(store.get());
   applyToolbar(store.get());
   syncSidebar(store.get());
   renderWorktreesPanel();

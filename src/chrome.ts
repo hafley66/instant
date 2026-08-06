@@ -10,7 +10,7 @@ import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, relTime } from "./core";
-import { tabs, tabMetaById, cellDims, pasteToActive } from "./terminal";
+import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   tabTurns,
@@ -118,6 +118,13 @@ export function syncMode(s: AppState) {
   document.body.dataset.mode = s.mode;
   ($("#mode-toggle") as HTMLButtonElement).textContent =
     s.mode === "dark" ? "☀" : "☾";
+}
+
+export function syncInlineDiagrams(s: AppState) {
+  const button = $("#diagram-toggle") as HTMLButtonElement;
+  button.classList.toggle("active", s.inlineDiagrams);
+  button.setAttribute("aria-pressed", String(s.inlineDiagrams));
+  syncInlineDiagramOverlays();
 }
 
 // Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
@@ -413,6 +420,9 @@ export function wireChrome() {
 
   $("#mode-toggle").onclick = () =>
     store.set({ mode: store.get().mode === "dark" ? "light" : "dark" });
+
+  $("#diagram-toggle").onclick = () =>
+    store.set({ inlineDiagrams: !store.get().inlineDiagrams });
 
   $("#shot-btn").onclick = captureToPrompt;
   $("#send-menu-btn").onclick = (e) => openSendPicker(e.currentTarget as HTMLElement);

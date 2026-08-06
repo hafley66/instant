@@ -5,13 +5,11 @@
 import { invoke } from "./generated/native";
 import { store, DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
-import { escapeHtml, shQuote, MD_EXTS } from "./core";
-import { openPreviewPanel, previewOrigin } from "./preview";
-import { openMarkdownPanel } from "./mdview/open";
+import { escapeHtml, shQuote } from "./core";
+import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
 import { getFocusedTermId, tabMetaById } from "./terminal";
 import { splitLineRef, tokenAtColumn } from "./termTokens";
 import { looksLikePath, resolveRef } from "./refResolve";
-import { htmlFileUrl } from "./0_htmlFileUrl";
 
 const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
 
@@ -57,16 +55,7 @@ export async function dispatchClick(rawToken: string, cwd: string) {
   // click rules still own what is left: urls, and tokens that name no file.
   if (result.kind === "hit") {
     const { path, line } = result.ref;
-    const browserUrl = htmlFileUrl(path);
-    if (browserUrl) {
-      const { openBrowserTab } = await import("./browser");
-      await openBrowserTab(browserUrl);
-      return;
-    }
-    const name = path.split("/").pop() ?? path;
-    const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
-    if (MD_EXTS.has(ext) && !line) openMarkdownPanel(path);
-    else openPreviewPanel(path, line);
+    await openPathInInstant(path, line);
     return;
   }
   const rule = clickRuleFor(token);

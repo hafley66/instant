@@ -226,6 +226,7 @@ export interface AppState {
   skin: Skin;
   mode: Mode;
   showToolbar: boolean; // top toolbar (Shot/dark/skin); hidden by default, opt in via Config
+  inlineDiagrams: boolean; // terminal Mermaid/D2 overlays; source text remains when disabled
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
@@ -332,6 +333,7 @@ const PERSIST: (keyof AppState)[] = [
   "skin",
   "mode",
   "showToolbar",
+  "inlineDiagrams",
   "sidebar",
   "active",
   "openTabs",
@@ -450,6 +452,7 @@ function load(): AppState {
     skin: loadKey<Skin>("skin", "xp"),
     mode: loadKey<Mode>("mode", "light"),
     showToolbar: loadKey<boolean>("showToolbar", false),
+    inlineDiagrams: loadKey<boolean>("inlineDiagrams", true),
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),
