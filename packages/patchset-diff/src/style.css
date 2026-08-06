@@ -1,8 +1,12 @@
 @import "react-diff-view/style/index.css";
 
 .patchset-diff {
-  --pd-bg: #0d1117; --pd-fg: #c9d1d9; --pd-line: #21262d;
-  --pd-head: #161b22; --pd-add: #3fb950; --pd-del: #f85149;
+  --pd-bg: #0d1117;
+  --pd-fg: #c9d1d9;
+  --pd-line: #21262d;
+  --pd-head: #161b22;
+  --pd-add: #3fb950;
+  --pd-del: #f85149;
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
