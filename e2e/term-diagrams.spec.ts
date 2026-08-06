@@ -212,6 +212,47 @@ test("renders visible fences when the native harness ledger returns no matching 
   await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
 });
 
+test("opens a viewport-tall D2 target and retains clicked source entries", async ({ page }, testInfo) => {
+  await openTerminal(page);
+  const d2Lines = Array.from({ length: 28 }, (_, index) => `node_${index} -> node_${index + 1}: step ${index + 1}`);
+  await writeFixture(page, [
+    "```d2",
+    ...d2Lines,
+    "```",
+    "```mermaid",
+    "flowchart LR",
+    "  source --> preview",
+    "```",
+  ].join("\r\n"));
+
+  const d2 = page.locator('.term-diagram[data-language="d2"]');
+  await expect(d2).toBeVisible();
+  await d2.click({ position: { x: 20, y: 10 } });
+
+  const lightbox = page.locator('.diagram-lightbox[data-language="d2"]');
+  await expect(lightbox).toBeVisible();
+  await expect(lightbox.locator(".diagram-lightbox-count")).toHaveText("1/1");
+  await lightbox.locator(".diagram-lightbox-debug summary").click();
+  await expect(lightbox.locator(".diagram-lightbox-debug")).toContainText("terminal buffer");
+  await expect(lightbox.locator(".diagram-lightbox-debug pre")).toContainText("node_0 -> node_1");
+  await lightbox.getByTitle("Copy diagram source").click();
+  await expect(lightbox.getByTitle("Copy diagram source")).toHaveText("Copied");
+  await page.keyboard.press("Escape");
+
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(mermaid).toBeVisible();
+  await mermaid.click({ position: { x: 20, y: 10 } });
+  const second = page.locator('.diagram-lightbox[data-language="mermaid"]');
+  await expect(second.locator(".diagram-lightbox-count")).toHaveText("2/2");
+  await second.getByTitle("Previous clicked diagram").click();
+  await expect(page.locator('.diagram-lightbox[data-language="d2"]')).toBeVisible();
+  await expect(page.locator(".diagram-lightbox-debug pre")).toContainText("node_27 -> node_28");
+  await testInfo.attach("large-d2-retained-lightbox", {
+    body: await page.locator(".diagram-lightbox").screenshot(),
+    contentType: "image/png",
+  });
+});
+
 test("does not infer D2 from Rust return types and arrow comments", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, [

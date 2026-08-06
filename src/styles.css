@@ -1300,7 +1300,7 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
   padding: 3px 8px;
   color: var(--panel-fg);
   background: var(--term-bg);
-  pointer-events: none;
+  pointer-events: auto;
   cursor: zoom-in;
 }
 .term-diagram[data-diagram-theme="light"] {
