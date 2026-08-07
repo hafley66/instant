@@ -25,6 +25,13 @@ export function inferHarnessFromEnv(env: NodeJS.ProcessEnv = process.env): Infer
       model: env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_DEFAULT_OPUS_MODEL || null,
     };
   }
+  if (env.CODEX_THREAD_ID) {
+    return {
+      harness: "codex",
+      sessionId: env.CODEX_THREAD_ID,
+      model: null,
+    };
+  }
   return null;
 }
 

@@ -29,6 +29,14 @@ describe("inferHarnessFromEnv", () => {
     expect(got).toEqual({ harness: "opencode", sessionId: "ses_1", model: "deepseek-v4-flash" });
   });
 
+  it("recognizes the native Codex thread id", () => {
+    expect(inferHarnessFromEnv({ CODEX_THREAD_ID: "codex-parent" })).toEqual({
+      harness: "codex",
+      sessionId: "codex-parent",
+      model: null,
+    });
+  });
+
   it("returns null when no marker is present", () => {
     expect(inferHarnessFromEnv({ PATH: "/usr/bin" })).toBeNull();
   });

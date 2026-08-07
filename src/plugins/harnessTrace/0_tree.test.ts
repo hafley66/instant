@@ -104,6 +104,29 @@ describe("resolveDispatchParents", () => {
     expect(driver.parentId).toBeNull();
   });
 
+  it("attaches a dispatch parent when bus records the native sender session id", () => {
+    const nodes = [
+      node({ id: "claude-parent", harness: "claude", status: "live" }),
+      node({ id: "opencode-child", harness: "opencode", status: "live" }),
+    ];
+    const envelopes = [env({ id: "m-native", from: "claude-parent", to: "flash-lane" })];
+    const resolved = resolveDispatchParents(nodes, envelopes, { "flash-lane": "opencode-child" });
+    expect(resolved.map(({ id, parentId, parentKind }) => ({ id, parentId, parentKind }))).toMatchInlineSnapshot(`
+      [
+        {
+          "id": "claude-parent",
+          "parentId": null,
+          "parentKind": null,
+        },
+        {
+          "id": "opencode-child",
+          "parentId": "claude-parent",
+          "parentKind": "dispatch",
+        },
+      ]
+    `);
+  });
+
   it("marks the dispatch link even when the sender is unknown, but keeps the node top-level", () => {
     const nodes: AgentSessionNode[] = [
       node({ id: "sess-child", harness: "opencode" }),

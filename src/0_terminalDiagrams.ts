@@ -352,6 +352,8 @@ export class TerminalDiagramOverlay {
       debounceTime(80),
     ).subscribe(() => {
       this.scrolling = false;
+      this.positionElements();
+      this.root.hidden = false;
       this.scheduleFrame();
     });
     this.recoverySubscription = this.recoveryEvents.pipe(
@@ -382,7 +384,14 @@ export class TerminalDiagramOverlay {
         }
         else this.scheduleFrame();
       }),
-      term.onScroll(() => this.viewportScrolled()),
+      // PTY output advancing the viewport also fires onScroll. Keep existing
+      // diagrams attached to their rows during that automatic movement; the
+      // wheel router calls viewportScrolled() explicitly for user scrolling,
+      // where hiding until the new row positions settle is still required.
+      term.onScroll(() => {
+        this.positionElements();
+        if (!this.scrolling) this.scheduleFrame();
+      }),
       term.onResize(() => {
         this.positionElements();
         this.scheduleFrame();

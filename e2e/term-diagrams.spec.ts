@@ -187,6 +187,8 @@ test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ 
   });
   expect(localScroll.after).toBe(localScroll.before);
   await expect(page.locator(".term-diagrams")).toBeHidden();
+  await expect(page.locator(".term-diagrams")).toBeVisible();
+  await expect(diagram).toContainText("Mermaid");
 });
 
 test("renders explicit terminal fences while the AI ledger has no matching visible message", async ({ page }) => {
@@ -219,6 +221,37 @@ test("renders explicit terminal fences while the AI ledger has no matching visib
   await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
 });
 
+test("renders a stripped Claude timeline while the AI ledger has no matching visible message", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.evaluate(() => {
+    const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+    if (target.__instantE2eNativeResults) target.__instantE2eNativeResults.read_ai_messages = [];
+  });
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
+  await writeFixture(page, [
+    "Committed 43d8cad6",
+    "",
+    "mermaid",
+    "timeline",
+    "    title strings-to-ids across the generations",
+    "    v1 : invented it, strings(id, value UNIQUE) + fact tables with ONLY integer FKs : CREATE VIEW auto-joins every column back to text",
+    "    v2 : verbatim port, intact",
+    "    v3 : port + mutations table, intact",
+    "    v4 : fact store keeps it (view downgraded to TEMP) : NEW runtime_graph subsystem skips it, view deferred, never lands",
+    "    v5 early : dropped by deliberate doctrine",
+    "    v5 now : revived 2026-07-12, interned BY DEFAULT, rel_name_txt views live at HEAD today",
+    "    v6 : new compiler born without it, task 4 queued",
+    "",
+    "Three things worth keeping from the dig:",
+  ].join("\r\n"));
+
+  const timeline = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(timeline.locator("svg")).toBeVisible();
+  await expect(timeline).toContainText("strings-to-ids across the generations");
+  await expect(timeline).toContainText("v6");
+});
+
 test("opens a viewport-tall D2 target and retains clicked source entries", async ({ page }, testInfo) => {
   await openTerminal(page, "e2e=1&noHarness=1");
   const d2Lines = Array.from({ length: 28 }, (_, index) => `node_${index} -> node_${index + 1}: step ${index + 1}`);
@@ -236,13 +269,10 @@ test("opens a viewport-tall D2 target and retains clicked source entries", async
   await expect(d2).toBeVisible();
   const d2Point = await visibleDiagramPoint(d2);
   await page.mouse.click(d2Point.x, d2Point.y);
-  await expect(page.locator(".diagram-lightbox")).toHaveCount(0);
-  await rightClickVisibleDiagram(page, d2);
-  await page.locator(".ctx-item", { hasText: "Expand D2 diagram" }).click();
 
   const lightbox = page.locator('.diagram-lightbox[data-language="d2"]');
   await expect(lightbox).toBeVisible();
-  await expect(lightbox.locator(".diagram-lightbox-count")).toHaveText("1/1");
+  await expect(lightbox.getByText("1/1", { exact: true })).toBeVisible();
   await lightbox.locator(".diagram-lightbox-debug summary").click();
   await expect(lightbox.locator(".diagram-lightbox-debug")).toContainText("terminal buffer");
   await expect(lightbox.locator(".diagram-lightbox-debug pre")).toContainText("node_0 -> node_1");
@@ -255,7 +285,7 @@ test("opens a viewport-tall D2 target and retains clicked source entries", async
   await rightClickVisibleDiagram(page, mermaid);
   await page.locator(".ctx-item", { hasText: "Expand Mermaid diagram" }).click();
   const second = page.locator('.diagram-lightbox[data-language="mermaid"]');
-  await expect(second.locator(".diagram-lightbox-count")).toHaveText("2/2");
+  await expect(second.getByText("2/2", { exact: true })).toBeVisible();
   await second.getByTitle("Previous clicked diagram").click();
   await expect(page.locator('.diagram-lightbox[data-language="d2"]')).toBeVisible();
   await expect(page.locator(".diagram-lightbox-debug pre")).toContainText("node_27 -> node_28");

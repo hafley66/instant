@@ -1,1 +1,1 @@
-20260722.0.instant-term-offbyone-ccz-pivot.md
+20260806.0.instant-preview-canvas-research.md

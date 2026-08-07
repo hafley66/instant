@@ -65,7 +65,7 @@ export function resolveDispatchParents(
     if (node.parentId !== null || node.parentKind !== null) return node;
     const envelope = bySession.get(node.id);
     if (!envelope) return node;
-    const senderId = registry[envelope.from];
+    const senderId = registry[envelope.from] ?? (ids.has(envelope.from) ? envelope.from : null);
     // The envelope proves the link, so parentKind reads "dispatch" even when the
     // sender is absent; parentId attaches only when the sender is a live node.
     if (senderId && ids.has(senderId)) {

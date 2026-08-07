@@ -99,12 +99,13 @@ export function registrySeeds(
       if (ms > (lastMailMs.get(agentId) ?? 0)) lastMailMs.set(agentId, ms);
     }
   }
-  // The oldest envelope whose `from` names a registered agent is the lane's
-  // dispatch edge; placeholder froms ("coordinator", "user") cannot parent.
+  // The oldest envelope whose sender is either a registered lane or a native
+  // store session carries the dispatch edge. Placeholder sender labels do not
+  // consume that edge when a later identified dispatch exists.
   const dispatchFrom = new Map<string, string>();
   for (const envelope of [...envelopes].sort((a, b) => a.ts.localeCompare(b.ts))) {
     if (envelope.kind !== "dispatch") continue;
-    if (!dispatchFrom.has(envelope.to) && directory[envelope.from]) {
+    if (!dispatchFrom.has(envelope.to) && (directory[envelope.from] || seeded.has(envelope.from))) {
       dispatchFrom.set(envelope.to, envelope.from);
     }
   }
@@ -120,10 +121,11 @@ export function registrySeeds(
       // Registry-only lanes have no store mtime, so mail traffic is the only
       // activity signal: live decays to idle, never done while the tmux lives.
       const status = !alive ? "done" : nowMs - mailMs <= SEED_LIVE_MS ? "live" : "idle";
-      const dispatcher = directory[dispatchFrom.get(agent.id) ?? ""];
+      const dispatchSender = dispatchFrom.get(agent.id) ?? "";
+      const dispatcher = directory[dispatchSender];
       const parentId = dispatcher
         ? dispatcher.sessionId || resolved[dispatcher.id] || dispatcher.id
-        : null;
+        : seeded.has(dispatchSender) ? dispatchSender : null;
       return {
         id: sessionId,
         harness: agent.harness ?? "shell",

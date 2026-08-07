@@ -12,7 +12,7 @@
 //   node scripts/bus.ts adopt --name <agent> --tmux <session> --harness <h> [--cwd <dir>] [--model <id>] [--mode <m>]
 //   node scripts/bus.ts prune
 // Exit codes: 0 ok, 1 usage/route error, 2 appended but not injected.
-import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
@@ -127,7 +127,7 @@ function sleepSync(seconds) {
 
 function dispatch(args) {
   const to = args.to;
-  const cwd = args.cwd;
+  const cwd = args.cwd && existsSync(args.cwd) ? realpathSync(args.cwd) : args.cwd;
   const cmd = args.cmd;
   if (!to || !cwd || !cmd) {
     console.log("usage: bus.ts dispatch --to <lane-id> --cwd <dir> --cmd <shell command> [--from <agent>] [--harness <h>] [--session-id <id>] [--model <id>] [--tokens <n>] [--mode <m>] [--tmux <session name>] [--socket <tmux -L socket>] [--body <text>] [--ref <path>] [--mail-dir <dir>] [--resolve-wait <seconds>]");
@@ -135,7 +135,11 @@ function dispatch(args) {
   }
   const inferred = inferHarnessFromEnv();
   const harness = flagValue(args, "harness") ?? inferred?.harness ?? "opencode";
-  const sessionId = flagValue(args, "session-id") ?? inferred?.sessionId ?? null;
+  // A new lane must resolve its own harness session. The caller's native
+  // session id identifies the dispatch parent; stamping it onto the child
+  // aliases every lane to the coordinator and removes the child from the
+  // harness tree.
+  const sessionId = flagValue(args, "session-id") ?? null;
   // Fallback reads the invoke string itself when the caller does not say.
   const model = flagValue(args, "model") ?? cmd.match(/(?:^|\s)-m\s+(\S+)/)?.[1] ?? inferred?.model ?? null;
   const mode = flagValue(args, "mode") ?? (cmd.includes("--auto") ? "auto" : null);
@@ -147,7 +151,7 @@ function dispatch(args) {
 
   const message = MailStore.send({
     id: mintId(),
-    from: args.from ?? "coordinator",
+    from: args.from ?? inferred?.sessionId ?? "coordinator",
     to,
     from_timestamp: nowIso(),
     kind: "dispatch",

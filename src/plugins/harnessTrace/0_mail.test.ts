@@ -266,6 +266,16 @@ describe("registrySeeds", () => {
     expect(row).toMatchObject({ id: "lane", parentId: "sess-real", parentKind: "dispatch" });
   });
 
+  it("hangs an unresolved lane under a native sender session id", () => {
+    const routes = { lane: route({ id: "lane", tmux: "lane" }) };
+    const stored = [seed("claude-parent")];
+    const envs = parseMailNdjson(
+      JSON.stringify({ id: "m-native", from: "claude-parent", to: "lane", ts: "2026-08-03T11:00:00Z", kind: "dispatch" }),
+    );
+    const [row] = registrySeeds(routes, stored, new Set(["lane"]), envs, NOW);
+    expect(row).toMatchObject({ id: "lane", parentId: "claude-parent", parentKind: "dispatch" });
+  });
+
   it("leaves parentId null when the dispatcher is not a registered agent", () => {
     const routes = { lane: route({ id: "lane", tmux: "lane" }) };
     const envs = parseMailNdjson(
