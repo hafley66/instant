@@ -296,11 +296,16 @@ export interface IStripPolicy {
   // The sessions claude code's own agent list already shows at the bottom of
   // this tab: the claude session joined to this terminal plus its claude-native
   // subagent descendants. The strip must not duplicate them.
-  nativeIds(nodes: AgentSessionNode[], sid: string): Set<string>;
+  nativeIds(nodes: AgentSessionNode[], sid: string, nativeSessionId?: string | null): Set<string>;
   // The strip's row set: everything in scope minus nativeIds. Dropping a native
   // parent promotes its external children to roots (indexAgentTree's orphan
   // law), which is how a dispatched lane surfaces as a top-level shell.
-  external(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
+  external(
+    nodes: AgentSessionNode[],
+    sid: string,
+    scope: StripScope,
+    nativeSessionId?: string | null,
+  ): AgentSessionNode[];
   // The checkbox write: flip the strip between today's going-on table and the
   // history waterfall, keeping whatever open state the entry holds (an absent
   // entry that is on screen by auto-appear stays open).
@@ -310,10 +315,20 @@ export interface IStripPolicy {
   openAction(row: { tmuxSession: string | null }, liveTmux: Set<string>): "open" | "ignore";
   // The scope the strip renders. An explicit choice wins; untouched (null),
   // a "related" that matches nothing widens to "all" (m-36e96eb8).
-  effectiveScope(nodes: AgentSessionNode[], sid: string, chosen: StripScope | null): StripScope;
+  effectiveScope(
+    nodes: AgentSessionNode[],
+    sid: string,
+    chosen: StripScope | null,
+    nativeSessionId?: string | null,
+  ): StripScope;
   // History mode's node set: external's scope + native subtraction, keeping
   // done/dead and subagent threads (the waterfall draws history).
-  history(nodes: AgentSessionNode[], sid: string, scope: StripScope): AgentSessionNode[];
+  history(
+    nodes: AgentSessionNode[],
+    sid: string,
+    scope: StripScope,
+    nativeSessionId?: string | null,
+  ): AgentSessionNode[];
 }
 
 // ---------------------------------------------------------------------------

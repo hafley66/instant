@@ -171,10 +171,10 @@ describe("StripPolicy with a tab-prefixed terminal id", () => {
   });
 });
 
-describe("StripPolicy.external drops finished lanes", () => {
+describe("StripPolicy.external keeps only active lanes", () => {
   // Sabotage receipt: the first live day put 7 rows in the bar with 0 lanes
   // running; every dispatched-and-done lane counted as a "shell".
-  it("keeps live and idle rows, drops done and dead on both scopes", () => {
+  it("keeps live rows and drops idle, done, and dead rows on both scopes", () => {
     const day = [
       ...TAB_TREE,
       node({ id: "oc-done", harness: "opencode", status: "done", parentId: "claude-s1", parentKind: "dispatch" }),
@@ -184,7 +184,7 @@ describe("StripPolicy.external drops finished lanes", () => {
     const related = StripPolicy.external(day, "s1", "related").map((n) => n.id);
     expect(related).toEqual(["oc-lane"]);
     const all = StripPolicy.external(day, "s1", "all").map((n) => n.id);
-    expect(all).toContain("oc-idle");
+    expect(all).not.toContain("oc-idle");
     expect(all).not.toContain("oc-done");
     expect(all).not.toContain("sh-dead");
   });
@@ -208,6 +208,16 @@ describe("StripPolicy.external related is parent links only", () => {
       node({ id: "oc-stray", harness: "opencode", tmuxSession: "s1" }),
     ];
     expect(StripPolicy.external(nodes, "s1", "related")).toEqual([]);
+  });
+});
+
+describe("StripPolicy native harness anchors", () => {
+  it("shows a dispatched OpenCode lane related to a Codex tmux tab", () => {
+    const nodes = [
+      node({ id: "codex-parent", harness: "codex", tmuxSession: "instant", tmuxMatches: ["instant"], status: "live" }),
+      node({ id: "flash-child", harness: "opencode", parentId: "codex-parent", parentKind: "dispatch", tmuxSession: "flash", status: "live" }),
+    ];
+    expect(StripPolicy.external(nodes, "instant", "related").map((entry) => entry.id)).toEqual(["flash-child"]);
   });
 });
 
@@ -293,6 +303,23 @@ describe("StripPolicy.effectiveScope", () => {
     ];
     expect(StripPolicy.effectiveScope(rooted, "s1", null)).toBe("related");
     expect(StripPolicy.external(rooted, "s1", "related")).toEqual([]);
+  });
+});
+
+describe("StripPolicy exact native session identity", () => {
+  it("anchors a same-cwd fourth tab to its recorded session instead of every matching root", () => {
+    const nodes = [
+      node({ id: "tab-1", tmuxSession: "repo", tmuxMatches: ["repo", "repo-4"] }),
+      node({ id: "tab-4", tmuxSession: "repo-4", tmuxMatches: ["repo", "repo-4"] }),
+      node({ id: "lane-1", harness: "opencode", parentId: "tab-1", parentKind: "dispatch", tmuxSession: "lane-1" }),
+      node({ id: "lane-4", harness: "opencode", parentId: "tab-4", parentKind: "dispatch", tmuxSession: "lane-4" }),
+    ];
+
+    expect([...StripPolicy.nativeIds(nodes, "repo-4", "tab-4")]).toEqual(["tab-4"]);
+    expect(StripPolicy.external(nodes, "repo-4", "related", "tab-4").map((entry) => entry.id)).toEqual([
+      "lane-4",
+    ]);
+    expect(StripPolicy.effectiveScope(nodes, "repo-4", null, "tab-4")).toBe("related");
   });
 });
 

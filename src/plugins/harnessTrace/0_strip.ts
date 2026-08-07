@@ -17,18 +17,31 @@ function descendantsOf(nodes: AgentSessionNode[], seed: Set<string>): Set<string
   return reachable;
 }
 
-// This tab's own claude session (the claude row joined to its tmux session)
-// plus the claude subagents descending from it. Transitive: a subagent of a
-// subagent is still inside the TUI's own list.
-function nativeClaudeIds(nodes: AgentSessionNode[], sid: string): Set<string> {
-  const native = new Set(
-    nodes.filter((n) => n.harness === "claude" && (n.tmuxMatches ?? []).includes(sid)).map((n) => n.id),
+// This tab's own harness session (the row joined to its tmux session) plus
+// subagents descending from it. Transitive: a subagent of a subagent remains
+// inside the TUI's own list regardless of which harness owns the pane.
+function nativeSessionIds(
+  nodes: AgentSessionNode[],
+  sid: string,
+  nativeSessionId?: string | null,
+): Set<string> {
+  const exact = nativeSessionId ? nodes.find((node) => node.id === nativeSessionId) : undefined;
+  const roots = nodes.filter((node) => node.parentKind === null);
+  const direct = roots.filter((node) => node.tmuxSession === sid);
+  const claudeMatches = roots.filter(
+    (node) => node.harness === "claude" && (node.tmuxMatches ?? []).includes(sid),
   );
+  const joined = exact
+    ? [exact]
+    : direct.length > 0
+      ? direct
+      : claudeMatches;
+  const native = new Set(joined.map((node) => node.id));
   for (let grew = true; grew; ) {
     grew = false;
     for (const node of nodes) {
       if (native.has(node.id)) continue;
-      if (node.harness !== "claude" || node.parentKind !== "subagent") continue;
+      if (node.parentKind !== "subagent") continue;
       if (node.parentId && native.has(node.parentId)) {
         native.add(node.id);
         grew = true;
@@ -53,8 +66,9 @@ function inScope(
   subset: AgentSessionNode[],
   tmux: string,
   scope: "related" | "all",
+  nativeSessionId?: string | null,
 ): AgentSessionNode[] {
-  const native = nativeClaudeIds(all, tmux);
+  const native = nativeSessionIds(all, tmux, nativeSessionId);
   if (scope === "all") return subset.filter((node) => !native.has(node.id));
   const related = descendantsOf(all, native);
   return subset.filter((node) => related.has(node.id) && !native.has(node.id));
@@ -77,28 +91,28 @@ export const StripPolicy: IStripPolicy = {
     return rowCount > 0 || hasCurrent;
   },
 
-  nativeIds(nodes, sid) {
-    return nativeClaudeIds(nodes, tmuxNameOf(sid));
+  nativeIds(nodes, sid, nativeSessionId) {
+    return nativeSessionIds(nodes, tmuxNameOf(sid), nativeSessionId);
   },
 
   // Done/dead rows stay out of the strip on every scope: the bar answers
   // "how many shells are going on", the full trace page keeps the history.
   // Subagent threads run inside their parent's pane, and a session with no
   // pane at all is not a shell either (m-17f56e54); history keeps both.
-  external(nodes, sid, scope) {
+  external(nodes, sid, scope, nativeSessionId) {
     const going = nodes.filter(
       (node) =>
-        (node.status === "live" || node.status === "idle") &&
+        node.status === "live" &&
         node.parentKind !== "subagent" &&
         node.tmuxSession !== null,
     );
-    return inScope(nodes, going, tmuxNameOf(sid), scope);
+    return inScope(nodes, going, tmuxNameOf(sid), scope, nativeSessionId);
   },
 
   // History keeps done/dead and subagent threads (the waterfall draws them),
   // but the native exclusion and the scope hold like everywhere else.
-  history(nodes, sid, scope) {
-    return inScope(nodes, nodes, tmuxNameOf(sid), scope);
+  history(nodes, sid, scope, nativeSessionId) {
+    return inScope(nodes, nodes, tmuxNameOf(sid), scope, nativeSessionId);
   },
 
   setActivation(entry, showActive) {
@@ -111,10 +125,10 @@ export const StripPolicy: IStripPolicy = {
 
   // Leak fix 2026-08-05: a tab WITH a native session but no children stays empty;
   // the widen to "all" only helps a spy tab joining no session of its own.
-  effectiveScope(nodes, sid, chosen) {
+  effectiveScope(nodes, sid, chosen, nativeSessionId) {
     if (chosen !== null) return chosen;
-    if (StripPolicy.external(nodes, sid, "related").length > 0) return "related";
-    if (StripPolicy.nativeIds(nodes, sid).size > 0) return "related";
-    return StripPolicy.external(nodes, sid, "all").length > 0 ? "all" : "related";
+    if (StripPolicy.external(nodes, sid, "related", nativeSessionId).length > 0) return "related";
+    if (StripPolicy.nativeIds(nodes, sid, nativeSessionId).size > 0) return "related";
+    return StripPolicy.external(nodes, sid, "all", nativeSessionId).length > 0 ? "all" : "related";
   },
 };

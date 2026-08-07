@@ -52,7 +52,7 @@ wireContextMenu(() => []);
 // production body against this page's terminal (the focused-terminal lookup is
 // main.ts's job and has no dock chrome here).
 installKeymap([
-  { id: "term.strip", keys: ["$mod+Shift+Period"], run: () => toggleTermStripFor(TERM_SID) },
+  { id: "term.strip", keys: ["$mod+Shift+x", "$mod+Shift+Period"], run: () => toggleTermStripFor(TERM_SID) },
 ]);
 
 // Wait for the dock to initialize, then add a terminal panel for session "s1"

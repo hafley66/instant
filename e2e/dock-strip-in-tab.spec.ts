@@ -20,8 +20,8 @@ const ROWS = [
   { id: "child-s1", harness: "claude", sessionId: "child-s1", parentId: "parent-s1", parentKind: "subagent", ts: "2026-08-03T10:10:00Z", lastActivity: "2026-08-03T10:50:00Z", status: "live", cwd: "~/projects/demo" },
   { id: "oc-lane", harness: "opencode", sessionId: "oc-lane", parentId: "parent-s1", parentKind: "dispatch", ts: "2026-08-03T10:20:00Z", lastActivity: "2026-08-03T10:55:00Z", status: "live", cwd: "~/projects/demo" },
   { id: "oc-sub", harness: "opencode", sessionId: "oc-sub", parentId: "oc-lane", parentKind: "subagent", ts: "2026-08-03T10:30:00Z", lastActivity: "2026-08-03T10:45:00Z", status: "idle", cwd: "~/projects/demo" },
-  { id: "parent-other", harness: "claude", sessionId: "parent-other", parentId: null, parentKind: null, ts: "2026-08-03T09:00:00Z", lastActivity: "2026-08-03T09:30:00Z", status: "idle", cwd: "~/projects/other" },
-  { id: "codex-other", harness: "codex", sessionId: "codex-other", parentId: "parent-other", parentKind: "dispatch", ts: "2026-08-03T09:05:00Z", lastActivity: "2026-08-03T09:20:00Z", status: "idle", cwd: "~/projects/other" },
+  { id: "parent-other", harness: "claude", sessionId: "parent-other", parentId: null, parentKind: null, ts: "2026-08-03T09:00:00Z", lastActivity: "2026-08-03T09:30:00Z", status: "live", cwd: "~/projects/other" },
+  { id: "codex-other", harness: "codex", sessionId: "codex-other", parentId: "parent-other", parentKind: "dispatch", ts: "2026-08-03T09:05:00Z", lastActivity: "2026-08-03T09:20:00Z", status: "live", cwd: "~/projects/other" },
   // A finished lane: the strip must not count it on any scope (the bar answers
   // "going on", the trace page keeps history).
   { id: "oc-finished", harness: "opencode", sessionId: "oc-finished", parentId: "parent-s1", parentKind: "dispatch", ts: "2026-08-03T08:00:00Z", lastActivity: "2026-08-03T08:30:00Z", status: "done", cwd: "~/projects/demo" },
@@ -174,7 +174,7 @@ test("hotkey summons the strip on a fresh terminal with no related sessions", as
   // One press = summoned. The empty state names the terminal's sid (the tmux
   // join is by session name, so the sid is the diagnostic) and says why it is
   // empty rather than rendering nothing.
-  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await page.keyboard.press(`${MOD}+Shift+KeyX`);
   await expect(strip).toBeVisible();
   const empty = page.getByTestId("strip-empty");
   await expect(empty).toContainText("s3");
@@ -184,7 +184,7 @@ test("hotkey summons the strip on a fresh terminal with no related sessions", as
   const refits = () =>
     page.evaluate(() => (window as Window & { __termRefits?: number }).__termRefits ?? 0);
   const beforeHide = await refits();
-  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await page.keyboard.press(`${MOD}+Shift+KeyX`);
   await expect(strip).toHaveCount(0);
   // Hiding hands the strip's height back to the xterm, so the host is asked to
   // refit on the way out as well as on the way in (9d85a55); the height gate

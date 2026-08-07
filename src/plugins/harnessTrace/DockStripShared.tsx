@@ -154,7 +154,7 @@ function attachTmux(
       cwd: untilde(n.cwd),
       lastActivity: n.lastActivity,
       routedTmux: routeTmux.get(n.id) ?? null,
-      going: (n.status === "live" || n.status === "idle") && n.parentKind !== "subagent",
+      going: n.status === "live" && n.parentKind !== "subagent",
     })),
     rows,
   );
@@ -255,6 +255,10 @@ export interface AgentTreeState {
 let traceSeeds: HarnessTraceSeed[] | null = null;
 let traceSeedsRequest: Promise<HarnessTraceSeed[]> | null = null;
 
+export function invalidateAgentTreeRows(): void {
+  traceSeeds = null;
+}
+
 function loadTraceSeeds(refresh = false): Promise<HarnessTraceSeed[]> {
   if (refresh) traceSeeds = null;
   if (traceSeeds) return Promise.resolve(traceSeeds);
@@ -336,7 +340,7 @@ export function useAgentTree(enabled = true): AgentTreeState {
   useEffect(() => {
     if (!enabled) return;
     loadRows();
-    return claimStripFeed({ onMail: () => loadRows(), onLiveNames: setLiveNames });
+    return claimStripFeed({ onMail: () => loadRows(true), onLiveNames: setLiveNames });
   }, [enabled, loadRows]);
   // Memoized on honest deps: every consumer memo (external, index, spans, row
   // models) keys on node identity, so it must move only when the inputs move.

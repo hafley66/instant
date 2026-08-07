@@ -8,12 +8,12 @@
 // view; the mail action pushes that agent's queue, which replaces the table
 // while it is the router's top. The auto-height, 240px-capped scroll area
 // reports its height changes up to the host so the xterm refits.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { store } from "../../state";
 import { TreeTable, type TreeColumn } from "../../treetable";
-import { COLUMNS, stripFilter, useAgentTree } from "./DockStripShared";
+import { COLUMNS, invalidateAgentTreeRows, stripFilter, useAgentTree } from "./DockStripShared";
 import { indexAgentTree, materializeAgentTree, type AgentTreeNode } from "./0_tree";
 import { openSession } from "./DockStripPanel";
 import { termViewRouter, pushMailPreview } from "./3_router";
@@ -46,7 +46,9 @@ const STYLE =
 // harness binds the same command): the policy decides what a press writes.
 export function toggleTermStripFor(sid: string): void {
   const entry = store.get().termStrip[sid] ?? null;
-  store.set({ termStrip: { ...store.get().termStrip, [sid]: StripPolicy.toggle(entry) } });
+  const next = StripPolicy.toggle(entry);
+  if (next.open) invalidateAgentTreeRows();
+  store.set({ termStrip: { ...store.get().termStrip, [sid]: next } });
 }
 
 // Summon the strip open and flip the network (waterfall) view on it, so the
@@ -72,6 +74,11 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   // null until the scope button is pressed; the policy widens an empty default.
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
+  const resumeTabs = useSyncExternalStore(
+    useCallback((notify: () => void) => store.subscribe(notify, ["resumeTabs"]), []),
+    () => store.get().resumeTabs,
+  );
+  const nativeSessionId = resumeTabs[StripPolicy.tmuxNameOf(sid)]?.sessionId ?? null;
 
   // Per-terminal open state (Toggle Relations Strip command).
   const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
@@ -80,7 +87,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     return store.subscribe(() => setEntry(store.get().termStrip[sid] ?? null), ["termStrip"]);
   }, [sid]);
 
-  const dataEnabled = entry?.open === true || current !== null;
+  // An absent entry is the auto-appear state: load enough data to decide
+  // whether related rows exist. Only an explicit dismissal suspends the feed.
+  const dataEnabled = entry?.open !== false || current !== null;
   const { nodes, liveTmux, registry, error, load } = useAgentTree(dataEnabled);
 
   const networkView = entry?.network ?? false;
@@ -97,11 +106,17 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     });
 
   const scope = useMemo(
-    () => StripPolicy.effectiveScope(nodes, sid, chosenScope),
-    [nodes, sid, chosenScope],
+    () => StripPolicy.effectiveScope(nodes, sid, chosenScope, nativeSessionId),
+    [nodes, sid, chosenScope, nativeSessionId],
   );
-  const external = useMemo(() => StripPolicy.external(nodes, sid, scope), [nodes, sid, scope]);
-  const historyNodes = useMemo(() => StripPolicy.history(nodes, sid, scope), [nodes, sid, scope]);
+  const external = useMemo(
+    () => StripPolicy.external(nodes, sid, scope, nativeSessionId),
+    [nodes, sid, scope, nativeSessionId],
+  );
+  const historyNodes = useMemo(
+    () => StripPolicy.history(nodes, sid, scope, nativeSessionId),
+    [nodes, sid, scope, nativeSessionId],
+  );
   const showActive = entry?.showActive ?? true;
   const visibleNodes = showActive ? external : historyNodes;
   const index = useMemo(() => indexAgentTree(visibleNodes), [visibleNodes]);
