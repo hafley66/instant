@@ -1841,6 +1841,16 @@ body[data-skin] .cmdp-input::placeholder {
   min-height: 0;
   overflow: hidden;
 }
+.dv-host-scroll .fs-preview-code,
+.dv-host-scroll .monaco-code-viewer {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+.dv-host-scroll .fs-preview-code {
+  display: flex;
+}
 .file-image-tools {
   position: absolute;
   top: 8px;

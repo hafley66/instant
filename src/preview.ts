@@ -20,13 +20,14 @@ import {
 } from "./reactdock";
 import { savePluginState } from "./pluginState";
 import { claimFsWatch } from "./fsWatch";
-import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
+import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS } from "./core";
 import { FileImageViewer } from "./1_FileImageViewer";
 import { renderD2 } from "./mdview/d2";
 import { resolveD2Preview } from "./0_d2Preview";
 import { browserFileUrl } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
 import { openExternalUrl } from "./0_openExternal";
+import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -218,9 +219,6 @@ export function initPreviewRestore() {
 // Monotonic render token per content node. A watch fire and a theme flip can
 // both be mid-flight over the same node; only the newest render may write.
 const renderSeq = new WeakMap<HTMLElement, number>();
-// The pane itself is overflow:hidden — the inner body owns the single scroll.
-const SCROLLER = ".src-pre, .code-body, .code-plain";
-
 function mountMediaViewer(node: HTMLElement, path: string, media: { url?: string; svg?: string; pdf?: string }) {
   node.insertAdjacentHTML("beforeend", `<div class="fs-preview-media"></div>`);
   const mount = node.querySelector<HTMLElement>(".fs-preview-media");
@@ -234,6 +232,22 @@ function mountMediaViewer(node: HTMLElement, path: string, media: { url?: string
   }));
 }
 
+function mountCodeViewer(node: HTMLElement, path: string, text: string, line?: number) {
+  node.insertAdjacentHTML("beforeend", `<div class="fs-preview-code"></div>`);
+  const mount = node.querySelector<HTMLElement>(".fs-preview-code");
+  if (!mount) return;
+  const root = createRoot(mount);
+  previewMediaRoots.set(node, root);
+  root.render(createElement(MonacoCodeViewer, {
+    id: path,
+    path,
+    text,
+    line,
+    dark: store.get().mode === "dark",
+    onText: (value: string) => previewTextByNode.set(node, value),
+  }));
+}
+
 // Render `path` into `node`: images via read_image, markdown via marked, a
 // `line` request via the line-numbered source view, everything else via shiki.
 async function renderPathInto(node: HTMLElement, path: string, line?: number) {
@@ -242,16 +256,6 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   const stale = () => renderSeq.get(node) !== seq;
   previewMediaRoots.get(node)?.unmount();
   previewMediaRoots.delete(node);
-  // A re-render from a file change (or theme flip) must not yank the reader back
-  // to the top, so carry the scroll offset across the innerHTML rewrite.
-  const prevScroll = node.querySelector<HTMLElement>(SCROLLER)?.scrollTop ?? 0;
-  const restoreScroll = () => {
-    if (prevScroll <= 0) return false;
-    const el = node.querySelector<HTMLElement>(SCROLLER);
-    if (!el) return false;
-    el.scrollTop = prevScroll;
-    return true;
-  };
   const name = path.split("/").pop() ?? path;
   const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
   const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
@@ -340,54 +344,14 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
   previewTextByNode.set(node, text); // back the meta-bar copy button
 
   if (line) {
-    // Whole file with line numbers; the target row is highlighted and scrolled
-    // to center. Syntax-highlighted via shiki (per-line spans, same trick as the
-    // rg panel), falling back to escaped text if the language is unknown / shiki
-    // fails. Capped so a giant source file stays responsive.
-    const lines = text.split("\n");
-    const CAP = 2000;
-    const hi = Math.min(lines.length, CAP);
-    const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
-    const lang = SHIKI_LANG[ext] || SHIKI_LANG[name.toLowerCase()] || "text";
-    let hl: string[] | null = null;
-    try {
-      const html = await codeToHtml(lines.slice(0, hi).join("\n"), { lang, theme });
-      hl = Array.from(
-        new DOMParser().parseFromString(html, "text/html").querySelectorAll(".line"),
-      ).map((s) => s.innerHTML);
-    } catch {
-      hl = null;
-    }
-    const body = lines
-      .slice(0, hi)
-      .map((l, i) => {
-        const n = i + 1;
-        const cls = n === line ? "src-line on" : "src-line";
-        const num = String(n).padStart(4, " ");
-        const code = hl?.[i] ?? escapeHtml(l);
-        return `<div class="${cls}" data-n="${n}"><span class="src-n">${num}</span>${code || " "}</div>`;
-      })
-      .join("");
-    const tail = hi < lines.length ? `<div class="src-elide">… ${lines.length - hi} more lines</div>` : "";
     if (stale()) return;
-    node.innerHTML = meta + `<pre class="src-pre">${body}${tail}</pre>`;
-    // Only re-center on the target row for a fresh open; a refresh of a file the
-    // user has already scrolled keeps their position.
-    if (!restoreScroll()) node.querySelector(".src-line.on")?.scrollIntoView({ block: "center" });
+    node.innerHTML = meta;
+    mountCodeViewer(node, path, text, line);
     return;
   }
 
-  const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
-  const lang = SHIKI_LANG[ext] || SHIKI_LANG[name.toLowerCase()] || "text";
-  try {
-    const html = await codeToHtml(text, { lang, theme });
-    if (stale()) return;
-    node.innerHTML = meta + `<div class="code-body">${html}</div>`;
-  } catch {
-    if (stale()) return;
-    node.innerHTML = meta + `<pre class="code-plain">${escapeHtml(text)}</pre>`;
-  }
-  restoreScroll();
+  node.innerHTML = meta;
+  mountCodeViewer(node, path, text);
 }
 
 // ---- working-tree diff panels ----
