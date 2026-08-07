@@ -118,3 +118,23 @@ test("rendered markdown links route through the host", async ({ page }) => {
     { href: "https://example.com/research", sourcePath: "/tmp/mdzoom-e2e/zoom.md" },
   ]);
 });
+
+test("Super XP does not style markdown source snippets", async ({ page }) => {
+  await page.evaluate(() => document.body.classList.add("xp-pixel"));
+  await page.getByTestId("open-md").click();
+  await page.getByRole("button", { name: /Zoom target/ }).click();
+  const code = page.locator(".mdview-streamdown code");
+  const scroller = page.locator('.mdview-streamdown [data-streamdown="code-block-body"]');
+  await expect(code).toContainText("POST /arrivals");
+
+  const styles = {
+    font: await code.evaluate((element) => getComputedStyle(element).font),
+    horizontalScrollbar: await scroller.evaluate((element) => getComputedStyle(element, "::-webkit-scrollbar").height),
+    scrollbarButton: await scroller.evaluate((element) => getComputedStyle(element, "::-webkit-scrollbar-button").display),
+  };
+  expect(styles).toEqual({
+    font: '12px / 17.4px "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace',
+    horizontalScrollbar: "8px",
+    scrollbarButton: "none",
+  });
+});

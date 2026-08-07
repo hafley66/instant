@@ -42,7 +42,14 @@ import { wireContextMenu } from "../src/ctxmenu";
 
 const ROOT = "/tmp/mdzoom-e2e";
 const DOC = `${ROOT}/zoom.md`;
-const DOC_TEXT = "# Zoom target\n\nA paragraph with an [external link](https://example.com/research) under the heading.\n";
+const DOC_TEXT = `# Zoom target
+
+A paragraph with an [external link](https://example.com/research) under the heading.
+
+\`\`\`http
+POST /arrivals  { batch: [ add tree, add fruit, del leaf ] }
+\`\`\`
+`;
 const openedHrefs: { href: string; sourcePath: string }[] = [];
 const entry = (path: string, is_dir = false): FsEntry => ({
   name: path.split("/").pop()!,
