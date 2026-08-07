@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text renderer benchmark</title>
+    <style>
+      body { margin: 0; background: #111; color: #ddd; font: 13px ui-monospace, monospace; }
+      .bench-host { position: fixed; left: -10000px; top: 0; width: 960px; height: 540px; overflow: auto; }
+      #results { margin: 24px; white-space: pre-wrap; }
+      .cm-editor { height: 540px; }
+      .cm-scroller { overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="/e2e/text-render-bench.ts"></script>
+  </body>
+</html>
