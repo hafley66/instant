@@ -129,12 +129,21 @@ test("Super XP does not style markdown source snippets", async ({ page }) => {
 
   const styles = {
     font: await code.evaluate((element) => getComputedStyle(element).font),
+    descendantFonts: await scroller.evaluate((element) =>
+      [...element.querySelectorAll("pre, code, span")]
+        .map((child) => getComputedStyle(child).fontFamily)
+        .filter((font, index, fonts) => fonts.indexOf(font) === index),
+    ),
+    nestedOverflow: await scroller.locator("pre").evaluate((element) => getComputedStyle(element).overflowX),
     horizontalScrollbar: await scroller.evaluate((element) => getComputedStyle(element, "::-webkit-scrollbar").height),
     scrollbarButton: await scroller.evaluate((element) => getComputedStyle(element, "::-webkit-scrollbar-button").display),
   };
   expect(styles).toEqual({
     font: '12px / 17.4px "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace',
+    descendantFonts: ['"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace'],
+    nestedOverflow: "visible",
     horizontalScrollbar: "8px",
     scrollbarButton: "none",
   });
+  await page.screenshot({ path: "test-results/mdview-super-xp-snippets.png" });
 });

@@ -139,6 +139,19 @@ body.xp-pixel .mdview-streamdown code * {
   white-space: inherit;
 }
 
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] {
+  overflow-x: auto !important;
+  scrollbar-color: color-mix(in srgb, currentColor 38%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] pre,
+body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] code {
+  width: max-content;
+  min-width: 100%;
+  overflow: visible !important;
+}
+
 body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"]::-webkit-scrollbar,
 body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] *::-webkit-scrollbar {
   width: 8px;

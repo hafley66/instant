@@ -18,6 +18,7 @@ import { addScope } from "./sprefa";
 let draggingIn = false;
 export const isDraggingIn = () => draggingIn;
 let dropWatchdog: number | undefined;
+let dragGeneration = 0;
 
 export async function wireOsDrop() {
   const main = getCurrentWindow();
@@ -26,27 +27,42 @@ export async function wireOsDrop() {
 
   const standDown = () => {
     draggingIn = false;
+    dragGeneration += 1;
     if (dropWatchdog !== undefined) {
       clearTimeout(dropWatchdog);
       dropWatchdog = undefined;
     }
+  };
+  const dismiss = () => {
+    standDown();
+    void catcher.hide();
   };
 
   window.addEventListener("dragenter", async (e) => {
     if (!e.dataTransfer?.types.includes("Files")) return;
     if (draggingIn) return;
     draggingIn = true;
+    const generation = ++dragGeneration;
     cancelHide(); // the catcher taking the drag must not auto-hide us
     const pos = await main.outerPosition();
     const size = await main.outerSize();
+    if (!draggingIn || generation !== dragGeneration) return;
     await catcher.setPosition(new PhysicalPosition(pos.x, pos.y));
     await catcher.setSize(new PhysicalSize(size.width, size.height));
+    if (!draggingIn || generation !== dragGeneration) return;
     await catcher.show();
+    if (!draggingIn || generation !== dragGeneration) {
+      await catcher.hide();
+      return;
+    }
     // Safety net: a drag cancelled outside the app may send no drop/leave.
-    dropWatchdog = window.setTimeout(() => {
-      standDown();
-      catcher.hide().catch(() => {});
-    }, 8000);
+    dropWatchdog = window.setTimeout(dismiss, 8000);
+  });
+  // A fast drop can land on the main webview before the catcher finishes its
+  // async move/resize. Cancel that pending show instead of displaying a stale
+  // full-window drop surface until the watchdog expires.
+  window.addEventListener("drop", () => {
+    if (draggingIn) dismiss();
   });
 
   // Catcher covers us exactly, so its drop position (physical px, window-origin)
@@ -55,7 +71,7 @@ export async function wireOsDrop() {
   await listen<{ paths: string[]; position: { x: number; y: number } }>(
     "os-file-drop",
     (e) => {
-      standDown();
+      dismiss();
       cancelHide();
       const { paths, position } = e.payload;
       if (!paths.length) return;
@@ -72,5 +88,5 @@ export async function wireOsDrop() {
     },
   );
 
-  await listen("os-file-drop-cancel", standDown);
+  await listen("os-file-drop-cancel", dismiss);
 }
