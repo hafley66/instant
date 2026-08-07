@@ -354,6 +354,24 @@ impl HarnessStore for OpencodeStore {
         };
         rows.flatten().collect()
     }
+    fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
+        let db = home.join(".local/share/opencode/opencode.db");
+        let Ok(conn) = Connection::open_with_flags(
+            db,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) else {
+            return vec![];
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT id FROM session WHERE time_archived IS NULL AND directory=?1 ORDER BY time_updated DESC",
+        ) else {
+            return vec![];
+        };
+        let Ok(rows) = stmt.query_map([cwd], |row| row.get(0)) else {
+            return vec![];
+        };
+        rows.flatten().collect()
+    }
     fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
         crate::harness_trace_index::opencode(home)
     }

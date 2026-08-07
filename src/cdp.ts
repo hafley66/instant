@@ -90,6 +90,8 @@ export class CdpView {
   private inViewport = true;
   private paused = false; // true while the screencast is stopped (tab hidden)
   private resizeTimer = 0;
+  private disposed = false;
+  private appliedMetrics = "";
   private dragging = false;
   private lastMove: MouseEvent | null = null;
   private moveRaf = 0;
@@ -298,7 +300,10 @@ export class CdpView {
       if (ev.payload.id !== this.id) return;
       this.pendingData = ev.payload.data;
       if (!this.raf) this.raf = requestAnimationFrame(() => this.flush());
-    }).then((u) => (this.unlisten = u));
+    }).then((u) => {
+      if (this.disposed) u();
+      else this.unlisten = u;
+    });
 
     // Native cursor: the page reports the CSS cursor under the pointer; mirror it
     // onto the canvas so links show a hand, text a beam, etc. CSS keywords map
@@ -307,7 +312,10 @@ export class CdpView {
       if (ev.payload.id !== this.id) return;
       const c = ev.payload.cursor;
       this.canvas.style.cursor = !c || c.startsWith("url(") ? "default" : c;
-    }).then((u) => (this.unlistenCursor = u));
+    }).then((u) => {
+      if (this.disposed) u();
+      else this.unlistenCursor = u;
+    });
 
     // Address-bar sync: the page reports its URL on navigation (link click,
     // redirect, SPA pushState). Reflect it unless the user is mid-edit in the bar.
@@ -317,14 +325,20 @@ export class CdpView {
       this.onNavigated(ev.payload.url);
       // CSS zoom is per-document; re-apply after a navigation if it isn't 1.
       if (this.zoom !== 1) this.applyZoom();
-    }).then((u) => (this.unlistenUrl = u));
+    }).then((u) => {
+      if (this.disposed) u();
+      else this.unlistenUrl = u;
+    });
 
     // Copy bridge: the page pushes its selection over __cdpCopy on ⌘C; write it
     // to the OS clipboard so it pastes into other apps.
     void listen<{ id: string; text: string }>("cdp-copy", (ev) => {
       if (ev.payload.id !== this.id) return;
       if (ev.payload.text) navigator.clipboard.writeText(ev.payload.text).catch(console.error);
-    }).then((u) => (this.unlistenCopy = u));
+    }).then((u) => {
+      if (this.disposed) u();
+      else this.unlistenCopy = u;
+    });
   }
 
   // CSS px size of the canvas (== CDP viewport CSS px) and the device ratio.
@@ -390,24 +404,32 @@ export class CdpView {
   }
 
   private scheduleResize() {
+    if (this.disposed) return;
     clearTimeout(this.resizeTimer);
     this.resizeTimer = window.setTimeout(() => this.applyMetrics(), 120);
   }
 
   /** Push current size + the active quality to the screencast (restarts it). */
   applyMetrics() {
+    if (this.disposed) return;
     const m = this.metrics();
     // No layout box (hidden panel reports 0×0): don't restart at 1×1. When the
     // panel is shown again its ResizeObserver fires with the real size and we
     // restart then — this is the only gate, so the stream always recovers.
     if (m.width <= 1 || m.height <= 1) return;
+    const signature = `${m.width}:${m.height}:${m.dpr}:${cdpQuality()}`;
+    if (signature === this.appliedMetrics) return;
+    this.appliedMetrics = signature;
     invoke("cdp_resize", {
       id: this.id,
       width: m.width,
       height: m.height,
       dpr: m.dpr,
       quality: cdpQuality(),
-    }).catch(console.error);
+    }).catch((error) => {
+      this.appliedMetrics = "";
+      if (!this.disposed) console.error(error);
+    });
   }
 
   private pos(e: MouseEvent) {
@@ -815,6 +837,7 @@ export class CdpView {
   }
 
   dispose() {
+    this.disposed = true;
     if (this.raf) cancelAnimationFrame(this.raf);
     if (this.moveRaf) cancelAnimationFrame(this.moveRaf);
     clearTimeout(this.resizeTimer);

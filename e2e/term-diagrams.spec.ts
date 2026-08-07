@@ -189,7 +189,7 @@ test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ 
   await expect(page.locator(".term-diagrams")).toBeHidden();
 });
 
-test("does not render terminal fences when the AI ledger has no matching visible message", async ({ page }) => {
+test("renders explicit terminal fences while the AI ledger has no matching visible message", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
     const target = window as Window & {
@@ -201,9 +201,22 @@ test("does not render terminal fences when the AI ledger has no matching visible
   });
   await page.getByTestId("open-term").click();
   await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
-  await writeFixture(page, output("Codex"));
+  await writeFixture(page, [
+    "Codex response:",
+    "mermaid",
+    "flowchart LR",
+    "  PTY --> tmux",
+    "  tmux --> xterm",
+    "",
+    "d2",
+    "PTY -> tmux",
+    "tmux -> xterm",
+    "",
+  ].join("\r\n"));
 
-  await expect(page.locator(".term-diagram")).toHaveCount(0);
+  await expect(page.locator(".term-diagram")).toHaveCount(2);
+  await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
+  await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
 });
 
 test("opens a viewport-tall D2 target and retains clicked source entries", async ({ page }, testInfo) => {

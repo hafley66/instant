@@ -38,6 +38,28 @@ describe("diagramElementAtPoint", () => {
 });
 
 describe("diagram location precedence", () => {
+  it("retains an explicit terminal fence while the ledger has no located match", () => {
+    const direct: DiagramFence = {
+      language: "d2",
+      code: "terminal -> tmux -> xterm",
+      start: 12,
+      end: 14,
+      inferred: false,
+    };
+
+    expect(mergeLocatedDiagrams([direct], [])).toMatchInlineSnapshot(`
+      [
+        {
+          "code": "terminal -> tmux -> xterm",
+          "end": 14,
+          "inferred": false,
+          "language": "d2",
+          "start": 12,
+        },
+      ]
+    `);
+  });
+
   it("keeps visible terminal source over an overlapping stale ledger estimate", () => {
     const direct: DiagramFence = {
       language: "mermaid",

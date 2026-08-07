@@ -156,6 +156,28 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
       break;
     }
   }
+  // Claude and Codex render Markdown fences without the backticks. The language
+  // label survives as its own row, which is enough provenance to distinguish a
+  // diagram from arrow-shaped source code. Capture through the next blank row.
+  for (let index = 0; index < lines.length; index++) {
+    if (occupied.has(lines[index].start)) continue;
+    const label = stripTuiBullet(lines[index].text).trim().toLowerCase();
+    if (label !== "mermaid" && label !== "d2") continue;
+    const firstCode = stripTuiBullet(lines[index + 1]?.text ?? "").trimStart();
+    if (label === "mermaid" ? !isMermaidStart(firstCode) : !isD2ArrowLine(firstCode)) continue;
+    let end = index + 1;
+    while (end + 1 < lines.length && stripTuiBullet(lines[end + 1].text).trim()) end++;
+    const block = lines.slice(index + 1, end + 1);
+    found.push({
+      language: label,
+      code: dedent(block.map((line) => stripTuiBullet(line.text))),
+      start: lines[index].start,
+      end: lines[end].end,
+      inferred: false,
+    });
+    for (let row = lines[index].start; row <= lines[end].end; row++) occupied.add(row);
+    index = end;
+  }
   for (let index = 0; index < lines.length; index++) {
     if (occupied.has(lines[index].start)) continue;
     const first = stripTuiBullet(lines[index].text).trimStart();
@@ -294,6 +316,8 @@ export class TerminalDiagramOverlay {
   disposables: IDisposable[];
   generation = 0;
   frame = 0;
+  painting = false;
+  repaintPending = false;
   activityEvents = new Subject<void>();
   activitySubscription: Subscription | null = null;
   scrollEvents = new Subject<void>();
@@ -401,10 +425,20 @@ export class TerminalDiagramOverlay {
       this.root.hidden = true;
       return;
     }
+    if (this.painting) {
+      this.repaintPending = true;
+      return;
+    }
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
-      void this.paint();
+      this.painting = true;
+      void this.paint().finally(() => {
+        this.painting = false;
+        if (!this.repaintPending) return;
+        this.repaintPending = false;
+        this.scheduleFrame();
+      });
     });
   }
 
@@ -453,11 +487,12 @@ export class TerminalDiagramOverlay {
     const ledger = messages
       ? locateMessageDiagrams(this.term, diagramsFromMessageTail(messages))
       : [];
-    // Once an AI ledger resolves, it owns diagram provenance. Terminal parsing
-    // is used only for a plain shell with no harness session, and then only for
-    // explicit fences. Raw arrow-shaped output and tool/write payloads remain
-    // terminal text.
-    const fences = messages === null ? direct : ledger;
+    // Keep exact, explicit terminal fences available while the harness ledger
+    // is empty, delayed, or unable to locate its source in the visible buffer.
+    // mergeLocatedDiagrams replaces a clipped terminal prefix with its complete
+    // ledger match while retaining the visible source when estimates disagree.
+    // Inferred arrow-shaped output remains excluded from `direct` above.
+    const fences = mergeLocatedDiagrams(direct, ledger);
     const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
