@@ -115,7 +115,16 @@
    Tailwind's generated utilities. Keep each token line block-level so fenced
    blocks retain their source newlines, including unknown-language fallbacks. */
 .mdview-streamdown [data-streamdown="code-block-body"] {
-  overflow-x: auto;
+  overflow-x: auto !important;
+}
+
+/* Streamdown's body owns horizontal overflow. A nested pre scroller produces
+   two scrollbars once panel zoom changes the visual width. */
+.mdview-streamdown [data-streamdown="code-block-body"] pre,
+.mdview-streamdown [data-streamdown="code-block-body"] code {
+  width: max-content;
+  min-width: 100%;
+  overflow: visible !important;
 }
 
 /* Markdown source snippets stay readable when Super XP is enabled. The skin's
@@ -140,16 +149,8 @@ body.xp-pixel .mdview-streamdown code * {
 }
 
 body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] {
-  overflow-x: auto !important;
   scrollbar-color: color-mix(in srgb, currentColor 38%, transparent) transparent;
   scrollbar-width: thin;
-}
-
-body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] pre,
-body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] code {
-  width: max-content;
-  min-width: 100%;
-  overflow: visible !important;
 }
 
 body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"]::-webkit-scrollbar,

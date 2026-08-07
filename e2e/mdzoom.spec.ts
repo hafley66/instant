@@ -25,6 +25,15 @@ const contentZoom = (page: Page) =>
     return el ? getComputedStyle(el).zoom : null;
   });
 
+const codeScrollerCount = (page: Page) =>
+  page.locator('[data-streamdown="code-block-body"]').evaluate((body) =>
+    [body, ...body.querySelectorAll("*")].filter((element) => {
+      const html = element as HTMLElement;
+      const overflow = getComputedStyle(html).overflowX;
+      return html.scrollWidth > html.clientWidth && (overflow === "auto" || overflow === "scroll");
+    }).length,
+  );
+
 const state = (page: Page) =>
   page.evaluate(() => {
     const w = (window as ZoomWindow).__mdzoom!;
@@ -70,6 +79,8 @@ test("cmd+/-/0 zoom the markdown preview opened from a focused terminal", async 
   await expect.poll(async () => (await state(page)).md).toBeCloseTo(1.2, 5);
   expect((await state(page)).term).toBe(1); // the terminal font is untouched
   expect(Number(await contentZoom(page))).toBeCloseTo(1.2, 5);
+  await page.getByRole("button", { name: /Zoom target/ }).click();
+  expect(await codeScrollerCount(page)).toBe(1);
   await expect(page.getByTitle("content zoom — reset (⌘0)")).toHaveText("120%");
   await page.screenshot({ path: "test-results/mdzoom-120.png" });
 
@@ -145,5 +156,6 @@ test("Super XP does not style markdown source snippets", async ({ page }) => {
     horizontalScrollbar: "8px",
     scrollbarButton: "none",
   });
+  expect(await codeScrollerCount(page)).toBe(1);
   await page.screenshot({ path: "test-results/mdview-super-xp-snippets.png" });
 });
