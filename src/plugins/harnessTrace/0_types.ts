@@ -46,6 +46,7 @@ export interface HarnessTraceRow {
   lastActivity: string;
   status: SessionStatus;
   cwd: string;
+  inputTokens?: number | null;
   // The bus sweep's token stamp for this lane (see MailTokens/AgentSessionNode).
   tokens?: MailTokens | null;
 }

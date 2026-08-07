@@ -321,6 +321,18 @@ describe("StripPolicy exact native session identity", () => {
     ]);
     expect(StripPolicy.effectiveScope(nodes, "repo-4", null, "tab-4")).toBe("related");
   });
+
+  it("does not guess a sibling root while the exact session is absent from a stale seed load", () => {
+    const nodes = [
+      node({ id: "tab-1", tmuxSession: "repo", tmuxMatches: ["repo", "repo-3"] }),
+      node({ id: "tab-3", tmuxSession: "repo-3", tmuxMatches: ["repo", "repo-3"] }),
+      node({ id: "lane-1", harness: "opencode", parentId: "tab-1", parentKind: "dispatch", tmuxSession: "lane-1" }),
+    ];
+
+    expect([...StripPolicy.nativeIds(nodes, "repo-3", "tab-new")]).toEqual([]);
+    expect(StripPolicy.effectiveScope(nodes, "repo-3", null, "tab-new")).toBe("related");
+    expect(StripPolicy.external(nodes, "repo-3", "related", "tab-new")).toEqual([]);
+  });
 });
 
 describe("StripPolicy.external with a cwd shared by several tmux sessions", () => {

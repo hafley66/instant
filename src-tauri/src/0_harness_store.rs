@@ -329,9 +329,9 @@ impl HarnessStore for OpencodeStore {
         ) else {
             return vec![];
         };
-        // MAX not latest: the newest row is often a 0-token assistant turn; the
-        // peak input across the session is the live context reading.
-        let sql = "SELECT s.id,s.directory,s.title,s.time_created,s.time_updated,(SELECT MAX(json_extract(m.data,'$.tokens.input')) FROM message m WHERE m.session_id=s.id),(SELECT json_extract(m.data,'$.modelID') FROM message m WHERE m.session_id=s.id AND json_extract(m.data,'$.modelID') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1) FROM session s WHERE s.time_archived IS NULL AND (?1 IS NULL OR s.directory=?1) ORDER BY s.time_updated DESC";
+        // tokens.total is OpenCode's complete context reading. tokens.input
+        // excludes cache reads and stays small for a large cached context.
+        let sql = "SELECT s.id,s.directory,s.title,s.time_created,s.time_updated,(SELECT MAX(json_extract(m.data,'$.tokens.total')) FROM message m WHERE m.session_id=s.id),(SELECT json_extract(m.data,'$.modelID') FROM message m WHERE m.session_id=s.id AND json_extract(m.data,'$.modelID') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1) FROM session s WHERE s.time_archived IS NULL AND (?1 IS NULL OR s.directory=?1) ORDER BY s.time_updated DESC";
         let Ok(mut stmt) = conn.prepare(sql) else {
             return vec![];
         };

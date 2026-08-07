@@ -28,14 +28,14 @@ function nativeSessionIds(
   const exact = nativeSessionId ? nodes.find((node) => node.id === nativeSessionId) : undefined;
   const roots = nodes.filter((node) => node.parentKind === null);
   const direct = roots.filter((node) => node.tmuxSession === sid);
-  const claudeMatches = roots.filter(
-    (node) => node.harness === "claude" && (node.tmuxMatches ?? []).includes(sid),
-  );
+  const compatible = roots.filter((node) => (node.tmuxMatches ?? []).includes(sid));
   const joined = exact
     ? [exact]
-    : direct.length > 0
+    : nativeSessionId
+      ? []
+      : direct.length > 0
       ? direct
-      : claudeMatches;
+      : compatible;
   const native = new Set(joined.map((node) => node.id));
   for (let grew = true; grew; ) {
     grew = false;
@@ -129,6 +129,10 @@ export const StripPolicy: IStripPolicy = {
     if (chosen !== null) return chosen;
     if (StripPolicy.external(nodes, sid, "related", nativeSessionId).length > 0) return "related";
     if (StripPolicy.nativeIds(nodes, sid, nativeSessionId).size > 0) return "related";
+    if (nativeSessionId) return "related";
+    if (nodes.some((node) => node.parentKind === null && (node.tmuxMatches ?? []).includes(tmuxNameOf(sid)))) {
+      return "related";
+    }
     return StripPolicy.external(nodes, sid, "all", nativeSessionId).length > 0 ? "all" : "related";
   },
 };

@@ -43,6 +43,7 @@ pub struct HarnessTraceRow {
     pub last_activity: String, // ISO UTC from store mtime/db
     pub status: &'static str,  // live | idle | done | dead
     pub cwd: String,           // tildified
+    pub input_tokens: Option<u64>,
     // CONTRACT2: claude/codex subagent children carry the parent session id +
     // "subagent"; others stay None (the frontend mail join may attach "dispatch").
     pub parent_id: Option<String>,
@@ -130,6 +131,7 @@ fn trace_rows(home: &Path) -> Vec<HarnessTraceRow> {
             last_activity: ms_to_iso(session.last_activity_ms),
             status: trace_status(&session.cwd, session.last_activity_ms, now),
             cwd: tildify(&session.cwd, home),
+            input_tokens: session.input_tokens,
             parent_id: session.parent_id,
             parent_kind: session.parent_kind,
         };
