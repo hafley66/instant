@@ -5,6 +5,7 @@
 import { store, type FsEntry, type Skin } from "./state";
 import { activeGroupEl } from "./reactdock";
 import { invoke } from "./generated/native";
+import { terminalFontCss } from "./0_terminalFonts";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -134,11 +135,11 @@ export const nextSkin = (s: Skin): Skin =>
 // (a pixel MONOSPACE) instead. That family ships with xp.css (already imported in
 // main.ts:1) and is declared @font-face there, so no new font file is needed.
 // Menlo stays as the fallback so missing glyphs still render monospaced.
-export const TERM_FONT_FAMILY_DEFAULT =
-  'Menlo, "Hack Nerd Font Mono", "MesloLGS NF", "DejaVu Sans Mono for Powerline", monospace';
 export const TERM_FONT_FAMILY_PIXEL = '"Perfect DOS VGA 437 Win", Menlo, monospace';
 export const termFontFamily = (): string =>
-  store.get().xpPixel ? TERM_FONT_FAMILY_PIXEL : TERM_FONT_FAMILY_DEFAULT;
+  store.get().xpPixel
+    ? TERM_FONT_FAMILY_PIXEL
+    : terminalFontCss(store.get().config?.terminal_fonts ?? []);
 
 // Append a line to the on-disk log (app_data_dir/instant.log). The webview
 // console isn't reachable once the app is bundled, so this is the durable record.

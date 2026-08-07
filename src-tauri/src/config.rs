@@ -16,7 +16,20 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+fn default_terminal_fonts() -> Vec<String> {
+    [
+        "Menlo",
+        "Hack Nerd Font Mono",
+        "MesloLGS NF",
+        "DejaVu Sans Mono for Powerline",
+        "monospace",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     #[serde(default)]
     pub exclude_sites: Vec<String>,
@@ -24,6 +37,19 @@ pub struct AppConfig {
     pub exclude_files: Vec<String>,
     #[serde(default)]
     pub exclude_apps: Vec<String>,
+    #[serde(default = "default_terminal_fonts")]
+    pub terminal_fonts: Vec<String>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            exclude_sites: Vec::new(),
+            exclude_files: Vec::new(),
+            exclude_apps: Vec::new(),
+            terminal_fonts: default_terminal_fonts(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -50,6 +76,7 @@ pub struct ConfigView {
     pub exclude_sites: Vec<String>,
     pub exclude_files: Vec<String>,
     pub exclude_apps: Vec<String>,
+    pub terminal_fonts: Vec<String>,
     pub excluded_count: u64,
 }
 
@@ -168,6 +195,7 @@ fn view(state: &ConfigState) -> ConfigView {
         exclude_sites: cfg.exclude_sites,
         exclude_files: cfg.exclude_files,
         exclude_apps: cfg.exclude_apps,
+        terminal_fonts: cfg.terminal_fonts,
         excluded_count: state.excluded_count.load(Ordering::Relaxed),
     }
 }
@@ -191,11 +219,13 @@ pub async fn config_set(
     exclude_sites: Vec<String>,
     exclude_files: Vec<String>,
     exclude_apps: Vec<String>,
+    terminal_fonts: Vec<String>,
 ) -> Result<ConfigView, String> {
     let next = AppConfig {
         exclude_sites,
         exclude_files,
         exclude_apps,
+        terminal_fonts,
     };
     write_file(&state.path, &next).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = next;
@@ -229,4 +259,28 @@ pub async fn config_open(state: State<'_, ConfigState>) -> Result<(), String> {
         .status()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_config_receives_the_terminal_font_defaults() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{"exclude_sites":["example.com"],"exclude_files":[],"exclude_apps":[]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.terminal_fonts,
+            vec![
+                "Menlo",
+                "Hack Nerd Font Mono",
+                "MesloLGS NF",
+                "DejaVu Sans Mono for Powerline",
+                "monospace",
+            ]
+        );
+    }
 }

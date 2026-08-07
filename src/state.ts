@@ -99,6 +99,7 @@ export interface ConfigView {
   exclude_sites: string[];
   exclude_files: string[];
   exclude_apps: string[];
+  terminal_fonts: string[];
   excluded_count: number;
 }
 

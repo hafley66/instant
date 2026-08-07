@@ -86,7 +86,7 @@ import {
   refreshFavorites,
   updateFavBadge,
 } from "./favorites";
-import { ACTIVITY_CAP, registerActivityBridge } from "./activity";
+import { ACTIVITY_CAP, refreshConfig, registerActivityBridge } from "./activity";
 import { isCapturing, cancelHide, scheduleHide, captureToPrompt, toggleRecording } from "./capture";
 import {
   ZOOM_STEP,
@@ -208,6 +208,7 @@ const TAB_COMMANDS: Command[] = [
 async function main() {
   // Resolve the home dir once so tildify() can stay synchronous during render.
   setHomeDir(await homeDir().catch(() => ""));
+  await refreshConfig();
   // On theme flip, re-render open file/diff previews so syntax colors track.
   initPreviewThemeSync();
   // Release fs watches for preview tabs the user has closed.
@@ -218,7 +219,7 @@ async function main() {
   // Skin/mode are store-driven: subscribe for changes, then apply once for the
   // persisted initial state.
   store.subscribe(syncSkin, ["skin"]);
-  store.subscribe(syncXpPixel, ["xpPixel"]);
+  store.subscribe(syncXpPixel, ["xpPixel", "config"]);
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
   store.subscribe(applyToolbar, ["showToolbar"]);

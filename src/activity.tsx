@@ -176,12 +176,13 @@ async function reloadConfig() {
 }
 
 // Persist a full set of rule lists and refresh the view from the backend.
-async function applyConfig(sites: string[], files: string[], apps: string[]) {
+async function applyConfig(sites: string[], files: string[], apps: string[], terminalFonts: string[]) {
   try {
     const view = await invoke<ConfigView>("config_set", {
       excludeSites: sites,
       excludeFiles: files,
       excludeApps: apps,
+      terminalFonts,
     });
     store.set({ config: view });
   } catch (e) {
@@ -316,19 +317,25 @@ export function ConfigPanelV2() {
               title="Sites"
               hint="browser URLs to ignore (e.g. mail.google.com, *.bank.com)"
               items={cfg.exclude_sites}
-              onChange={(next) => applyConfig(next, cfg.exclude_files, cfg.exclude_apps)}
+              onChange={(next) => applyConfig(next, cfg.exclude_files, cfg.exclude_apps, cfg.terminal_fonts)}
             />
             <CfgGroup
               title="Files"
               hint="file paths to ignore (e.g. /secret/, *.env)"
               items={cfg.exclude_files}
-              onChange={(next) => applyConfig(cfg.exclude_sites, next, cfg.exclude_apps)}
+              onChange={(next) => applyConfig(cfg.exclude_sites, next, cfg.exclude_apps, cfg.terminal_fonts)}
             />
             <CfgGroup
               title="Apps"
               hint="never screenshot while these apps are frontmost (e.g. 1Password)"
               items={cfg.exclude_apps}
-              onChange={(next) => applyConfig(cfg.exclude_sites, cfg.exclude_files, next)}
+              onChange={(next) => applyConfig(cfg.exclude_sites, cfg.exclude_files, next, cfg.terminal_fonts)}
+            />
+            <CfgGroup
+              title="Terminal fonts"
+              hint="CSS fallback order used by xterm.js"
+              items={cfg.terminal_fonts}
+              onChange={(next) => applyConfig(cfg.exclude_sites, cfg.exclude_files, cfg.exclude_apps, next)}
             />
           </>
         )}
