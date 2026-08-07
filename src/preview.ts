@@ -10,11 +10,15 @@ import { store } from "./state";
 import { routePath } from "./plugin";
 import {
   addPreviewPanel,
+  allPanelIds,
   isPreviewOpen,
   activatePreviewPanel,
+  focusPanelById,
   onDockChange,
   setPreviewRehydration,
+  togglePanel,
 } from "./reactdock";
+import { savePluginState } from "./pluginState";
 import { claimFsWatch } from "./fsWatch";
 import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS, SHIKI_LANG } from "./core";
 import { FileImageViewer } from "./1_FileImageViewer";
@@ -60,6 +64,15 @@ export function openPreviewPanel(
 }
 
 export async function openPathInInstant(path: string, line?: number): Promise<void> {
+  try {
+    await invoke("list_dir", { path });
+    savePluginState<{ root?: string }>("files", { root: path });
+    if (allPanelIds().includes("files")) focusPanelById("files");
+    else togglePanel("files");
+    return;
+  } catch {
+    // A file produces ENOTDIR. Continue through the existing file routes.
+  }
   const browserUrl = browserFileUrl(path, getHomeDir());
   if (browserUrl) {
     const { openBrowserTab } = await import("./browser");

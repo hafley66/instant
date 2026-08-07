@@ -35,6 +35,7 @@ import { tokenAtColumn } from "./termTokens";
 import {
   joinWrappedRows,
   capWrappedRows,
+  softWrappedPathLink,
   wrappedLinkSpans,
   MAX_WRAP_ROWS,
   type WrapRow,
@@ -387,6 +388,22 @@ function wrappedLineRows(id: string, bufferRow: number): { rows: WrapRow[]; inde
   return { rows: capped.rows, index: capped.index, start };
 }
 
+function softPathRows(id: string, bufferRow: number): { rows: WrapRow[]; index: number; start: number } | null {
+  const term = tabs.get(id)?.term;
+  if (!term) return null;
+  const buf = term.buffer.active;
+  const radius = 4;
+  const start = Math.max(0, bufferRow - radius);
+  const end = Math.min(buf.length - 1, bufferRow + radius);
+  const rows: WrapRow[] = [];
+  for (let row = start; row <= end; row++) {
+    const line = buf.getLine(row);
+    if (!line) return null;
+    rows.push({ text: line.translateToString(true), isWrapped: line.isWrapped });
+  }
+  return { rows, index: bufferRow - start, start };
+}
+
 // The word/path token under the pointer, for a ⌘-click miss (no link hit) and
 // for the hover card. Maps clientX/Y to a buffer cell through the screen-cell
 // geometry, then hands the row (joined across any wrap) to the same scanner the
@@ -620,6 +637,24 @@ export function openTab(
           };
         },
       );
+      const softRows = softPathRows(id, y - 1);
+      const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
+      if (soft) {
+        const startX = soft.range.startCol + 1;
+        const endX = soft.range.endCol;
+        const existing = links.find((link) =>
+          link.range.start.y === y && link.range.end.y === y &&
+          link.range.start.x === startX && link.range.end.x === endX,
+        );
+        if (existing) existing.text = soft.text;
+        else {
+          links.push({
+            text: soft.text,
+            range: { start: { x: startX, y }, end: { x: endX, y } },
+            activate,
+          });
+        }
+      }
       cb(links);
     },
   });

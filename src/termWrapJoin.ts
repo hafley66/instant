@@ -89,3 +89,63 @@ export function wrappedLinkSpans(
     .filter((span) => openable(span.text))
     .map((span) => ({ text: span.text, ranges: mapSpanToRowRanges(span, joined) }));
 }
+
+export type SoftPathLink = {
+  text: string;
+  range: RowRange;
+};
+
+// Agent TUIs sometimes wrap Markdown themselves before writing to the PTY.
+// Those continuation rows are separate logical terminal lines, so isWrapped is
+// false and joinWrappedRows must leave them alone. Reconstruct only the narrow
+// shape produced for a path: the last token of one row ends at that row's text,
+// the first token of the next row begins after indentation, and concatenating
+// them is still an openable, whitespace-free path. The returned range covers
+// only the fragment on the requested row; each row gets its own xterm link but
+// both activate with the complete path.
+export function softWrappedPathLink(
+  rows: WrapRow[],
+  requestedIndex: number,
+  openable: (text: string) => boolean,
+): SoftPathLink | null {
+  const tokens = rows.map((row) => scanLineTokens(row.text));
+  const fragments = rows.map((row, index) => {
+    const rowTokens = tokens[index];
+    return {
+      first: rowTokens[0],
+      last: rowTokens[rowTokens.length - 1],
+      end: row.text.trimEnd().length,
+    };
+  });
+  const joins = (leftIndex: number): boolean => {
+    const left = fragments[leftIndex];
+    const right = fragments[leftIndex + 1];
+    if (!left?.last || !right?.first) return false;
+    if (rows[leftIndex + 1].isWrapped) return false;
+    if (left.last.end !== left.end) return false;
+    if (right.first !== right.last) return false;
+    const combined = left.last.text + right.first.text;
+    return left.last.text.includes("/") && !/[\s'"`()<>[\]{}]/.test(combined) && openable(combined);
+  };
+
+  let start = requestedIndex;
+  while (start > 0 && joins(start - 1)) start--;
+  let end = requestedIndex;
+  while (end + 1 < rows.length && joins(end)) end++;
+  if (start === end) return null;
+
+  const parts = [];
+  for (let index = start; index <= end; index++) {
+    const token = index === start ? fragments[index].last : fragments[index].first;
+    if (!token) return null;
+    parts.push(token.text);
+  }
+  const requested = requestedIndex === start
+    ? fragments[requestedIndex].last
+    : fragments[requestedIndex].first;
+  if (!requested) return null;
+  return {
+    text: parts.join(""),
+    range: { rowIndex: requestedIndex, startCol: requested.start, endCol: requested.end },
+  };
+}

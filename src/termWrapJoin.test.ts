@@ -4,6 +4,7 @@ import {
   mapSpanToRowRanges,
   capWrappedRows,
   wrappedLinkSpans,
+  softWrappedPathLink,
   MAX_WRAP_ROWS,
   type WrapRow,
 } from "./termWrapJoin";
@@ -29,6 +30,46 @@ describe("joinWrappedRows", () => {
     const joined = joinWrappedRows([row("Update(日本"), row("語.ts)", true)]);
     expect(joined.text).toBe("Update(日本語.ts)");
     expect(joined.rowStartOffsets).toEqual([0, 9]); // 9 = "Update(日本".length
+  });
+});
+
+describe("softWrappedPathLink", () => {
+  const rows = [
+    row("  - .worktrees/text-render-bench/test-results/text-render-bench-records--c392e-unt-"),
+    row("    and-scroll-measurements-webkit/text-render-benchmark.png"),
+  ];
+
+  it("gives both TUI-wrapped rows the complete path with their local underline", () => {
+    expect([
+      softWrappedPathLink(rows, 0, (text) => text.includes("/")),
+      softWrappedPathLink(rows, 1, (text) => text.includes("/")),
+    ]).toMatchInlineSnapshot(`
+      [
+        {
+          "range": {
+            "endCol": 83,
+            "rowIndex": 0,
+            "startCol": 4,
+          },
+          "text": ".worktrees/text-render-bench/test-results/text-render-bench-records--c392e-unt-and-scroll-measurements-webkit/text-render-benchmark.png",
+        },
+        {
+          "range": {
+            "endCol": 60,
+            "rowIndex": 1,
+            "startCol": 4,
+          },
+          "text": ".worktrees/text-render-bench/test-results/text-render-bench-records--c392e-unt-and-scroll-measurements-webkit/text-render-benchmark.png",
+        },
+      ]
+    `);
+  });
+
+  it("does not join adjacent prose lines", () => {
+    expect(softWrappedPathLink([
+      row("source src/preview.ts"),
+      row("  then continue.md"),
+    ], 0, (text) => text.includes("/"))).toBeNull();
   });
 });
 
