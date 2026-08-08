@@ -55,6 +55,7 @@ export function PanZoomViewport({
   };
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    event.preventDefault();
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     event.currentTarget.setPointerCapture(event.pointerId);
   };

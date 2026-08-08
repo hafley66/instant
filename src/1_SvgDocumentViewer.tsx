@@ -72,6 +72,7 @@ export function SvgDocumentViewer({
   };
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    event.preventDefault();
     drag.current = {
       pointerId: event.pointerId,
       x: event.clientX,

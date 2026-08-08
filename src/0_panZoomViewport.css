@@ -14,8 +14,16 @@
 .panzoom-stage {
   overflow: hidden;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   cursor: grab;
   outline: none;
+}
+
+.panzoom-stage img,
+.panzoom-stage svg,
+.panzoom-stage object {
+  -webkit-user-drag: none;
 }
 
 .panzoom-stage:active {
