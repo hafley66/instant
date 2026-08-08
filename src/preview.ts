@@ -31,7 +31,7 @@ import { documentHref } from "./0_documentHref";
 import { openExternalUrl } from "./0_openExternal";
 import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
 import { shareReplay, type Subscription } from "rxjs";
-import { visibleFileWatch, type VisibleFileWatch } from "./0_visibleFileWatch";
+import { visibleFileWatch$ } from "./0_visibleFileWatch";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -140,7 +140,7 @@ function ensureInst(path: string, line?: number): PreviewInst {
 type PreviewWatch = {
   timer?: ReturnType<typeof setTimeout>;
   visibility?: Subscription;
-  watcher?: VisibleFileWatch;
+  watcher?: Subscription;
   visible?: boolean;
 };
 const previewWatches = new Map<string, PreviewWatch>();
@@ -159,7 +159,7 @@ function watchPreview(path: string) {
     w.visible = visible;
     if (!visible) clearTimeout(w.timer);
   });
-  w.watcher = visibleFileWatch(visibility$, () =>
+  w.watcher = visibleFileWatch$(visibility$, () =>
     claimFsWatch(path, () => {
       clearTimeout(w.timer);
       w.timer = setTimeout(() => {
@@ -168,7 +168,7 @@ function watchPreview(path: string) {
         void renderPathInto(inst.el, path, inst.line);
       }, WATCH_DEBOUNCE_MS);
     }),
-  );
+  ).subscribe({ error: console.error });
 }
 
 function releasePreviewWatch(path: string) {
@@ -177,7 +177,7 @@ function releasePreviewWatch(path: string) {
   previewWatches.delete(path);
   clearTimeout(w.timer);
   w.visibility?.unsubscribe();
-  w.watcher?.dispose();
+  w.watcher?.unsubscribe();
 }
 
 // Release the watch for any preview whose tab is gone. Registered once at
