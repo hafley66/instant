@@ -15,6 +15,8 @@ import {
   activatePreviewPanel,
   focusPanelById,
   onDockChange,
+  panelVisibility$,
+  previewPanelId,
   setPreviewRehydration,
   togglePanel,
 } from "./reactdock";
@@ -28,6 +30,8 @@ import { browserFileUrl } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
 import { openExternalUrl } from "./0_openExternal";
 import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
+import { shareReplay, type Subscription } from "rxjs";
+import { visibleFileWatch, type VisibleFileWatch } from "./0_visibleFileWatch";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -134,9 +138,10 @@ function ensureInst(path: string, line?: number): PreviewInst {
 // change stream in initPreviewWatch, since dock panels can also be closed by
 // keybinding, layout restore, or the tab's own ✕).
 type PreviewWatch = {
-  release?: () => void;
   timer?: ReturnType<typeof setTimeout>;
-  dead?: boolean;
+  visibility?: Subscription;
+  watcher?: VisibleFileWatch;
+  visible?: boolean;
 };
 const previewWatches = new Map<string, PreviewWatch>();
 // Editors write in bursts (truncate + write, or rename-over); coalesce so one
@@ -147,26 +152,32 @@ function watchPreview(path: string) {
   if (previewWatches.has(path)) return;
   const w: PreviewWatch = {};
   previewWatches.set(path, w);
-  claimFsWatch(path, () => {
-    clearTimeout(w.timer);
-    w.timer = setTimeout(() => {
-      const inst = previewInsts.get(path);
-      if (!inst || !isPreviewOpen(path)) return;
-      void renderPathInto(inst.el, path, inst.line);
-    }, WATCH_DEBOUNCE_MS);
-  })
-    // The claim is async: if the tab closed while it was in flight, drop it now.
-    .then((release) => (w.dead ? release() : (w.release = release)))
-    .catch(console.error);
+  const visibility$ = panelVisibility$(previewPanelId(path)).pipe(
+    shareReplay({ bufferSize: 1, refCount: true }),
+  );
+  w.visibility = visibility$.subscribe((visible) => {
+    w.visible = visible;
+    if (!visible) clearTimeout(w.timer);
+  });
+  w.watcher = visibleFileWatch(visibility$, () =>
+    claimFsWatch(path, () => {
+      clearTimeout(w.timer);
+      w.timer = setTimeout(() => {
+        const inst = previewInsts.get(path);
+        if (!inst || !isPreviewOpen(path) || !w.visible) return;
+        void renderPathInto(inst.el, path, inst.line);
+      }, WATCH_DEBOUNCE_MS);
+    }),
+  );
 }
 
 function releasePreviewWatch(path: string) {
   const w = previewWatches.get(path);
   if (!w) return;
   previewWatches.delete(path);
-  w.dead = true;
   clearTimeout(w.timer);
-  w.release?.();
+  w.visibility?.unsubscribe();
+  w.watcher?.dispose();
 }
 
 // Release the watch for any preview whose tab is gone. Registered once at

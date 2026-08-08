@@ -33,6 +33,7 @@ import { SessionSidebar } from "./sessionSidebar";
 import { InTabStrip } from "./plugins/harnessTrace/InTabStrip";
 import { restoredTerminalSessionIds } from "./0_dockRestore";
 import { nextClosedOrder } from "./0_reopenOrder";
+import { panelApiVisibility$ } from "./0_panelVisibility";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -150,6 +151,7 @@ const termSid = (id: string) => id.slice(TERM.length);
 export const termPanelId = (sid: string) => TERM + sid;
 const PREVIEW = "preview:";
 const isPreview = (id: string) => id.startsWith(PREVIEW);
+export const previewPanelId = (path: string) => PREVIEW + path;
 // Markdown viewer panels (`md:<path>`): pure React (params carry the path), no
 // adopted content node — but treated as dynamic for layout-restore purposes.
 const MD = "md:";
@@ -590,6 +592,9 @@ export function allPanelIds(): string[] {
 }
 export function activePanelId(): string | null {
   return api?.activePanel?.id ?? null;
+}
+export function panelVisibility$(panelId: string) {
+  return panelApiVisibility$(api?.getPanel(panelId)?.api);
 }
 // The DOM element of the active group (one tab pane). Dockview groups are
 // absolutely positioned, so this is a valid positioning context for an overlay
