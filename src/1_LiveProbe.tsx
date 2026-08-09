@@ -33,13 +33,13 @@ export function LiveProbePanel({
       <div className="live-probe-head">
         <strong>probe</strong>
         <span>{scope ?? "app"}</span>
-        <span>DOM {domNodes}</span>
+        <span data-testid="live-probe-dom-count">DOM {domNodes}</span>
         <span>events {snapshot.eventCount}</span>
       </div>
-      <div className="live-probe-renders">
+      <div className="live-probe-renders" data-testid="live-probe-renders">
         {rows.length === 0 ? <span>renders 0</span> : rows.map(([name, count]) => <span key={name}>{name} {count}</span>)}
       </div>
-      <div className="live-probe-events">
+      <div className="live-probe-events" data-testid="live-probe-events">
         {latest.map((event) => (
           <span key={event.sequence}>{event.sequence} {event.kind}:{event.name}</span>
         ))}

@@ -32,3 +32,17 @@ test("SVG links survive the pan overlay and stationary clicks open them", async 
   await page.screenshot({ path: receipt, fullPage: true });
   await testInfo.attach("svg-link-click", { path: receipt, contentType: "image/png" });
 });
+
+test("SVG media preview shows the live render probe", async ({ page }) => {
+  await page.goto("/e2e-svg-link.html");
+  await expect(page.locator(".svg-document-stage object")).toHaveCount(1);
+  await expect.poll(() => page.locator(".svg-document-stage object").evaluate((node: HTMLObjectElement) => node.contentDocument?.readyState)).toBe("complete");
+
+  const probe = page.getByRole("region", { name: "live render probe" });
+  await expect(probe).toBeVisible();
+  await expect(probe.getByTestId("live-probe-dom-count")).toHaveText(/^DOM [1-9]\d*$/);
+  await expect(probe.getByTestId("live-probe-renders")).toContainText("FileImageViewer 1");
+  await expect(probe.getByTestId("live-probe-renders")).toContainText(/SvgDocumentViewer [1-9]\d*/);
+  await expect(probe.getByTestId("live-probe-events")).toContainText(/render:SvgDocumentViewer/);
+  await expect(page).toHaveScreenshot("svg-link-probe.png", { animations: "disabled" });
+});
