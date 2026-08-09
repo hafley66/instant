@@ -3,6 +3,7 @@ import type { PDFViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
 import type { PDFDocumentLoadingTask } from "pdfjs-dist/types/src/pdf.d.ts";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { openExternal } from "./0_openExternal";
+import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 
 function dataUrlBytes(url: string): Uint8Array {
   const encoded = url.slice(url.indexOf(",") + 1);
@@ -18,6 +19,8 @@ export function PdfDocumentViewer({
   url: string;
   onOpenHref?: (href: string) => void | Promise<void>;
 }) {
+  useLiveProbeRender("PdfDocumentViewer", path);
+  useLiveProbeLifecycle("PdfDocumentViewer", path);
   const container = useRef<HTMLDivElement>(null);
   const pages = useRef<HTMLDivElement>(null);
   const viewer = useRef<PDFViewer | null>(null);

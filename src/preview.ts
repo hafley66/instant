@@ -32,6 +32,7 @@ import { openExternalUrl } from "./0_openExternal";
 import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
 import { shareReplay, type Subscription } from "rxjs";
 import { visibleFileWatch$ } from "./0_visibleFileWatch";
+import { liveProbe } from "./0_liveProbe";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -231,6 +232,7 @@ export function initPreviewRestore() {
 // both be mid-flight over the same node; only the newest render may write.
 const renderSeq = new WeakMap<HTMLElement, number>();
 function mountMediaViewer(node: HTMLElement, path: string, media: { url?: string; svg?: string; pdf?: string }) {
+  liveProbe.record({ kind: "mount", name: "preview.mediaViewer", scope: path, detail: { svg: Boolean(media.svg), pdf: Boolean(media.pdf), url: Boolean(media.url) } });
   node.insertAdjacentHTML("beforeend", `<div class="fs-preview-media"></div>`);
   const mount = node.querySelector<HTMLElement>(".fs-preview-media");
   if (!mount) return;
@@ -239,6 +241,7 @@ function mountMediaViewer(node: HTMLElement, path: string, media: { url?: string
   root.render(createElement(FileImageViewer, {
     path,
     ...media,
+    probeRoot: node,
     onOpenHref: (href: string) => openDocumentHrefInInstant(href, path),
   }));
 }
@@ -262,6 +265,7 @@ function mountCodeViewer(node: HTMLElement, path: string, text: string, line?: n
 // Render `path` into `node`: images via read_image, markdown via marked, a
 // `line` request via the line-numbered source view, everything else via shiki.
 async function renderPathInto(node: HTMLElement, path: string, line?: number) {
+  liveProbe.record({ kind: "operation", name: "preview.renderPathInto", scope: path, detail: { line: line ?? 0 } });
   const seq = (renderSeq.get(node) ?? 0) + 1;
   renderSeq.set(node, seq);
   const stale = () => renderSeq.get(node) !== seq;
@@ -317,7 +321,10 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
         (sibling) => invoke<string>("read_image", { path: sibling }),
         async (sourcePath) => {
           const source = await invoke<string>("read_text", { path: sourcePath });
-          return { source, svg: await renderD2(source, store.get().mode === "dark") };
+          const dark = store.get().mode === "dark";
+          const svg = await renderD2(source, dark);
+          liveProbe.record({ kind: "operation", name: "preview.renderD2", scope: sourcePath, detail: { dark, sourceBytes: source.length, svgBytes: svg.length } });
+          return { source, svg };
         },
       );
       if (stale()) return;

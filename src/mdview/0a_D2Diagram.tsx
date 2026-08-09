@@ -1,16 +1,22 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { DiagramLightbox, diagramSvgMarkup } from "./0_DiagramLightbox";
 import { renderD2 } from "./d2";
+import { useLiveProbeLifecycle, useLiveProbeRender } from "../1_LiveProbe";
+import { liveProbe } from "../0_liveProbe";
 
 export function D2Diagram({ code, dark }: { code: string; dark: boolean }) {
+  useLiveProbeRender("D2Diagram", undefined, { dark, sourceBytes: code.length });
+  useLiveProbeLifecycle("D2Diagram");
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let disposed = false;
+    const started = typeof performance === "undefined" ? Date.now() : performance.now();
     void renderD2(code, dark)
       .then((rendered) => {
+        liveProbe.record({ kind: "operation", name: "mdview.renderD2", detail: { dark, sourceBytes: code.length, svgBytes: rendered.length, elapsedMs: Math.round((typeof performance === "undefined" ? Date.now() : performance.now()) - started) } });
         if (!disposed) {
           setError("");
           setSvg(rendered);

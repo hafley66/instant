@@ -4,6 +4,7 @@ import { clampPanZoom, pinchPanZoom, wheelZooms } from "./0_PanZoomViewport";
 import { sanitizeSvgDocument } from "./0_svgSanitize";
 import { panSvgBox, svgBoxAtZoom, svgNativeBox, svgSourceBox, type SvgBox } from "./0_svgViewport";
 import { openExternalUrl } from "./0_openExternal";
+import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 
 export function SvgDocumentViewer({
   path,
@@ -14,6 +15,8 @@ export function SvgDocumentViewer({
   source: string;
   onOpenHref?: (href: string) => void | Promise<void>;
 }) {
+  useLiveProbeRender("SvgDocumentViewer", path);
+  useLiveProbeLifecycle("SvgDocumentViewer", path);
   const clean = useMemo(() => sanitizeSvgDocument(source), [source]);
   const original = useMemo(() => svgSourceBox(clean) ?? { x: 0, y: 0, width: 1, height: 1 }, [clean]);
   const url = useMemo(() => URL.createObjectURL(new Blob([clean], { type: "image/svg+xml" })), [clean]);

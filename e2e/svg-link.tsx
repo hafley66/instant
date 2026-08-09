@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { SvgDocumentViewer } from "../src/1_SvgDocumentViewer";
+import { FileImageViewer } from "../src/1_FileImageViewer";
 import "../src/styles.css";
 
 declare global {
@@ -19,8 +19,9 @@ const source = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.
   </svg>
 </svg>`;
 
-createRoot(document.getElementById("root")!).render(
+const root = document.getElementById("root")!;
+createRoot(root).render(
   <div style={{ width: "800px", height: "500px" }}>
-    <SvgDocumentViewer path="/tmp/svg-link-receipt.svg" source={source} onOpenHref={(href) => { window.__openedSvgHref = href }} />
+    <FileImageViewer path="/tmp/svg-link-receipt.svg" svg={source} probeRoot={root} onOpenHref={(href) => { window.__openedSvgHref = href }} />
   </div>,
 );

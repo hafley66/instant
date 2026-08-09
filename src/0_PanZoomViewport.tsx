@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import "./0_panZoomViewport.css";
+import { useLiveProbeRender } from "./1_LiveProbe";
 
 export type PanZoomApi = {
   zoom: number;
@@ -40,6 +41,7 @@ export function PanZoomViewport({
   controls?: (api: PanZoomApi) => ReactNode;
   className?: string;
 }) {
+  useLiveProbeRender("PanZoomViewport");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
