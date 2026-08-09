@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type RefObject } from "react";
-import { countDomNodes, liveProbe, type LiveProbeDetail, type LiveProbeKind } from "./0_liveProbe";
+import { countDomNodes, liveProbe, selectProbeRoot, type LiveProbeDetail, type LiveProbeKind } from "./0_liveProbe";
 
 export function useLiveProbeRender(name: string, scope?: string, detail?: LiveProbeDetail): void {
   liveProbe.record({ kind: "render", name, scope, detail });
@@ -51,7 +51,7 @@ export function LiveProbePanel({
 function useStateDomCount(rootRef: RefObject<HTMLElement | null> | undefined, root: HTMLElement | undefined, eventCount: number) {
   const [domNodes, setDomNodes] = useState(0);
   useLayoutEffect(() => {
-    const next = countDomNodes(rootRef?.current ?? root ?? null);
+    const next = countDomNodes(selectProbeRoot(root ?? null, rootRef?.current ?? null));
     setDomNodes((current) => current === next ? current : next);
   }, [eventCount, root, rootRef]);
   return domNodes;

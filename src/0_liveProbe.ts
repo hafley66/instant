@@ -25,9 +25,15 @@ export type LiveProbe = {
   reset(): void;
 };
 
+export type ProbeDomRoot = Pick<ParentNode, "querySelectorAll">;
+
 const now = (): number => typeof performance === "undefined" ? Date.now() : performance.now();
 
-export function countDomNodes(root: Pick<ParentNode, "querySelectorAll"> | null): number {
+export function selectProbeRoot(explicitRoot: ProbeDomRoot | null, fallbackRoot: ProbeDomRoot | null): ProbeDomRoot | null {
+  return explicitRoot ?? fallbackRoot;
+}
+
+export function countDomNodes(root: ProbeDomRoot | null): number {
   if (!root) return 0;
   return 1 + root.querySelectorAll("*").length;
 }

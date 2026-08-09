@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { countDomNodes, createLiveProbe } from "./0_liveProbe";
+import { countDomNodes, createLiveProbe, selectProbeRoot } from "./0_liveProbe";
 
 describe("live probe", () => {
   it("keeps render and operation counts separate while retaining a bounded event log", async () => {
@@ -50,5 +50,11 @@ describe("live probe", () => {
     const root = { querySelectorAll: () => [{}, {}, {}] } as unknown as HTMLElement;
     expect(countDomNodes(root)).toBe(4);
     expect(countDomNodes(null)).toBe(0);
+  });
+
+  it("uses the explicit tab root before the local media wrapper", () => {
+    const tabRoot = { querySelectorAll: () => [{}, {}, {}, {}, {}] } as unknown as HTMLElement;
+    const mediaRoot = { querySelectorAll: () => [{}] } as unknown as HTMLElement;
+    expect(countDomNodes(selectProbeRoot(tabRoot, mediaRoot))).toBe(6);
   });
 });
