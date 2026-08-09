@@ -34,6 +34,7 @@ import type { AgentSessionNode } from "./0_types";
 import type { AgentTreeNode } from "./0_tree";
 import type { AiMessage } from "../../state";
 import type { ISessionTick, ISessionSpan, IWaterfallDomain, IWaterfallRange, TickType } from "./0_types";
+import { useLiveProbeLifecycle, useLiveProbeRender } from "../../1_LiveProbe";
 
 export interface WaterfallProps {
   // Full in-scope node set: history, not just the going-on subset.
@@ -136,6 +137,8 @@ function BrushOverview(props: {
 }
 
 export function Waterfall({ nodes, nowMs, onOpen, onLayout }: WaterfallProps) {
+  useLiveProbeRender("Waterfall", undefined, { nodeCount: nodes.length });
+  useLiveProbeLifecycle("Waterfall");
   const clock = Math.floor(nowMs / CLOCK_STEP_MS) * CLOCK_STEP_MS;
   const spans = useMemo(() => sessionSpans(nodes, clock), [nodes, clock]);
   const spanById = useMemo(() => new Map(spans.map((s) => [s.id, s])), [spans]);

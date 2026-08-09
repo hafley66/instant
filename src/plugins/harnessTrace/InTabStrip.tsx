@@ -22,6 +22,7 @@ import { Waterfall } from "./4_Waterfall";
 import { mailAgentIdFor } from "./0_mail";
 import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
+import { useLiveProbeRender } from "../../1_LiveProbe";
 
 export interface InTabStripProps {
   sid: string;
@@ -93,6 +94,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   const { nodes, liveTmux, registry, error, load } = useAgentTree(dataEnabled);
 
   const networkView = entry?.network ?? false;
+  useLiveProbeRender("InTabStrip", sid, { networkView, nodeCount: nodes.length });
   const setNetwork = (next: boolean) =>
     store.set({
       termStrip: {

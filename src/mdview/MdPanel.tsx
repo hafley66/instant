@@ -39,6 +39,7 @@ import { setPendingFrag, takePendingFrag } from "./open";
 import { MdExplorer } from "./MdExplorer";
 import { useFsWatch } from "./0_watch";
 import "./mdview.css";
+import { useLiveProbeRender } from "../1_LiveProbe";
 
 const StreamdownBody = lazy(() => import("./0_Streamdown"));
 
@@ -201,6 +202,7 @@ export const MdPanel = SignalReact(function MdPanel({
   const appState = host.useAppState();
   const dark = appState.dark;
   const path = pathSig.$();
+  useLiveProbeRender("MdPanel", path);
   const state = mdDocs.$()[path];
   const ui = mdUi.$();
   const collapsed = collapsedFor(path).$();
