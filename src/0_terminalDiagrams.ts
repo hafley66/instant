@@ -6,6 +6,7 @@ import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, type DiagramLightboxEntry } from "./mdview/0_DiagramLightbox";
 import { mermaidTheme } from "./mdview/0_diagramTheme";
 import { renderD2 } from "./mdview/d2";
+import { liveProbe } from "./0_liveProbe";
 import {
   diagramsFromMessageTail,
   isGenericMermaidDeclaration,
@@ -259,6 +260,7 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
   if (fence.language === "d2") {
     const rendered = await renderD2(fence.code, dark);
     if (typeof rendered !== "string") throw new Error("D2 renderer returned no SVG markup");
+    liveProbe.record({ kind: "operation", name: "terminal.renderD2", detail: { dark, sourceBytes: fence.code.length, svgBytes: rendered.length } });
     return rendered;
   }
   const mermaid = await loadMermaid();
@@ -275,6 +277,7 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
     try {
       const rendered = await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, lines.slice(0, length).join("\n"));
       if (typeof rendered?.svg !== "string") throw new Error("Mermaid renderer returned no SVG markup");
+      liveProbe.record({ kind: "operation", name: "terminal.renderMermaid", detail: { dark, sourceBytes: fence.code.length, svgBytes: rendered.svg.length } });
       return rendered.svg;
     } catch (reason) {
       lastError = reason;
