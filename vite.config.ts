@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { signalsJsx } from "@hafley66/signals/vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [react(), signalsJsx()],
   // Two HTML entries: the app (index.html) and the headless drop-catcher window
   // (dropcatcher.html). The catcher is the only surface with the native Tauri
   // drag handler; the main window keeps it off so dockview tab-drag works.

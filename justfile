@@ -50,6 +50,11 @@ install-cli:
 signing-setup:
     ./scripts/setup-signing.sh
 
+# Build, sign, and replace /Applications/instant.app with the shared local
+# Instant Dev identity. On a second Mac, pass the exported .p12 once.
+install-local p12="":
+    ./scripts/1_install-local.sh "{{p12}}"
+
 # one-time: local push-to-talk dictation (Handy, https://handy.computer — open
 # source, fully on-device, no audio leaves the machine). Alternative to Claude
 # Code's /voice, which streams audio to Anthropic. After install: grant Handy
@@ -78,20 +83,16 @@ bundle:
 cut version:
     ./scripts/0_release.sh {{version}}
 
-# regenerate the linked architectural backlog from comment_node relations
-todos:
-    dl --no-daemon --apply
-
-# regenerate the native-to-HTTP migration inventory from comment_node relations
-native-http:
-    dl --no-daemon --apply
-
-# lint rails + generated TODO.md drift (never writes)
-todos-check:
-    dl --no-daemon --check
+# Disabled while dl6 replaces dl:
+# todos:
+#     dl --no-daemon --apply
+# native-http:
+#     dl --no-daemon --apply
+# todos-check:
+#     dl --no-daemon --check
 
 # typecheck only
-check: todos-check
+check:
     corepack pnpm@10.12.4 run api:check
     corepack pnpm@10.12.4 exec tsc --noEmit
 

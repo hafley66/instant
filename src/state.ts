@@ -4,9 +4,6 @@
 import { createStore } from "./store";
 import type { SortState } from "./table";
 import type { HarnessId } from "./harnessTypes";
-import type { BoopSnap } from "./boopAgents";
-
-const EMPTY_BOOP: BoopSnap = { lanes: [], sessions: [], costUsd: null, calls: 0 };
 
 export type { SortState };
 
@@ -302,8 +299,6 @@ export interface AppState {
   // Plugins should read/write their slice here instead of touching localStorage
   // directly — see src/pluginState.ts (persisted).
   pluginState: Record<string, unknown>;
-  // Lanes/ps/session snapshot from the boop binary (runtime; polled, not persisted).
-  boopAgents: BoopSnap;
 }
 
 // Seeded into wtAgents on first run; thereafter the user's edited list wins.
@@ -511,7 +506,6 @@ function load(): AppState {
     sprefaScope: loadKey<SprefaScopeItem[]>("sprefaScope", []),
     sprefaScopeActive: loadKey<boolean>("sprefaScopeActive", false),
     pluginState,
-    boopAgents: EMPTY_BOOP,
   };
 }
 

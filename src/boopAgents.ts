@@ -2,6 +2,8 @@
 // exclusively (no scripts/bus.ts, no raw tmux) and parses its text/TSV/ndjson
 // output into plain row objects. Parsers are pure and fixture-tested; the
 // client takes an injected runner so the tauri boundary stays out of this file.
+import { Signal } from "@hafley66/signals";
+
 export const BOOP_BIN: string =
   "/Users/chrishafley/projects/sprefa/.boop-worktrees/lane/boop-rows/v6/boop/target/release/boop";
 
@@ -234,6 +236,13 @@ export interface BoopSnap {
   costUsd: number | null;
   calls: number;
 }
+
+export const boopAgents = Signal<BoopSnap>({
+  lanes: [],
+  sessions: [],
+  costUsd: null,
+  calls: 0,
+});
 
 export type RunCommand = (commandLine: string) => Promise<string>;
 

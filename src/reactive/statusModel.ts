@@ -1,4 +1,5 @@
-import { Signal, StorageSignal } from "@hafley66/signals";
+import { Signal, storageSignal } from "@hafley66/signals";
+import { Observable } from "rxjs";
 import type { StatusReport } from "../plugin";
 import { aggregateStatus } from "./statusDerivations";
 
@@ -12,8 +13,25 @@ export const statusRows = Signal<StatusRow[]>([]);
 export const aggregateHealth = Signal(() => aggregateStatus(statusRows.$()));
 
 export function createSprefaRoot(storage: Storage = localStorage) {
-  return StorageSignal("sprefa.root", "~/projects/sprefa/v5", {
-    storage,
+  const key = "sprefa.root";
+  return storageSignal({
+    read: new Observable<string>((subscriber) => {
+      const emit = () => subscriber.next(storage.getItem(key) ?? "");
+      const onStorage = (event: StorageEvent) => {
+        if (event.storageArea === storage && event.key === key) emit();
+      };
+      if (typeof addEventListener === "function") addEventListener("storage", onStorage);
+      emit();
+      return () => {
+        if (typeof removeEventListener === "function") removeEventListener("storage", onStorage);
+      };
+    }),
+    write: {
+      next: (value) => storage.setItem(key, value),
+      error() {},
+      complete() {},
+    },
+  }, "~/projects/sprefa/v5", {
     parse: (value) => value,
     serialize: (value) => value,
   });

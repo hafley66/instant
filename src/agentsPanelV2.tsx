@@ -1,11 +1,10 @@
 // Agents (boop) v2 panel, on the shared <TreeTable> grid stack. Rows are boop
 // lanes (liveness, pid, rss, cpu) expandable to the lane's route detail. Data
-// derivation + shellouts live in main.ts; this file is presentational, reading
-// the bridge. useApp() resubscribes on store change so polls re-render.
+// derivation + shellouts live in main.ts; this file reads the boop snapshot
+// signal directly. The signals JSX Vite plugin tracks the .$() read.
 import { useEffect, useState } from "react";
-import { useApp } from "./useStore";
 import { TreeTable, type TreeColumn } from "./treetable";
-import type { AgentsRow } from "./boopAgents";
+import { boopAgents, type AgentsRow } from "./boopAgents";
 
 export interface AgentsSummary {
   total: number;
@@ -15,13 +14,11 @@ export interface AgentsSummary {
 }
 
 export interface AgentsBridge {
-  rows: () => AgentsRow[];
   onShow?: () => void;
   canExpand: (row: AgentsRow) => boolean;
   getSubRows: (row: AgentsRow) => AgentsRow[] | undefined;
   onToggle: (lane: string, willExpand: boolean) => void;
   hail: (lane: string, body: string) => Promise<void>;
-  summary: () => AgentsSummary;
 }
 
 let agentsBridge: AgentsBridge | null = null;
@@ -167,13 +164,18 @@ function agentsFilter(r: AgentsRow, q: string): boolean {
 }
 
 export function AgentsPanelV2() {
-  useApp();
   useEffect(() => {
     agentsBridge?.onShow?.();
   }, []);
   const b = agentsBridge;
-  const rows = b?.rows() ?? [];
-  const sum = b?.summary() ?? { total: 0, live: 0, sessions: 0, costUsd: null };
+  const snap = boopAgents.$();
+  const rows = snap.lanes;
+  const sum: AgentsSummary = {
+    total: rows.length,
+    live: rows.filter((row) => row.state === "live").length,
+    sessions: snap.sessions.length,
+    costUsd: snap.costUsd,
+  };
   return (
     <div className="v2-panel">
       <div className="act-bar">
