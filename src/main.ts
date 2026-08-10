@@ -116,7 +116,53 @@ import { isDraggingIn, wireOsDrop } from "./dnd";
 import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
+import { setAgentsPanel } from "./agentsPanelV2";
+import { BoopClient, startBoopPolling, subRowsFor } from "./boopAgents";
 import { startReactiveRuntime } from "./reactive/runtime";
+
+// Agents (boop) panel wiring: shellout runner + poll + bridge. New code here
+// calls boop only; it never imports scripts/bus.ts or execs tmux directly.
+function registerAgentsPanel() {
+  const client = new BoopClient((line) => invoke<string>("run_click", { command: line, cwd: "" }));
+  const stop = startBoopPolling(client, (snap) => store.set({ boopAgents: snap }), 1500);
+  window.addEventListener("beforeunload", stop, { once: true });
+  const expand = (lane: string) => {
+    void client.route(lane).then((detail) => {
+      const snap = store.get().boopAgents;
+      store.set({
+        boopAgents: {
+          ...snap,
+          lanes: snap.lanes.map((l) => (l.lane === lane ? { ...l, route: detail } : l)),
+        },
+      });
+    });
+  };
+  setAgentsPanel({
+    rows: () => store.get().boopAgents.lanes,
+    onShow: () => {
+      // First poll already fired at registration; nothing to force here.
+    },
+    canExpand: (row) => row.kind === "lane",
+    getSubRows: (row) => subRowsFor(row),
+    onToggle: (lane, willExpand) => {
+      if (willExpand) expand(lane);
+    },
+    hail: (lane, body) =>
+      client.hail(lane, body, "instant").then(() => {
+        // no per-hail surface yet; the poll reflects the queued message next tick
+      }),
+    summary: () => {
+      const s = store.get().boopAgents;
+      const lanes = s.lanes;
+      return {
+        total: lanes.length,
+        live: lanes.filter((l) => l.state === "live").length,
+        sessions: s.sessions.length,
+        costUsd: s.costUsd,
+      };
+    },
+  });
+}
 
 // Toggle the per-terminal right "session sidebar" (file explorer) on the
 // focused terminal. Each terminal remembers its own open state + width.
@@ -291,6 +337,7 @@ async function main() {
   registerPaint();
   registerV2Bridges();
   registerActivityBridge();
+  registerAgentsPanel();
   refreshFavorites();
   initRail(); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
   const stopReactiveRuntime = startReactiveRuntime();

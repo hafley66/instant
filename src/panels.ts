@@ -4,6 +4,7 @@
 // to its lazy data refresh.
 import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
+import { AgentsPanelV2 } from "./agentsPanelV2";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { store } from "./state";
 import { cdpPerf } from "./cdp";
@@ -70,6 +71,14 @@ export function registerBuiltin() {
         iconLabel: "Activity",
         html: "",
         component: ActivityPanelV2,
+      },
+      {
+        id: "agents",
+        title: "Agents",
+        icon: "⏵",
+        iconLabel: "Agents",
+        html: "",
+        component: AgentsPanelV2,
       },
     ],
   });
