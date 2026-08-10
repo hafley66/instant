@@ -2,7 +2,7 @@
 
 ## Commit
 
-`PENDING` at report authoring time. The task commit is created after this report is staged.
+`be7352f` (`Migrate file explorer to grid tree`)
 
 ## Checks
 
