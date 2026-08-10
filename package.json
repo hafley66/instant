@@ -19,6 +19,7 @@
     "test:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
+    "@hafley66/grid": "0.1.0",
     "@hafley66/json-rx": "0.1.2",
     "@hafley66/signals": "0.0.2",
     "@oddbird/css-anchor-positioning": "^0.9.0",
