@@ -106,6 +106,11 @@ fn pixel_dims(cols: u16, rows: u16, cell_w: Option<u16>, cell_h: Option<u16>) ->
 /// the isolation is total. Discriminated by cfg!(debug_assertions).
 fn tmux_cmd() -> std::process::Command {
     let mut c = std::process::Command::new("tmux");
+    // A release app is launched by macOS rather than a login shell, so its
+    // locale can be absent or non-UTF-8. tmux otherwise replaces wide/Unicode
+    // cells with underscores before those bytes ever reach xterm. Force UTF-8
+    // on every client, including clients attaching to an already-live server.
+    c.arg("-u");
     if !cfg!(debug_assertions) {
         c.args(["-L", "instant-prod"]);
     }
@@ -355,7 +360,17 @@ pub async fn open_session(
             None => c.arg("-l"),
         }
         c.env("PATH", path_env());
-        c.env("TERM", if graphics { "xterm-kitty" } else { "xterm-256color" });
+        c.env_remove("LC_ALL");
+        c.env("LANG", "en_US.UTF-8");
+        c.env("LC_CTYPE", "en_US.UTF-8");
+        c.env(
+            "TERM",
+            if graphics {
+                "xterm-kitty"
+            } else {
+                "xterm-256color"
+            },
+        );
         c
     } else {
         // When creating, the trailing command runs inside; on reattach tmux
@@ -368,6 +383,7 @@ pub async fn open_session(
         let mut c = CommandBuilder::new("tmux");
         // Match tmux_cmd's socket so the pty's own server is the same one all the
         // management commands talk to (prod = private socket; dev = default).
+        c.arg("-u");
         if !cfg!(debug_assertions) {
             c.args(["-L", "instant-prod"]);
         }
@@ -381,6 +397,9 @@ pub async fn open_session(
             c.arg(run);
         }
         c.env("PATH", path_env());
+        c.env_remove("LC_ALL");
+        c.env("LANG", "en_US.UTF-8");
+        c.env("LC_CTYPE", "en_US.UTF-8");
         c.env("TERM", "xterm-256color");
         c
     };
