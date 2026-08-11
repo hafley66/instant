@@ -8,6 +8,17 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), signalsJsx()],
+  // signalsJsx rewrites JSX imports after Vite's initial HTML/module scan, so
+  // the generated runtime otherwise gets discovered only after the webview has
+  // loaded and Vite forces a dependency-optimization reload.
+  optimizeDeps: {
+    include: [
+      "@hafley66/signals/react",
+      "@hafley66/signals/jsx-runtime",
+      "@hafley66/signals/jsx-dev-runtime",
+      "@hafley66/grid > @tanstack/react-table",
+    ],
+  },
   // Two HTML entries: the app (index.html) and the headless drop-catcher window
   // (dropcatcher.html). The catcher is the only surface with the native Tauri
   // drag handler; the main window keeps it off so dockview tab-drag works.
@@ -40,11 +51,24 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. keep backend sources and nested Git worktrees out of the frontend watcher
+      // 3. avoid FSEvents' volume-wide native stream and keep generated trees
+      // out of the frontend watcher
+      usePolling: true,
+      interval: 500,
       ignored: [
+        "**/.git/**",
+        "**/node_modules/**",
+        "**/.pnpm-store/**",
         "**/src-tauri/**",
+        "**/target/**",
         "**/.worktrees/**",
         "**/.claude/worktrees/**",
+        "**/dist/**",
+        "**/coverage/**",
+        "**/test-results/**",
+        "**/playwright-report/**",
+        "**/chat_log/**",
+        "**/.dl/**",
       ],
     },
   },
