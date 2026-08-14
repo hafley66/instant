@@ -65,6 +65,10 @@ left join agent_turn a
                where session_id = u.session_id and role_id = 2
                  and turn < u.turn)
 where u.role_id = 1 and u.ts > $cursor
+  -- Every inner-pipeline run is itself an opencode session whose turn 1 is
+  -- this template rendered. Sync ingests it, so without this filter the loop
+  -- maps its own prompts forever.
+  and u.said not like 'mode: %'
 order by u.ts"
 }
 
