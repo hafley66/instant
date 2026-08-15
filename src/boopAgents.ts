@@ -5,7 +5,7 @@
 import { Signal } from "@hafley66/signals";
 
 export const BOOP_BIN: string =
-  "/Users/chrishafley/projects/sprefa/.boop-worktrees/lane/boop-rows/v6/boop/target/release/boop";
+  "/Users/chrishafley/projects/claude-research/bin/boop";
 
 export interface LaneInfo {
   state: string; // live | dead | ?
@@ -65,6 +65,39 @@ export function parsePs(text: string): Record<string, PsInfo> {
     };
   }
   return out;
+}
+
+export interface PstreeInfo {
+  lane: string;
+  parent: string | null;
+  inferred: boolean;
+  pid: number | null;
+  state: string;
+  goal: string | null;
+  children: number[];
+}
+
+export function parsePstree(text: string): PstreeInfo[] {
+  return text.split("\n").flatMap((line) => {
+    if (!line.trim()) return [];
+    try {
+      const row = JSON.parse(line);
+      if (typeof row.lane !== "string" || row.lane.length === 0) return [];
+      return [{
+        lane: row.lane,
+        parent: typeof row.parent === "string" ? row.parent : null,
+        inferred: row.inferred === true,
+        pid: typeof row.pid === "number" ? row.pid : null,
+        state: typeof row.state === "string" ? row.state : "?",
+        goal: typeof row.goal === "string" ? row.goal : null,
+        children: Array.isArray(row.children)
+          ? row.children.filter((pid: unknown): pid is number => typeof pid === "number")
+          : [],
+      }];
+    } catch {
+      return [];
+    }
+  });
 }
 
 export interface BoopSession {
@@ -167,6 +200,12 @@ export interface LaneRow {
   children: number | null;
   sessions: number;
   route: LaneDetail | null;
+  parent: string | null;
+  inferred: boolean;
+  goal: string | null;
+  childPids: number[];
+  childLanes?: LaneRow[];
+  addressable: boolean;
 }
 
 export interface RouteRow {
@@ -180,7 +219,51 @@ export interface RouteRow {
   tmux: string | null;
 }
 
-export type AgentsRow = LaneRow | RouteRow;
+export interface SessionRow {
+  kind: "session";
+  id: string;
+  lane: string;
+  sessionId: string;
+  harness: string;
+  cwd: string;
+  turns: number;
+  lastTs: number;
+}
+
+export interface SessionGroupRow {
+  kind: "session-group";
+  id: string;
+  lane: string;
+  harness: string;
+  children: AgentsRow[];
+}
+
+export type AgentsRow = LaneRow | RouteRow | SessionRow | SessionGroupRow;
+
+export function sessionTree(sessions: BoopSession[]): SessionGroupRow[] {
+  const byHarness = new Map<string, SessionRow[]>();
+  for (const session of [...sessions].sort((a, b) => b.lastTs - a.lastTs)) {
+    const rows = byHarness.get(session.harness) ?? [];
+    rows.push({
+      kind: "session",
+      id: `session:${session.session}`,
+      lane: session.nickname || session.session,
+      sessionId: session.session,
+      harness: session.harness,
+      cwd: session.cwd,
+      turns: session.turns,
+      lastTs: session.lastTs,
+    });
+    byHarness.set(session.harness, rows);
+  }
+  return [...byHarness.entries()].map(([harness, children]) => ({
+    kind: "session-group",
+    id: `sessions:${harness}`,
+    lane: `${harness} chats`,
+    harness,
+    children,
+  }));
+}
 
 export function mergeLanes(
   lanes: LaneInfo[],
@@ -210,12 +293,59 @@ export function mergeLanes(
       children: p?.children ?? null,
       sessions: perHarness[l.harness] ?? 0,
       route: null,
+      parent: null,
+      inferred: false,
+      goal: null,
+      childPids: [],
+      addressable: true,
     };
   });
 }
 
+export function buildLaneTree(lanes: LaneRow[], edges: PstreeInfo[]): LaneRow[] {
+  const byLane = new Map(lanes.map((lane) => [lane.lane, { ...lane }]));
+  for (const edge of edges) {
+    const lane = byLane.get(edge.lane);
+    byLane.set(edge.lane, {
+      ...(lane ?? {
+        kind: "lane" as const,
+        id: edge.lane,
+        lane: edge.lane,
+        harness: "",
+        mode: "",
+        model: "",
+        tmux: "",
+        cwd: "",
+        rssKb: null,
+        cpuPct: null,
+        uptimeSec: null,
+        children: edge.children.length,
+        sessions: 0,
+        route: null,
+        addressable: false,
+      }),
+      state: lane?.state ?? edge.state,
+      pid: lane?.pid ?? edge.pid,
+      parent: edge.parent,
+      inferred: edge.inferred,
+      goal: edge.goal,
+      childPids: edge.children,
+    });
+  }
+  const roots: LaneRow[] = [];
+  for (const lane of byLane.values()) {
+    const parent = lane.parent ? byLane.get(lane.parent) : undefined;
+    if (!parent || parent === lane) roots.push(lane);
+    else parent.childLanes = [...(parent.childLanes ?? []), lane];
+  }
+  return roots;
+}
+
 export function subRowsFor(row: AgentsRow): AgentsRow[] | undefined {
-  if (row.kind !== "lane" || !row.route) return undefined;
+  if (row.kind === "session-group") return row.children;
+  if (row.kind !== "lane") return undefined;
+  const children: AgentsRow[] = [...(row.childLanes ?? [])];
+  if (!row.route) return children.length > 0 ? children : undefined;
   const r = row.route;
   const child: RouteRow = {
     kind: "route",
@@ -227,11 +357,29 @@ export function subRowsFor(row: AgentsRow): AgentsRow[] | undefined {
     cwd: r.cwd,
     tmux: r.tmux,
   };
-  return [child];
+  return [...children, child];
+}
+
+export function withLaneRoute(rows: LaneRow[], lane: string, route: LaneDetail): LaneRow[] {
+  return rows.map((row) => ({
+    ...row,
+    route: row.lane === lane ? route : row.route,
+    childLanes: row.childLanes ? withLaneRoute(row.childLanes, lane, route) : undefined,
+  }));
+}
+
+export function findLane(rows: LaneRow[], lane: string): LaneRow | undefined {
+  for (const row of rows) {
+    if (row.lane === lane) return row;
+    const child = row.childLanes ? findLane(row.childLanes, lane) : undefined;
+    if (child) return child;
+  }
+  return undefined;
 }
 
 export interface BoopSnap {
   lanes: LaneRow[];
+  tree: LaneRow[];
   sessions: BoopSession[];
   costUsd: number | null;
   calls: number;
@@ -239,6 +387,7 @@ export interface BoopSnap {
 
 export const boopAgents = Signal<BoopSnap>({
   lanes: [],
+  tree: [],
   sessions: [],
   costUsd: null,
   calls: 0,
@@ -255,6 +404,10 @@ function quoteArg(a: string): string {
 }
 
 export class BoopClient {
+  sessions: BoopSession[] = [];
+  costUsd: number | null = null;
+  calls = 0;
+
   constructor(
     private run: RunCommand,
     private bin: string = BOOP_BIN,
@@ -267,12 +420,13 @@ export class BoopClient {
   async poll(tick: number): Promise<BoopSnap> {
     const lanesInfo = parseLaneList(await this.cmd(["beep", "lane", "list"]));
     const psInfo = parsePs(await this.cmd(["beep", "ps"]));
-    let sessions: BoopSession[] = [];
-    let costUsd: number | null = null;
-    let calls = 0;
+    const pstree = parsePstree(await this.cmd(["beep", "pstree", "--all", "--format", "ndjson"]));
+    if (lanesInfo.length > 0 && pstree.length === 0) {
+      throw new Error("boop returned lanes without a pstree projection");
+    }
     if (tick % 5 === 0) {
       try {
-        sessions = parseSessions(
+        this.sessions = parseSessions(
           await this.cmd(["db", "session", "list", "--limit", "8", "--format", "ndjson"]),
         );
       } catch {
@@ -282,13 +436,14 @@ export class BoopClient {
         const u = parseUsage(
           await this.cmd(["db", "usage", "--limit", "1", "--format", "ndjson"]),
         );
-        costUsd = u.costUsd;
-        calls = u.calls;
+        this.costUsd = u.costUsd;
+        this.calls = u.calls;
       } catch {
         // usage read failed; keep last
       }
     }
-    return { lanes: mergeLanes(lanesInfo, psInfo, sessions), sessions, costUsd, calls };
+    const lanes = mergeLanes(lanesInfo, psInfo, this.sessions);
+    return { lanes, tree: buildLaneTree(lanes, pstree), sessions: this.sessions, costUsd: this.costUsd, calls: this.calls };
   }
 
   async route(lane: string): Promise<LaneDetail> {

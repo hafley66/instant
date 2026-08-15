@@ -1279,13 +1279,11 @@ body[data-skin="xp"][data-mode="dark"] .turn-copy[data-role="user"] small { colo
   overflow: hidden;
   background: var(--term-bg);
 }
-.term-host .xterm,
-.term-host .xterm-viewport {
-  height: 100% !important;
-}
-.term-host .xterm-viewport {
-  overflow-y: hidden !important;
-}
+/* xterm v6 (DOM renderer) sizes .xterm to its content (.xterm-screen =
+   rows * cellHeight, set by FitAddon). Forcing height:100% here made .xterm
+   taller than the screen (a 2px+ gap), and .xterm-viewport is now a vestigial
+   absolute background layer (the real scroll container is .xterm-scrollable-
+   element). Both rules are v5-era leftovers. */
 .term-diagrams {
   position: absolute;
   inset: 0;
@@ -2507,11 +2505,52 @@ body[data-skin="xp"][data-mode="dark"] .dtable th.sorted {
      rows in dark mode). */
   background: var(--panel-bg);
   color: var(--panel-fg);
+  --grid-bg: var(--panel-bg);
+  --grid-row-alternate-bg: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 3%);
+  --grid-header-bg: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 6%);
+  --grid-fg: var(--panel-fg);
+  --grid-muted-fg: color-mix(in srgb, var(--panel-fg), transparent 34%);
+  --grid-faint-fg: color-mix(in srgb, var(--panel-fg), transparent 48%);
+  --grid-border: color-mix(in srgb, var(--panel-fg), transparent 78%);
+  --grid-hairline: color-mix(in srgb, var(--panel-fg), transparent 88%);
+  --grid-accent: var(--accent);
 }
 .v2-panel .panel-scroll {
   flex: 1;
   min-height: 0;
   height: auto;
+}
+.v2-panel [data-testid="grid-tree"] {
+  width: 100% !important;
+}
+.v2-panel [data-testid="grid"] table {
+  table-layout: fixed;
+}
+.v2-panel [data-testid="grid"] th:first-child,
+.v2-panel [data-testid="grid"] td:first-child {
+  box-sizing: border-box;
+  width: 44px !important;
+  min-width: 44px;
+  max-width: 44px;
+}
+.v2-panel [data-testid="grid"] th:nth-child(2),
+.v2-panel [data-testid="grid"] td:nth-child(2) {
+  box-sizing: border-box;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+}
+.v2-panel [data-testid="grid"] td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v2-panel [data-testid="grid"] td:first-child {
+  overflow: visible;
+}
+.v2-panel [data-testid="grid"] [data-testid="row-toggle"] {
+  transform: none !important;
 }
 /* Virtualized TreeTable owns its own scroll container. */
 .tt-scroll {

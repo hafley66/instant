@@ -67,7 +67,11 @@ pub struct KittyScanner {
 
 impl Default for KittyScanner {
     fn default() -> Self {
-        Self { state: State::Normal, apc: Vec::new(), pending: None }
+        Self {
+            state: State::Normal,
+            apc: Vec::new(),
+            pending: None,
+        }
     }
 }
 
@@ -159,7 +163,10 @@ impl KittyScanner {
             return resolve(keys, data);
         }
         if more {
-            self.pending = Some(Pending { keys, data: payload });
+            self.pending = Some(Pending {
+                keys,
+                data: payload,
+            });
             return None;
         }
         resolve(keys, payload)
@@ -192,7 +199,10 @@ fn geti(keys: &HashMap<u8, String>, k: u8, default: i64) -> i64 {
 }
 
 fn resolve(keys: HashMap<u8, String>, payload: Vec<u8>) -> Option<ScanOut> {
-    let action = keys.get(&b'a').and_then(|s| s.chars().next()).unwrap_or('t');
+    let action = keys
+        .get(&b'a')
+        .and_then(|s| s.chars().next())
+        .unwrap_or('t');
     let id = geti(&keys, b'i', 0) as u32;
 
     if action == 'q' {
@@ -215,14 +225,24 @@ fn resolve(keys: HashMap<u8, String>, payload: Vec<u8>) -> Option<ScanOut> {
 
     if action == 'd' {
         return Some(ScanOut::Graphics(Graphics {
-            action, id, format, width, height, x, y, no_scroll,
+            action,
+            id,
+            format,
+            width,
+            height,
+            x,
+            y,
+            no_scroll,
             delete: true,
             rgba: Vec::new(),
         }));
     }
 
     // Resolve the transmission medium to raw bytes.
-    let medium = keys.get(&b't').and_then(|s| s.chars().next()).unwrap_or('d');
+    let medium = keys
+        .get(&b't')
+        .and_then(|s| s.chars().next())
+        .unwrap_or('d');
     let raw = match medium {
         'd' => payload, // already base64-decoded pixel/PNG bytes
         's' => read_shm(&String::from_utf8_lossy(&payload))?,
@@ -233,7 +253,14 @@ fn resolve(keys: HashMap<u8, String>, payload: Vec<u8>) -> Option<ScanOut> {
 
     let rgba = to_rgba(raw, format, width, height)?;
     Some(ScanOut::Graphics(Graphics {
-        action, id, format, width, height, x, y, no_scroll,
+        action,
+        id,
+        format,
+        width,
+        height,
+        x,
+        y,
+        no_scroll,
         delete: false,
         rgba,
     }))
@@ -255,7 +282,14 @@ fn read_shm(name: &str) -> Option<Vec<u8>> {
             return None;
         }
         let len = st.st_size as usize;
-        let ptr = libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, fd, 0);
+        let ptr = libc::mmap(
+            std::ptr::null_mut(),
+            len,
+            libc::PROT_READ,
+            libc::MAP_SHARED,
+            fd,
+            0,
+        );
         if ptr == libc::MAP_FAILED {
             libc::close(fd);
             return None;

@@ -13,8 +13,21 @@ const EXTRA_PATH: &str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sb
 // Heavy/uninteresting dirs we never descend into. NOT .worktrees — that's where
 // worktrees often live.
 const SKIP: &[&str] = &[
-    "node_modules", "target", ".git", "Library", ".cache", ".cargo", ".rustup",
-    ".npm", ".Trash", "dist", "build", ".next", "vendor", "Pictures", "Music",
+    "node_modules",
+    "target",
+    ".git",
+    "Library",
+    ".cache",
+    ".cargo",
+    ".rustup",
+    ".npm",
+    ".Trash",
+    "dist",
+    "build",
+    ".next",
+    "vendor",
+    "Pictures",
+    "Music",
 ];
 
 #[derive(Serialize, Clone)]
@@ -81,7 +94,10 @@ fn add_worktree_blocking(repo: String, branch: String) -> Result<String, String>
     let path_str = path.to_string_lossy().to_string();
     // Existing branch -> plain checkout; else create it off HEAD.
     if git(repo_path, &["worktree", "add", &path_str, branch]).is_err() {
-        git(repo_path, &["worktree", "add", "-b", branch, &path_str, "HEAD"])?;
+        git(
+            repo_path,
+            &["worktree", "add", "-b", branch, &path_str, "HEAD"],
+        )?;
     }
     Ok(path_str)
 }
@@ -166,7 +182,9 @@ fn walk(dir: &Path, depth: usize, max: usize, out: &mut Vec<PathBuf>) {
         out.push(dir.to_path_buf());
         return;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if !p.is_dir() {
@@ -205,7 +223,9 @@ fn scan_worktrees_blocking(roots: Vec<String>, max_depth: Option<usize>) -> Vec<
     // Dedupe clones by canonical git-common-dir; keep one probe dir per clone.
     let mut clones: BTreeMap<String, PathBuf> = BTreeMap::new();
     for c in candidates {
-        let Ok(common) = git(&c, &["rev-parse", "--git-common-dir"]) else { continue };
+        let Ok(common) = git(&c, &["rev-parse", "--git-common-dir"]) else {
+            continue;
+        };
         let abs = if Path::new(&common).is_absolute() {
             PathBuf::from(&common)
         } else {
@@ -230,16 +250,24 @@ fn scan_worktrees_blocking(roots: Vec<String>, max_depth: Option<usize>) -> Vec<
 /// `scan_worktrees` (walks many clones) and `worktree_at` (resolves one path
 /// on demand, e.g. a live tmux session's cwd the walk never reached).
 fn worktree_rows_for_clone(probe: &Path) -> Vec<WorktreeRow> {
-    let Ok(porcelain) = git(probe, &["worktree", "list", "--porcelain"]) else { return Vec::new() };
+    let Ok(porcelain) = git(probe, &["worktree", "list", "--porcelain"]) else {
+        return Vec::new();
+    };
     // Porcelain: blocks separated by a blank line; first block is the main worktree.
-    let blocks: Vec<&str> = porcelain.split("\n\n").filter(|b| !b.trim().is_empty()).collect();
+    let blocks: Vec<&str> = porcelain
+        .split("\n\n")
+        .filter(|b| !b.trim().is_empty())
+        .collect();
     let main_path = blocks
         .first()
         .and_then(|b| b.lines().find_map(|l| l.strip_prefix("worktree ")))
         .unwrap_or("")
         .to_string();
-    let origin =
-        git(Path::new(&main_path), &["config", "--get", "remote.origin.url"]).unwrap_or_default();
+    let origin = git(
+        Path::new(&main_path),
+        &["config", "--get", "remote.origin.url"],
+    )
+    .unwrap_or_default();
 
     let mut rows = Vec::new();
     for block in blocks {
@@ -296,7 +324,8 @@ fn worktree_at_blocking(path: String) -> Option<WorktreeRow> {
     git(p, &["rev-parse", "--is-inside-work-tree"]).ok()?;
     let canon_target = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     worktree_rows_for_clone(p).into_iter().find(|r| {
-        let wt_canon = std::fs::canonicalize(&r.worktree).unwrap_or_else(|_| PathBuf::from(&r.worktree));
+        let wt_canon =
+            std::fs::canonicalize(&r.worktree).unwrap_or_else(|_| PathBuf::from(&r.worktree));
         canon_target == wt_canon || canon_target.starts_with(&wt_canon)
     })
 }

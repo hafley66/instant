@@ -17,12 +17,12 @@ pub struct Entry {
     is_dir: bool,
     size: u64,
     modified: i64, // unix ms, 0 if unknown
-    ext: String, // lowercased extension, "" for dirs / none
+    ext: String,   // lowercased extension, "" for dirs / none
 }
 
 #[derive(Serialize)]
 pub struct DirListing {
-    path: String, // canonical dir shown
+    path: String,           // canonical dir shown
     parent: Option<String>, // parent dir, None at root
     entries: Vec<Entry>,
 }
@@ -243,13 +243,19 @@ fn list_dir_recursive_blocking(
 /// ignore semantics. Directories are excluded because FileSearchTree retains
 /// its lazy expandable directory browser beside search results.
 #[tauri::command]
-pub async fn search_files(path: Option<String>, max_files: Option<usize>) -> Result<Vec<Entry>, String> {
+pub async fn search_files(
+    path: Option<String>,
+    max_files: Option<usize>,
+) -> Result<Vec<Entry>, String> {
     tauri::async_runtime::spawn_blocking(move || search_files_blocking(path, max_files))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn search_files_blocking(path: Option<String>, max_files: Option<usize>) -> Result<Vec<Entry>, String> {
+fn search_files_blocking(
+    path: Option<String>,
+    max_files: Option<usize>,
+) -> Result<Vec<Entry>, String> {
     let dir = resolve(path);
     let canon = dir.canonicalize().unwrap_or(dir);
     let cap = max_files.unwrap_or(20_000);
@@ -263,14 +269,31 @@ fn search_files_blocking(path: Option<String>, max_files: Option<usize>) -> Resu
         .parents(true)
         .follow_links(false);
     for result in builder.build() {
-        if entries.len() >= cap { break; }
-        let entry = match result { Ok(entry) => entry, Err(_) => continue };
-        let file_type = match entry.file_type() { Some(file_type) => file_type, None => continue };
-        if !file_type.is_file() { continue; }
+        if entries.len() >= cap {
+            break;
+        }
+        let entry = match result {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let file_type = match entry.file_type() {
+            Some(file_type) => file_type,
+            None => continue,
+        };
+        if !file_type.is_file() {
+            continue;
+        }
         let p = entry.into_path();
-        let meta = match std::fs::metadata(&p) { Ok(meta) => meta, Err(_) => continue };
+        let meta = match std::fs::metadata(&p) {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
         entries.push(Entry {
-            name: p.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            name: p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
             path: p.to_string_lossy().into_owned(),
             is_dir: false,
             size: meta.len(),
@@ -379,8 +402,7 @@ fn save_text_blocking(path: String, contents: String) -> Result<(), String> {
     let resolved = resolve(Some(path));
     if let Some(parent) = resolved.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("{}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
     }
     std::fs::write(&resolved, contents).map_err(|e| format!("{}: {e}", resolved.display()))
@@ -397,8 +419,7 @@ pub async fn delete_file(path: String) -> Result<(), String> {
 
 fn delete_file_blocking(path: String) -> Result<(), String> {
     let resolved = resolve(Some(path));
-    let meta = std::fs::metadata(&resolved)
-        .map_err(|e| format!("{}: {e}", resolved.display()))?;
+    let meta = std::fs::metadata(&resolved).map_err(|e| format!("{}: {e}", resolved.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", resolved.display()));
     }

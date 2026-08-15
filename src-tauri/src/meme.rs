@@ -165,7 +165,9 @@ fn magick_run_blocking(args: Vec<String>) -> Result<MagickResult, String> {
         .output()
         .map_err(|e| format!("cannot run '{bin}': {e}. Is ImageMagick installed?"))?;
     if !probe.status.success() {
-        return Err(format!("'{bin}' -version failed. Is ImageMagick installed?"));
+        return Err(format!(
+            "'{bin}' -version failed. Is ImageMagick installed?"
+        ));
     }
 
     let display = command_display(&args);
@@ -302,8 +304,7 @@ fn save_meme_blocking(path: String, data_url: String) -> Result<(), String> {
     let resolved = crate::fs::resolve(Some(path));
     if let Some(parent) = resolved.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("{}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
     }
     std::fs::write(&resolved, bytes).map_err(|e| format!("{}: {e}", resolved.display()))

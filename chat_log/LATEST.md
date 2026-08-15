@@ -1,1 +1,1 @@
-20260806.0.instant-preview-canvas-research.md
+20260808.1.instant-rectangle-window-graph.md

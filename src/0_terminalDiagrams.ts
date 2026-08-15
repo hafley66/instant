@@ -3,9 +3,7 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { auditTime, debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
-import { DiagramLightbox, diagramSvgMarkup, type DiagramLightboxEntry } from "./mdview/0_DiagramLightbox";
-import { mermaidTheme } from "./mdview/0_diagramTheme";
-import { renderD2 } from "./mdview/d2";
+import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
 import {
   diagramsFromMessageTail,
@@ -22,6 +20,7 @@ export type DiagramFence = {
   start: number;
   end: number;
   inferred: boolean;
+  stripped?: boolean;
   locator?: string;
   messageId?: string;
 };
@@ -135,7 +134,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
   const lines = logicalLines(
     term,
     Math.max(0, viewportTop - 1000),
-    Math.min(buffer.length - 1, viewportTop + term.rows - 1),
+    Math.min(buffer.length - 1, viewportTop + term.rows + 1000),
   );
   const found: DiagramFence[] = [];
   const occupied = new Set<number>();
@@ -159,15 +158,22 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
   }
   // Claude and Codex render Markdown fences without the backticks. The language
   // label survives as its own row, which is enough provenance to distinguish a
-  // diagram from arrow-shaped source code. Capture through the next blank row.
+  // diagram from arrow-shaped source code. Code rows retain Markdown's leading
+  // indentation, including across internal blank rows.
   for (let index = 0; index < lines.length; index++) {
     if (occupied.has(lines[index].start)) continue;
     const label = stripTuiBullet(lines[index].text).trim().toLowerCase();
     if (label !== "mermaid" && label !== "d2") continue;
-    const firstCode = stripTuiBullet(lines[index + 1]?.text ?? "").trimStart();
-    if (label === "mermaid" ? !isMermaidStart(firstCode) : !isD2ArrowLine(firstCode)) continue;
+    const firstRaw = stripTuiBullet(lines[index + 1]?.text ?? "");
+    const firstCode = firstRaw.trimStart();
+    if (label === "mermaid" ? !isMermaidStart(firstCode) : !isD2Start(firstCode)) continue;
+    const codeIndent = firstRaw.length - firstCode.length;
     let end = index + 1;
-    while (end + 1 < lines.length && stripTuiBullet(lines[end + 1].text).trim()) end++;
+    while (end + 1 < lines.length) {
+      const next = stripTuiBullet(lines[end + 1].text);
+      if (next.trim() && next.length - next.trimStart().length < codeIndent) break;
+      end++;
+    }
     const block = lines.slice(index + 1, end + 1);
     found.push({
       language: label,
@@ -175,6 +181,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
       start: lines[index].start,
       end: lines[end].end,
       inferred: false,
+      stripped: true,
     });
     for (let row = lines[index].start; row <= lines[end].end; row++) occupied.add(row);
     index = end;
@@ -251,17 +258,34 @@ function isD2ArrowLine(line: string): boolean {
   return new RegExp(String.raw`^\s*${atom}(?:\s+${arrow}\s+${atom})+(?:\s*:\s*.+)?\s*$`).test(line);
 }
 
+function isD2Start(line: string): boolean {
+  return /^(?:direction|classes|vars)\s*:/.test(line) || isD2ArrowLine(line);
+}
+
 function darkBackground(host: HTMLElement): boolean {
   const channels = getComputedStyle(host).backgroundColor.match(/[\d.]+/g)?.slice(0, 3).map(Number);
   return !!channels && channels.reduce((sum, channel) => sum + channel, 0) < 384;
 }
 
-async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string> {
+type RenderedDiagram = { svg: string; code: string; lineCount: number };
+
+async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<RenderedDiagram> {
   if (fence.language === "d2") {
-    const rendered = await renderD2(fence.code, dark);
-    if (typeof rendered !== "string") throw new Error("D2 renderer returned no SVG markup");
-    liveProbe.record({ kind: "operation", name: "terminal.renderD2", detail: { dark, sourceBytes: fence.code.length, svgBytes: rendered.length } });
-    return rendered;
+    const lines = fence.code.split("\n");
+    let lastError: unknown;
+    for (let length = lines.length; length > 0; length--) {
+      try {
+        const code = lines.slice(0, length).join("\n");
+        const rendered = await renderD2(code, dark);
+        if (typeof rendered !== "string") throw new Error("D2 renderer returned no SVG markup");
+        liveProbe.record({ kind: "operation", name: "terminal.renderD2", detail: { dark, sourceBytes: code.length, svgBytes: rendered.length } });
+        return { svg: rendered, code, lineCount: length };
+      } catch (reason) {
+        lastError = reason;
+        if (!fence.stripped) throw reason;
+      }
+    }
+    throw lastError;
   }
   const mermaid = await loadMermaid();
   mermaid.initialize({
@@ -277,11 +301,16 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<string
     try {
       const rendered = await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, lines.slice(0, length).join("\n"));
       if (typeof rendered?.svg !== "string") throw new Error("Mermaid renderer returned no SVG markup");
-      liveProbe.record({ kind: "operation", name: "terminal.renderMermaid", detail: { dark, sourceBytes: fence.code.length, svgBytes: rendered.svg.length } });
-      return rendered.svg;
+      const code = lines.slice(0, length).join("\n");
+      liveProbe.record({ kind: "operation", name: "terminal.renderMermaid", detail: { dark, sourceBytes: code.length, svgBytes: rendered.svg.length } });
+      return {
+        svg: rendered.svg,
+        code,
+        lineCount: length,
+      };
     } catch (reason) {
       lastError = reason;
-      if (!fence.inferred) throw reason;
+      if (!fence.inferred && !fence.stripped) throw reason;
     }
   }
   throw lastError;
@@ -329,7 +358,7 @@ export class TerminalDiagramOverlay {
   recoverySubscription: Subscription;
   scrolling = false;
   lastScrollAt = Number.NEGATIVE_INFINITY;
-  cache = new Map<string, Promise<string>>();
+  cache = new Map<string, Promise<RenderedDiagram>>();
   elementCache = new Map<string, HTMLElement>();
   lightboxRoot: Root | null = null;
   lightboxMount: HTMLDivElement | null = null;
@@ -516,7 +545,15 @@ export class TerminalDiagramOverlay {
         this.cache.set(key, pending);
       }
       try {
-        return { fence, svg: await pending, error: "" };
+        const result = await pending;
+        const renderedFence = result.lineCount < fence.code.split("\n").length
+          ? {
+              ...fence,
+              code: result.code,
+              end: Math.min(fence.end, fence.start + result.lineCount),
+            }
+          : fence;
+        return { fence: renderedFence, svg: result.svg, error: "" };
       } catch (reason) {
         this.cache.delete(key);
         return { fence, svg: "", error: reason instanceof Error ? reason.message : `Failed to render ${fence.language}` };

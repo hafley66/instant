@@ -24,7 +24,7 @@ import { savePluginState } from "./pluginState";
 import { claimFsWatch } from "./fsWatch";
 import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS } from "./core";
 import { FileImageViewer } from "./1_FileImageViewer";
-import { renderD2 } from "./mdview/d2";
+import { renderD2 } from "@hafley66/md";
 import { resolveD2Preview } from "./0_d2Preview";
 import { browserFileUrl } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";

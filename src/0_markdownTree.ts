@@ -1,6 +1,6 @@
 // Reusable TreeTable preset data for Markdown files. Consumers own the lazy
 // read, then use these rows and `openMarkdownPanel(path, id)` for navigation.
-import { parseMdSections } from "./mdview/model";
+import { parseMdSections } from "@hafley66/md";
 
 export interface MarkdownHeadingRow {
   kind: "heading";

@@ -6,7 +6,6 @@ import { Children, createContext, lazy, Suspense, useContext, useEffect, useMemo
 import type { StreamdownProps } from "streamdown";
 import { SignalReact } from "@hafley66/signals/react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { getMdviewHost } from "./ports";
 import { baseName } from "./local/core";
 import {
@@ -39,7 +38,6 @@ import { setPendingFrag, takePendingFrag } from "./open";
 import { MdExplorer } from "./MdExplorer";
 import { useFsWatch } from "./0_watch";
 import "./mdview.css";
-import { useLiveProbeRender } from "../1_LiveProbe";
 
 const StreamdownBody = lazy(() => import("./0_Streamdown"));
 
@@ -202,7 +200,7 @@ export const MdPanel = SignalReact(function MdPanel({
   const appState = host.useAppState();
   const dark = appState.dark;
   const path = pathSig.$();
-  useLiveProbeRender("MdPanel", path);
+  host.useRenderProbe("MdPanel", path);
   const state = mdDocs.$()[path];
   const ui = mdUi.$();
   const collapsed = collapsedFor(path).$();
@@ -465,7 +463,7 @@ export const MdPanel = SignalReact(function MdPanel({
           </button>
         ) : null}
         <span className="spy-spacer" />
-        <button type="button" onClick={() => void openPath(path).catch(console.error)} title="open in the OS default app">
+        <button type="button" onClick={() => void host.openPath(path).catch(console.error)} title="open in the OS default app">
           ↗ external
         </button>
       </div>

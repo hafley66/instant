@@ -13,3 +13,24 @@
   background: var(--row-active-bg);
   color: var(--row-active-fg);
 }
+
+.file-tree-grid {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  --grid-row-hover: var(--row-hover);
+  --grid-row-selected: var(--row-active-bg);
+}
+
+.file-tree-grid [data-testid="grid-tree"] {
+  height: 100%;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.file-tree-grid [data-testid="grid-tree"] > div:last-child {
+  box-sizing: border-box;
+  max-height: 100% !important;
+  height: 100%;
+}

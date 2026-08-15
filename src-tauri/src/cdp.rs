@@ -30,8 +30,7 @@ use tungstenite::client::IntoClientRequest;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::Message;
 
-const CHROME: &str =
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 /// DevTools port. Dev and a prod build pick different ports (plus separate
 /// profiles via crate::state_dir) so both can run a headless Chrome at once
@@ -150,7 +149,12 @@ fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
 /// running engine rewrites these as it lives).
 fn clear_session(profile: &PathBuf) {
     let d = profile.join("Default");
-    for f in ["Current Session", "Current Tabs", "Last Session", "Last Tabs"] {
+    for f in [
+        "Current Session",
+        "Current Tabs",
+        "Last Session",
+        "Last Tabs",
+    ] {
         let _ = std::fs::remove_file(d.join(f));
     }
     let _ = std::fs::remove_dir_all(d.join("Sessions"));
@@ -205,13 +209,16 @@ fn read_until(
 /// Avoids pulling in an http-client crate for four trivial localhost calls.
 fn http(method: &str, path: &str) -> Result<String, String> {
     let port = debug_port();
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
     // Short per-read timeout so read_until can poll; the deadline bounds the total.
-    stream.set_read_timeout(Some(Duration::from_millis(250))).ok();
+    stream
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .ok();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let req = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
-    stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
@@ -222,7 +229,9 @@ fn http(method: &str, path: &str) -> Result<String, String> {
         }
         let n = read_until(&mut stream, &mut tmp, deadline)?;
         if n == 0 {
-            return Err(format!("http {method} {path}: connection closed in headers"));
+            return Err(format!(
+                "http {method} {path}: connection closed in headers"
+            ));
         }
         buf.extend_from_slice(&tmp[..n]);
     };
@@ -236,7 +245,9 @@ fn http(method: &str, path: &str) -> Result<String, String> {
         .lines()
         .find_map(|l| {
             let (k, v) = l.split_once(':')?;
-            k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse().ok())?
+            k.trim()
+                .eq_ignore_ascii_case("content-length")
+                .then(|| v.trim().parse().ok())?
         })
         .unwrap_or(0);
 
@@ -421,7 +432,9 @@ fn attach(
     let mut send_boot = |method: &str, params: Value| {
         let n = boot_id.fetch_add(1, Ordering::Relaxed);
         let _ = ws.send(Message::Text(
-            json!({ "id": n, "method": method, "params": params }).to_string().into(),
+            json!({ "id": n, "method": method, "params": params })
+                .to_string()
+                .into(),
         ));
     };
     send_boot("Page.enable", json!({}));
@@ -446,7 +459,10 @@ fn attach(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": width, "height": height, "deviceScaleFactor": dpr, "mobile": false }),
     );
-    send_boot("Page.startScreencast", screencast_params(width, height, dpr, quality));
+    send_boot(
+        "Page.startScreencast",
+        screencast_params(width, height, dpr, quality),
+    );
     let _ = boot_id; // (silence move warnings)
 
     let app2 = app.clone();
@@ -456,7 +472,9 @@ fn attach(
         loop {
             if stop2.load(Ordering::Relaxed) {
                 let _ = ws.send(Message::Text(
-                    json!({ "id": 999999, "method": "Page.stopScreencast" }).to_string().into(),
+                    json!({ "id": 999999, "method": "Page.stopScreencast" })
+                        .to_string()
+                        .into(),
                 ));
                 let _ = ws.close(None);
                 break;
@@ -472,43 +490,37 @@ fn attach(
                             && v["params"]["name"] == "__cursorSync"
                         {
                             let c = v["params"]["payload"].as_str().unwrap_or("default");
-                            let _ = app2.emit(
-                                "cdp-cursor",
-                                json!({ "id": id2.clone(), "cursor": c }),
-                            );
+                            let _ =
+                                app2.emit("cdp-cursor", json!({ "id": id2.clone(), "cursor": c }));
                         } else if v["method"] == "Runtime.bindingCalled"
                             && v["params"]["name"] == "__cdpCopy"
                         {
                             let t = v["params"]["payload"].as_str().unwrap_or("");
-                            let _ = app2.emit(
-                                "cdp-copy",
-                                json!({ "id": id2.clone(), "text": t }),
-                            );
+                            let _ = app2.emit("cdp-copy", json!({ "id": id2.clone(), "text": t }));
                         } else if v["method"] == "Page.frameNavigated"
                             && v["params"]["frame"]["parentId"].is_null()
                         {
                             // Main-frame full navigation (link click, redirect,
                             // form submit). parentId null = top frame.
                             if let Some(u) = v["params"]["frame"]["url"].as_str() {
-                                let _ = app2.emit(
-                                    "cdp-url",
-                                    json!({ "id": id2.clone(), "url": u }),
-                                );
+                                let _ =
+                                    app2.emit("cdp-url", json!({ "id": id2.clone(), "url": u }));
                             }
                         } else if v["method"] == "Page.navigatedWithinDocument" {
                             // SPA / history.pushState same-document navigation.
                             if let Some(u) = v["params"]["url"].as_str() {
-                                let _ = app2.emit(
-                                    "cdp-url",
-                                    json!({ "id": id2.clone(), "url": u }),
-                                );
+                                let _ =
+                                    app2.emit("cdp-url", json!({ "id": id2.clone(), "url": u }));
                             }
                         } else if v["method"] == "Page.screencastFrame" {
                             let data = v["params"]["data"].as_str().unwrap_or("");
                             let session = v["params"]["sessionId"].clone();
                             let _ = app2.emit(
                                 "cdp-frame",
-                                FrameEvent { id: id2.clone(), data: data.to_string() },
+                                FrameEvent {
+                                    id: id2.clone(),
+                                    data: data.to_string(),
+                                },
                             );
                             // Ack so Chrome keeps sending frames.
                             let _ = ws.send(Message::Text(
@@ -533,7 +545,12 @@ fn attach(
 
     store.0.lock().unwrap().insert(
         id,
-        CdpTab { target_id, cmd_tx, stop, next_id },
+        CdpTab {
+            target_id,
+            cmd_tx,
+            stop,
+            next_id,
+        },
     );
     Ok(())
 }
@@ -576,7 +593,10 @@ pub fn cdp_resize(
     );
     // Restart the screencast so frames come at the new size/quality immediately.
     send("Page.stopScreencast", json!({}));
-    send("Page.startScreencast", screencast_params(width, height, dpr, quality));
+    send(
+        "Page.startScreencast",
+        screencast_params(width, height, dpr, quality),
+    );
     Ok(())
 }
 

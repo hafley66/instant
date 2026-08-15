@@ -1,4 +1,4 @@
-# @instant/mdview
+# @hafley66/md
 
 A sectioned markdown viewer panel: parses a document into a heading tree
 (`model.ts`), renders each section as its own Streamdown slice, supports

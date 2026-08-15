@@ -12,12 +12,13 @@ import { previewInsts } from "./preview";
 import { tabs, tabMetaById, tabCwds } from "./terminal";
 import { openWorktree, resumeLaunch, sessionsForWorktree } from "./worktrees";
 import { harnessAdapter, harnessesForCommand, type HarnessId } from "./harness";
+import { boundSessionFirst, type ResolvedSession } from "./0a_terminalSessionCandidates";
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
 // have a claude/opencode session even if the tab is a plain shell the user ran
 // the agent inside).
-export type ResolvedSession = { editor: HarnessId; sessionId: string; cwd: string };
+export type { ResolvedSession } from "./0a_terminalSessionCandidates";
 
 // Resolve harness sessions for a tab by probing BOTH editors' on-disk stores
 // (harness_session) across EVERY candidate cwd — claude keys its jsonl dir by the
@@ -48,6 +49,15 @@ export async function tabSessions(
     }
   }
   return out;
+}
+
+async function sessionsForTab(id: string): Promise<ResolvedSession[]> {
+  const meta = tabMetaById(id);
+  const tab = tabs.get(id);
+  if (!meta || !tab) return [];
+  const cwds = tabCwds(id);
+  const sessions = await tabSessions(cwds, meta.command, meta.harness);
+  return boundSessionFirst(sessions, cwds, store.get().resumeTabs[tab.name]);
 }
 
 // Newest agent session in a cwd whose id is NOT already claimed by another tab's
@@ -84,7 +94,7 @@ async function turnsFor(
   sessionId: string,
   cwd: string,
 ): Promise<AiMessage[]> {
-  const key = `${editor}:${sessionId}`;
+  const key = `${editor}:${sessionId}:${cwd}`;
   const hit = ledgerCache.get(key);
   if (hit) return hit;
   const msgs = await harnessAdapter(editor).read(sessionId, cwd).catch(() => [] as AiMessage[]);
@@ -95,42 +105,40 @@ async function turnsFor(
 // latest session each call (drops the cache for it) so a live conversation's new
 // turns become matchable.
 export async function warmTurns(id: string) {
-  const meta = tabMetaById(id);
-  if (!meta) return;
-  // tabSessions is ordered by live cwd and the declared harness. A terminal
-  // sidebar has one current transcript, so avoid loading fallback-cwd and
-  // other-harness ledgers that cannot be presented in that panel.
-  const sessions = (await tabSessions(tabCwds(id), meta.command, meta.harness)).slice(0, 1);
-  const all: AiMessage[] = [];
+  const sessions = await sessionsForTab(id);
   for (const s of sessions) {
-    ledgerCache.delete(`${s.editor}:${s.sessionId}`); // pick up new turns
+    ledgerCache.delete(`${s.editor}:${s.sessionId}:${s.cwd}`); // pick up new turns
     turnCwd.set(`${s.editor}:${s.sessionId}`, s.cwd);
-    all.push(...(await turnsFor(s.editor, s.sessionId, s.cwd)));
+    const turns = await turnsFor(s.editor, s.sessionId, s.cwd);
+    if (turns.length) {
+      tabTurns.set(id, turns);
+      return;
+    }
   }
-  tabTurns.set(id, all);
+  tabTurns.set(id, []);
 }
 
 // Live sidebar polling reads only records after each harness's monotonic seq.
 // Claude/Codex use ledger line sequence; OpenCode uses time_created, all behind
 // the same HarnessAdapter.read(session, cwd, afterSeq) interface.
 export async function refreshTurns(id: string): Promise<AiMessage[] | null> {
-  const meta = tabMetaById(id);
-  if (!meta) return null;
-  const sessions = (await tabSessions(tabCwds(id), meta.command, meta.harness)).slice(0, 1);
+  const sessions = await sessionsForTab(id);
   if (!sessions.length) return null;
-  const all: AiMessage[] = [];
   for (const s of sessions) {
-    const key = `${s.editor}:${s.sessionId}`;
+    const key = `${s.editor}:${s.sessionId}:${s.cwd}`;
     turnCwd.set(key, s.cwd);
     const prior = ledgerCache.get(key) ?? [];
     const afterSeq = prior.reduce((latest, turn) => Math.max(latest, turn.seq), 0);
     const fresh = await harnessAdapter(s.editor).read(s.sessionId, s.cwd, afterSeq).catch(() => [] as AiMessage[]);
     const merged = [...prior, ...fresh.filter((turn) => !prior.some((old) => old.id === turn.id))];
     ledgerCache.set(key, merged);
-    all.push(...merged);
+    if (merged.length) {
+      tabTurns.set(id, merged);
+      return merged;
+    }
   }
-  tabTurns.set(id, all);
-  return all;
+  tabTurns.set(id, []);
+  return [];
 }
 
 // --- on-screen turn identification (the alt-screen blocks text selection, so we

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFileRows } from "./1_FileTree";
+import { buildFileRows } from "./0_FileTreeModel";
 import type { FsEntry } from "../../state";
 
 const entry = (name: string, is_dir: boolean, ext = ""): FsEntry => ({

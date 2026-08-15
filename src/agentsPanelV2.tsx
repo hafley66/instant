@@ -2,9 +2,12 @@
 // lanes (liveness, pid, rss, cpu) expandable to the lane's route detail. Data
 // derivation + shellouts live in main.ts; this file reads the boop snapshot
 // signal directly. The signals JSX Vite plugin tracks the .$() read.
-import { useEffect, useState } from "react";
-import { TreeTable, type TreeColumn } from "./treetable";
-import { boopAgents, type AgentsRow } from "./boopAgents";
+import { useEffect, useState, type ReactNode } from "react";
+import { createGrid } from "@hafley66/grid";
+import { GridTable } from "@hafley66/grid/react";
+import { Signal } from "@hafley66/signals";
+import { z } from "zod";
+import { boopAgents, sessionTree, type AgentsRow } from "./boopAgents";
 
 export interface AgentsSummary {
   total: number;
@@ -15,6 +18,7 @@ export interface AgentsSummary {
 
 export interface AgentsBridge {
   onShow?: () => void;
+  open: (row: AgentsRow) => void;
   canExpand: (row: AgentsRow) => boolean;
   getSubRows: (row: AgentsRow) => AgentsRow[] | undefined;
   onToggle: (lane: string, willExpand: boolean) => void;
@@ -44,6 +48,9 @@ function AgentsNameCell({ row }: { row: AgentsRow }) {
       </span>
     );
   }
+  if (row.kind === "session") {
+    return <span className="s-name" title={`${row.cwd}\n${row.sessionId}`}>{row.lane}</span>;
+  }
   return <span className="s-name">{row.lane}</span>;
 }
 
@@ -52,7 +59,17 @@ function AgentsDotCell({ row }: { row: AgentsRow }) {
   return <span className={"dot" + (row.state === "live" ? " on" : "")} />;
 }
 
+function OpenCell({ row, children }: { row: AgentsRow; children: ReactNode }) {
+  const canOpen = row.kind === "session" || (row.kind === "lane" && row.state === "live" && !!row.tmux);
+  return (
+    <span onClick={() => agentsBridge?.open(row)} style={{ display: "block", cursor: canOpen ? "pointer" : "default" }}>
+      {children}
+    </span>
+  );
+}
+
 function AgentsStateCell({ row }: { row: AgentsRow }) {
+  if (row.kind === "session") return <span className="s-meta">{row.turns} turns</span>;
   if (row.kind !== "lane") return null;
   return <span className={"agents-state " + row.state}>{row.state}</span>;
 }
@@ -62,7 +79,7 @@ function AgentsStateCell({ row }: { row: AgentsRow }) {
 function HailCell({ row }: { row: AgentsRow }) {
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState("");
-  if (row.kind !== "lane") return null;
+  if (row.kind !== "lane" || !row.addressable) return null;
   if (open) {
     return (
       <input
@@ -107,72 +124,69 @@ function HailCell({ row }: { row: AgentsRow }) {
   );
 }
 
-const AGENTS_COLUMNS: TreeColumn<AgentsRow>[] = [
-  { id: "dot", header: "", cell: (r) => <AgentsDotCell row={r} /> },
-  {
-    id: "lane",
-    header: "lane",
-    tree: true,
-    cell: (r) => <AgentsNameCell row={r} />,
-    sortValue: (r) => ("lane" in r ? r.lane : ""),
-  },
-  {
-    id: "harness",
-    header: "harness",
-    cell: (r) => ("harness" in r ? <span className="s-meta">{r.harness}</span> : ""),
-    sortValue: (r) => ("harness" in r ? r.harness : ""),
-  },
-  {
-    id: "state",
-    header: "state",
-    cell: (r) => <AgentsStateCell row={r} />,
-    sortValue: (r) => ("state" in r ? r.state : ""),
-  },
-  {
-    id: "pid",
-    header: "pid",
-    cell: (r) => ("pid" in r && r.pid !== null ? String(r.pid) : ""),
-    sortValue: (r) => ("pid" in r ? (r.pid ?? -1) : -1),
-  },
-  {
-    id: "rss",
-    header: "rss",
-    cell: (r) => ("rssKb" in r ? fmtKb(r.rssKb) : ""),
-    sortValue: (r) => ("rssKb" in r ? (r.rssKb ?? -1) : -1),
-  },
-  {
-    id: "cpu",
-    header: "cpu",
-    cell: (r) => ("cpuPct" in r ? fmtCpu(r.cpuPct) : ""),
-    sortValue: (r) => ("cpuPct" in r ? (r.cpuPct ?? -1) : -1),
-  },
-  { id: "hail", header: "", noRowClick: true, cell: (r) => <HailCell row={r} /> },
-];
-
-function agentsFilter(r: AgentsRow, q: string): boolean {
-  const s = q.toLowerCase();
-  if (r.kind === "route") {
-    return (r.sessionId ?? "").toLowerCase().includes(s) || (r.model ?? "").toLowerCase().includes(s);
-  }
-  return (
-    r.lane.toLowerCase().includes(s) ||
-    r.harness.toLowerCase().includes(s) ||
-    r.state.toLowerCase().includes(s) ||
-    r.model.toLowerCase().includes(s) ||
-    r.cwd.toLowerCase().includes(s)
-  );
-}
+const agentsRows = Signal<AgentsRow[]>(() => [
+  ...boopAgents.$().tree,
+  ...sessionTree(boopAgents.$().sessions),
+]);
+const agentsGrid = createGrid<AgentsRow>({
+  schema: z.custom<AgentsRow>(),
+  rows: agentsRows,
+  mode: "client",
+  getRowId: (row) => row.id,
+  getSubRows: (row) => agentsBridge?.getSubRows(row),
+  columnDefs: [
+    { id: "__expand", header: "" },
+    { id: "dot", header: "", cell: ({ row }) => <AgentsDotCell row={row.original} /> },
+    {
+      id: "name",
+      header: "lane",
+      accessorFn: (row) => row.lane,
+      cell: ({ row }) => <OpenCell row={row.original}><AgentsNameCell row={row.original} /></OpenCell>,
+    },
+    {
+      id: "harness",
+      header: "harness",
+      accessorFn: (row) => "harness" in row ? row.harness : "",
+      cell: ({ row }) => <OpenCell row={row.original}>{"harness" in row.original ? <span className="s-meta">{row.original.harness}</span> : ""}</OpenCell>,
+    },
+    {
+      id: "state",
+      header: "state",
+      accessorFn: (row) => row.kind === "session" ? `${row.turns} turns` : "state" in row ? row.state : "",
+      cell: ({ row }) => <OpenCell row={row.original}><AgentsStateCell row={row.original} /></OpenCell>,
+    },
+    {
+      id: "pid",
+      header: "pid",
+      accessorFn: (row) => "pid" in row ? (row.pid ?? -1) : -1,
+      cell: ({ row }) => <OpenCell row={row.original}>{"pid" in row.original && row.original.pid !== null ? String(row.original.pid) : ""}</OpenCell>,
+    },
+    {
+      id: "rss",
+      header: "rss",
+      accessorFn: (row) => "rssKb" in row ? (row.rssKb ?? -1) : -1,
+      cell: ({ row }) => <OpenCell row={row.original}>{"rssKb" in row.original ? fmtKb(row.original.rssKb) : ""}</OpenCell>,
+    },
+    {
+      id: "cpu",
+      header: "cpu",
+      accessorFn: (row) => "cpuPct" in row ? (row.cpuPct ?? -1) : -1,
+      cell: ({ row }) => <OpenCell row={row.original}>{"cpuPct" in row.original ? fmtCpu(row.original.cpuPct) : ""}</OpenCell>,
+    },
+    { id: "hail", header: "", cell: ({ row }) => <HailCell row={row.original} /> },
+  ],
+});
 
 export function AgentsPanelV2() {
+  const [filter, setFilter] = useState("");
   useEffect(() => {
     agentsBridge?.onShow?.();
   }, []);
-  const b = agentsBridge;
   const snap = boopAgents.$();
-  const rows = snap.lanes;
+  const rows = agentsRows.$();
   const sum: AgentsSummary = {
-    total: rows.length,
-    live: rows.filter((row) => row.state === "live").length,
+    total: snap.lanes.length,
+    live: snap.lanes.filter((row) => row.state === "live").length,
     sessions: snap.sessions.length,
     costUsd: snap.costUsd,
   };
@@ -181,27 +195,24 @@ export function AgentsPanelV2() {
       <div className="act-bar">
         <span className="spy-title">agents · boop</span>
         <span className="wt-count">
-          {sum.live} live / {sum.total} lanes
+          {sum.live} live / {sum.total} lanes · {sum.sessions} chats
           {sum.costUsd != null ? ` · $${sum.costUsd.toFixed(2)}` : ""}
         </span>
       </div>
       <div className="panel-scroll">
+        <input
+          value={filter}
+          placeholder="filter lanes…"
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            setFilter(value);
+            agentsGrid.onGlobalFilterChange(value);
+          }}
+        />
         {rows.length === 0 ? (
           <div className="session-empty">no boop lanes — is the registry reachable?</div>
         ) : (
-          <TreeTable<AgentsRow>
-            columns={AGENTS_COLUMNS}
-            data={rows}
-            getRowId={(r) => r.id}
-            getSubRows={(r) => b?.getSubRows(r)}
-            getRowCanExpand={(r) => b?.canExpand(r) ?? false}
-            onToggleExpand={(r, willExpand) => b?.onToggle(r.lane, willExpand)}
-            controls
-            filter={agentsFilter}
-            searchPlaceholder="filter lanes…"
-            rowClass={(r) => "agents-" + r.kind}
-            rowTitle={(r) => ("cwd" in r && r.cwd ? r.cwd : ("lane" in r ? r.lane : ""))}
-          />
+          <GridTable grid={agentsGrid} density="compact" maxHeight={720} />
         )}
       </div>
     </div>

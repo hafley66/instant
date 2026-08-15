@@ -33,8 +33,12 @@ fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Read the persisted registry (empty on first run / parse error).
 pub fn load(app: &AppHandle) -> Vec<Workspace> {
-    let Ok(path) = store_path(app) else { return Vec::new() };
-    let Ok(bytes) = fs::read(path) else { return Vec::new() };
+    let Ok(path) = store_path(app) else {
+        return Vec::new();
+    };
+    let Ok(bytes) = fs::read(path) else {
+        return Vec::new();
+    };
     serde_json::from_slice(&bytes).unwrap_or_default()
 }
 

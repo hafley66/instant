@@ -11,6 +11,7 @@ import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";
+import { openPath } from "@tauri-apps/plugin-opener";
 // CSS Anchor Positioning isn't in WebKit yet (Tauri = WKWebView); this shims
 // `anchor-name`/`position-anchor`/`anchor()`/`position-area` so tooltips and
 // menus can be authored in native CSS. No-ops where the browser supports it.
@@ -25,6 +26,9 @@ import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
 import { toggleNetworkFor, toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
+import { PanZoomViewport } from "./0_PanZoomViewport";
+import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
+import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
 import { installMdviewHost } from "./mdview/ports";
 import { registerPaint } from "./paintPanel";
@@ -117,7 +121,8 @@ import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
 import { setAgentsPanel } from "./agentsPanelV2";
-import { boopAgents, BoopClient, startBoopPolling, subRowsFor } from "./boopAgents";
+import { boopAgents, BoopClient, findLane, startBoopPolling, subRowsFor, withLaneRoute } from "./boopAgents";
+import { harnessAdapter, harnessIds } from "./harness";
 import { startReactiveRuntime } from "./reactive/runtime";
 
 // Agents (boop) panel wiring: shellout runner + poll + bridge. New code here
@@ -132,6 +137,7 @@ function registerAgentsPanel() {
       boopAgents.$({
         ...snap,
         lanes: snap.lanes.map((l) => (l.lane === lane ? { ...l, route: detail } : l)),
+        tree: withLaneRoute(snap.tree, lane, detail),
       });
     });
   };
@@ -139,10 +145,25 @@ function registerAgentsPanel() {
     onShow: () => {
       // First poll already fired at registration; nothing to force here.
     },
-    canExpand: (row) => row.kind === "lane",
+    open: (row) => {
+      if (row.kind === "lane" && row.state === "live" && row.tmux) {
+        openTab(row.tmux, { viewer: true });
+        return;
+      }
+      if (row.kind === "session") {
+        const harness = harnessIds.find((id) => id === row.harness);
+        if (!harness) return;
+        openTab(`chat-${harness}-${row.sessionId}`, {
+          cwd: row.cwd,
+          command: harnessAdapter(harness).resume(row.sessionId),
+        });
+      }
+    },
+    canExpand: (row) => row.kind === "lane" && (row.addressable || (row.childLanes?.length ?? 0) > 0),
     getSubRows: (row) => subRowsFor(row),
     onToggle: (lane, willExpand) => {
-      if (willExpand) expand(lane);
+      const row = findLane(boopAgents.$().tree, lane);
+      if (willExpand && row?.addressable) expand(lane);
     },
     hail: (lane, body) =>
       client.hail(lane, body, "instant").then(() => {
@@ -306,8 +327,13 @@ async function main() {
     readImage: (path) => invoke<string>("read_image", { path }),
     listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
     openHref: openDocumentHrefInInstant,
+    openPath,
     watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
     FileTree,
+    PanZoomViewport,
+    useRenderProbe: useLiveProbeRender,
+    useLifecycleProbe: useLiveProbeLifecycle,
+    recordOperation: (name, detail) => liveProbe.record({ kind: "operation", name, detail }),
     registerZoomKind,
     resetPanelZoom,
     readPluginState,

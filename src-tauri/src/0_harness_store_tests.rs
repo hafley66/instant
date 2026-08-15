@@ -20,7 +20,11 @@ fn claude_messages_resolve_one_exact_file_without_session_discovery() {
     let cwd = "/fixture";
     let project = claude_project_dir(&home, cwd);
     fs::create_dir_all(project.join("parent/subagents")).unwrap();
-    fs::write(project.join("unrelated.jsonl"), "{ invalid and intentionally unreadable\n").unwrap();
+    fs::write(
+        project.join("unrelated.jsonl"),
+        "{ invalid and intentionally unreadable\n",
+    )
+    .unwrap();
     fs::write(
         project.join("wanted.jsonl"),
         r#"{"type":"user","uuid":"message-1","timestamp":"2026-07-20T10:00:10.000Z","promptSource":"typed","origin":{"kind":"human"},"message":{"role":"user","content":"direct"}}"#,
@@ -209,7 +213,11 @@ fn claude_session_ids_use_metadata_without_parsing_transcripts() {
     let cwd = "/fixture";
     let dir = home.join(".claude/projects/-fixture");
     fs::create_dir_all(dir.join("parent/subagents")).unwrap();
-    fs::write(dir.join("broken.jsonl"), "{ this transcript is intentionally invalid").unwrap();
+    fs::write(
+        dir.join("broken.jsonl"),
+        "{ this transcript is intentionally invalid",
+    )
+    .unwrap();
     fs::write(
         dir.join("parent/subagents/child.jsonl"),
         "{ this transcript is intentionally invalid",
@@ -250,7 +258,11 @@ fn kimi_session_ids_do_not_parse_wire_history() {
     let dir = home.join(".kimi-code/sessions/work/session_kimi-fast");
     fs::create_dir_all(dir.join("agents/main")).unwrap();
     fs::write(dir.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
-    fs::write(dir.join("agents/main/wire.jsonl"), "not JSON and deliberately irrelevant").unwrap();
+    fs::write(
+        dir.join("agents/main/wire.jsonl"),
+        "not JSON and deliberately irrelevant",
+    )
+    .unwrap();
 
     assert_eq!(
         session_ids(&home, HarnessId::Kimi, "/fixture"),

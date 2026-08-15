@@ -214,7 +214,10 @@ fn claude_session_path(home: &Path, cwd: &str, session_id: &str) -> Option<PathB
         return Some(direct);
     }
     fs::read_dir(project).ok()?.flatten().find_map(|entry| {
-        let path = entry.path().join("subagents").join(format!("{session_id}.jsonl"));
+        let path = entry
+            .path()
+            .join("subagents")
+            .join(format!("{session_id}.jsonl"));
         path.is_file().then_some(path)
     })
 }
@@ -597,7 +600,9 @@ impl HarnessStore for KimiStore {
             for session in sessions.flatten() {
                 let path = session.path();
                 let state = path.join("state.json");
-                let Some(meta) = fs::read_to_string(&state).ok().and_then(|value| json(&value))
+                let Some(meta) = fs::read_to_string(&state)
+                    .ok()
+                    .and_then(|value| json(&value))
                 else {
                     continue;
                 };

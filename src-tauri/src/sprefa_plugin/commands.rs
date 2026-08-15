@@ -94,10 +94,16 @@ fn rpc_with_timeout(
         .map_err(|e| e.to_string())?;
 
     let req = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    let body = http_rpc(&mut stream, &serde_json::to_string(&req).map_err(|e| e.to_string())?)?;
+    let body = http_rpc(
+        &mut stream,
+        &serde_json::to_string(&req).map_err(|e| e.to_string())?,
+    )?;
     let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     if let Some(err) = v.get("error") {
-        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("rpc error");
+        let msg = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("rpc error");
         return Err(msg.to_string());
     }
     v.get("result")

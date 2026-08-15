@@ -1,7 +1,3 @@
-#[path = "0_pty_events.rs"]
-mod pty_events;
-#[path = "0a_harness_trace_index.rs"]
-mod harness_trace_index;
 mod activity;
 mod capture;
 mod cdp;
@@ -12,8 +8,12 @@ mod fs_watch;
 mod harness;
 #[path = "0_harness_store.rs"]
 pub mod harness_store;
+#[path = "0a_harness_trace_index.rs"]
+mod harness_trace_index;
 mod kitty;
 mod ledger;
+#[path = "0_pty_events.rs"]
+mod pty_events;
 pub use ledger::AiMessage;
 mod meme;
 mod pty;
@@ -58,6 +58,10 @@ const MIN_GAP: Duration = Duration::from_millis(350);
 // the desktop — an accessory app's hidden window doesn't restore focus itself.
 static PREV_APP: Mutex<Option<String>> = Mutex::new(None);
 
+// Serialize append/truncate cycles so concurrent frontend and native events
+// cannot reorder bytes or truncate a newer write.
+static LOG_LOCK: Mutex<()> = Mutex::new(());
+
 // Tap-thread gesture state (behind a Mutex, since with_enabled takes `impl Fn`).
 #[derive(Default)]
 struct Gesture {
@@ -96,14 +100,17 @@ fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, ki
 /// / Input Monitoring permission, same as the hotkey.
 fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        log_event(
+            &app,
+            "INFO",
+            "input_tap_thread_started",
+            serde_json::json!({}),
+        );
         // This thread services a HID-level event tap: at default QoS a loaded
         // machine schedules it behind other work, and a slow tap callback
         // delays every keystroke and click systemwide. Pin user-interactive.
         unsafe {
-            libc::pthread_set_qos_class_self_np(
-                libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE,
-                0,
-            );
+            libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
         }
         let g = Mutex::new(Gesture::default());
         // Supervisor loop: macOS disables a tap whose callback stalls
@@ -112,140 +119,176 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<At
         // (CGEventTapEnable is crate-private), so the callback marks the tap
         // dead and stops its runloop, and this loop re-creates the tap.
         loop {
-        let res = CGEventTap::with_enabled(
-            CGEventTapLocation::HID,
-            CGEventTapPlacement::HeadInsertEventTap,
-            // Active (not ListenOnly) so the send-highlight combo can be dropped
-            // before the focused app turns it into its own paste. Every other
-            // event returns Keep, so pass-through is unchanged.
-            CGEventTapOptions::Default,
-            vec![
-                CGEventType::RightMouseDown,
-                CGEventType::LeftMouseDown,
-                CGEventType::LeftMouseDragged,
-                CGEventType::LeftMouseUp,
-                CGEventType::KeyDown,
-                CGEventType::FlagsChanged,
-            ],
-            |_proxy, ty, event| {
-                let mut g = g.lock().unwrap();
-                match ty {
-                    CGEventType::TapDisabledByTimeout
-                    | CGEventType::TapDisabledByUserInput => {
-                        // Delivered regardless of the event mask. Mark the tap
-                        // dead and stop the runloop; the supervisor loop above
-                        // re-creates the tap.
-                        tap_active.store(false, Ordering::Relaxed);
-                        CFRunLoop::get_current().stop();
-                    }
-                    CGEventType::RightMouseDown => {
-                        let now = Instant::now();
-                        let is_double = g
-                            .last_right_down
-                            .map(|t| {
-                                now.duration_since(t)
-                                    < Duration::from_millis(DOUBLE_RIGHT_MS as u64)
-                            })
-                            .unwrap_or(false);
-                        if is_double {
-                            g.last_right_down = None; // reset so a triple isn't two doubles
-                            let handle = app.clone();
-                            let _ = app.run_on_main_thread(move || toggle_window(&handle));
-                        } else {
-                            g.last_right_down = Some(now);
+            log_event(
+                &app,
+                "INFO",
+                "input_tap_create_attempt",
+                serde_json::json!({}),
+            );
+            let res = CGEventTap::with_enabled(
+                CGEventTapLocation::HID,
+                CGEventTapPlacement::HeadInsertEventTap,
+                // Active (not ListenOnly) so the send-highlight combo can be dropped
+                // before the focused app turns it into its own paste. Every other
+                // event returns Keep, so pass-through is unchanged.
+                CGEventTapOptions::Default,
+                vec![
+                    CGEventType::RightMouseDown,
+                    CGEventType::LeftMouseDown,
+                    CGEventType::LeftMouseDragged,
+                    CGEventType::LeftMouseUp,
+                    CGEventType::KeyDown,
+                    CGEventType::FlagsChanged,
+                ],
+                |_proxy, ty, event| {
+                    let mut g = g.lock().unwrap();
+                    match ty {
+                        CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
+                            // Delivered regardless of the event mask. Mark the tap
+                            // dead and stop the runloop; the supervisor loop above
+                            // re-creates the tap.
+                            tap_active.store(false, Ordering::Relaxed);
+                            CFRunLoop::get_current().stop();
                         }
-                    }
-                    CGEventType::LeftMouseDown => g.drag_active = false,
-                    CGEventType::LeftMouseDragged => {
-                        if !g.drag_active {
-                            g.drag_active = true; // leading edge of a drag burst
-                            maybe_capture(&mut g, &app, &enabled, "drag");
-                        }
-                    }
-                    CGEventType::LeftMouseUp => {
-                        if g.drag_active {
-                            g.drag_active = false; // trailing edge
-                            maybe_capture(&mut g, &app, &enabled, "drag-end");
-                        } else {
-                            let cs = event
-                                .get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
-                            maybe_capture(
-                                &mut g,
-                                &app,
-                                &enabled,
-                                if cs >= 2 { "dblclick" } else { "click" },
-                            );
-                        }
-                    }
-                    CGEventType::FlagsChanged => {
-                        // Right ⌘ has its own device bit, so this is unambiguous
-                        // even while left ⌘ is held. Act only on the press edge
-                        // (released -> pressed); a second tap within the window
-                        // summons. We read one modifier bit, not key content.
-                        let rcmd = event.get_flags().bits() & RCMD_BIT != 0;
-                        if rcmd && !g.right_cmd_down {
+                        CGEventType::RightMouseDown => {
                             let now = Instant::now();
                             let is_double = g
-                                .last_right_cmd
-                                .map(|t| now.duration_since(t) < Duration::from_millis(DOUBLE_RCMD_MS as u64))
+                                .last_right_down
+                                .map(|t| {
+                                    now.duration_since(t)
+                                        < Duration::from_millis(DOUBLE_RIGHT_MS as u64)
+                                })
                                 .unwrap_or(false);
                             if is_double {
-                                g.last_right_cmd = None; // reset so a triple isn't two doubles
+                                log_event(
+                                    &app,
+                                    "INFO",
+                                    "double_right_click_detected",
+                                    serde_json::json!({ "window_ms": DOUBLE_RIGHT_MS }),
+                                );
+                                g.last_right_down = None; // reset so a triple isn't two doubles
                                 let handle = app.clone();
                                 let _ = app.run_on_main_thread(move || toggle_window(&handle));
                             } else {
-                                g.last_right_cmd = Some(now);
+                                g.last_right_down = Some(now);
                             }
                         }
-                        g.right_cmd_down = rcmd;
-                    }
-                    CGEventType::KeyDown => {
-                        let flags = event.get_flags().bits();
-                        let keycode = event
-                            .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                        // Right-⌘ + Right-⇧ + V (keycode 9): grab the current
-                        // selection from the focused app and send it to the
-                        // active instant session. Right-side device bits isolate
-                        // this from the plain Cmd+V capture below. Drop the event
-                        // so the focused app doesn't also paste.
-                        if keycode == 9 && flags & RCMD_BIT != 0 && flags & RSHIFT_BIT != 0 {
-                            let handle = app.clone();
-                            std::thread::spawn(move || grab_and_send_selection(&handle));
-                            return CallbackResult::Drop;
-                        }
-                        if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
-                            // 8 = C, 9 = V (ANSI keycodes). Only these two — not a keylogger.
-                            match keycode {
-                                8 => maybe_capture(&mut g, &app, &enabled, "copy"),
-                                9 => maybe_capture(&mut g, &app, &enabled, "paste"),
-                                _ => {}
+                        CGEventType::LeftMouseDown => g.drag_active = false,
+                        CGEventType::LeftMouseDragged => {
+                            if !g.drag_active {
+                                g.drag_active = true; // leading edge of a drag burst
+                                maybe_capture(&mut g, &app, &enabled, "drag");
                             }
                         }
+                        CGEventType::LeftMouseUp => {
+                            if g.drag_active {
+                                g.drag_active = false; // trailing edge
+                                maybe_capture(&mut g, &app, &enabled, "drag-end");
+                            } else {
+                                let cs = event
+                                    .get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
+                                maybe_capture(
+                                    &mut g,
+                                    &app,
+                                    &enabled,
+                                    if cs >= 2 { "dblclick" } else { "click" },
+                                );
+                            }
+                        }
+                        CGEventType::FlagsChanged => {
+                            // Right ⌘ has its own device bit, so this is unambiguous
+                            // even while left ⌘ is held. Act only on the press edge
+                            // (released -> pressed); a second tap within the window
+                            // summons. We read one modifier bit, not key content.
+                            let rcmd = event.get_flags().bits() & RCMD_BIT != 0;
+                            if rcmd && !g.right_cmd_down {
+                                let now = Instant::now();
+                                let is_double = g
+                                    .last_right_cmd
+                                    .map(|t| {
+                                        now.duration_since(t)
+                                            < Duration::from_millis(DOUBLE_RCMD_MS as u64)
+                                    })
+                                    .unwrap_or(false);
+                                if is_double {
+                                    log_event(
+                                        &app,
+                                        "INFO",
+                                        "double_right_command_detected",
+                                        serde_json::json!({ "window_ms": DOUBLE_RCMD_MS }),
+                                    );
+                                    g.last_right_cmd = None; // reset so a triple isn't two doubles
+                                    let handle = app.clone();
+                                    let _ = app.run_on_main_thread(move || toggle_window(&handle));
+                                } else {
+                                    g.last_right_cmd = Some(now);
+                                }
+                            }
+                            g.right_cmd_down = rcmd;
+                        }
+                        CGEventType::KeyDown => {
+                            let flags = event.get_flags().bits();
+                            let keycode =
+                                event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                            // Right-⌘ + Right-⇧ + V (keycode 9): grab the current
+                            // selection from the focused app and send it to the
+                            // active instant session. Right-side device bits isolate
+                            // this from the plain Cmd+V capture below. Drop the event
+                            // so the focused app doesn't also paste.
+                            if keycode == 9 && flags & RCMD_BIT != 0 && flags & RSHIFT_BIT != 0 {
+                                let handle = app.clone();
+                                std::thread::spawn(move || grab_and_send_selection(&handle));
+                                return CallbackResult::Drop;
+                            }
+                            if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
+                                // 8 = C, 9 = V (ANSI keycodes). Only these two — not a keylogger.
+                                match keycode {
+                                    8 => maybe_capture(&mut g, &app, &enabled, "copy"),
+                                    9 => maybe_capture(&mut g, &app, &enabled, "paste"),
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                }
-                CallbackResult::Keep // passive: pass every event through unchanged
-            },
-            || {
-                // Tap created OK; mark it live for the capture diagnostics, then
-                // run its runloop (blocks this thread until the tap is disabled).
-                tap_active.store(true, Ordering::Relaxed);
-                CFRunLoop::run_current()
-            },
-        );
-        if res.is_err() {
-            tap_active.store(false, Ordering::Relaxed);
-            eprintln!(
-                "input taps disabled: event tap creation failed \
-                 (grant Accessibility / Input Monitoring permission)"
+                    CallbackResult::Keep // passive: pass every event through unchanged
+                },
+                || {
+                    // Tap created OK; mark it live for the capture diagnostics, then
+                    // run its runloop (blocks this thread until the tap is disabled).
+                    tap_active.store(true, Ordering::Relaxed);
+                    log_event(&app, "INFO", "input_tap_active", serde_json::json!({}));
+                    CFRunLoop::run_current()
+                },
             );
-            return;
-        }
-        if tap_active.load(Ordering::Relaxed) {
-            // Runloop ended without a TapDisabled event; nothing to recover
-            // from, so don't spin re-creating taps.
-            return;
-        }
+            if res.is_err() {
+                tap_active.store(false, Ordering::Relaxed);
+                log_event(
+                    &app,
+                    "ERROR",
+                    "input_tap_create_failed",
+                    serde_json::json!({
+                        "reason": "grant Accessibility / Input Monitoring permission"
+                    }),
+                );
+                eprintln!(
+                    "input taps disabled: event tap creation failed \
+                 (grant Accessibility / Input Monitoring permission)"
+                );
+                return;
+            }
+            if tap_active.load(Ordering::Relaxed) {
+                // Runloop ended without a TapDisabled event; nothing to recover
+                // from, so don't spin re-creating taps.
+                log_event(
+                    &app,
+                    "WARN",
+                    "input_tap_runloop_ended",
+                    serde_json::json!({ "active": true }),
+                );
+                return;
+            }
+            log_event(&app, "WARN", "input_tap_disabled", serde_json::json!({}));
         } // loop
     });
 }
@@ -273,7 +316,9 @@ fn dot_icon(color: [u8; 3]) -> tauri::image::Image<'static> {
 /// Reflect capture state in the menu bar: a red dot while recording, the default
 /// app icon when idle. Called from `capture_set_enabled`.
 pub fn set_recording_indicator(app: &AppHandle, on: bool) {
-    let Some(tray) = app.tray_by_id("main") else { return };
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
     if on {
         let _ = tray.set_icon(Some(dot_icon([220, 40, 40])));
     } else {
@@ -286,7 +331,9 @@ pub fn set_recording_indicator(app: &AppHandle, on: bool) {
 /// the pasteboard. Plain (left) Command flag, so it doesn't re-trigger the
 /// right-side send-highlight combo in our own tap.
 fn synth_copy() {
-    let Ok(src) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) else { return };
+    let Ok(src) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) else {
+        return;
+    };
     const KC_C: u16 = 8;
     if let Ok(ev) = CGEvent::new_keyboard_event(src.clone(), KC_C, true) {
         ev.set_flags(CGEventFlags::CGEventFlagCommand);
@@ -341,10 +388,44 @@ fn set_switcher_visible(app: &AppHandle, on: bool) {
 
 /// Toggle the summon window. When showing, anchor it to the mouse cursor.
 fn toggle_window(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("main") else { return };
+    let Some(win) = app.get_webview_window("main") else {
+        log_event(
+            app,
+            "ERROR",
+            "toggle_window_missing",
+            serde_json::json!({ "label": "main" }),
+        );
+        return;
+    };
 
-    if win.is_visible().unwrap_or(false) {
-        let _ = win.hide(); // focus-lost handler demotes us out of the switcher
+    let visible = match win.is_visible() {
+        Ok(value) => {
+            log_event(
+                app,
+                "INFO",
+                "toggle_window_visibility",
+                serde_json::json!({ "visible": value }),
+            );
+            value
+        }
+        Err(error) => {
+            log_event(
+                app,
+                "ERROR",
+                "toggle_window_visibility_failed",
+                serde_json::json!({ "error": format!("{error:?}") }),
+            );
+            false
+        }
+    };
+    if visible {
+        let result = win.hide(); // focus-lost handler demotes us out of the switcher
+        log_event(
+            app,
+            if result.is_ok() { "INFO" } else { "ERROR" },
+            "toggle_window_hide",
+            serde_json::json!({ "result": result.as_ref().map(|_| "ok").unwrap_or("error"), "error": result.err().map(|e| format!("{e:?}")) }),
+        );
         reactivate_prev_app();
         return;
     }
@@ -363,10 +444,32 @@ fn toggle_window(app: &AppHandle) {
     }
 
     set_switcher_visible(app, true);
-    let _ = win.show();
-    let _ = win.set_focus();
+    let show_result = win.show();
+    log_event(
+        app,
+        if show_result.is_ok() { "INFO" } else { "ERROR" },
+        "toggle_window_show",
+        serde_json::json!({ "result": show_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": show_result.err().map(|e| format!("{e:?}")) }),
+    );
+    let focus_result = win.set_focus();
+    log_event(
+        app,
+        if focus_result.is_ok() {
+            "INFO"
+        } else {
+            "ERROR"
+        },
+        "toggle_window_focus",
+        serde_json::json!({ "result": focus_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": focus_result.err().map(|e| format!("{e:?}")) }),
+    );
     // Tell the front to play its entrance animation + refocus the active term.
-    let _ = win.emit("summoned", ());
+    let emit_result = win.emit("summoned", ());
+    log_event(
+        app,
+        if emit_result.is_ok() { "INFO" } else { "ERROR" },
+        "toggle_window_emit_summoned",
+        serde_json::json!({ "result": emit_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": emit_result.err().map(|e| format!("{e:?}")) }),
+    );
 }
 
 // Poll the frontmost app and emit `frontmost-app` (the owner name) on every
@@ -392,7 +495,9 @@ fn spawn_frontmost_watch(app: AppHandle) {
 // a running app with no extra TCC prompt (osascript/System Events would need
 // Automation access). Best-effort: a missing/renamed app just no-ops.
 fn reactivate_prev_app() {
-    let Some(name) = PREV_APP.lock().unwrap().take() else { return };
+    let Some(name) = PREV_APP.lock().unwrap().take() else {
+        return;
+    };
     std::thread::spawn(move || {
         let _ = std::process::Command::new("/usr/bin/open")
             .arg("-a")
@@ -465,7 +570,11 @@ fn resolve_path(raw: &str, cwd: &str) -> Result<std::path::PathBuf, String> {
     } else {
         PathBuf::from(raw)
     };
-    Ok(if p.is_absolute() { p } else { PathBuf::from(cwd).join(p) })
+    Ok(if p.is_absolute() {
+        p
+    } else {
+        PathBuf::from(cwd).join(p)
+    })
 }
 
 /// Open a path or URL the user ⌘-clicked in a terminal, iTerm2-style. URLs go to
@@ -488,7 +597,9 @@ fn open_target_blocking(app: AppHandle, target: String, cwd: String) -> Result<S
     }
     // URL: a bare www. host, or an explicit scheme://… with an alnum+[-+.] scheme.
     let scheme_ok = t.split_once("://").is_some_and(|(s, _)| {
-        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
     });
     let hide_window = || {
         if let Some(w) = app.get_webview_window("main") {
@@ -572,6 +683,28 @@ fn log_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(state_dir(app)?.join("instant.log"))
 }
 
+fn log_timestamp_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+/// Write a structured native event to the same file used by frontend errors.
+/// The fields remain JSON so stack traces and backend errors cannot corrupt the
+/// one-event-per-line format.
+fn log_event(app: &AppHandle, level: &str, event: &str, fields: serde_json::Value) {
+    let line = format!(
+        "ts={} level={} target=instant event={} fields={}",
+        log_timestamp_ms(),
+        level,
+        event,
+        serde_json::to_string(&fields).unwrap_or_else(|_| "{}".to_string()),
+    );
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || log_append_blocking(app, line));
+}
+
 /// Append one line to app_data_dir/instant.log. The webview has no console a user
 /// can reach, so errors/events are mirrored here. Best-effort: logging never
 /// throws back into the app. Caps the file so it can't grow unbounded.
@@ -581,16 +714,26 @@ async fn log_append(app: AppHandle, line: String) {
 }
 
 fn log_append_blocking(app: AppHandle, line: String) {
-    let Ok(path) = log_file_path(&app) else { return };
+    let _guard = LOG_LOCK.lock().unwrap();
+    let Ok(path) = log_file_path(&app) else {
+        return;
+    };
     // Trim from the front if it crosses the cap (cheap: rewrite tail on overflow).
     const CAP: u64 = 2_000_000;
-    if std::fs::metadata(&path).map(|m| m.len() > CAP).unwrap_or(false) {
+    if std::fs::metadata(&path)
+        .map(|m| m.len() > CAP)
+        .unwrap_or(false)
+    {
         if let Ok(data) = std::fs::read(&path) {
             let keep = data.len().saturating_sub(CAP as usize / 2);
             let _ = std::fs::write(&path, &data[keep..]);
         }
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         use std::io::Write;
         let _ = f.write_all(line.as_bytes());
         let _ = f.write_all(b"\n");
@@ -699,6 +842,17 @@ pub fn run() {
         )
         .setup(move |app| {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            log_event(
+                app.handle(),
+                "INFO",
+                "startup",
+                serde_json::json!({
+                    "isolated": isolated,
+                    "no_globals": no_globals,
+                    "skip_shared_globals": skip_shared_globals,
+                    "debug_assertions": cfg!(debug_assertions),
+                }),
+            );
             app.state::<pty_events::PtyEvents>().start(app.handle().clone());
             if !no_globals {
                 app.global_shortcut().register(summon)?;
@@ -790,8 +944,20 @@ pub fn run() {
                 // No tray or summon gesture, so show directly. INSTANT_ISOLATED
                 // still has its separate Cmd+Shift+Space global shortcut.
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
+                    let show_result = win.show();
+                    log_event(
+                        app.handle(),
+                        if show_result.is_ok() { "INFO" } else { "ERROR" },
+                        "startup_window_show",
+                        serde_json::json!({ "result": show_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": show_result.err().map(|e| format!("{e:?}")) }),
+                    );
+                    let focus_result = win.set_focus();
+                    log_event(
+                        app.handle(),
+                        if focus_result.is_ok() { "INFO" } else { "ERROR" },
+                        "startup_window_focus",
+                        serde_json::json!({ "result": focus_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": focus_result.err().map(|e| format!("{e:?}")) }),
+                    );
                 }
                 return Ok(());
             }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { PanZoomViewport } from "../0_PanZoomViewport";
+import { getMdviewHost } from "./ports";
 import { copyText } from "./0_copyText";
 import "./0_diagramLightbox.css";
 
@@ -37,6 +37,7 @@ type DiagramLightboxSingleProps = {
 };
 
 export function DiagramLightbox(props: DiagramLightboxHistoryProps | DiagramLightboxSingleProps) {
+  const PanZoomViewport = getMdviewHost().PanZoomViewport;
   const entries = "entries" in props ? props.entries : [{
     id: "markdown-diagram",
     svg: props.svg,

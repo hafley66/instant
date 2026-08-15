@@ -19,7 +19,7 @@ import { invoke } from "./generated/native";
 import { store, type FsEntry, type DirListing, type AiMessage, type TermSidebarView } from "./state";
 import { fileGlyph } from "./core";
 import { openPreviewPanel } from "./preview";
-import { openMarkdownPanel } from "./mdview/open";
+import { openMarkdownPanel } from "@hafley66/md";
 import { markdownHeadingRows, type MarkdownHeadingRow } from "./0_markdownTree";
 import { TurnPreviewPopover } from "./0_turnPreviewPopover";
 import { fileEntry, isCompaction, isMarkdown, isToolOnlyTurn, touchedFiles, turnOrder, turnPrimaryPreview, turnReferences, turnRoleLabel, visibleTurnWindows, type TouchedFile } from "./0_sessionSidebarModel";

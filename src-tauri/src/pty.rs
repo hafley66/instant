@@ -153,7 +153,15 @@ fn list_sessions_blocking() -> Vec<Session> {
             let created = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let paths = paths.remove(&name).unwrap_or_default();
             let commands = commands.remove(&name).unwrap_or_default();
-            Some(Session { name, windows, attached, activity, created, paths, commands })
+            Some(Session {
+                name,
+                windows,
+                attached,
+                activity,
+                created,
+                paths,
+                commands,
+            })
         })
         .collect()
 }
@@ -173,7 +181,9 @@ fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<Str
         .output();
     let mut paths: HashMap<String, Vec<String>> = HashMap::new();
     let mut commands: HashMap<String, Vec<String>> = HashMap::new();
-    let Ok(out) = out else { return (paths, commands) };
+    let Ok(out) = out else {
+        return (paths, commands);
+    };
     let push = |map: &mut HashMap<String, Vec<String>>, name: &str, val: &str| {
         if val.is_empty() {
             return;
@@ -281,7 +291,9 @@ pub fn reap_orphan_graphics() {
     };
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let mut it = line.split_whitespace();
-        let (Some(pid), Some(ppid)) = (it.next(), it.next()) else { continue };
+        let (Some(pid), Some(ppid)) = (it.next(), it.next()) else {
+            continue;
+        };
         if ppid != "1" {
             continue; // only launchd-reparented orphans
         }
@@ -340,13 +352,20 @@ pub async fn open_session(
             .map(|o| o.status.success())
             .unwrap_or(false);
         if !alive {
-            return Err(format!("tmux session '{name}' is not running (viewer tabs attach only)"));
+            return Err(format!(
+                "tmux session '{name}' is not running (viewer tabs attach only)"
+            ));
         }
     }
 
     let (pixel_width, pixel_height) = pixel_dims(cols, rows, cell_w, cell_h);
     let pair = native_pty_system()
-        .openpty(PtySize { rows, cols, pixel_width, pixel_height })
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width,
+            pixel_height,
+        })
         .map_err(|e| e.to_string())?;
 
     let start_dir = cwd.as_deref().filter(|s| !s.is_empty());
@@ -417,17 +436,26 @@ pub async fn open_session(
     drop(pair.slave);
     // Direct PTYs own their child; tmux mode owns only a client and deliberately
     // leaves the tmux server/session alive across webview reloads.
-    let child = if graphics || direct_pty_mode() { Some(child) } else { None };
+    let child = if graphics || direct_pty_mode() {
+        Some(child)
+    } else {
+        None
+    };
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer: SharedWriter =
-        Arc::new(Mutex::new(pair.master.take_writer().map_err(|e| e.to_string())?));
+    let writer: SharedWriter = Arc::new(Mutex::new(
+        pair.master.take_writer().map_err(|e| e.to_string())?,
+    ));
 
-    store
-        .0
-        .lock()
-        .unwrap()
-        .insert(id.clone(), PtyHandle { name: name.clone(), writer: writer.clone(), master: pair.master, child });
+    store.0.lock().unwrap().insert(
+        id.clone(),
+        PtyHandle {
+            name: name.clone(),
+            writer: writer.clone(),
+            master: pair.master,
+            child,
+        },
+    );
 
     if !graphics && !direct_pty_mode() {
         enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
@@ -450,7 +478,10 @@ pub async fn open_session(
                         pending.extend_from_slice(&buf[..n]);
                         let chunk = drain_utf8(&mut pending);
                         if !chunk.is_empty() {
-                            let _ = events.send(PtyData { id: id.clone(), chunk });
+                            let _ = events.send(PtyData {
+                                id: id.clone(),
+                                chunk,
+                            });
                         }
                     }
                 }
@@ -471,7 +502,10 @@ pub async fn open_session(
                                 if chunk.is_empty() {
                                     continue;
                                 }
-                                let _ = events.send(PtyData { id: id.clone(), chunk });
+                                let _ = events.send(PtyData {
+                                    id: id.clone(),
+                                    chunk,
+                                });
                             }
                             ScanOut::Graphics(g) => {
                                 let _ = app.emit(
@@ -531,7 +565,12 @@ pub fn resize_pty(
     let map = store.0.lock().unwrap();
     if let Some(h) = map.get(&id) {
         h.master
-            .resize(PtySize { rows, cols, pixel_width, pixel_height })
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width,
+                pixel_height,
+            })
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -555,7 +594,9 @@ pub fn close_pty(store: State<PtyStore>, id: String) {
 /// makes copy-mode auto-exit when scrolled back to the bottom (live view).
 #[tauri::command]
 pub async fn scroll_session(name: String, up: bool, lines: u32) {
-    if direct_pty_mode() { return; }
+    if direct_pty_mode() {
+        return;
+    }
     let n = lines.max(1).to_string();
     let dir = if up { "scroll-up" } else { "scroll-down" };
     let path = path_env();
@@ -575,10 +616,15 @@ pub async fn scroll_session(name: String, up: bool, lines: u32) {
 pub async fn kill_session(store: State<'_, PtyStore>, name: String) -> Result<(), String> {
     if direct_pty_mode() {
         let mut map = store.0.lock().unwrap();
-        let id = map.iter().find(|(_, h)| h.name == name).map(|(id, _)| id.clone());
+        let id = map
+            .iter()
+            .find(|(_, h)| h.name == name)
+            .map(|(id, _)| id.clone());
         if let Some(id) = id {
             if let Some(mut handle) = map.remove(&id) {
-                if let Some(mut child) = handle.child.take() { let _ = child.kill(); }
+                if let Some(mut child) = handle.child.take() {
+                    let _ = child.kill();
+                }
             }
         }
         return Ok(());
@@ -676,7 +722,13 @@ fn rogue_agent_sessions_blocking() -> Vec<RogueSession> {
             if bin != "claude" && bin != "opencode" {
                 return None;
             }
-            Some(RogueSession { pid, tty, command: bin.to_string(), args, cwd: process_cwd(pid) })
+            Some(RogueSession {
+                pid,
+                tty,
+                command: bin.to_string(),
+                args,
+                cwd: process_cwd(pid),
+            })
         })
         .collect()
 }

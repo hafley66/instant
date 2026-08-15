@@ -1,5 +1,64 @@
 import { describe, expect, it } from "vitest";
-import { diagramElementAtPoint, diagramElementKey, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+import type { Terminal } from "@xterm/xterm";
+import { diagramElementAtPoint, diagramElementKey, findDiagramFences, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+
+function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): Terminal {
+  const lines = rows.map((text) => ({
+    isWrapped: false,
+    translateToString: () => text,
+  }));
+  return {
+    rows: height,
+    buffer: {
+      active: {
+        viewportY,
+        length: lines.length,
+        getLine: (row: number) => lines[row],
+      },
+    },
+  } as unknown as Terminal;
+}
+
+describe("stripped terminal diagrams", () => {
+  it("captures rich D2 with internal blank rows and stops at assistant prose", () => {
+    const terminal = terminalWithRows([
+      "• d2",
+      "  direction: right",
+      "",
+      "  classes: {",
+      "    ok: {",
+      "      style.fill: \"#d3f9d8\"",
+      "    }",
+      "  }",
+      "",
+      "  IN: inputs { class: ok }",
+      "  IN -> OUT",
+      "Self-contained: no imported house file.",
+    ]);
+
+    expect(findDiagramFences(terminal)).toMatchInlineSnapshot(`
+      [
+        {
+          "code": "direction: right
+
+      classes: {
+        ok: {
+          style.fill: \"#d3f9d8\"
+        }
+      }
+
+      IN: inputs { class: ok }
+      IN -> OUT",
+          "end": 10,
+          "inferred": false,
+          "language": "d2",
+          "start": 0,
+          "stripped": true,
+        },
+      ]
+    `);
+  });
+});
 
 describe("svgAspectRatio", () => {
   it("reads SVG dimensions and rejects missing renderer output", () => {

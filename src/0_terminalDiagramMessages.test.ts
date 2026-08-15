@@ -59,4 +59,42 @@ describe("terminal message diagrams", () => {
       ]
     `);
   });
+
+  it("keeps rich D2 declarations and internal blank rows intact", () => {
+    const rich = `before
+\`\`\`d2
+direction: right
+
+classes: {
+  ok: {
+    style.fill: "#d3f9d8"
+  }
+}
+
+IN: inputs { class: ok }
+IN -> OUT: resolve
+\`\`\`
+after`;
+
+    expect(diagramsFromMessageTail([message("m5", "assistant", rich)]))
+      .toMatchInlineSnapshot(`
+        [
+          {
+            "code": "direction: right
+
+        classes: {
+          ok: {
+            style.fill: \"#d3f9d8\"
+          }
+        }
+
+        IN: inputs { class: ok }
+        IN -> OUT: resolve",
+            "language": "d2",
+            "locator": "m5",
+            "messageId": "m5",
+          },
+        ]
+      `);
+  });
 });

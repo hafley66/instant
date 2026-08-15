@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Native pan proof</title>
+<style>
+  * { box-sizing: border-box }
+  body { margin: 0; background: #111; color: #ddd; font: 14px system-ui }
+  output { position: fixed; z-index: 1; padding: 8px; background: #111d }
+  #viewport {
+    width: 100vw;
+    height: 100vh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-x pan-y;
+    cursor: grab;
+  }
+  #viewport:active { cursor: grabbing }
+  svg { display: block; width: 3000px; height: 2000px }
+</style>
+
+<output>scrollLeft 0 · scrollTop 0</output>
+<div id="viewport">
+  <svg viewBox="0 0 3000 2000" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
+        <path d="M100 0H0V100" fill="none" stroke="#345"/>
+      </pattern>
+    </defs>
+    <rect width="3000" height="2000" fill="#18202b"/>
+    <rect width="3000" height="2000" fill="url(#grid)"/>
+    <g fill="#8bd" font-family="system-ui" font-size="32">
+      <text x="100" y="100">native overflow surface</text>
+      <text x="1400" y="950">drag with mouse</text>
+      <text x="2600" y="1850">trackpad and touch are native</text>
+    </g>
+  </svg>
+</div>
+
+<script>
+  const viewport = document.querySelector('#viewport')
+  const output = document.querySelector('output')
+  let drag
+
+  viewport.addEventListener('scroll', () => {
+    output.value = `scrollLeft ${viewport.scrollLeft} · scrollTop ${viewport.scrollTop}`
+  }, { passive: true })
+
+  viewport.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY }
+    viewport.setPointerCapture(event.pointerId)
+  })
+
+  viewport.addEventListener('pointermove', event => {
+    if (!drag || drag.id !== event.pointerId) return
+    viewport.scrollBy(drag.x - event.clientX, drag.y - event.clientY)
+    drag.x = event.clientX
+    drag.y = event.clientY
+  })
+
+  viewport.addEventListener('pointerup', event => {
+    if (drag?.id === event.pointerId) drag = undefined
+  })
+</script>

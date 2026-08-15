@@ -1,68 +1,88 @@
-// Generic lazy filesystem tree on the canonical TreeTable (AGENTS: no bespoke
-// tree UIs). Extracted from memeTree.tsx so panels (meme thumbs, mdview
-// explorer) share one implementation. Dirs lazy-load on first expand via the
-// given native list command. Markdown files expand idempotently so repeated
-// activation retains their already-materialized heading children.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect } from "react";
+import { Signal, type Signal as SignalValue } from "@hafley66/signals";
+import { createGrid, type Grid } from "@hafley66/grid";
+import { GridTree } from "@hafley66/grid/react";
+import { z } from "zod";
 import { invoke, type CommandName } from "../../generated/native";
-import { type ExpandedState } from "@tanstack/react-table";
-import { TreeTable, type TreeColumn } from "../../treetable";
 import type { FsEntry } from "../../state";
 import { isMarkdownPath, markdownHeadingRows, type MarkdownHeadingRow } from "../../0_markdownTree";
-import { openMarkdownPanel } from "../../mdview/open";
+import { openMarkdownPanel } from "@hafley66/md";
+import { buildFileRows, type FileTreeModelRow } from "./0_FileTreeModel";
 import "./1_FileTree.css";
 
-export interface FileTreeRow {
-  id: string;
-  kind: "dir" | "file";
-  label: string;
-  path: string;
-  ext: string;
-  children?: FileTreeRow[];
-}
+export type FileTreeRow = FileTreeModelRow;
 
-type TreeRow = FileTreeRow | MarkdownHeadingRow;
+type GridHeadingRow = MarkdownHeadingRow & { name: string; ext: ""; children?: GridRow[] };
+type GridFileRow = Omit<FileTreeRow, "children"> & { children?: GridRow[] };
+type GridRow = GridFileRow | GridHeadingRow;
 
-function isExpanded(expanded: ExpandedState, path: string): boolean {
-  return typeof expanded === "object" && Boolean((expanded as Record<string, boolean>)[path]);
-}
+const gridRowSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  label: z.string(),
+  name: z.string(),
+  path: z.string(),
+  ext: z.string(),
+});
 
-function entryToRow(e: FsEntry): FileTreeRow {
-  return {
-    id: e.path,
-    kind: e.is_dir ? "dir" : "file",
-    label: e.name,
-    path: e.path,
-    ext: e.ext,
-    children: e.is_dir ? [] : undefined,
-  };
-}
+export { buildFileRows } from "./0_FileTreeModel";
 
-// Children materialize only for expanded dirs (lazy); a collapsed dir keeps
-// `children: undefined` so the twisty shows via getRowCanExpand.
-export function buildFileRows(
+type FileTreeModel = {
+  roots: SignalValue<FsEntry[]>;
+  children: SignalValue<Record<string, FsEntry[]>>;
+  markdown: SignalValue<Record<string, MarkdownHeadingRow[]>>;
+  expanded: SignalValue<Record<string, boolean>>;
+  rows: SignalValue<GridRow[]>;
+  grid: Grid<GridRow>;
+};
+
+const models = new Map<string, FileTreeModel>();
+
+function projectRows(
   entries: FsEntry[],
-  expanded: ExpandedState,
-  fsChildren: Record<string, FsEntry[]>,
-): FileTreeRow[] {
-  return entries.map((e) => {
-    const children =
-      e.is_dir && isExpanded(expanded, e.path)
-        ? buildFileRows(fsChildren[e.path] ?? [], expanded, fsChildren)
-        : undefined;
-    return { ...entryToRow(e), children };
-  });
+  expanded: Record<string, boolean>,
+  children: Record<string, FsEntry[]>,
+  markdown: Record<string, MarkdownHeadingRow[]>,
+): GridRow[] {
+  const addMarkdown = (rows: FileTreeRow[]): GridRow[] => rows.map((row) => ({
+    ...row,
+    children: row.kind === "dir"
+      ? addMarkdown(row.children ?? [])
+      : markdown[row.path]?.map((heading) => ({ ...heading, name: heading.label, ext: "" as const })),
+  }));
+  return addMarkdown(buildFileRows(entries, expanded, children));
 }
 
-const defaultGlyph = (r: FileTreeRow): string => (r.kind === "dir" ? "📁" : "📄");
+function modelFor(rootPath: string, rootEntries: FsEntry[]): FileTreeModel {
+  const existing = models.get(rootPath);
+  if (existing) return existing;
+
+  const roots = Signal(rootEntries);
+  const children = Signal<Record<string, FsEntry[]>>({});
+  const markdown = Signal<Record<string, MarkdownHeadingRow[]>>({});
+  const expanded = Signal<Record<string, boolean>>({});
+  const rows = Signal<GridRow[]>(() => projectRows(roots.$(), expanded.$(), children.$(), markdown.$()));
+  const grid = createGrid<GridRow>({
+    schema: gridRowSchema as z.ZodType<GridRow>,
+    rows,
+    mode: "client",
+    getRowId: (row) => row.id,
+    getSubRows: (row) => row.children,
+    getRowCanExpand: (row) => row.kind === "dir" || (row.kind === "file" && isMarkdownPath(row.path)),
+  });
+  const model = { roots, children, markdown, expanded, rows, grid };
+  models.set(rootPath, model);
+  return model;
+}
+
+const defaultGlyph = (row: FileTreeRow): string => row.kind === "dir" ? "📁" : "📄";
 
 export interface FileTreeProps {
   rootPath: string;
   rootEntries: FsEntry[];
   activePath?: string;
-  // Files with these extensions (lowercase, no dot) are shown; dirs always are.
   filterExts?: ReadonlySet<string>;
-  listCommand: CommandName; // native listing command ("list_dir" | "list_dir_meme")
+  listCommand: CommandName;
   onSelect: (path: string) => void;
   glyphFor?: (row: FileTreeRow) => string;
   searchPlaceholder?: string;
@@ -71,95 +91,63 @@ export interface FileTreeProps {
 export function FileTree({
   rootPath,
   rootEntries,
-  activePath,
   filterExts,
   listCommand,
   onSelect,
   glyphFor = defaultGlyph,
-  searchPlaceholder = "filter files…",
 }: FileTreeProps) {
-  const [fsChildren, setFsChildren] = useState<Record<string, FsEntry[]>>({});
-  const [expanded, setExpanded] = useState<ExpandedState>({});
-  const [markdownChildren, setMarkdownChildren] = useState<Record<string, MarkdownHeadingRow[]>>({});
+  const model = modelFor(rootPath, rootEntries);
 
-  // Reset loaded children/expansion when the root folder changes.
   useEffect(() => {
-    setFsChildren({});
-    setExpanded({});
-  }, [rootPath]);
+    if (model.roots.$() !== rootEntries) model.roots.$(rootEntries);
+  }, [model, rootEntries]);
 
-  const rows = useMemo(
-    () => buildFileRows(rootEntries, expanded, fsChildren),
-    [rootEntries, expanded, fsChildren],
-  );
-
-  async function loadChildren(path: string) {
-    if (fsChildren[path]) return;
-    try {
-      const listing = await invoke<{ entries: FsEntry[] }>(listCommand, { path });
-      const filtered = listing.entries.filter(
-        (e) => e.is_dir || !filterExts || filterExts.has(e.ext.toLowerCase()),
-      );
-      setFsChildren((prev) => ({ ...prev, [path]: filtered }));
-    } catch {
-      // ignore permission / missing folder errors
-    }
-  }
-
-  async function loadMarkdown(path: string) {
-    if (markdownChildren[path]) return;
-    try {
-      const text = await invoke<string>("read_text", { path });
-      setMarkdownChildren((prev) => ({ ...prev, [path]: markdownHeadingRows(path, text) }));
-    } catch { setMarkdownChildren((prev) => ({ ...prev, [path]: [] })); }
-  }
-
-  const columns: TreeColumn<TreeRow>[] = [
-    {
-      id: "name",
-      header: "name",
-      tree: true,
-      cell: (r) => r.kind === "heading" ? <span className="sidebar-heading"># {r.label}</span> : (
-        <span className="file-tree-cell">
-          <span className="file-tree-glyph">{glyphFor(r)}</span>
-          {r.label}
-        </span>
-      ),
-      sortValue: (r) => r.label,
-    },
-  ];
+  useEffect(() => {
+    const subscription = model.grid.events.$.subscribe((event) => {
+      const expansion = event?.type === "expanded" ? event.expanded : undefined;
+      if (!expansion || typeof expansion !== "object") return;
+      model.expanded.$(expansion as Record<string, boolean>);
+      const rows = model.rows.$();
+      for (const [path, open] of Object.entries(expansion)) {
+        if (!open) continue;
+        const row = rows.find((candidate) => candidate.id === path);
+        if (row?.kind === "dir" && !model.children.$()[path]) {
+          void invoke<{ entries: FsEntry[] }>(listCommand, { path }).then((listing) => {
+            const filtered = listing.entries.filter(
+              (entry) => entry.is_dir || !filterExts || filterExts.has(entry.ext.toLowerCase()),
+            );
+            model.children.$({ ...model.children.$(), [path]: filtered });
+          }).catch(() => undefined);
+        }
+        if (row?.kind === "file" && isMarkdownPath(row.path) && !model.markdown.$()[row.path]) {
+          void invoke<string>("read_text", { path: row.path }).then((text) => {
+            model.markdown.$({ ...model.markdown.$(), [row.path]: markdownHeadingRows(row.path, text) });
+          }).catch(() => undefined);
+        }
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [filterExts, listCommand, model]);
 
   return (
-    <TreeTable<TreeRow>
-      columns={columns}
-      data={rows}
-      getRowId={(r) => r.kind === "heading" ? r.id : r.path}
-      getSubRows={(r) => r.kind === "file" && isMarkdownPath(r.path) ? markdownChildren[r.path] : r.kind === "dir" ? r.children : undefined}
-      getRowCanExpand={(r) => r.kind === "dir" || (r.kind === "file" && isMarkdownPath(r.path))}
-      onToggleExpand={(r, willExpand) => {
-        if (willExpand && r.kind === "dir") loadChildren(r.path);
-        if (willExpand && r.kind === "file" && isMarkdownPath(r.path)) void loadMarkdown(r.path);
-      }}
-      expanded={expanded}
-      onExpandedChange={setExpanded}
-      // controls wraps the table in .tt-host > .tt-wrap, whose base CSS
-      // (flex:1; min-height:0; overflow:auto) is the scroll pattern the other
-      // panels use. (No `virtual`: it threw a ResizeObserver loop while the
-      // chain was unbounded.)
-      controls
-      filter={(r, q) => {
-        const s = q.toLowerCase();
-        return r.label.toLowerCase().includes(s) || r.path.toLowerCase().includes(s);
-      }}
-      searchPlaceholder={searchPlaceholder}
-      onRowClick={(r) => {
-        if (r.kind === "heading") openMarkdownPanel(r.path, r.headingId);
-        else if (r.kind === "file") onSelect(r.path);
-      }}
-      toggleOnDoubleClick={(r) => r.kind === "dir"}
-      ensureExpanded={(r) => r.kind === "file" && isMarkdownPath(r.path)}
-      rowTitle={(r) => r.path}
-      rowClass={(r) => (r.path === activePath ? "file-tree-active" : undefined)}
-    />
+    <div className="file-tree-grid">
+      <GridTree
+        grid={model.grid}
+        width="100%"
+        onRowClick={(row) => {
+          if (row.kind === "heading") openMarkdownPanel(row.path, row.headingId);
+          else if (row.kind === "file") onSelect(row.path);
+        }}
+        renderIcon={(row) => row.kind === "heading" ? "#" : glyphFor({
+          id: row.id,
+          kind: row.kind,
+          label: row.label,
+          name: row.name,
+          path: row.path,
+          ext: row.ext,
+        })}
+        renderLabel={(row) => row.label}
+      />
+    </div>
   );
 }

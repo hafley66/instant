@@ -170,8 +170,7 @@ pub(crate) fn frontmost_app() -> String {
     let name_key = unsafe { CFString::wrap_under_get_rule(kCGWindowOwnerName) };
     for i in 0..info.len() {
         let Some(item) = info.get(i) else { continue };
-        let dict =
-            unsafe { CFDictionary::<CFString, CFType>::wrap_under_get_rule(*item as _) };
+        let dict = unsafe { CFDictionary::<CFString, CFType>::wrap_under_get_rule(*item as _) };
         // Skip menubar/dock/overlay windows (non-zero layer).
         let layer = dict
             .find(&layer_key)

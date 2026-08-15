@@ -5,6 +5,42 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>instant</title>
+    <script>
+      // Install diagnostics before the module graph starts. A SyntaxError while
+      // evaluating an imported module prevents src/main.ts from running, so its
+      // normal error listeners cannot observe that failure. Tauri initializes
+      // __TAURI_INTERNALS__ before document scripts execute; the queue keeps
+      // browser/dev loads harmless when that bridge is absent.
+      (() => {
+        const queue = (window.__instantEarlyDiagnostics = window.__instantEarlyDiagnostics || []);
+        const stringify = (value) => {
+          if (value instanceof Error) return `${value.message}\n${value.stack || ""}`;
+          if (typeof value === "string") return value;
+          try { return JSON.stringify(value); } catch (_) { return String(value); }
+        };
+        const send = (kind, value, extra) => {
+          const line = `[frontend.${kind}] ${stringify(value)}${extra ? ` ${extra}` : ""}`;
+          const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+          if (typeof invoke !== "function") {
+            queue.push(line);
+            return;
+          }
+          invoke("log_append", { line: `${new Date().toISOString()} ${line}` }).catch(() => {});
+        };
+        window.addEventListener("error", (event) => {
+          send("error", event.error || event.message, `source=${event.filename || ""}:${event.lineno || 0}:${event.colno || 0}`);
+        }, true);
+        window.addEventListener("unhandledrejection", (event) => {
+          send("unhandledrejection", event.reason);
+        }, true);
+        window.addEventListener("load", () => {
+          if (queue.length === 0) return;
+          const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+          if (typeof invoke !== "function") return;
+          while (queue.length) invoke("log_append", { line: `${new Date().toISOString()} ${queue.shift()}` }).catch(() => {});
+        }, { once: true });
+      })();
+    </script>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 

@@ -213,14 +213,19 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(1024);
         for index in 0..1024 {
             sender
-                .send(PtyData { id: "term".into(), chunk: index.to_string() })
+                .send(PtyData {
+                    id: "term".into(),
+                    chunk: index.to_string(),
+                })
                 .unwrap();
         }
         drop(sender);
 
         let started = Instant::now();
         let mut sizes = Vec::new();
-        run_batches(receiver, Duration::from_millis(2), |batch| sizes.push(batch.len()));
+        run_batches(receiver, Duration::from_millis(2), |batch| {
+            sizes.push(batch.len())
+        });
 
         assert_eq!(sizes, vec![256, 256, 256, 256]);
         assert!(started.elapsed() >= Duration::from_millis(8));

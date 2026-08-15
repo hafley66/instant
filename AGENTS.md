@@ -39,3 +39,12 @@ icon and double-click/double-cmd summon gesture (both process-wide singletons). 
 `just dev-safe` instead, which sets `INSTANT_NO_GLOBALS=1` to skip tray creation, the
 global shortcut, and the summon-gesture CGEventTap in the second instance (it shows its
 window on launch instead, since the summon gesture is otherwise the only way to reach it).
+
+## Flash 4 bus lanes
+
+The user authorizes OpenRouter DeepSeek V4 Flash 0731 to read and edit this repository
+and its Git worktrees when explicitly dispatched through the repository `bus` CLI for a
+specified coding or research lane. This authorization covers source content required by
+the lane brief. It does not authorize other models, other repositories, credential files,
+environment secrets, publishing, pushing, merging, or external messaging beyond the bus
+completion hail named by the brief.

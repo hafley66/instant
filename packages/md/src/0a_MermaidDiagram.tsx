@@ -2,14 +2,14 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import mermaid from "mermaid";
 import { DiagramLightbox, diagramSvgMarkup } from "./0_DiagramLightbox";
 import { mermaidTheme } from "./0_diagramTheme";
-import { useLiveProbeLifecycle, useLiveProbeRender } from "../1_LiveProbe";
-import { liveProbe } from "../0_liveProbe";
+import { getMdviewHost } from "./ports";
 
 let nextDiagramId = 0;
 
 export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) {
-  useLiveProbeRender("MermaidDiagram", undefined, { dark, sourceBytes: code.length });
-  useLiveProbeLifecycle("MermaidDiagram");
+  const host = getMdviewHost();
+  host.useRenderProbe("MermaidDiagram", undefined, { dark, sourceBytes: code.length });
+  host.useLifecycleProbe("MermaidDiagram");
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
@@ -27,7 +27,7 @@ export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) 
     });
     void mermaid.render(id, code)
       .then(({ svg: rendered }) => {
-        liveProbe.record({ kind: "operation", name: "mdview.renderMermaid", detail: { dark, sourceBytes: code.length, svgBytes: rendered.length } });
+        host.recordOperation("mdview.renderMermaid", { dark, sourceBytes: code.length, svgBytes: rendered.length });
         if (!disposed) {
           setError("");
           setSvg(rendered);

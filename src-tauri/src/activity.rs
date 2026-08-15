@@ -45,7 +45,7 @@ pub struct Event {
     pub ts: i64,        // unix ms
     pub source: String, // 'browser' | 'os' | 'files'
     pub kind: String,
-    pub app: String,   // frontmost app (os captures)
+    pub app: String, // frontmost app (os captures)
     pub url: String,
     pub title: String, // browser title / file name
     pub text: String,  // selection/clipboard / file path / dom context
@@ -142,7 +142,8 @@ fn reconcile_builtin_schedules(rules: &mut [Rule]) -> usize {
         .map(|rule| {
             let mut previous = rule.schedule.clone();
             previous["source"]["interval"]["periodMs"] = serde_json::json!(300_000);
-            previous["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"] = serde_json::json!(300_000);
+            previous["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"] =
+                serde_json::json!(300_000);
             (rule.id, (rule.schedule, previous))
         })
         .collect();
@@ -310,7 +311,10 @@ fn header(name: &[u8], value: &[u8]) -> Header {
 // Permissive CORS so the extension's background fetch() succeeds.
 fn with_cors<R: Read>(resp: Response<R>) -> Response<R> {
     resp.with_header(header(b"Access-Control-Allow-Origin", b"*"))
-        .with_header(header(b"Access-Control-Allow-Methods", b"GET, POST, OPTIONS"))
+        .with_header(header(
+            b"Access-Control-Allow-Methods",
+            b"GET, POST, OPTIONS",
+        ))
         .with_header(header(b"Access-Control-Allow-Headers", b"Content-Type"))
 }
 
@@ -340,11 +344,10 @@ pub fn spawn_server(app: AppHandle) {
                     let rules = app.state::<RulesState>();
                     let list = rules.rules.lock().unwrap();
                     let revision = rules.revision.load(Ordering::Relaxed);
-                    let body = serde_json::json!({ "revision": revision, "rules": &*list }).to_string();
-                    let resp = Response::from_string(body).with_header(header(
-                        b"Content-Type",
-                        b"application/json",
-                    ));
+                    let body =
+                        serde_json::json!({ "revision": revision, "rules": &*list }).to_string();
+                    let resp = Response::from_string(body)
+                        .with_header(header(b"Content-Type", b"application/json"));
                     let _ = req.respond(with_cors(resp));
                 }
                 (Method::Post, "/heartbeat") => {
@@ -372,20 +375,16 @@ pub fn spawn_server(app: AppHandle) {
                     let db = app.state::<ActivityDb>();
                     let body = collect_matches(&db)
                         .unwrap_or_else(|e| serde_json::json!({ "error": e }).to_string());
-                    let resp = Response::from_string(body).with_header(header(
-                        b"Content-Type",
-                        b"application/json",
-                    ));
+                    let resp = Response::from_string(body)
+                        .with_header(header(b"Content-Type", b"application/json"));
                     let _ = req.respond(with_cors(resp));
                 }
                 (Method::Get, "/diagnostics") => {
                     let db = app.state::<ActivityDb>();
                     let body = collect_network_diagnostics(&db)
                         .unwrap_or_else(|e| serde_json::json!({ "error": e }).to_string());
-                    let resp = Response::from_string(body).with_header(header(
-                        b"Content-Type",
-                        b"application/json",
-                    ));
+                    let resp = Response::from_string(body)
+                        .with_header(header(b"Content-Type", b"application/json"));
                     let _ = req.respond(with_cors(resp));
                 }
                 (Method::Post, "/ingest") => {
@@ -395,7 +394,11 @@ pub fn spawn_server(app: AppHandle) {
                     // type:"rulematch"; everything else is an activity-spy event.
                     let is_match = serde_json::from_str::<serde_json::Value>(&body)
                         .ok()
-                        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s == "rulematch"))
+                        .and_then(|v| {
+                            v.get("type")
+                                .and_then(|t| t.as_str())
+                                .map(|s| s == "rulematch")
+                        })
                         .unwrap_or(false);
                     if is_match {
                         match serde_json::from_str::<RuleMatch>(&body) {
@@ -409,8 +412,15 @@ pub fn spawn_server(app: AppHandle) {
                                 let row = {
                                     let conn = db.0.lock().unwrap();
                                     insert_row(
-                                        &conn, now_ms(), "browser", "rulematch", "", &m.url,
-                                        &m.rule_id, &text, "",
+                                        &conn,
+                                        now_ms(),
+                                        "browser",
+                                        "rulematch",
+                                        "",
+                                        &m.url,
+                                        &m.rule_id,
+                                        &text,
+                                        "",
                                     )
                                 };
                                 match row {
@@ -531,10 +541,11 @@ fn collect_matches(db: &ActivityDb) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     let mut out: Vec<serde_json::Value> = Vec::new();
     for (ts, url, rule_id, text) in rows {
-        let matches: Vec<HashMap<String, serde_json::Value>> = serde_json::from_str::<RuleMatch>(&text)
-            .map(|m| m.matches)
-            .or_else(|_| serde_json::from_str(&text))
-            .unwrap_or_default();
+        let matches: Vec<HashMap<String, serde_json::Value>> =
+            serde_json::from_str::<RuleMatch>(&text)
+                .map(|m| m.matches)
+                .or_else(|_| serde_json::from_str(&text))
+                .unwrap_or_default();
         for m in matches {
             for (field, val) in m {
                 out.push(serde_json::json!({
@@ -612,7 +623,9 @@ pub async fn activity_events(
         }
         None => {
             let mut stmt = conn
-                .prepare(&format!("SELECT {cols} FROM events ORDER BY ts DESC LIMIT ?1"))
+                .prepare(&format!(
+                    "SELECT {cols} FROM events ORDER BY ts DESC LIMIT ?1"
+                ))
                 .map_err(|e| e.to_string())?;
             let out = stmt
                 .query_map(params![lim], map)
@@ -677,7 +690,10 @@ pub fn rules_get(state: State<RulesState>) -> Vec<Rule> {
 /// Replace the rule set, persist to rules.json, return the stored list. The
 /// extension picks the change up on its next /config tick (<= 1 min).
 #[tauri::command]
-pub async fn rules_set(state: State<'_, RulesState>, rules: Vec<Rule>) -> Result<Vec<Rule>, String> {
+pub async fn rules_set(
+    state: State<'_, RulesState>,
+    rules: Vec<Rule>,
+) -> Result<Vec<Rule>, String> {
     write_rules(&state.path, &rules).map_err(|e| e.to_string())?;
     *state.rules.lock().unwrap() = rules.clone();
     state.revision.fetch_add(1, Ordering::Relaxed);
@@ -685,7 +701,10 @@ pub async fn rules_set(state: State<'_, RulesState>, rules: Vec<Rule>) -> Result
 }
 
 #[tauri::command]
-pub async fn activity_rule_matches(state: State<'_, ActivityDb>, limit: Option<i64>) -> Result<Vec<RuleMatch>, String> {
+pub async fn activity_rule_matches(
+    state: State<'_, ActivityDb>,
+    limit: Option<i64>,
+) -> Result<Vec<RuleMatch>, String> {
     let cap = limit.unwrap_or(100).clamp(1, 500);
     let conn = state.0.lock().unwrap();
     let mut stmt = conn
@@ -702,8 +721,12 @@ pub async fn activity_rule_matches(state: State<'_, ActivityDb>, limit: Option<i
                 rule_id: row.get(0)?,
                 url: row.get(1)?,
                 ts: row.get(2)?,
-                stream: serde_json::from_str::<RuleMatch>(&text).ok().and_then(|m| m.stream),
-                schema: serde_json::from_str::<RuleMatch>(&text).ok().and_then(|m| m.schema),
+                stream: serde_json::from_str::<RuleMatch>(&text)
+                    .ok()
+                    .and_then(|m| m.stream),
+                schema: serde_json::from_str::<RuleMatch>(&text)
+                    .ok()
+                    .and_then(|m| m.schema),
                 matches: serde_json::from_str::<RuleMatch>(&text)
                     .map(|m| m.matches)
                     .or_else(|_| serde_json::from_str(&text))
@@ -711,7 +734,8 @@ pub async fn activity_rule_matches(state: State<'_, ActivityDb>, limit: Option<i
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -753,9 +777,10 @@ mod tests {
 
     #[test]
     fn parses_editor_cursor_payload() {
-        let ev: Ingest =
-            serde_json::from_str(r#"{"type":"editor","event":"cursor","path":"/tmp/a.ts","line":42,"ts":2}"#)
-                .unwrap();
+        let ev: Ingest = serde_json::from_str(
+            r#"{"type":"editor","event":"cursor","path":"/tmp/a.ts","line":42,"ts":2}"#,
+        )
+        .unwrap();
         assert_eq!(ev.source_type, "editor");
         assert_eq!(ev.line, Some(42));
     }
@@ -763,7 +788,8 @@ mod tests {
     #[test]
     fn parses_editor_save_payload() {
         let ev: Ingest =
-            serde_json::from_str(r#"{"type":"editor","event":"save","path":"/tmp/a.ts","ts":3}"#).unwrap();
+            serde_json::from_str(r#"{"type":"editor","event":"save","path":"/tmp/a.ts","ts":3}"#)
+                .unwrap();
         assert_eq!(ev.source_type, "editor");
         assert_eq!(ev.event, "save");
     }
@@ -791,7 +817,10 @@ mod tests {
         .unwrap();
         assert_eq!(reconcile_builtin_schedules(&mut rules), 1);
         assert_eq!(rules[0].schedule["source"]["interval"]["periodMs"], 5_000);
-        assert_eq!(rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["op"], "browsingContext.reload");
+        assert_eq!(
+            rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["op"],
+            "browsingContext.reload"
+        );
         assert_eq!(rules[1].schedule, "passive");
     }
 
@@ -802,12 +831,16 @@ mod tests {
             .map(|json| serde_json::from_str(json).unwrap())
             .collect();
         rules[0].schedule["source"]["interval"]["periodMs"] = serde_json::json!(300_000);
-        rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"] = serde_json::json!(300_000);
+        rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"] =
+            serde_json::json!(300_000);
         rules[1].schedule["source"]["interval"]["periodMs"] = serde_json::json!(42_000);
 
         assert_eq!(reconcile_builtin_schedules(&mut rules), 1);
         assert_eq!(rules[0].schedule["source"]["interval"]["periodMs"], 5_000);
-        assert_eq!(rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"], 5_000);
+        assert_eq!(
+            rules[0].schedule["pipe"][0]["exhaustMap"]["effect"]["input"]["target"]["idleForMs"],
+            5_000
+        );
         assert_eq!(rules[1].schedule["source"]["interval"]["periodMs"], 42_000);
     }
 
@@ -823,15 +856,29 @@ mod tests {
                url TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL, shot TEXT NOT NULL)",
         )
         .unwrap();
-        let row = insert_row(&conn, 1_000, "editor", "save", "", "/tmp/a.ts", "instant", "", "").unwrap();
+        let row = insert_row(
+            &conn,
+            1_000,
+            "editor",
+            "save",
+            "",
+            "/tmp/a.ts",
+            "instant",
+            "",
+            "",
+        )
+        .unwrap();
         assert_eq!(row.source, "editor");
         assert_eq!(row.kind, "save");
         assert_eq!(row.url, "/tmp/a.ts");
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM events WHERE source='editor'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE source='editor'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
     }
-
 }
 // todo(security): cap ingest request bodies and define localhost authentication policy
