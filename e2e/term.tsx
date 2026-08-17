@@ -35,6 +35,9 @@ import { wireContextMenu } from "../src/ctxmenu";
 import { ctxItemsFor, setLastCtxPoint } from "../src/chrome";
 import { closeActiveTab, reopenLastTab } from "../src/tabs";
 import { openPreviewPanel } from "../src/preview";
+import { boopAgents, buildLaneTree, mergeLanes, type LaneInfo } from "../src/boopAgents";
+import { setDockStrip } from "../src/plugins/harnessTrace/DockStripPanel";
+import { toggleTermStripFor } from "../src/plugins/harnessTrace/InTabStrip";
 
 // Mock list_dir with a small fixture tree so the sidebar's file explorer has
 // rows to render. Other commands (open_session/resize_pty/write_pty) resolve
@@ -51,6 +54,14 @@ const E2E_VIEWER_PANE = E2E_PARAMS.get("pane") ?? "%1";
 const E2E_VIEWER_CONTENT = E2E_PARAMS.get("contentB64")
   ? atob(E2E_PARAMS.get("contentB64")!)
   : "BOOP VIEWER FIXTURE\r\n";
+const E2E_BOOP_ROWS = E2E_PARAMS.get("boopRowsB64")
+  ? JSON.parse(atob(E2E_PARAMS.get("boopRowsB64")!)) as LaneInfo[]
+  : [];
+if (E2E_BOOP_ROWS.length > 0) {
+  const lanes = mergeLanes(E2E_BOOP_ROWS, {}, []);
+  boopAgents.$({ lanes, tree: buildLaneTree(lanes, []), sessions: [], costUsd: null, calls: 0 });
+}
+setDockStrip({ onOpen: (name, tmuxTarget) => openTab(name, { viewer: true, tmuxTarget }) });
 const ROOT = "/tmp/term-e2e";
 const entry = (path: string, is_dir = false) => ({
   name: path.split("/").pop()!,
@@ -209,6 +220,7 @@ setDockHooks({
 installKeymap([
   { id: "tab.close", keys: ["$mod+w"], run: closeActiveTab },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], run: () => void reopenLastTab() },
+  { id: "term.strip", keys: ["$mod+Shift+Period"], run: () => toggleTermStripFor(sessionId("e2e")) },
   {
     id: "term.sidebar",
     keys: ["$mod+Shift+Backslash"],
