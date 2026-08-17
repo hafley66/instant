@@ -5,6 +5,7 @@ import {
   parseBoopAgentGraph,
   projectBoopAgentGraph,
   projectAgentEdges,
+  recentAgentGraph,
 } from "./1_boopAgentExplorer";
 
 const producerFixture = {
@@ -141,5 +142,47 @@ describe("Boop agent explorer", () => {
     expect(boopAgentGraphCommand({ cwd: "/repo", includeHistory: true }, "/opt/boop")).toBe("/opt/boop agent sessions --format json --cwd '/repo' --history");
     expect(graph.schemaVersion).toBe("boop-agent/1");
     expect(() => parseBoopAgentGraph({ ...producerFixture, schema_version: 2 })).toThrow("unsupported");
+  });
+
+  it("keeps live and seven-day sessions, required ancestors, and recent events", () => {
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.UTC(2026, 7, 17);
+    const graph = parseBoopAgentGraph({
+      schema_version: 1,
+      sessions: [
+        { session: { harness: "codex", id: "old-parent" }, state: "idle", last_activity_ts: (now - 30 * day) / 1000 },
+        { session: { harness: "codex", id: "recent-child" }, state: "idle", last_activity_ts: now - 2 * day },
+        { session: { harness: "claude", id: "old-idle" }, state: "idle", last_activity_ts: now - 8 * day },
+        { session: { harness: "claude", id: "old-live" }, state: "live", last_activity_ts: now - 90 * day },
+      ],
+      edges: [
+        { parent: { harness: "codex", id: "old-parent" }, child: { harness: "codex", id: "recent-child" }, kind: "spawn", timestamp: (now - 2 * day) / 1000 },
+      ],
+      shells: [],
+      trace_events: [
+        { event_key: "recent", lane: "recent-child", session: "recent-child", kind: "work", started_ts: now - day, detail: "recent", created_ts: now - day },
+        { event_key: "old", lane: "old-idle", session: "old-idle", kind: "work", started_ts: now - 20 * day, detail: "old", created_ts: now - 20 * day },
+      ],
+    });
+    const recent = recentAgentGraph(graph, now - 7 * day);
+    expect({
+      nodes: recent.nodes.map((node) => `${node.harness}:${node.id}`),
+      edges: recent.edges.map((edge) => `${edge.from}->${edge.to}`),
+      events: recent.events.map((event) => event.id),
+    }).toMatchInlineSnapshot(`
+      {
+        "edges": [
+          "codex:old-parent->codex:recent-child",
+        ],
+        "events": [
+          "recent",
+        ],
+        "nodes": [
+          "codex:old-parent",
+          "codex:recent-child",
+          "claude:old-live",
+        ],
+      }
+    `);
   });
 });

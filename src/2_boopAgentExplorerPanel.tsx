@@ -20,6 +20,8 @@ import {
   type RunBoopCommand,
 } from "./1_boopAgentExplorer";
 
+const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 let loadGraph: ((query: AgentGraphQuery) => Promise<BoopAgentGraph>) | null = null;
 let pendingSelection: { harness: string; sessionId: string } | null = null;
 
@@ -115,7 +117,10 @@ export function BoopAgentExplorerPanel() {
     setError("");
     void loader(query).then((graph) => {
       if (sequence !== request.current) return;
-      const next = projectBoopAgentGraph(graph);
+      const next = projectBoopAgentGraph(
+        graph,
+        ui.includeHistory ? Date.now() - HISTORY_WINDOW_MS : undefined,
+      );
       setSnapshot(next);
       const routeId = pendingSelection ? routeSelection(next.tree, pendingSelection) : null;
       if (routeId) updateUi("selectedId", routeId);
@@ -157,7 +162,7 @@ export function BoopAgentExplorerPanel() {
           onChange={(event) => updateUi("cwd", event.currentTarget.value || undefined)}
           onKeyDown={(event) => event.stopPropagation()}
         />
-        <label><input type="checkbox" checked={ui.includeHistory} onChange={(event) => updateUi("includeHistory", event.currentTarget.checked)} /> history</label>
+        <label><input type="checkbox" checked={ui.includeHistory} onChange={(event) => updateUi("includeHistory", event.currentTarget.checked)} /> past 7 days</label>
       </div>
       {error ? <div className="session-empty">{error}</div> : null}
       <div className="panel-scroll boop-agent-explorer-body">

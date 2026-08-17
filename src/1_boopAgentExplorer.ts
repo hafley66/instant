@@ -232,12 +232,71 @@ export function projectAgentEdges(graph: BoopAgentGraph): AgentEdgeFact[] {
   return [...byKey.values()];
 }
 
-export function projectBoopAgentGraph(graph: BoopAgentGraph): AgentExplorerSnapshot {
+const ACTIVE_AGENT_STATES = new Set(["live", "running", "active"]);
+
+function epochMs(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
+export function recentAgentGraph(graph: BoopAgentGraph, sinceMs: number): BoopAgentGraph {
+  const activity = new Map<string, number>();
+  const note = (id: string | undefined, value: unknown) => {
+    if (!id) return;
+    const timestamp = epochMs(value);
+    if (timestamp !== null && timestamp > (activity.get(id) ?? 0)) activity.set(id, timestamp);
+  };
+  for (const node of graph.nodes) {
+    const id = identity(node.harness, node.id);
+    note(id, node.metadata?.lastActivityTs);
+  }
+  for (const edge of graph.edges) {
+    note(edge.from, edge.metadata?.timestamp);
+    note(edge.to, edge.metadata?.timestamp);
+  }
+  for (const event of graph.events) {
+    const timestamp = event.end ?? event.start ?? event.metadata?.createdTs;
+    note(event.nodeId, timestamp);
+    note(event.from, timestamp);
+    note(event.to, timestamp);
+  }
+
+  const keep = new Set<string>();
+  for (const node of graph.nodes) {
+    const id = identity(node.harness, node.id);
+    if (ACTIVE_AGENT_STATES.has(node.status?.toLowerCase() ?? "") || (activity.get(id) ?? 0) >= sinceMs) keep.add(id);
+  }
+  // A recent child needs its historical parents so projectAgentTree can retain
+  // the path. Walk to a fixed point because parent chains can be arbitrarily deep.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of graph.edges) {
+      if (keep.has(edge.to) && !keep.has(edge.from)) {
+        keep.add(edge.from);
+        changed = true;
+      }
+    }
+  }
+  const nodes = graph.nodes.filter((node) => keep.has(identity(node.harness, node.id)));
+  const edges = graph.edges.filter((edge) => keep.has(edge.from) && keep.has(edge.to));
+  const events = graph.events.filter((event) => {
+    const timestamp = epochMs(event.end ?? event.start ?? event.metadata?.createdTs);
+    return timestamp !== null && timestamp >= sinceMs && keep.has(event.nodeId);
+  });
+  const producerEdges = graph.producerEdges.filter((edge) =>
+    keep.has(identity(edge.parent.harness, edge.parent.id)) && keep.has(identity(edge.child.harness, edge.child.id))
+  );
+  return { ...graph, nodes, edges, events, producerEdges };
+}
+
+export function projectBoopAgentGraph(graph: BoopAgentGraph, sinceMs?: number): AgentExplorerSnapshot {
+  const source = sinceMs === undefined ? graph : recentAgentGraph(graph, sinceMs);
   return {
-    graph,
-    tree: projectAgentTree(graph),
-    timeline: projectAgentTimeline(graph),
-    edges: projectAgentEdges(graph),
+    graph: source,
+    tree: projectAgentTree(source),
+    timeline: projectAgentTimeline(source),
+    edges: projectAgentEdges(source),
   };
 }
 
