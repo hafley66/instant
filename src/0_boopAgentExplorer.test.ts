@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BoopAgentExplorerClient,
+  boopAgentGraphCommand,
   parseBoopAgentGraph,
   projectBoopAgentGraph,
   projectAgentEdges,
@@ -123,17 +124,21 @@ describe("Boop agent explorer", () => {
   });
 
   it("performs one bounded command and replaces only after parsing and validation", async () => {
-    const commands: string[] = [];
-    const client = new BoopAgentExplorerClient(async (command) => {
-      commands.push(command);
+    const queries: unknown[] = [];
+    const client = new BoopAgentExplorerClient(async (query) => {
+      queries.push(query);
       return JSON.stringify(producerFixture);
-    }, "/opt/boop");
+    });
     const graph = await client.load({ cwd: "/repo", includeHistory: true });
-    expect(commands).toMatchInlineSnapshot(`
+    expect(queries).toMatchInlineSnapshot(`
       [
-        "/opt/boop agent sessions --format json --cwd '/repo' --history",
+        {
+          "cwd": "/repo",
+          "includeHistory": true,
+        },
       ]
     `);
+    expect(boopAgentGraphCommand({ cwd: "/repo", includeHistory: true }, "/opt/boop")).toBe("/opt/boop agent sessions --format json --cwd '/repo' --history");
     expect(graph.schemaVersion).toBe("boop-agent/1");
     expect(() => parseBoopAgentGraph({ ...producerFixture, schema_version: 2 })).toThrow("unsupported");
   });

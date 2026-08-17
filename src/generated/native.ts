@@ -73,6 +73,7 @@ export type CommandName =
   | "screenshot"
   | "open_target"
   | "run_click"
+  | "boop_agent_graph"
   | "log_append"
   | "log_path"
   | "log_reveal";
@@ -195,6 +196,7 @@ export namespace commands {
     export const screenshot = "screenshot";
     export const openTarget = "open_target";
     export const runClick = "run_click";
+    export const boopAgentGraph = "boop_agent_graph";
     export const logAppend = "log_append";
     export const logPath = "log_path";
     export const logReveal = "log_reveal";

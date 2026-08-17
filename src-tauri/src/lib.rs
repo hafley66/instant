@@ -664,6 +664,29 @@ fn run_click_blocking(command: String, cwd: String) -> Result<String, String> {
     Ok(s)
 }
 
+#[tauri::command]
+async fn boop_agent_graph(cwd: Option<String>, include_history: bool) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut command = std::process::Command::new("boop");
+        command
+            .args(["agent", "sessions", "--format", "json"])
+            .env("PATH", pty::path_env());
+        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+            command.arg("--cwd").arg(cwd);
+        }
+        if include_history {
+            command.arg("--history");
+        }
+        let output = command.output().map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+        String::from_utf8(output.stdout).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Per-build state directory. A release ("prod") build nests all of its state
 /// (headless-Chrome profile, sqlite dbs, config.json, captures, log) under a
 /// `prod` subfolder so it can run alongside a `tauri dev` ("dev") instance
@@ -1109,6 +1132,7 @@ pub fn run() {
             screenshot,
             open_target,
             run_click,
+            boop_agent_graph,
             log_append,
             log_path,
             log_reveal,

@@ -18,7 +18,7 @@ import type {
 export const BOOP_AGENT_BIN = "/Users/chrishafley/.cargo/bin/boop";
 export const BOOP_AGENT_SCHEMA_VERSION = 1;
 
-export type RunBoopCommand = (commandLine: string) => Promise<string>;
+export type RunBoopCommand = (query: AgentGraphQuery) => Promise<string>;
 export type LoadBoopAgentGraph = (query: AgentGraphQuery) => Promise<BoopAgentGraph>;
 export type ProjectAgentTimeline = (graph: BoopAgentGraph) => ReturnType<typeof projectAgentTimeline>;
 
@@ -256,10 +256,10 @@ export function boopAgentGraphCommand(query: AgentGraphQuery, bin = BOOP_AGENT_B
 }
 
 export class BoopAgentExplorerClient {
-  constructor(private readonly run: RunBoopCommand, private readonly bin = BOOP_AGENT_BIN) {}
+  constructor(private readonly run: RunBoopCommand) {}
 
   async load(query: AgentGraphQuery): Promise<BoopAgentGraph> {
-    const text = await this.run(boopAgentGraphCommand(query, this.bin));
+    const text = await this.run(query);
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);

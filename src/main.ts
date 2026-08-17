@@ -316,7 +316,10 @@ async function main() {
 
   applyZoom(); // restore persisted webview zoom
   registerBuiltin();
-  setBoopAgentExplorerRunner((line) => invoke<string>("run_click", { command: line, cwd: "" }));
+  setBoopAgentExplorerRunner((query) => invoke<string>("boop_agent_graph", {
+    cwd: query.cwd ?? null,
+    includeHistory: query.includeHistory ?? false,
+  }));
   registerRulesPlugin();
   registerMetricsPlugin();
   registerHarnessTracePlugin();
