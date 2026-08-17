@@ -12,8 +12,7 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@hafley66/boop-adapters": path.resolve(__dirname, "../hafley-rxjs/packages/boop-adapters/dist/index.js"),
-      "@hafley66/marbler-runtime": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/2_Marbler.tsx"),
-      "@hafley66/marbler-model": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/1_model.ts"),
+      "@hafley66/marbler": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/index.ts"),
     },
   },
   // signalsJsx rewrites JSX imports after Vite's initial HTML/module scan, so

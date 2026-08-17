@@ -1,5 +1,4 @@
-import { MarblerPanel } from "@hafley66/marbler-runtime";
-import { createMarbler } from "@hafley66/marbler-model";
+import { createMarbler, MarblerPanel } from "@hafley66/marbler";
 import type { ExpandedState } from "@tanstack/react-table";
 import { useEffect, useRef, useState } from "react";
 import { boopAgentRoute } from "@hafley66/boop-adapters";
