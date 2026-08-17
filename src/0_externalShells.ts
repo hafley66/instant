@@ -15,6 +15,14 @@ export function liveExternalShellRows<T extends ExternalShellRow>(rows: T[]): T[
   return rows.filter((row) => row.state === "live" && row.tmux.length > 0);
 }
 
+export function viewerNeedsRetarget(
+  viewer: boolean,
+  currentTarget: string | undefined,
+  requestedTarget: string | undefined,
+): boolean {
+  return viewer && requestedTarget !== undefined && currentTarget !== requestedTarget;
+}
+
 export interface ExternalShellOpenSessionArgs {
   [key: string]: unknown;
   id: string;

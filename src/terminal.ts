@@ -60,7 +60,7 @@ import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
-import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction } from "./0_externalShells";
+import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import {
   renderSessionActive,
   refreshSessions,
@@ -439,6 +439,14 @@ export function openTab(
 ) {
   const id = sessionId(name);
   if (tabs.has(id)) {
+    const existing = tabs.get(id);
+    if (existing && viewerNeedsRetarget(opts.viewer ?? false, existing.tmuxTarget, opts.tmuxTarget)) {
+      removeTermPanel(id);
+      queueMicrotask(() => {
+        void settleClosures().then(() => openTab(name, opts));
+      });
+      return;
+    }
     if (hasTermPanel(id)) {
       activate(id);
       return;

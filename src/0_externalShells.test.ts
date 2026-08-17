@@ -4,10 +4,24 @@ import {
   externalViewerTarget,
   liveExternalShellRows,
   persistedViewerTarget,
+  viewerNeedsRetarget,
   viewerFailureAction,
 } from "./0_externalShells";
 
 describe("external shell viewer targets", () => {
+  it("retargets a same-name viewer instead of focusing its stale pane", () => {
+    expect([
+      viewerNeedsRetarget(true, "%707", "%509"),
+      viewerNeedsRetarget(true, "%509", "%509"),
+      viewerNeedsRetarget(false, "%707", "%509"),
+    ]).toMatchInlineSnapshot(`
+      [
+        true,
+        false,
+        false,
+      ]
+    `);
+  });
   it("keeps only live rows and preserves each exact tmux target", () => {
     expect(liveExternalShellRows([
       { lane: "codex-590", state: "live", tmux: "%590" },
