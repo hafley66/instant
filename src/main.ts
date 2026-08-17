@@ -124,6 +124,7 @@ import { setAgentsPanel } from "./agentsPanelV2";
 import { boopAgents, BoopClient, findLane, startBoopPolling, subRowsFor, withLaneRoute } from "./boopAgents";
 import { harnessAdapter, harnessIds } from "./harness";
 import { startReactiveRuntime } from "./reactive/runtime";
+import { externalViewerTarget } from "./0_externalShells";
 
 // Agents (boop) panel wiring: shellout runner + poll + bridge. New code here
 // calls boop only; it never imports scripts/bus.ts or execs tmux directly.
@@ -147,7 +148,8 @@ function registerAgentsPanel() {
     },
     open: (row) => {
       if (row.kind === "lane" && row.state === "live" && row.tmux) {
-        openTab(row.tmux, { viewer: true });
+        const target = externalViewerTarget(row.lane, row.tmux);
+        openTab(target.name, { viewer: target.viewer, tmuxTarget: target.tmuxTarget });
         return;
       }
       if (row.kind === "session") {
@@ -216,7 +218,8 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
-  { id: "term.strip", keys: ["$mod+Shift+x", "$mod+Shift+Period"], title: "Toggle Relations Strip", group: "View", run: toggleTermStrip },
+  { id: "term.strip", keys: ["$mod+Shift+x"], title: "Toggle Relations Strip", group: "View", run: toggleTermStrip },
+  { id: "panel.agents.shortcut", keys: ["$mod+Shift+Period"], title: "Toggle Agents", group: "Panel", run: () => togglePanel("agents") },
   { id: "term.network", keys: ["$mod+Shift+N"], title: "Toggle Network View", group: "View", run: toggleNetwork },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
@@ -429,7 +432,7 @@ async function main() {
   setReplaying(true); // don't log restored tabs as fresh visits
   for (const t of store.get().openTabs) {
     if (t.browser && t.url) spawnBrowserTab(t.name, t.url);
-    else openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics, viewer: t.viewer });
+    else openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics, viewer: t.viewer, tmuxTarget: t.tmuxTarget });
   }
   setReplaying(false);
   if (wantActive && (tabs.has(wantActive) || browserTabs.has(wantActive))) activate(wantActive);
