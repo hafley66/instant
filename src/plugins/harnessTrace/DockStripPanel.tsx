@@ -12,7 +12,7 @@ import { StripPolicy } from "./0_strip";
 import type { AgentTreeNode } from "./0_tree";
 
 export interface DockStripBridge {
-  onOpen: (sessionName: string) => void;
+  onOpen: (name: string, tmuxTarget: string) => void;
 }
 
 let dockStripBridge: DockStripBridge | null = null;
@@ -25,7 +25,11 @@ export function setDockStrip(bridge: DockStripBridge) {
 // the bridge for an unjoined or dead-tmux row.
 export function openSession(sessionName: string | null, liveTmux: Set<string>) {
   if (StripPolicy.openAction({ tmuxSession: sessionName }, liveTmux) !== "open") return;
-  dockStripBridge?.onOpen(sessionName!);
+  dockStripBridge?.onOpen(sessionName!, sessionName!);
+}
+
+export function openExternalShell(name: string, tmuxTarget: string): void {
+  dockStripBridge?.onOpen(name, tmuxTarget);
 }
 
 const PLUGIN_ID = "dock-strip";

@@ -870,7 +870,7 @@ export function registerV2Bridges() {
   // terminal, the same openTab path TmuxPanelV2 uses. Both strips reach this
   // one bridge, so it is where a viewer tab is minted: the tab watches a lane
   // someone else launched, and closing the view must not end the lane.
-  setDockStrip({ onOpen: (name) => openTab(name, { viewer: true }) });
+  setDockStrip({ onOpen: (name, tmuxTarget) => openTab(name, { viewer: true, tmuxTarget }) });
   setTmuxPanel({
     rows: tmuxRows,
     onOpen: (name) => openTab(name),

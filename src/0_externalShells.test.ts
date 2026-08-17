@@ -2,11 +2,27 @@ import { describe, expect, it } from "vitest";
 import {
   externalShellOpenSessionArgs,
   externalViewerTarget,
+  liveExternalShellRows,
   persistedViewerTarget,
   viewerFailureAction,
 } from "./0_externalShells";
 
 describe("external shell viewer targets", () => {
+  it("keeps only live rows and preserves each exact tmux target", () => {
+    expect(liveExternalShellRows([
+      { lane: "codex-590", state: "live", tmux: "%590" },
+      { lane: "claude-707", state: "dead", tmux: "%707" },
+      { lane: "native", state: "live", tmux: "" },
+    ])).toMatchInlineSnapshot(`
+      [
+        {
+          "lane": "codex-590",
+          "state": "live",
+          "tmux": "%590",
+        },
+      ]
+    `);
+  });
   it("keeps the lane identity and pane target separate", () => {
     expect(persistedViewerTarget(externalViewerTarget("luna", "%509"))).toMatchInlineSnapshot(`
       {

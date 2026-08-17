@@ -6,6 +6,15 @@ export interface ExternalShellTarget {
   viewer: true;
 }
 
+export interface ExternalShellRow {
+  state: string;
+  tmux: string;
+}
+
+export function liveExternalShellRows<T extends ExternalShellRow>(rows: T[]): T[] {
+  return rows.filter((row) => row.state === "live" && row.tmux.length > 0);
+}
+
 export interface ExternalShellOpenSessionArgs {
   [key: string]: unknown;
   id: string;

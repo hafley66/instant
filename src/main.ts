@@ -219,8 +219,8 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
-  { id: "term.strip", keys: ["$mod+Shift+x"], title: "Toggle Relations Strip", group: "View", run: toggleTermStrip },
-  { id: "panel.agents.shortcut", keys: ["$mod+Shift+Period"], title: "Toggle Agents", group: "Panel", run: () => togglePanel("agents") },
+  { id: "term.strip", keys: ["$mod+Shift+x", "$mod+Shift+Period"], title: "Toggle External Shells", group: "View", run: toggleTermStrip },
+  { id: "panel.agents.shortcut", keys: [], title: "Toggle Agents", group: "Panel", run: () => togglePanel("agents") },
   { id: "term.network", keys: ["$mod+Shift+N"], title: "Toggle Network View", group: "View", run: toggleNetwork },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
