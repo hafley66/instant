@@ -24,6 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import playwright from "@playwright/test";
 import { LiveGate, MAIL_DIR } from "../src/plugins/harnessTrace/0_live.ts";
+import { ackCountFromOutput, boopAckArgs, boopHailArgs, boopLaneListArgs, messageIdFromOutput } from "./0_livespawnBoop.ts";
 
 const PANE = `gate-claude-${process.pid}`;
 const PARENT_AGENT = PANE;
@@ -409,11 +410,8 @@ async function main() {
   if (!(await webUp(url))) throw new Error(`vite never came up on ${port}`);
   const browser = await playwright.chromium.launch();
 
-  const hail = step("hail", "node", [
-    BOOP, "beep", "hail", PARENT_AGENT,
-    "--mail-dir", mailDir, "--from", "coordinator", "--kind", "dispatch", "--body", HAIL_BODY,
-  ]);
-  const hailId = /queued (m-[0-9a-f]+)/.exec(hail.stdout)?.[1] ?? "";
+  const hail = step("hail", BOOP, boopHailArgs(PARENT_AGENT, mailDir, HAIL_BODY));
+  const hailId = messageIdFromOutput(hail.stdout) ?? "";
   const hailedAt = Date.now();
 
   const samples = [];
@@ -536,10 +534,8 @@ async function main() {
     if (childSessionId && acked === 0 && sweeps < 4) {
       sweeps += 1;
       step(`cass-index-${sweeps}`, "cass", ["index", "--watch-once", dirname(jsonl), "--robot"]);
-      const swept = step(`ack-${sweeps}`, BOOP, [
-        "beep", "message", "ack", "--mail-dir", mailDir, "--lane", PARENT_AGENT,
-      ]);
-      acked = Number(/acked (\d+)/.exec(swept.stdout)?.[1] ?? /closed (\d+)/.exec(swept.stdout)?.[1] ?? "0");
+      const swept = step(`ack-${sweeps}`, BOOP, boopAckArgs(PARENT_AGENT, mailDir));
+      acked = ackCountFromOutput(swept.stdout);
     }
 
     const childRow = sample.rows.find((row) => row.harness === "opencode");
@@ -562,7 +558,7 @@ async function main() {
   } catch {
     // exited on the SIGTERM above
   }
-  step("list-lanes", BOOP, ["beep", "lane", "list", "--mail-dir", mailDir]);
+  step("list-lanes", BOOP, boopLaneListArgs(mailDir));
   step("capture-final", "tmux", ["capture-pane", "-p", "-t", PANE], env);
   step("kill-gate", "tmux", ["kill-session", "-t", PANE], env);
 
