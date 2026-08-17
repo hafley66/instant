@@ -27,7 +27,7 @@ export interface AgentSessionNode {
   // full list (includes the sid) while display still shows the single tmuxSession.
   // Optional (absent = no matches) so join-free fixtures keep compiling.
   tmuxMatches?: string[];
-  // Current token usage stamped by the bus sweep from the session's own
+  // Current token usage stamped by the route updater from the session's own
   // harness artifact; absent when the source is unreadable or not yet swept.
   tokens?: MailTokens | null;
 }
@@ -47,7 +47,7 @@ export interface HarnessTraceRow {
   status: SessionStatus;
   cwd: string;
   inputTokens?: number | null;
-  // The bus sweep's token stamp for this lane (see MailTokens/AgentSessionNode).
+  // The route updater's token stamp for this lane (see MailTokens/AgentSessionNode).
   tokens?: MailTokens | null;
 }
 
@@ -70,8 +70,7 @@ export interface IAgentTreeIndex {
   size: number;
 }
 
-// One dispatch-bus envelope (~/.agent/mail/*.ndjson). The bus is designed, not
-// built yet, so every field is validated on the wire.
+// One dispatch envelope (~/.agent/mail/*.ndjson), validated on the wire.
 export interface MailEnvelope {
   id: string;
   from: string;
@@ -110,7 +109,7 @@ export interface ITermRouter {
 }
 
 // ---------------------------------------------------------------------------
-// Message bus (2026-08-03 bus ruling). MailEnvelope above predates it: its
+// Mail ledger (2026-08-03 ruling). MailEnvelope above predates it: its
 // single `ts` field is read as a from_timestamp fallback for pre-ruling
 // fixtures, and 0_mail.ts still projects that shape for the trace panel.
 // ---------------------------------------------------------------------------
@@ -158,7 +157,7 @@ export interface IMailQueueRow {
 }
 
 // Pure fold surface over the mailbox log. Every method takes the parsed rows;
-// file IO (append/read) and cass live at the edges (scripts/bus.ts).
+// file IO (append/read) and cass live at the edges outside the app process.
 export interface IMailStore {
   // Parse NDJSON; malformed lines and rows without id/to are skipped.
   parse(text: string): IMailMessage[];
@@ -192,11 +191,11 @@ export interface IMailAgent {
   tmux: string | null;
   cwd: string | null;
   sourcePath: string | null;
-  // The bus sweep's stamp of current input-token usage, with the sweep time.
+  // The route's stamp of current input-token usage, with the sweep time.
   tokens?: MailTokens | null;
 }
 
-// Token stamp the bus sweep writes into a live route: current input-token
+// Token stamp the route updater writes into a live route: current input-token
 // usage `in` at ISO time `at`. Absent when the host artifact is unreadable.
 export interface MailTokens {
   in: number;
@@ -212,29 +211,9 @@ export interface IMailDirectoryReader {
   agent(directory: IMailDirectory, agentId: string): IMailAgent | null;
 }
 
-// One cass search hit, the fields the ack sweep reads.
-export interface IMailCassHit {
-  source_path: string;
-  workspace: string;
-  agent: string;
-  line_number: number;
-}
-
-// Transport arg builders for the two legs, kept pure so the CLI shell is a
-// spawn and nothing else.
-export interface IMailLeg {
-  // argv vectors (after "tmux") that type the body into the agent's pane:
-  // a literal write then Enter. null = the agent has no pane.
-  tmuxSendArgs(agent: IMailAgent, body: string, socket: string | null): string[][] | null;
-  // argv (after "cass") proving the message reached a transcript.
-  cassSearchArgs(message: IMailMessage): string[];
-  // Hits scoped to this agent's session/source path.
-  cassHits(agent: IMailAgent, robotJson: string): IMailCassHit[];
-}
-
 // The frontend's read side of the mailbox: list_dir + read_text over the mail
-// dir, parsed by MailStore/MailDirectory. Read-only by construction — the send
-// and ack legs are out-of-process (scripts/bus.ts).
+// dir, parsed by MailStore/MailDirectory. Read-only by construction. Boop owns
+// the send and ack legs outside the app process.
 export interface IMailbox {
   messages: IMailMessage[];
   directory: IMailDirectory;

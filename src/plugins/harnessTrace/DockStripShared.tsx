@@ -188,7 +188,7 @@ function startFeed(): () => void {
   let debounce: ReturnType<typeof setTimeout> | undefined;
   const notifyMail = () => {
     clearTimeout(debounce);
-    // A 14-line bus sweep is one reload, not 14 (mdview 0_watch precedent).
+    // A batch mail update is one reload, not one reload per line.
     debounce = setTimeout(() => {
       for (const listener of feedListeners) listener.onMail();
     }, MAIL_DEBOUNCE_MS);

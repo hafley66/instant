@@ -1,5 +1,5 @@
-// Live-spawn gate: one claude session, started with --model sonnet in its own
-// tmux server, is hailed once over the bus and told to run one verbatim
+// Live-spawn gate: one claude session, started with --model sonnet in the
+// default tmux server, is hailed once over Boop and told to run one verbatim
 // `opencode run` command; the harness stores are then polled and the trace page
 // is rendered from each sample's real bytes.
 //
@@ -25,10 +25,10 @@ import { dirname, join } from "node:path";
 import playwright from "@playwright/test";
 import { LiveGate, MAIL_DIR } from "../src/plugins/harnessTrace/0_live.ts";
 
-const SOCKET = "livespawn-gate";
 const PANE = "gate-claude";
 const PARENT_AGENT = "gate-claude";
 const CHILD_AGENT = "oc-child";
+const BOOP = process.env.BOOP_BIN ?? "/Users/chrishafley/.cargo/bin/boop";
 const PORT = 4193;
 const MODEL = "openrouter/deepseek/deepseek-v4-flash-0731";
 // The one command the hail tells claude to run verbatim. It is data here and in
@@ -59,7 +59,7 @@ function scratchClaudeMd(driverPath: string): string {
     "",
     "## What will arrive",
     "",
-    "One message, injected into this pane by `scripts/bus.ts hail` over tmux,",
+    "One message, injected into this pane by `boop beep hail` over tmux,",
     "prefixed `[bus m-<id>]` and sent by the agent id `coordinator`. It asks for",
     "exactly one command to be run with the Bash tool and for the single word",
     "`done` in reply. Running it is the entire purpose of this session.",
@@ -381,23 +381,19 @@ async function main() {
   );
   // Written before the pane starts so it is session context, not a later read.
   writeFileSync(join(cwd, "CLAUDE.md"), scratchClaudeMd(join(root, "scripts", "livespawn.ts")));
-  // The send leg only needs the pane; the session id and source path are the
-  // ack leg's, and claude does not write a transcript until its first message,
-  // so they are filled in after the hail lands.
-  writeRegistry(mailDir, {
-    [PARENT_AGENT]: { sessionId: "", harness: "claude", tmux: PANE, sourcePath: null },
-  });
-
   const env = scrubbedEnv();
-  step("default-socket-before", "tmux", ["-L", "default", "ls"]);
-  step("kill-stale-gate", "tmux", ["-L", SOCKET, "kill-server"], env);
+  step("kill-stale-gate", "tmux", ["kill-session", "-t", PANE], env);
   step("new-session", "tmux", [
-    "-L", SOCKET, "new-session", "-d", "-s", PANE, "-x", "200", "-y", "50", "-c", cwd,
+    "new-session", "-d", "-s", PANE, "-x", "200", "-y", "50", "-c", cwd,
     "claude", "--model", "sonnet",
+  ], env);
+  step("patch-route", BOOP, [
+    "beep", "lane", "patch", "--tmux", PANE, "--harness", "claude", "--cwd", cwd,
+    "--mail-dir", mailDir, PARENT_AGENT,
   ], env);
   await wait(8000);
   // Scratch cwd = a folder claude has never seen: answer the trust prompt.
-  step("trust-prompt", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
+  step("trust-prompt", "tmux", ["send-keys", "-t", PANE, "Enter"], env);
   await wait(4000);
 
   // Own port, so a sibling lane's dev server cannot serve its tree's sources
@@ -414,10 +410,8 @@ async function main() {
   const browser = await playwright.chromium.launch();
 
   const hail = step("hail", "node", [
-    join(root, "scripts", "bus.ts"),
-    "hail", "--mail-dir", mailDir, "--socket", SOCKET,
-    "--to", PARENT_AGENT, "--from", "coordinator", "--kind", "dispatch",
-    "--body", HAIL_BODY,
+    BOOP, "beep", "hail", PARENT_AGENT,
+    "--mail-dir", mailDir, "--from", "coordinator", "--kind", "dispatch", "--body", HAIL_BODY,
   ]);
   const hailId = /queued (m-[0-9a-f]+)/.exec(hail.stdout)?.[1] ?? "";
   const hailedAt = Date.now();
@@ -493,7 +487,7 @@ async function main() {
     return files.length ? join(projectDir, files.sort()[0]) : null;
   });
   if (!jsonl) {
-    step("capture-no-session", "tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], env);
+    step("capture-no-session", "tmux", ["capture-pane", "-p", "-t", PANE], env);
     throw new Error(`claude never wrote a transcript under ${projectDir}`);
   }
   const claudeSessionId = jsonl.slice(jsonl.lastIndexOf("/") + 1, -".jsonl".length);
@@ -514,12 +508,12 @@ async function main() {
   for (let tick = 1; tick <= totalTicks; tick += 1) {
     await wait(intervalMs);
     const sample = await takeSample(tick);
-    const pane = spawnSync("tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], { encoding: "utf8", env });
+    const pane = spawnSync("tmux", ["capture-pane", "-p", "-t", PANE], { encoding: "utf8", env });
     // Claude asks before a Bash call the allow-list does not cover; the dialog's
     // first option is "yes", so an Enter keeps the pane moving. Logged, never
     // matched on prompt text beyond the dialog marker.
     if (/Do you want to (proceed|run)/i.test(pane.stdout ?? "")) {
-      step(`permission-enter-${tick}`, "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
+      step(`permission-enter-${tick}`, "tmux", ["send-keys", "-t", PANE, "Enter"], env);
     }
 
     // Challenge state, read structurally: the turn is over, nothing was spawned,
@@ -534,18 +528,18 @@ async function main() {
     if (challenged) {
       confirmations += 1;
       compliance = "challenged";
-      step("confirm-1", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "-l", "--", CONFIRM_LINE], env);
-      step("confirm-1-enter", "tmux", ["-L", SOCKET, "send-keys", "-t", PANE, "Enter"], env);
+      step("confirm-1", "tmux", ["send-keys", "-t", PANE, "-l", "--", CONFIRM_LINE], env);
+      step("confirm-1-enter", "tmux", ["send-keys", "-t", PANE, "Enter"], env);
       console.log("recipient challenged the hail; one confirmation sent");
     }
 
     if (childSessionId && acked === 0 && sweeps < 4) {
       sweeps += 1;
       step(`cass-index-${sweeps}`, "cass", ["index", "--watch-once", dirname(jsonl), "--robot"]);
-      const swept = step(`sweep-${sweeps}`, "node", [
-        join(root, "scripts", "bus.ts"), "sweep", "--mail-dir", mailDir, "--agent", PARENT_AGENT,
+      const swept = step(`ack-${sweeps}`, BOOP, [
+        "beep", "message", "ack", "--mail-dir", mailDir, "--lane", PARENT_AGENT,
       ]);
-      acked = Number(/acked (\d+)/.exec(swept.stdout)?.[1] ?? "0");
+      acked = Number(/acked (\d+)/.exec(swept.stdout)?.[1] ?? /closed (\d+)/.exec(swept.stdout)?.[1] ?? "0");
     }
 
     const childRow = sample.rows.find((row) => row.harness === "opencode");
@@ -568,17 +562,14 @@ async function main() {
   } catch {
     // exited on the SIGTERM above
   }
-  step("list-mail", "node", [join(root, "scripts", "bus.ts"), "list", "--mail-dir", mailDir]);
-  step("capture-final", "tmux", ["-L", SOCKET, "capture-pane", "-p", "-t", PANE], env);
-  step("kill-gate", "tmux", ["-L", SOCKET, "kill-server"], env);
-  step("gate-socket-after", "tmux", ["-L", SOCKET, "ls"], env);
-  step("default-socket-after", "tmux", ["-L", "default", "ls"]);
+  step("list-lanes", BOOP, ["beep", "lane", "list", "--mail-dir", mailDir]);
+  step("capture-final", "tmux", ["capture-pane", "-p", "-t", PANE], env);
+  step("kill-gate", "tmux", ["kill-session", "-t", PANE], env);
 
   writeFileSync(join(scratch, "run.json"), JSON.stringify({
     startedAt,
     finishedAt: new Date().toISOString(),
     scratch,
-    socket: SOCKET,
     pane: PANE,
     model: { claude: "sonnet", opencode: MODEL },
     cwd,

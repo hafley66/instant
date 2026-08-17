@@ -181,7 +181,7 @@ function route(partial: Partial<IMailAgent> & { id: string }): IMailAgent {
 describe("registrySeeds", () => {
   const NOW = Date.parse("2026-08-03T12:00:00Z");
 
-  // Sabotage receipt: before this seam, a `bus dispatch`ed shell lane existed
+  // Sabotage receipt: before this seam, an externally dispatched shell lane existed
   // only in registry.json, so it never became a row on any scope.
   it("synthesizes a seed for a route no harness store reported", () => {
     const [row] = registrySeeds(

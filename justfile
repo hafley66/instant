@@ -117,7 +117,7 @@ test:
 cargo-check:
     cargo check --manifest-path src-tauri/Cargo.toml
 
-# Build the shared harness-store CLI consumed by scripts/bus.ts.
+# Build the shared harness-store CLI used by the harness adapters.
 harness-cli:
     cargo build --manifest-path src-tauri/Cargo.toml --bin instant-harness
 
@@ -147,8 +147,8 @@ vscode-install: vscode-build
     cd vscode-ext && corepack pnpm@10.12.4 exec @vscode/vsce package --allow-missing-repository -o instant-activity.vsix
     code --install-extension vscode-ext/instant-activity.vsix
 
-# LIVE spawn gate: boots claude (--model sonnet) in its own tmux server, hails
-# it once over the bus to run one verbatim `opencode run`, polls the harness
+# LIVE spawn gate: boots claude (--model sonnet) in the default tmux server, hails
+# it once over Boop to run one verbatim `opencode run`, polls the harness
 # stores for up to 6 minutes and renders the trace page from each sample, then
 # asserts structure + transitions over the recorded run. Wall-clock and
 # token-spending by construction: a user-named exception to the 10-second law,

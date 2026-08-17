@@ -50,7 +50,7 @@ export class TermRouter implements ITermRouter {
 export const termRouter: ITermRouter = new TermRouter();
 
 // ---------------------------------------------------------------------------
-// Mail-preview view registration (2026-08-03 bus ruling). Same instance, wider
+// Mail-preview view registration (2026-08-03 mail ruling). Same instance, wider
 // view union: the stacks hold plain objects, and TermView's own lines belong to
 // another lane, so the kind joins here instead of in that union.
 // ---------------------------------------------------------------------------

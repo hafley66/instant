@@ -1,5 +1,5 @@
 // Data source for the Agents (boop) panel. Shells out to the boop binary
-// exclusively (no scripts/bus.ts, no raw tmux) and parses its text/TSV/ndjson
+// exclusively (no legacy Bus script, no raw tmux) and parses its text/TSV/ndjson
 // output into plain row objects. Parsers are pure and fixture-tested; the
 // client takes an injected runner so the tauri boundary stays out of this file.
 import { Signal } from "@hafley66/signals";

@@ -1,5 +1,5 @@
 // Queue preview for one agent id: its in and out messages from the mailbox log,
-// threaded by reply_to, with the ack state the 2026-08-03 bus ruling defines
+// threaded by reply_to, with the ack state the 2026-08-03 mail ruling defines
 // (to_timestamp filled only by a cass hit in this agent's transcript). Render
 // only: every number on screen comes from MailStore's pure fold.
 import { useCallback, useEffect, useMemo, useState } from "react";

@@ -127,7 +127,7 @@ import { startReactiveRuntime } from "./reactive/runtime";
 import { externalViewerTarget } from "./0_externalShells";
 
 // Agents (boop) panel wiring: shellout runner + poll + bridge. New code here
-// calls boop only; it never imports scripts/bus.ts or execs tmux directly.
+// calls Boop only; it never shells out to tmux directly.
 function registerAgentsPanel() {
   const client = new BoopClient((line) => invoke<string>("run_click", { command: line, cwd: "" }));
   const stop = startBoopPolling(client, (snap) => boopAgents.$(snap), 1500);
