@@ -261,8 +261,6 @@ export function SessionSidebar(props: {
   const [, bump] = useState(0);
   const [root, setRoot] = useState<string | null>(() => getCwd());
   const [turns, setTurns] = useState<AiMessage[]>([]);
-  const [cass, setCass] = useState<{ available: boolean; path: string | null } | null>(null);
-  const [cassCopied, setCassCopied] = useState(false);
   const [headings, setHeadings] = useState<Record<string, MarkdownHeadingRow[]>>({});
   const [turnFilter, setTurnFilter] = useState<"all" | "visible" | "user" | "tools">("visible");
   const [turnPreview, setTurnPreview] = useState<{ path: string; text: string; fallbackRect: DOMRect | null } | null>(null);
@@ -330,13 +328,6 @@ export function SessionSidebar(props: {
     };
   }, [sid]);
   useEffect(() => loadTurns(), [loadTurns]);
-  useEffect(() => {
-    let alive = true;
-    void invoke<{ available: boolean; path: string | null }>("cass_status")
-      .then((status) => { if (alive) setCass(status); })
-      .catch(() => { if (alive) setCass({ available: false, path: null }); });
-    return () => { alive = false; };
-  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => {
       void refreshTurns(sid).then(() => setTurns(tabTurns.get(sid) ?? [])).catch((e: unknown) => console.error("refreshTurns:", e));
@@ -430,21 +421,7 @@ export function SessionSidebar(props: {
             data-testid={source === "turns" ? "sidebar-turns" : "sidebar-files"}
           >
             {source === "turns" ? (
-              cass?.available === false ? (
-                <div className="term-sidebar-cass-install" data-testid="cass-install">
-                  <strong>CASS is not installed</strong>
-                  <span>Install it to browse cross-harness session turns.</span>
-                  <code>brew install dicklesworthstone/tap/cass</code>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void navigator.clipboard.writeText("brew install dicklesworthstone/tap/cass").then(() => setCassCopied(true)).catch(() => {});
-                    }}
-                  >
-                    {cassCopied ? "copied" : "copy install command"}
-                  </button>
-                </div>
-              ) : turnData.length ? (
+              turnData.length ? (
                 <TreeTable<TurnNode>
                   key="turns"
                   columns={turnColumns}

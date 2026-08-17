@@ -104,7 +104,7 @@ fn pixel_dims(cols: u16, rows: u16, cell_w: Option<u16>, cell_h: Option<u16>) ->
 /// default socket, so the running dev instance is unchanged. Every tmux call in
 /// this file goes through here, including the new-session in the pty itself, so
 /// the isolation is total. Discriminated by cfg!(debug_assertions).
-fn tmux_cmd() -> std::process::Command {
+fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
     let mut c = std::process::Command::new("tmux");
     // A release app is launched by macOS rather than a login shell, so its
     // locale can be absent or non-UTF-8. tmux otherwise replaces wide/Unicode
@@ -114,7 +114,14 @@ fn tmux_cmd() -> std::process::Command {
     if !cfg!(debug_assertions) {
         c.args(["-L", "instant-prod"]);
     }
+    if let Some(socket) = socket {
+        c.args(["-L", socket]);
+    }
     c
+}
+
+fn tmux_cmd() -> std::process::Command {
+    tmux_cmd_for_socket(None)
 }
 
 /// Resolve a tmux session or pane target without creating anything. Pane IDs
@@ -122,7 +129,11 @@ fn tmux_cmd() -> std::process::Command {
 /// containing session, while the original target remains available for the
 /// follow-up select-pane command.
 fn tmux_target_session(target: &str) -> Result<String, String> {
-    let out = tmux_cmd()
+    tmux_target_session_on_socket(target, None)
+}
+
+fn tmux_target_session_on_socket(target: &str, socket: Option<&str>) -> Result<String, String> {
+    let out = tmux_cmd_for_socket(socket)
         .args(["display-message", "-p", "-t", target, "#{session_name}"])
         .env("PATH", path_env())
         .output()
@@ -837,6 +848,38 @@ mod tests {
             tmux_attach_args("boop-session", None),
             ["attach-session", "-d", "-t", "boop-session"]
         );
+    }
+
+    #[test]
+    fn live_tmux_pane_resolves_and_dead_target_is_refused() {
+        let socket = format!("instant-external-shell-test-{}", std::process::id());
+        let session = format!("instant-external-shell-session-{}", std::process::id());
+        let created = tmux_cmd_for_socket(Some(&socket))
+            .args(["new-session", "-d", "-s", &session])
+            .status();
+        let Ok(created) = created else { return };
+        if !created.success() {
+            return;
+        }
+
+        let pane = tmux_cmd_for_socket(Some(&socket))
+            .args(["display-message", "-p", "#{pane_id}"])
+            .output()
+            .ok()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
+        let Some(pane) = pane.filter(|pane| !pane.is_empty()) else {
+            let _ = tmux_cmd_for_socket(Some(&socket)).arg("kill-server").status();
+            return;
+        };
+
+        assert_eq!(tmux_target_session_on_socket(&pane, Some(&socket)), Ok(session.clone()));
+        assert_eq!(
+            tmux_attach_args(&session, Some(&pane)),
+            ["attach-session", "-d", "-t", session.as_str(), ";", "select-pane", "-t", pane.as_str()]
+        );
+
+        let _ = tmux_cmd_for_socket(Some(&socket)).arg("kill-server").status();
+        assert!(tmux_target_session_on_socket(&pane, Some(&socket)).is_err());
     }
 
     #[test]
