@@ -4,8 +4,7 @@
 // client takes an injected runner so the tauri boundary stays out of this file.
 import { Signal } from "@hafley66/signals";
 
-export const BOOP_BIN: string =
-  "/Users/chrishafley/projects/claude-research/bin/boop";
+export const BOOP_BIN = "/Users/chrishafley/.cargo/bin/boop";
 
 export interface LaneInfo {
   state: string; // live | dead | ?
