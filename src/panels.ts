@@ -12,6 +12,7 @@ import { setBrowserPerf } from "./browser";
 import { refreshSessions, scanWorktreesIfNeeded } from "./worktrees";
 import { ConfigPanelV2 } from "./activity";
 import { registerFavoritesPlugin } from "./favorites";
+import { registerBoopAgentExplorer } from "./2_boopAgentExplorerPanel";
 
 export function registerBuiltin() {
   registerPlugin({
@@ -83,6 +84,7 @@ export function registerBuiltin() {
     ],
   });
   registerFavoritesPlugin(); // between activity/config: keeps rail order
+  registerBoopAgentExplorer();
   registerPlugin({
     id: "builtin",
     panels: [
