@@ -45,6 +45,12 @@ const E2E_PARAMS = new URLSearchParams(window.location.search);
 const E2E_HARNESS = E2E_PARAMS.get("harness") === "kimi" ? "kimi" : "codex";
 const E2E_WHEEL_HARNESS = E2E_PARAMS.get("wheelHarness");
 const E2E_NO_HARNESS = E2E_PARAMS.has("noHarness");
+const E2E_VIEWER = E2E_PARAMS.has("viewer");
+const E2E_VIEWER_LANE = E2E_PARAMS.get("lane") ?? "e2e-viewer";
+const E2E_VIEWER_PANE = E2E_PARAMS.get("pane") ?? "%1";
+const E2E_VIEWER_CONTENT = E2E_PARAMS.get("contentB64")
+  ? atob(E2E_PARAMS.get("contentB64")!)
+  : "BOOP VIEWER FIXTURE\r\n";
 const ROOT = "/tmp/term-e2e";
 const entry = (path: string, is_dir = false) => ({
   name: path.split("/").pop()!,
@@ -69,6 +75,18 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
 
 (window as E2eWindow).__instantE2eNativeResults = {
   list_sessions: [],
+  open_session: (args: Record<string, unknown> | undefined) => {
+    if (args?.attachOnly === true) {
+      const id = String(args.id ?? "");
+      requestAnimationFrame(() => writeTerm(id, `\x1b[2J\x1b[H${E2E_VIEWER_CONTENT}`));
+      (window as Window & { __externalOpenSession?: Record<string, unknown> }).__externalOpenSession = args;
+    }
+    return undefined;
+  },
+  close_pty: (args: Record<string, unknown> | undefined) => {
+    (window as Window & { __externalClosePty?: Record<string, unknown> }).__externalClosePty = args;
+    return undefined;
+  },
   cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
   list_dir: (args: Record<string, unknown> | undefined) => {
     const path = String(args?.path ?? ROOT);
@@ -237,6 +255,9 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = 
     },
   });
 };
+document.querySelector<HTMLButtonElement>("[data-testid=open-viewer]")!.onclick = () => {
+  openTab(E2E_VIEWER_LANE, { viewer: true, tmuxTarget: E2E_VIEWER_PANE });
+};
 document.querySelector<HTMLButtonElement>("[data-testid=open-file]")!.onclick = () => {
   openPreviewPanel(`${ROOT}/README.md`);
 };
@@ -245,3 +266,12 @@ mountReactDock(document.getElementById("dock")!);
 initRail();
 document.addEventListener("contextmenu", (event) => setLastCtxPoint(event.clientX, event.clientY), true);
 wireContextMenu(ctxItemsFor);
+
+// A reload is the same persisted-open-tab replay that the desktop composition
+// root performs. This fixture keeps the replay explicit so the lifecycle test
+// can assert that a pane target and viewer title survive a page reload.
+if (E2E_VIEWER && store.get().openTabs.length > 0) {
+  for (const tab of store.get().openTabs) {
+    openTab(tab.name, { viewer: tab.viewer, tmuxTarget: tab.tmuxTarget });
+  }
+}

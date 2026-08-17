@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { externalViewerTarget, persistedViewerTarget, viewerFailureAction } from "./0_externalShells";
+import {
+  externalShellOpenSessionArgs,
+  externalViewerTarget,
+  persistedViewerTarget,
+  viewerFailureAction,
+} from "./0_externalShells";
 
 describe("external shell viewer targets", () => {
   it("keeps the lane identity and pane target separate", () => {
@@ -15,5 +20,30 @@ describe("external shell viewer targets", () => {
   it("removes a viewer tab after an attach failure", () => {
     expect(viewerFailureAction(true)).toBe("remove");
     expect(viewerFailureAction(false)).toBe("retain");
+  });
+
+  it("carries a parsed Boop row through the open_session viewer contract", () => {
+    const row = { lane: "terra", tmux: "%509" };
+    expect(externalShellOpenSessionArgs(externalViewerTarget(row.lane, row.tmux), {
+      id: "s:terra",
+      cols: 120,
+      rows: 40,
+      cellW: 8,
+      cellH: 16,
+    })).toMatchInlineSnapshot(`
+      {
+        "attachOnly": true,
+        "cellH": 16,
+        "cellW": 8,
+        "cols": 120,
+        "command": null,
+        "cwd": null,
+        "graphics": false,
+        "id": "s:terra",
+        "name": "terra",
+        "rows": 40,
+        "tmuxTarget": "%509",
+      }
+    `);
   });
 });
