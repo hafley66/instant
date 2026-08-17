@@ -3,18 +3,18 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  bus,
+  boop,
   dropMailDir,
   hasSession,
   killProofSessions,
   killSession,
   makeMailDir,
   proofId,
-  SOCKET,
+  tmux,
   wireRealNative,
 } from "./0_live";
 
-// Layer B of the live suite: the real strip components over the real socket
+// Layer B of the live suite: the real strip components over the default socket
 // and mail dir; only the IPC transport is the exposed binding (0_live).
 test.afterEach(() => killProofSessions());
 
@@ -30,10 +30,10 @@ async function summonStrip(page: import("@playwright/test").Page): Promise<void>
 
 function dispatchLane(lane: string, mailDir: string): string {
   const cwd = mkdtempSync(join(tmpdir(), "proof-cwd-"));
-  bus(
-    ["dispatch", "--to", lane, "--cwd", cwd, "--cmd", "sleep 300", "--harness", "shell", "--socket", SOCKET, "--resolve-wait", "0"],
-    mailDir,
-  );
+  const created = tmux(["new-session", "-d", "-s", lane, "-c", cwd, "sleep", "300"]);
+  expect(created.status).toBe(0);
+  const route = boop(["lane", "patch", "--tmux", lane, "--harness", "shell", "--cwd", cwd, lane], mailDir);
+  expect(route.status).toBe(0);
   return cwd;
 }
 

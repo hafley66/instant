@@ -1,18 +1,15 @@
-// Shared edges for the live suite: a private tmux socket, the real bus CLI
-// against a per-test mail dir, and the page wiring that serves the real files.
+// Shared edges for the live suite: uniquely named tmux sessions, the real Boop
+// CLI against a per-test mail dir, and the page wiring that serves real files.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
 
-export const SOCKET = "instant-proof";
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BUS = join(HERE, "..", "scripts", "bus.ts");
+export const BOOP = process.env.BOOP_BIN ?? "/Users/chrishafley/.cargo/bin/boop";
 
 export function tmux(args: string[]): { status: number; stdout: string; stderr: string } {
-  const r = spawnSync("tmux", ["-L", SOCKET, ...args], { encoding: "utf8" });
+  const r = spawnSync("tmux", args, { encoding: "utf8" });
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
@@ -45,8 +42,8 @@ export function killProofSessions(): void {
   }
 }
 
-export function bus(args: string[], mailDir: string): { status: number; stdout: string } {
-  const r = spawnSync("node", [BUS, ...args, "--mail-dir", mailDir], { encoding: "utf8" });
+export function boop(args: string[], mailDir: string): { status: number; stdout: string } {
+  const r = spawnSync(BOOP, ["beep", ...args, "--mail-dir", mailDir], { encoding: "utf8" });
   return { status: r.status ?? 1, stdout: (r.stdout ?? "") + (r.stderr ?? "") };
 }
 
@@ -75,7 +72,7 @@ export function readRegistry(mailDir: string): Record<string, unknown> {
 // A real tmux client attached to a lane, riding `script` for the tty. Killing
 // it is what closing a viewer pty does; the lane must survive that.
 export function attachClient(name: string): ChildProcess {
-  return spawn("script", ["-q", "/dev/null", "tmux", "-L", SOCKET, "attach-session", "-t", `=${name}`], {
+  return spawn("script", ["-q", "/dev/null", "tmux", "attach-session", "-t", `=${name}`], {
     stdio: "ignore",
   });
 }

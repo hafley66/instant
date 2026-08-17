@@ -1,5 +1,5 @@
 #!/bin/bash
-# stage.sh <NN> <slug> [proof-dir]: full app-window PNG + tmux/bus receipts.
+# stage.sh <NN> <slug> [proof-dir]: full app-window PNG + tmux/mail receipts.
 set -euo pipefail
 
 NN="${1:?stage number}"
@@ -25,7 +25,7 @@ fi
   echo "at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "tmux ($SOCKET):"
   tmux -L "$SOCKET" list-sessions -F "  #{session_name} attached=#{session_attached}" 2>&1 || true
-  echo "bus tail:"
+echo "mail tail:"
   tail -5 ~/.agent/mail/bus.ndjson 2>/dev/null | sed 's/^/  /' || true
 } >> "$DIR/receipts.log"
 

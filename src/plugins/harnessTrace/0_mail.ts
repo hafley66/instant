@@ -1,7 +1,7 @@
 // Pure mail-ledger parsing + session join: no fs, no invoke, so vitest covers
 // it directly (the panel reads the files through list_dir/read_text).
-// The parse itself now yields ruled envelopes (0_bus.ts, 2026-08-03 bus
-// ruling); parseMailNdjson projects them back to the pre-ruling MailEnvelope
+// The parse yields ruled envelopes (0_bus.ts); parseMailNdjson projects them
+// back to the MailEnvelope
 // shape the trace panel's join reads, with ts = from_timestamp.
 import { MailDirectory, MailStore } from "./0_bus";
 import type {

@@ -134,7 +134,7 @@ function traceFilter(r: AgentTreeNode, q: string): boolean {
   );
 }
 
-// Missing mail dir = zero enrichment, zero errors (the bus is not built yet).
+// Missing mail dir = zero enrichment, zero errors.
 export async function loadMailLedger(): Promise<{
   envelopes: MailEnvelope[];
   registry: MailRegistry;

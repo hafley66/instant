@@ -7,18 +7,21 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 // End-to-end over the real boop binary: the exact verbs the Agents panel shells
 // out. Runs on a uniquely-named tmux session (killed after each case) and a
 // throwaway --mail-dir, and skips cleanly when tmux is absent. Deviation from
-// the busDispatch private-socket pattern: `beep lane patch` has no --socket
+// the retired Bus private-socket pattern: `beep lane patch` has no --socket
 // flag (it always talks to the default tmux server), so the pane lives there
 // under a unique name instead of a private socket; only that session is torn
 // down, never the server. A `beep lane create --dry-run` asserts the documented
 // private-socket spawn contract without launching a real harness.
 const BOOP =
   process.env.BOOP_BIN ??
-  "/Users/chrishafley/projects/sprefa/.boop-worktrees/lane/boop-rows/v6/boop/target/release/boop";
+  "/Users/chrishafley/.cargo/bin/boop";
 
 const HAVE_TMUX = (() => {
   try {
     execFileSync("tmux", ["-V"], { stdio: "ignore" });
+    const probe = `booptest-probe-${process.pid}`;
+    execFileSync("tmux", ["new-session", "-d", "-s", probe, "sleep", "1"], { stdio: "ignore" });
+    execFileSync("tmux", ["kill-session", "-t", probe], { stdio: "ignore" });
     return true;
   } catch {
     return false;

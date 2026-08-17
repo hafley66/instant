@@ -1,6 +1,6 @@
 // Frontend read side of the mailbox: the same list_dir/read_text seam the trace
 // panel's ledger join uses, parsed into ruled envelopes. Read-only — a send or
-// an ack appends to the log from out of process (scripts/bus.ts), because the
+// an ack appends to the log from out of process (Boop), because the
 // tmux and cass legs have no native command on this seam.
 import { invoke } from "../../generated/native";
 import type { DirListing } from "../../state";
@@ -10,7 +10,7 @@ import type { IMailbox, IMailboxReader, IMailDirectory, IMailMessage } from "./0
 export const MAIL_DIR = "~/.agent/mail";
 
 export const MailboxReader: IMailboxReader = {
-  // A missing mail dir reads as an empty mailbox, never an error: the bus is
+  // A missing mail dir reads as an empty mailbox, never an error: mail is
   // opt-in per machine.
   read(dir) {
     return invoke<DirListing>("list_dir", { path: dir })
