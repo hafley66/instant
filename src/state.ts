@@ -156,6 +156,9 @@ export interface Fav extends AiMessage {
 // xterm wiring is lost on reload, so we replay these on boot.
 export interface OpenTab {
   name: string;
+  // Boop can identify a pane as `%123`; keep that attach target separate from
+  // the stable tab identity and title.
+  tmuxTarget?: string;
   command: string | null;
   cwd: string | null;
   graphics?: boolean; // kitty-graphics (awrit) tab — restore the overlay on reload

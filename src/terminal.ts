@@ -16,6 +16,7 @@ import {
   activeId,
   setActive,
   flashStatus,
+  showError,
   sanitizePaste,
   escapeHtml,
   THEMES,
@@ -59,6 +60,7 @@ import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
+import { viewerFailureAction } from "./0_externalShells";
 import {
   renderSessionActive,
   refreshSessions,
@@ -70,6 +72,7 @@ import {
 export type Tab = {
   id: string;
   name: string;
+  tmuxTarget?: string;
   term: Terminal;
   fit: FitAddon;
   el: HTMLElement;
@@ -217,10 +220,11 @@ export function recordTab(
   cwd: string | null,
   graphics = false,
   viewer = false,
+  tmuxTarget?: string,
 ) {
   const cur = store.get().openTabs;
   if (cur.some((t) => t.name === name)) return;
-  store.set({ openTabs: [...cur, { name, command, cwd, graphics, viewer }] });
+  store.set({ openTabs: [...cur, { name, command, cwd, graphics, viewer, tmuxTarget }] });
 }
 export function forgetTab(id: string) {
   store.set({ openTabs: store.get().openTabs.filter((t) => sessionId(t.name) !== id) });
@@ -431,7 +435,7 @@ function wordAt(id: string, clientX: number, clientY: number): string {
 // fall back to QUICK_CMD and the backend default (HOME).
 export function openTab(
   name: string,
-  opts: { command?: string | null; cwd?: string | null; graphics?: boolean; viewer?: boolean } = {},
+  opts: { command?: string | null; cwd?: string | null; graphics?: boolean; viewer?: boolean; tmuxTarget?: string } = {},
 ) {
   const id = sessionId(name);
   if (tabs.has(id)) {
@@ -576,12 +580,13 @@ export function openTab(
     () => refreshTurns(id),
     () => store.get().inlineDiagrams,
   );
+  const tmuxTarget = opts.tmuxTarget;
   const wheel = graphics ? undefined : new TerminalWheelRouter(
     term,
-    (up, lines) => { void invoke(commands.pty.scrollSession, { name, up, lines }).catch(() => {}); },
+    (up, lines) => { void invoke(commands.pty.scrollSession, { name: tmuxTarget ?? name, up, lines }).catch(() => {}); },
     () => diagrams?.viewportScrolled(),
   );
-  tabs.set(id, { id, name, term, fit, el, graphics, overlay, diagrams, wheel, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, wheel, harness, outputTail: "" });
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -846,13 +851,21 @@ export function openTab(
   // 80x24 default that leaves full-screen TUIs (opencode) clipped.
   const command = cmd;
   const cwd = opts.cwd ?? null;
-  recordTab(name, command, cwd, graphics, opts.viewer ?? false); // survives reload; tmux session outlives the webview
+  recordTab(name, command, cwd, graphics, opts.viewer ?? false, tmuxTarget); // survives reload; tmux session outlives the webview
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
     invoke("open_session", {
-      id, name, command, cwd, cols, rows, graphics, attachOnly: opts.viewer ?? false, ...cellDims(term),
-    }).catch(console.error);
+      id, name, tmuxTarget, command, cwd, cols, rows, graphics, attachOnly: opts.viewer ?? false, ...cellDims(term),
+    }).catch((error) => {
+      console.error(error);
+      showError("terminal", error);
+      if (viewerFailureAction(opts.viewer ?? false) === "remove") {
+        forgetTab(id);
+        if (hasTermPanel(id)) removeTermPanel(id);
+        else onTermClosed(id);
+      }
+    });
   });
 
   // Hand the host element to dockview as a flat, draggable/splittable panel.

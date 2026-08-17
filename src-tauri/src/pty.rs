@@ -117,6 +117,44 @@ fn tmux_cmd() -> std::process::Command {
     c
 }
 
+/// Resolve a tmux session or pane target without creating anything. Pane IDs
+/// such as `%509` are accepted by tmux's target grammar and resolve to their
+/// containing session, while the original target remains available for the
+/// follow-up select-pane command.
+fn tmux_target_session(target: &str) -> Result<String, String> {
+    let out = tmux_cmd()
+        .args(["display-message", "-p", "-t", target, "#{session_name}"])
+        .env("PATH", path_env())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("tmux target '{target}' is not running"));
+    }
+    let session = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if session.is_empty() {
+        return Err(format!("tmux target '{target}' is not running"));
+    }
+    Ok(session)
+}
+
+fn tmux_attach_args(session: &str, target: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "attach-session".to_string(),
+        "-d".to_string(),
+        "-t".to_string(),
+        session.to_string(),
+    ];
+    if let Some(target) = target {
+        args.extend([
+            ";".to_string(),
+            "select-pane".to_string(),
+            "-t".to_string(),
+            target.to_string(),
+        ]);
+    }
+    args
+}
+
 // The poll-loop commands below are async + spawn_blocking: they shell out
 // (tmux/ps/lsof), and a sync `#[tauri::command]` runs on the main thread —
 // per-poll subprocess spawns there beachball the app whenever the system is
@@ -322,6 +360,7 @@ pub async fn open_session(
     events: State<'_, PtyEvents>,
     id: String,
     name: String,
+    tmux_target: Option<String>,
     command: Option<String>,
     cwd: Option<String>,
     cols: u16,
@@ -338,24 +377,29 @@ pub async fn open_session(
         if map.contains_key(&id) {
             drop(map);
             if !graphics && !direct_pty_mode() {
-                enable_mouse(&name);
+                enable_mouse(tmux_target.as_deref().unwrap_or(&name));
             }
             return resize_pty(store, id, cols, rows, cell_w, cell_h);
         }
     }
     // A viewer tab only watches an existing lane; `new-session -A` on a dead
     // one would resurrect it as an empty shell, so refuse instead.
-    if attach_only.unwrap_or(false) && !graphics && !direct_pty_mode() {
-        let alive = tmux_cmd()
-            .args(["has-session", "-t", &format!("={name}")])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if !alive {
-            return Err(format!(
-                "tmux session '{name}' is not running (viewer tabs attach only)"
-            ));
+    let attach_target = tmux_target.as_deref().filter(|target| !target.is_empty());
+    let target_session = if let Some(target) = attach_target {
+        if graphics || direct_pty_mode() {
+            return Err("tmux targets are unavailable for direct PTYs".to_string());
         }
+        tmux_target_session(target)?
+    } else {
+        name.clone()
+    };
+    if attach_only.unwrap_or(false) && !graphics && !direct_pty_mode() {
+        tmux_target_session(attach_target.unwrap_or(&name)).map_err(|_| {
+            format!(
+                "tmux target '{}' is not running (viewer tabs attach only)",
+                attach_target.unwrap_or(&name)
+            )
+        })?;
     }
 
     let (pixel_width, pixel_height) = pixel_dims(cols, rows, cell_w, cell_h);
@@ -406,14 +450,19 @@ pub async fn open_session(
         if !cfg!(debug_assertions) {
             c.args(["-L", "instant-prod"]);
         }
-        c.args(["new-session", "-A", "-D", "-s", &name]);
-        // Start dir for a freshly-created session (a worktree path, usually).
-        // tmux ignores -c when reattaching, like the trailing command.
-        if let Some(dir) = start_dir {
-            c.args(["-c", dir]);
-        }
-        if let Some(run) = command.as_deref().filter(|s| !s.is_empty()) {
-            c.arg(run);
+        if attach_only.unwrap_or(false) || attach_target.is_some() {
+            let args = tmux_attach_args(&target_session, attach_target);
+            c.args(args.iter().map(String::as_str));
+        } else {
+            // Start dir for a freshly-created session (a worktree path, usually).
+            // tmux ignores -c when reattaching, like the trailing command.
+            c.args(["new-session", "-A", "-D", "-s", &name]);
+            if let Some(dir) = start_dir {
+                c.args(["-c", dir]);
+            }
+            if let Some(run) = command.as_deref().filter(|s| !s.is_empty()) {
+                c.arg(run);
+            }
         }
         c.env("PATH", path_env());
         c.env_remove("LC_ALL");
@@ -458,7 +507,7 @@ pub async fn open_session(
     );
 
     if !graphics && !direct_pty_mode() {
-        enable_mouse(&name); // wheel scrolls the pane / forwards to mouse-aware TUIs
+        enable_mouse(&target_session); // wheel scrolls the pane / forwards to mouse-aware TUIs
     }
 
     // Reader thread: pump pty -> bounded event queue until EOF (session detached/killed).
@@ -772,6 +821,22 @@ mod tests {
     #[test]
     fn pixel_dims_saturates_instead_of_overflowing() {
         assert_eq!(pixel_dims(u16::MAX, 1, Some(2), Some(1)), (u16::MAX, 1));
+    }
+
+    #[test]
+    fn pane_attach_keeps_the_pane_target_after_resolving_its_session() {
+        assert_eq!(
+            tmux_attach_args("boop-session", Some("%509")),
+            ["attach-session", "-d", "-t", "boop-session", ";", "select-pane", "-t", "%509"]
+        );
+    }
+
+    #[test]
+    fn session_attach_has_no_create_or_restart_arguments() {
+        assert_eq!(
+            tmux_attach_args("boop-session", None),
+            ["attach-session", "-d", "-t", "boop-session"]
+        );
     }
 
     #[test]
