@@ -125,6 +125,7 @@ import { boopAgents, BoopClient, findLane, startBoopPolling, subRowsFor, withLan
 import { harnessAdapter, harnessIds } from "./harness";
 import { startReactiveRuntime } from "./reactive/runtime";
 import { externalViewerTarget } from "./0_externalShells";
+import { setBoopAgentExplorerRunner } from "./2_boopAgentExplorerPanel";
 
 // Agents (boop) panel wiring: shellout runner + poll + bridge. New code here
 // calls Boop only; it never shells out to tmux directly.
@@ -315,6 +316,7 @@ async function main() {
 
   applyZoom(); // restore persisted webview zoom
   registerBuiltin();
+  setBoopAgentExplorerRunner((line) => invoke<string>("run_click", { command: line, cwd: "" }));
   registerRulesPlugin();
   registerMetricsPlugin();
   registerHarnessTracePlugin();

@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { signalsJsx } from "@hafley66/signals/vite";
+import path from "node:path";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -8,6 +9,13 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), signalsJsx()],
+  resolve: {
+    alias: {
+      "@hafley66/boop-adapters": path.resolve(__dirname, "../hafley-rxjs/packages/boop-adapters/dist/index.js"),
+      "@hafley66/marbler-runtime": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/2_Marbler.tsx"),
+      "@hafley66/marbler-model": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/1_model.ts"),
+    },
+  },
   // signalsJsx rewrites JSX imports after Vite's initial HTML/module scan, so
   // the generated runtime otherwise gets discovered only after the webview has
   // loaded and Vite forces a dependency-optimization reload.
