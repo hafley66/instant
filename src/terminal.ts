@@ -60,7 +60,7 @@ import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
-import { viewerFailureAction } from "./0_externalShells";
+import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction } from "./0_externalShells";
 import {
   renderSessionActive,
   refreshSessions,
@@ -855,9 +855,16 @@ export function openTab(
   requestAnimationFrame(() => {
     fit.fit();
     const { cols, rows } = term;
-    invoke("open_session", {
-      id, name, tmuxTarget, command, cwd, cols, rows, graphics, attachOnly: opts.viewer ?? false, ...cellDims(term),
-    }).catch((error) => {
+    const dimensions = cellDims(term);
+    const request = opts.viewer
+      ? externalShellOpenSessionArgs(externalViewerTarget(name, tmuxTarget ?? name), {
+          id,
+          cols,
+          rows,
+          ...dimensions,
+        })
+      : { id, name, tmuxTarget, command, cwd, cols, rows, graphics, attachOnly: false, ...dimensions };
+    invoke("open_session", request).catch((error) => {
       console.error(error);
       showError("terminal", error);
       if (viewerFailureAction(opts.viewer ?? false) === "remove") {
