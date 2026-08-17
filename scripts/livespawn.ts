@@ -25,8 +25,8 @@ import { dirname, join } from "node:path";
 import playwright from "@playwright/test";
 import { LiveGate, MAIL_DIR } from "../src/plugins/harnessTrace/0_live.ts";
 
-const PANE = "gate-claude";
-const PARENT_AGENT = "gate-claude";
+const PANE = `gate-claude-${process.pid}`;
+const PARENT_AGENT = PANE;
 const CHILD_AGENT = "oc-child";
 const BOOP = process.env.BOOP_BIN ?? "/Users/chrishafley/.cargo/bin/boop";
 const PORT = 4193;
