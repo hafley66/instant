@@ -25,7 +25,7 @@ fi
   echo "at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "tmux ($SOCKET):"
   tmux -L "$SOCKET" list-sessions -F "  #{session_name} attached=#{session_attached}" 2>&1 || true
-echo "mail tail:"
+  echo "mail tail:"
   tail -5 ~/.agent/mail/bus.ndjson 2>/dev/null | sed 's/^/  /' || true
 } >> "$DIR/receipts.log"
 
