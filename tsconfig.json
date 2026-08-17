@@ -12,8 +12,7 @@
     "baseUrl": ".",
     "paths": {
       "@hafley66/boop-adapters": ["../hafley-rxjs/packages/boop-adapters/dist/index.d.ts"],
-      "@hafley66/marbler-runtime": ["../hafley-rxjs/packages/marbler/src/2_Marbler.tsx"],
-      "@hafley66/marbler-model": ["../hafley-rxjs/packages/marbler/src/1_model.ts"]
+      "@hafley66/marbler": ["../hafley-rxjs/packages/marbler/src/index.ts"]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
