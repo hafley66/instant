@@ -14,6 +14,7 @@ function node(id: string, ts: string, parentId: string | null): AgentSessionNode
     ts,
     lastActivity: ts,
     status: "live",
+    tmuxSession: null,
   };
 }
 

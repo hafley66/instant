@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { AgentSessionNode } from "./plugins/harnessTrace/0_types";
 
 const MAX_NODES = 128;
-const HEIGHT = 76;
+const INITIAL_HEIGHT = 76;
 
 function depthOf(node: AgentSessionNode, byId: Map<string, AgentSessionNode>): number {
   let depth = 0;
@@ -71,13 +71,16 @@ export function BoopFamilyGraph(props: {
     const leave = () => hoverRef.current(null);
     const resize = new ResizeObserver((entries) => {
       const width = Math.max(1, Math.floor(entries[0]?.contentRect.width ?? 1));
-      projection?.resize(width, HEIGHT);
+      const height = Math.max(1, Math.floor(entries[0]?.contentRect.height ?? INITIAL_HEIGHT));
+      projection?.resize(width, height);
       render();
     });
     const initialize = async () => {
-      const width = Math.max(1, Math.floor(element.getBoundingClientRect().width));
+      const rect = element.getBoundingClientRect();
+      const width = Math.max(1, Math.floor(rect.width));
+      const height = Math.max(1, Math.floor(rect.height || INITIAL_HEIGHT));
       const next = new PixiProjection(element, geometry, {
-        renderer: "webgl", representation: "particles", width, height: HEIGHT,
+        renderer: "webgl", representation: "particles", width, height,
         devicePixelRatio: window.devicePixelRatio || 1, backgroundColor: 0x10141c,
       });
       await next.init();
@@ -104,5 +107,5 @@ export function BoopFamilyGraph(props: {
     return () => { disposed = true; resize.disconnect(); projection?.dispose(); };
   }, [geometry, idAt]);
 
-  return <div ref={host} className="boop-family-graph" data-testid="boop-family-graph" aria-label="focused family network" style={{ height: HEIGHT, width: "100%", overflow: "hidden" }} />;
+  return <div ref={host} className="boop-family-graph" data-testid="boop-family-graph" aria-label="focused family network" style={{ height: "100%", width: "100%", overflow: "hidden" }} />;
 }

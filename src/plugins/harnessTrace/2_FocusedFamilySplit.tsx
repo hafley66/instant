@@ -4,13 +4,21 @@ import { readPluginState, savePluginState } from "../../pluginState";
 
 export interface HarnessTraceUiState {
   familyStripLayouts?: Record<string, [number, number]>;
+  familyContentLayouts?: Record<string, [number, number]>;
 }
 
 const DEFAULT_LAYOUT: [number, number] = [70, 30];
+const DEFAULT_CONTENT_LAYOUT: [number, number] = [38, 62];
 
 function layoutFor(sid: string): [number, number] {
   const layout = readPluginState<HarnessTraceUiState>("harnessTrace", {}).familyStripLayouts?.[sid];
   if (!layout || layout.length !== 2 || !layout.every((size) => Number.isFinite(size) && size > 0)) return DEFAULT_LAYOUT;
+  return layout;
+}
+
+function contentLayoutFor(sid: string): [number, number] {
+  const layout = readPluginState<HarnessTraceUiState>("harnessTrace", {}).familyContentLayouts?.[sid];
+  if (!layout || layout.length !== 2 || !layout.every((size) => Number.isFinite(size) && size > 0)) return DEFAULT_CONTENT_LAYOUT;
   return layout;
 }
 
@@ -59,6 +67,30 @@ export function FocusedFamilySplit({ sid, term, strip, onCommittedLayout }: Focu
       <PanelResizeHandle className="meme-sash meme-sash-horizontal" data-testid="focused-family-resize" onDragging={(dragging) => { if (!dragging) saveLayout(); }} onBlur={saveLayout} />
       <Panel id={`focused-family-strip-${sid}`} defaultSize={initialLayout[1]} minSize={15}>
         {strip}
+      </Panel>
+    </PanelGroup>
+  );
+}
+
+export function FocusedFamilyContentSplit(props: { sid: string; graph: ReactNode; table: ReactNode }) {
+  const initialLayout = useMemo(() => contentLayoutFor(props.sid), [props.sid]);
+  const latestLayout = useRef(initialLayout);
+  const saveLayout = () => {
+    const state = readPluginState<HarnessTraceUiState>("harnessTrace", {});
+    savePluginState<HarnessTraceUiState>("harnessTrace", {
+      ...state,
+      familyContentLayouts: { ...state.familyContentLayouts, [props.sid]: latestLayout.current },
+    });
+  };
+
+  return (
+    <PanelGroup direction="vertical" id={`focused-family-content-${props.sid}`} data-testid="focused-family-content-split" style={{ flex: "1 1 auto", minHeight: 0 }} onLayout={(layout) => { latestLayout.current = [layout[0], layout[1]]; }}>
+      <Panel id={`focused-family-graph-${props.sid}`} defaultSize={initialLayout[0]} minSize={15}>
+        {props.graph}
+      </Panel>
+      <PanelResizeHandle className="meme-sash meme-sash-horizontal" data-testid="focused-family-content-resize" onDragging={(dragging) => { if (!dragging) saveLayout(); }} onBlur={saveLayout} />
+      <Panel id={`focused-family-table-${props.sid}`} defaultSize={initialLayout[1]} minSize={25}>
+        {props.table}
       </Panel>
     </PanelGroup>
   );

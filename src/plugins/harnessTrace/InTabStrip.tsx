@@ -26,6 +26,7 @@ import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
 import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
 import { BoopFamilyGraph } from "../../1b_BoopFamilyGraph";
+import { FocusedFamilyContentSplit } from "./2_FocusedFamilySplit";
 
 export interface InTabStripProps {
   sid: string;
@@ -47,7 +48,7 @@ const STYLE =
   // Virtual rows need the wrap itself to scroll: height:auto above kills
   // .tt-scroll's height:100%, so cap it here (act-bar eats the other 24px).
   ".term-strip .tt-scroll{max-height:216px}";
-const FAMILY_GRAPH_STYLE = ".boop-family-graph{border-bottom:1px solid var(--frame);background:#10141c;flex:0 0 76px}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
+const FAMILY_GRAPH_STYLE = ".boop-family-graph{background:#10141c}.focused-family-table{height:100%;min-height:0;overflow:hidden}.focused-family-table .tt-wrap{height:100%}.focused-family-table .tt-scroll{max-height:none}.focused-family-table td,.focused-family-table th{line-height:19px}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
 const NO_RESUME_TABS: Record<string, { sessionId?: string }> = {};
 
 // The toggle command's whole body (main.ts binds it to the hotkey, the e2e
@@ -316,9 +317,10 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
             : "no external shells: every agent session here belongs to a claude tab's own list."}
         </div>
       ) : (
-        <>
-        {familyMode && <BoopFamilyGraph nodes={visibleNodes} selectedId={linkedId} onSelect={setLinkedId} onHover={setLinkedId} />}
-        <TreeTable<AgentTreeNode>
+        familyMode ? <FocusedFamilyContentSplit
+          sid={sid}
+          graph={<BoopFamilyGraph nodes={visibleNodes} selectedId={linkedId} onSelect={setLinkedId} onHover={setLinkedId} />}
+          table={<div className="focused-family-table"><TreeTable<AgentTreeNode>
           columns={columns}
           data={tree}
           getRowId={(r) => r.id}
@@ -337,8 +339,25 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
           onRowDoubleClick={(r) => {
             if (!index.hasChildren(r.id)) onOpenRow(r);
           }}
+        /></div>}
+        /> : <TreeTable<AgentTreeNode>
+          columns={columns}
+          data={tree}
+          getRowId={(r) => r.id}
+          getSubRows={(r) => r.children}
+          getRowCanExpand={(r) => index.hasChildren(r.id)}
+          expanded={expanded}
+          onExpandedChange={setExpanded}
+          virtual
+          controls
+          filter={stripFilter}
+          searchPlaceholder="filter loaded rows…"
+          rowTitle={(r) => r.why || r.cwd}
+          rowClass={(r) => (r.tmuxSession ? "dock-strip-row" : "dock-strip-row unjoined")}
+          onRowDoubleClick={(r) => {
+            if (!index.hasChildren(r.id)) onOpenRow(r);
+          }}
         />
-        </>
       )}
     </div>
   );

@@ -248,6 +248,38 @@ test("focused family strip saves a vertical drag layout and refits after each co
   expect(restoredStrip!.height / restoredSplit!.height).toBeCloseTo(layout[1] / 100, 1);
 });
 
+test("focused family graph and table save an independent vertical layout", async ({ page }) => {
+  await seed(page);
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+
+  const split = page.getByTestId("focused-family-content-split");
+  const graph = page.getByTestId("boop-family-graph");
+  const table = page.locator(".focused-family-table");
+  const handle = page.getByTestId("focused-family-content-resize");
+  await expect(split).toBeVisible();
+  await expect(handle).toBeVisible();
+
+  const beforeGraph = await graph.boundingBox();
+  const handleBox = await handle.boundingBox();
+  expect(beforeGraph).not.toBeNull();
+  expect(handleBox).not.toBeNull();
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 40, { steps: 4 });
+  await page.mouse.up();
+
+  const afterGraph = await graph.boundingBox();
+  expect(afterGraph!.height).toBeGreaterThan(beforeGraph!.height + 20);
+  await expect(table.locator(".tt-scroll")).toHaveCSS("max-height", "none");
+  const layout = await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("pluginState") ?? "{}");
+    return state.harnessTrace.familyContentLayouts.s1 as [number, number];
+  });
+  expect(layout).toHaveLength(2);
+  expect(layout[0]).toBeGreaterThan(38);
+});
+
 test("family bridge renders empty and error states from a Claude identity fixture", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
   await page.addInitScript(() => {
