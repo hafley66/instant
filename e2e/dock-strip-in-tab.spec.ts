@@ -206,6 +206,48 @@ test("period summons the focused session family tree in the terminal strip", asy
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
 });
 
+test("focused family strip saves a vertical drag layout and refits after each committed change", async ({ page }) => {
+  await seed(page);
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
+  const refits = () => page.evaluate(() => (window as Window & { __termRefits?: number }).__termRefits ?? 0);
+
+  const beforeOpen = await refits();
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  const handle = page.getByTestId("focused-family-resize");
+  await expect(handle).toBeVisible();
+  await expect.poll(refits).toBe(beforeOpen + 1);
+
+  const beforeDrag = await refits();
+  const handleBox = await handle.boundingBox();
+  expect(handleBox).not.toBeNull();
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y - 60, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(refits).toBe(beforeDrag + 1);
+  // The public store is not exposed in production; localStorage is the durable
+  // pluginState mirror and is the persistence receipt this page can inspect.
+  const layout = await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("pluginState") ?? "{}");
+    return state.harnessTrace.familyStripLayouts.s1 as [number, number];
+  });
+  expect(layout).toHaveLength(2);
+  expect(layout[1]).toBeGreaterThan(30);
+
+  const beforeClose = await refits();
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(handle).toHaveCount(0);
+  await expect.poll(refits).toBeGreaterThan(beforeClose);
+
+  const beforeRestore = await refits();
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(handle).toBeVisible();
+  await expect.poll(refits).toBeGreaterThan(beforeRestore);
+  const restoredStrip = await page.getByTestId("in-tab-strip").boundingBox();
+  const restoredSplit = await page.getByTestId("focused-family-split").boundingBox();
+  expect(restoredStrip!.height / restoredSplit!.height).toBeCloseTo(layout[1] / 100, 1);
+});
+
 test("family bridge renders empty and error states from a Claude identity fixture", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
   await page.addInitScript(() => {

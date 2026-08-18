@@ -30,6 +30,7 @@ import { BoopFamilyGraph } from "../../1b_BoopFamilyGraph";
 export interface InTabStripProps {
   sid: string;
   onLayout: () => void;
+  resizable?: boolean;
 }
 
 const STYLE =
@@ -42,6 +43,7 @@ const STYLE =
   ".term-strip .act-check{align-items:center}" +
   ".term-strip .tt-wrap{font-size:11px}" +
   ".term-strip td,.term-strip th{padding:0 4px;line-height:16px}" +
+  ".focused-family-strip{height:100%;flex:1 1 auto;max-height:none}" +
   // Virtual rows need the wrap itself to scroll: height:auto above kills
   // .tt-scroll's height:100%, so cap it here (act-bar eats the other 24px).
   ".term-strip .tt-scroll{max-height:216px}";
@@ -84,7 +86,7 @@ export function toggleNetworkFor(sid: string): void {
   });
 }
 
-function InTabStripView({ sid, onLayout }: InTabStripProps) {
+function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
   const [, setVersion] = useState(0);
   useEffect(() => termViewRouter.subscribe(() => setVersion((v) => v + 1)), []);
 
@@ -179,6 +181,7 @@ function InTabStripView({ sid, onLayout }: InTabStripProps) {
   const stripRef = useRef<HTMLDivElement | null>(null);
   const stripHeight = useRef(0);
   useEffect(() => {
+    if (resizable) return;
     const height = stripRef.current?.getBoundingClientRect().height ?? 0;
     if (height === stripHeight.current) return;
     stripHeight.current = height;
@@ -250,7 +253,7 @@ function InTabStripView({ sid, onLayout }: InTabStripProps) {
         : `viewing: ${current.agentSessionId}`;
 
   return (
-    <div className="term-strip" data-testid="in-tab-strip" ref={stripRef}>
+    <div className={resizable ? "term-strip focused-family-strip" : "term-strip"} data-testid="in-tab-strip" ref={stripRef}>
       <style>{STYLE}</style>
       <style>{FAMILY_GRAPH_STYLE}</style>
       <div className="act-bar">
