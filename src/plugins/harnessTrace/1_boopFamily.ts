@@ -54,6 +54,10 @@ const parentKindOf = (kind: string): ParentKind =>
 export function normalizeBoopFamily(raw: BoopGraph, now = Date.now()): AgentSessionNode[] {
   const parentByChild = new Map<string, GraphEdge>();
   for (const edge of raw.edges) parentByChild.set(identityKey(edge.child), edge);
+  const nodeIdByLane = new Map(raw.shells.map((shell) => [
+    shell.lane,
+    shell.session?.id ?? shell.session_id ?? shell.lane,
+  ]));
   const nodes = raw.sessions.map((session): AgentSessionNode => {
     const edge = parentByChild.get(identityKey(session.session));
     return {
@@ -79,12 +83,13 @@ export function normalizeBoopFamily(raw: BoopGraph, now = Date.now()): AgentSess
     if (existing) {
       existing.tmuxSession = tmux ?? existing.tmuxSession;
       existing.tmuxMatches = [...new Set([...(existing.tmuxMatches ?? []), ...(tmux ? [tmux] : [])])];
+      existing.status = statusOf(shell.state);
       continue;
     }
     nodes.push({
       id: shell.lane,
       harness: harnessOf(shell.harness),
-      parentId: shell.parent_lane ?? null,
+      parentId: shell.parent_lane ? nodeIdByLane.get(shell.parent_lane) ?? shell.parent_lane : null,
       parentKind: shell.parent_lane ? "dispatch" : null,
       from: "user",
       why: "",
@@ -102,7 +107,7 @@ export function normalizeBoopFamily(raw: BoopGraph, now = Date.now()): AgentSess
     const sessionId = shell.session?.id ?? shell.session_id;
     const node = sessionId ? byId.get(sessionId) : undefined;
     if (node && shell.parent_lane && node.parentId === null) {
-      node.parentId = shell.parent_lane;
+      node.parentId = nodeIdByLane.get(shell.parent_lane) ?? shell.parent_lane;
       node.parentKind = "dispatch";
     }
   }

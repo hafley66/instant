@@ -15,6 +15,57 @@ describe("focusedFamilyQuery", () => {
 });
 
 describe("normalizeBoopFamily", () => {
+  it("uses live shell evidence and translates lane parents to transcript ids", () => {
+    const rows = normalizeBoopFamily({
+      sessions: [
+        { session: { harness: "codex", id: "root-thread" }, state: "idle" },
+        { session: { harness: "codex", id: "child-thread" }, state: "idle" },
+      ],
+      edges: [],
+      shells: [
+        { lane: "codex-root", harness: "codex", session_id: "root-thread", tmux: "%1", tmux_session: "instant", state: "live" },
+        { lane: "feature-child", parent_lane: "codex-root", harness: "codex", session_id: "child-thread", tmux: "feature-child", state: "live" },
+      ],
+    }, Date.parse("2026-08-18T00:00:00.000Z"));
+
+    expect(rows).toMatchInlineSnapshot(`
+      [
+        {
+          "cwd": "",
+          "from": "user",
+          "harness": "codex",
+          "id": "root-thread",
+          "lastActivity": "2026-08-18T00:00:00.000Z",
+          "parentId": null,
+          "parentKind": null,
+          "status": "live",
+          "tmuxMatches": [
+            "instant",
+          ],
+          "tmuxSession": "instant",
+          "ts": "2026-08-18T00:00:00.000Z",
+          "why": "",
+        },
+        {
+          "cwd": "",
+          "from": "user",
+          "harness": "codex",
+          "id": "child-thread",
+          "lastActivity": "2026-08-18T00:00:00.000Z",
+          "parentId": "root-thread",
+          "parentKind": "dispatch",
+          "status": "live",
+          "tmuxMatches": [
+            "feature-child",
+          ],
+          "tmuxSession": "feature-child",
+          "ts": "2026-08-18T00:00:00.000Z",
+          "why": "",
+        },
+      ]
+    `);
+  });
+
   it("keeps Claude descendants and a historical member from typed Boop edges", () => {
     const rows = normalizeBoopFamily({
       sessions: [
