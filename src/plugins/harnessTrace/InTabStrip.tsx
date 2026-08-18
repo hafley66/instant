@@ -25,6 +25,7 @@ import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
 import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
+import { BoopFamilyGraph } from "../../1b_BoopFamilyGraph";
 
 export interface InTabStripProps {
   sid: string;
@@ -44,6 +45,7 @@ const STYLE =
   // Virtual rows need the wrap itself to scroll: height:auto above kills
   // .tt-scroll's height:100%, so cap it here (act-bar eats the other 24px).
   ".term-strip .tt-scroll{max-height:216px}";
+const FAMILY_GRAPH_STYLE = ".boop-family-graph{border-bottom:1px solid var(--frame);background:#10141c;flex:0 0 76px}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
 const NO_RESUME_TABS: Record<string, { sessionId?: string }> = {};
 
 // The toggle command's whole body (main.ts binds it to the hotkey, the e2e
@@ -91,6 +93,7 @@ function InTabStripView({ sid, onLayout }: InTabStripProps) {
   // null until the scope button is pressed; the policy widens an empty default.
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
+  const [linkedId, setLinkedId] = useState<string | null>(null);
 
   // Per-terminal open state (Toggle Relations Strip command).
   const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
@@ -249,6 +252,7 @@ function InTabStripView({ sid, onLayout }: InTabStripProps) {
   return (
     <div className="term-strip" data-testid="in-tab-strip" ref={stripRef}>
       <style>{STYLE}</style>
+      <style>{FAMILY_GRAPH_STYLE}</style>
       <div className="act-bar">
         {canGoBack && (
           <button type="button" className="strip-back" title="back" onClick={() => termViewRouter.back(sid)}>
@@ -309,6 +313,8 @@ function InTabStripView({ sid, onLayout }: InTabStripProps) {
             : "no external shells: every agent session here belongs to a claude tab's own list."}
         </div>
       ) : (
+        <>
+        {familyMode && <BoopFamilyGraph nodes={visibleNodes} selectedId={linkedId} onSelect={setLinkedId} onHover={setLinkedId} />}
         <TreeTable<AgentTreeNode>
           columns={columns}
           data={tree}
@@ -322,11 +328,14 @@ function InTabStripView({ sid, onLayout }: InTabStripProps) {
           filter={stripFilter}
           searchPlaceholder="filter loaded rows…"
           rowTitle={(r) => r.why || r.cwd}
-          rowClass={(r) => (r.tmuxSession ? "dock-strip-row" : "dock-strip-row unjoined")}
+          rowClass={(r) => `${r.tmuxSession ? "dock-strip-row" : "dock-strip-row unjoined"}${r.id === linkedId ? " boop-family-linked" : ""}`}
+          onRowHover={(r) => setLinkedId(r?.id ?? null)}
+          onRowClick={(r) => setLinkedId(r.id)}
           onRowDoubleClick={(r) => {
             if (!index.hasChildren(r.id)) onOpenRow(r);
           }}
         />
+        </>
       )}
     </div>
   );

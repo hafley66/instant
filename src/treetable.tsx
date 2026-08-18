@@ -79,6 +79,7 @@ export interface TreeTableProps<T> {
   expanded?: ExpandedState;
   onExpandedChange?: (e: ExpandedState) => void;
   onRowClick?: (row: T, e: MouseEvent) => void;
+  onRowHover?: (row: T | null) => void;
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
   // Inline cell edit committed (Enter/blur/select). Fired with the row, the
@@ -129,6 +130,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
     defaultExpandedAll,
     defaultExpanded,
     onRowClick,
+    onRowHover,
     onRowDoubleClick,
     onRowContextMenu,
     onToggleExpand,
@@ -339,6 +341,7 @@ export function TreeTable<T>(props: TreeTableProps<T>) {
       onFocusRow={setActive}
       columns={columns}
       onRowClick={onRowClick}
+      onRowHover={onRowHover}
       onRowDoubleClick={onRowDoubleClick}
       onRowContextMenu={onRowContextMenu}
       onToggleExpand={onToggleExpand}
