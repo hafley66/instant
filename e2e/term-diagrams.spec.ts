@@ -458,3 +458,41 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
     sameAfterDebouncedScan: true,
   });
 });
+
+const escapedLabelFlowchart = [
+  "```mermaid",
+  "flowchart LR",
+  '  parse["parse &lt; lex"] --> lower',
+  '  lower --> emit["emit &lt; link"]',
+  "  emit --> run",
+  "  run --> report",
+  "```",
+].join("\r\n");
+
+test("renders a flowchart whose quoted labels carry escaped angle brackets", async ({ page }) => {
+  await openTerminal(page);
+  await writeFixture(page, escapedLabelFlowchart);
+
+  const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(mermaid.locator("svg")).toBeVisible();
+  await expect(mermaid).not.toHaveClass(/term-diagram-error/);
+  await expect(mermaid).toContainText("parse < lex");
+});
+
+test("names the failing request when the Mermaid bundle cannot be fetched", async ({ page }) => {
+  await page.route(/mermaid\.min/, async (route) => {
+    // The module import that carries the bundle URL keeps its ?url suffix. Only
+    // the lazy script element request is cut, which is what a dev server that
+    // stopped after the page loaded does to the terminal overlay.
+    if (route.request().url().includes("?url")) return route.continue();
+    return route.abort("connectionrefused");
+  });
+  await openTerminal(page);
+  await writeFixture(page, escapedLabelFlowchart);
+
+  const failed = page.locator(".term-diagram-error");
+  await expect(failed).toBeVisible();
+  await expect(failed).toContainText("mermaid.min");
+  await expect(failed).toContainText("did not load:");
+  await expect(failed).not.toHaveText("Mermaid bundle failed to load");
+});

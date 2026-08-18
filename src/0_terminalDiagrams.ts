@@ -37,22 +37,59 @@ let mermaidId = 0;
 type MermaidApi = typeof import("mermaid").default;
 let mermaidPromise: Promise<MermaidApi> | null = null;
 
-function loadMermaid(): Promise<MermaidApi> {
-  const loaded = (window as typeof window & { mermaid?: MermaidApi }).mermaid;
-  if (loaded) return Promise.resolve(loaded);
-  if (mermaidPromise) return mermaidPromise;
-  mermaidPromise = new Promise((resolve, reject) => {
+function mermaidGlobal(): MermaidApi | undefined {
+  return (window as typeof window & { mermaid?: MermaidApi }).mermaid;
+}
+
+function failureText(reason: unknown): string {
+  if (reason instanceof Error) return `${reason.name}: ${reason.message}`;
+  return String(reason);
+}
+
+// A script element's error event carries no detail, so the cause is re-read
+// from the network. The bundle is fetched from the page origin at first paint,
+// long after the page loaded, so a dev server that has since stopped is the
+// common answer and only a second request can say so.
+async function bundleFailureReason(url: string): Promise<string> {
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return `HTTP ${response.status} ${response.statusText}`.trim();
+    return `served HTTP ${response.status}, so the bundle itself did not execute`;
+  } catch (reason) {
+    return failureText(reason);
+  }
+}
+
+function injectMermaidBundle(url: string): Promise<MermaidApi> {
+  return new Promise<MermaidApi>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = mermaidBundleUrl;
+    script.src = url;
     script.addEventListener("load", () => {
-      const api = (window as typeof window & { mermaid?: MermaidApi }).mermaid;
+      const api = mermaidGlobal();
       if (api) resolve(api);
-      else reject(new Error("Mermaid bundle loaded without its global API"));
+      else reject(new Error(`Mermaid bundle ${url} ran without defining globalThis.mermaid`));
     });
-    script.addEventListener("error", () => reject(new Error("Mermaid bundle failed to load")));
+    script.addEventListener("error", () => {
+      void bundleFailureReason(url).then((reason) =>
+        reject(new Error(`Mermaid bundle ${url} did not load: ${reason}`)));
+    });
     document.head.appendChild(script);
   });
-  return mermaidPromise;
+}
+
+export function loadMermaid(): Promise<MermaidApi> {
+  const loaded = mermaidGlobal();
+  if (loaded) return Promise.resolve(loaded);
+  if (mermaidPromise) return mermaidPromise;
+  // A rejected load is never kept. The overlay repaints on scroll and on PTY
+  // activity, and holding a rejected promise turned one unreachable fetch into
+  // a dead diagram for the rest of the app session.
+  const attempt = injectMermaidBundle(mermaidBundleUrl).catch((reason) => {
+    if (mermaidPromise === attempt) mermaidPromise = null;
+    throw reason;
+  });
+  mermaidPromise = attempt;
+  return attempt;
 }
 
 function logicalLines(term: Terminal, from: number, through: number): LogicalLine[] {
