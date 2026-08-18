@@ -10,6 +10,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), signalsJsx()],
   resolve: {
+    dedupe: ["react", "react-dom", "@hafley66/signals"],
     alias: {
       "@hafley66/boop-adapters": path.resolve(__dirname, "../hafley-rxjs/packages/boop-adapters/dist/index.js"),
       "@hafley66/marbler": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/index.ts"),
@@ -20,10 +21,14 @@ export default defineConfig(async () => ({
   // loaded and Vite forces a dependency-optimization reload.
   optimizeDeps: {
     include: [
+      "@hafley66/grid > @tanstack/react-table",
+      "lodash",
+    ],
+    exclude: [
+      "@hafley66/signals",
       "@hafley66/signals/react",
       "@hafley66/signals/jsx-runtime",
       "@hafley66/signals/jsx-dev-runtime",
-      "@hafley66/grid > @tanstack/react-table",
     ],
   },
   // Two HTML entries: the app (index.html) and the headless drop-catcher window

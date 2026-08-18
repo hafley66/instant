@@ -1,213 +1,155 @@
-import { createMarbler, MarblerPanel } from "@hafley66/marbler";
-import type { ExpandedState } from "@tanstack/react-table";
-import { useEffect, useRef, useState } from "react";
-import { boopAgentRoute } from "@hafley66/boop-adapters";
-import { TreeTable, type TreeColumn } from "./treetable";
-import { readPluginState, savePluginState } from "./pluginState";
+import { createGrid, GridTable } from "@hafley66/grid/react";
+import { Endpoint, Signal, SignalReact } from "@hafley66/signals/react";
+import type { GridConfig, GridState } from "@hafley66/grid";
+import { invoke } from "./generated/native";
+import { from, map } from "rxjs";
+import { useRef } from "react";
 import { registerPlugin } from "./plugin";
+import { BOOP_AGENT_EXPLORER_PLUGIN_ID, type AgentGraphQuery } from "./0_boopAgentExplorerTypes";
 import {
-  BOOP_AGENT_EXPLORER_PLUGIN_ID,
-  EMPTY_EXPLORER_UI,
-  type AgentGraphQuery,
-  type AgentExplorerSnapshot,
-  type BoopAgentGraph,
-  type BoopExplorerUiState,
-  type AgentTreeRow,
-} from "./0_boopAgentExplorerTypes";
-import {
-  BoopAgentExplorerClient,
-  projectBoopAgentGraph,
-  type RunBoopCommand,
-} from "./1_boopAgentExplorer";
+  boopNetworkEventSchema,
+  parseBoopNetworkEvents,
+  type BoopNetworkEvent,
+} from "./1_boopNetwork";
 
 const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const EVENT_LIMIT = 2_000;
 
-let loadGraph: ((query: AgentGraphQuery) => Promise<BoopAgentGraph>) | null = null;
+type RunBoopNetworkCommand = (query: AgentGraphQuery & { sinceMs: number; limit: number }) => Promise<string>;
+
+let runEvents: RunBoopNetworkCommand | null = null;
 let pendingSelection: { harness: string; sessionId: string } | null = null;
 
-export function setBoopAgentExplorerRunner(run: RunBoopCommand): void {
-  const client = new BoopAgentExplorerClient(run);
-  loadGraph = (query) => client.load(query);
+export function setBoopAgentExplorerRunner(run: RunBoopNetworkCommand): void {
+  runEvents = run;
 }
 
 export function setBoopAgentExplorerSelection(harness: string, sessionId: string): void {
   pendingSelection = { harness, sessionId };
 }
 
-function treeFilter(row: AgentTreeRow, query: string): boolean {
-  const q = query.toLowerCase();
-  return [row.id, row.name, row.harness, row.sessionId, row.status, row.cwd]
-    .some((value) => value.toLowerCase().includes(q)) ||
-    row.communications.some((communication) =>
-      [communication.id, communication.kind, communication.message].some((value) => value.toLowerCase().includes(q)),
-    );
+function timestamp(value: number): string {
+  return new Date(value).toISOString().slice(11, 23);
 }
 
-function communicationText(row: AgentTreeRow): string {
-  if (!row.communications.length) return "";
-  const kinds = new Map<string, number>();
-  for (const communication of row.communications) kinds.set(communication.kind, (kinds.get(communication.kind) ?? 0) + 1);
-  return [...kinds.entries()].map(([kind, count]) => `${kind} ×${count}`).join(" · ");
+function duration(row: BoopNetworkEvent): string {
+  if (row.started_ts === null || row.finished_ts === null) return "";
+  return `${Math.max(0, row.finished_ts - row.started_ts)} ms`;
 }
 
-const TREE_COLUMNS: TreeColumn<AgentTreeRow>[] = [
-  {
-    id: "name",
-    header: "agent",
-    tree: true,
-    cell: (row) => <span className="s-name" title={row.cwd}>{row.name}</span>,
-    sortValue: (row) => row.name,
-  },
-  { id: "harness", header: "harness", cell: (row) => <span className="s-meta">{row.harness}</span>, sortValue: (row) => row.harness },
-  { id: "status", header: "state", cell: (row) => <span className={`agents-state ${row.status}`}>{row.status}</span>, sortValue: (row) => row.status },
-  { id: "session", header: "session", cell: (row) => <span className="s-meta" title={row.sessionId}>{row.sessionId}</span>, sortValue: (row) => row.sessionId },
-  { id: "activity", header: "activity", cell: communicationText, sortValue: (row) => row.communications.length },
-];
+const columns = [
+  { accessorKey: "created_ts", header: "Time", cell: ({ row }: { row: { original: BoopNetworkEvent } }) => timestamp(row.original.created_ts) },
+  { accessorKey: "kind", header: "Event" },
+  { accessorKey: "lane", header: "Lane" },
+  { accessorKey: "from_lane", header: "From" },
+  { accessorKey: "to_lane", header: "To" },
+  { accessorKey: "session", header: "Session" },
+  { accessorKey: "classification", header: "State" },
+  { id: "duration", header: "Duration", cell: ({ row }: { row: { original: BoopNetworkEvent } }) => duration(row.original) },
+  { accessorKey: "detail", header: "Detail" },
+] as unknown as GridConfig<BoopNetworkEvent>["columnDefs"];
 
-function initialUi(): BoopExplorerUiState {
-  const saved = readPluginState<Partial<BoopExplorerUiState>>(BOOP_AGENT_EXPLORER_PLUGIN_ID, {});
+type NetworkInput = { sinceMs: number; limit: number };
+
+const endpoint = new Endpoint<NetworkInput, BoopNetworkEvent[]>({
+  request: (input) => ({ url: "native://boop_trace_events", method: "POST", body: input }),
+  decode: (response) => boopNetworkEventSchema.array().parse(response.body),
+}, (request) => from(
+  runEvents
+    ? runEvents(request.body as NetworkInput)
+    : invoke<string>("boop_trace_events", request.body as Record<string, unknown>),
+).pipe(map((text) => ({ status: 200, body: parseBoopNetworkEvents(text) }))));
+
+function createNetworkModel() {
+  const input = Signal<NetworkInput | undefined>({ sinceMs: Date.now() - HISTORY_WINDOW_MS, limit: EVENT_LIMIT });
+  const query = endpoint.createQuery(input, { staleTime: 5_000 });
+  const filter = Signal("");
+  const rows = Signal<BoopNetworkEvent[]>(() => {
+    const target = pendingSelection;
+    const events = query.data.$() ?? [];
+    if (!target) return events;
+    return events.filter((row) => row.session === target.sessionId || row.lane.includes(target.sessionId));
+  });
   return {
-    ...EMPTY_EXPLORER_UI,
-    ...saved,
-    expanded: saved.expanded ?? {},
+    input,
+    query,
+    filter,
+    grid: createGrid({
+      schema: boopNetworkEventSchema,
+      rows,
+      columnDefs: columns,
+      mode: "client",
+      getRowId: (row) => row.event_key,
+      state: Signal<GridState>({
+        sorting: [], columnFilters: [], globalFilter: undefined, columnOrder: [],
+        columnPinning: { start: [], end: [] }, columnVisibility: {}, columnSizing: {},
+        rowPinning: { top: [], bottom: [] }, rowSelection: {}, expanded: {}, grouping: [],
+        pagination: { pageIndex: 0, pageSize: EVENT_LIMIT },
+      }),
+    }),
   };
 }
 
-function routeSelection(rows: AgentTreeRow[], target: { harness: string; sessionId: string }): string | null {
-  for (const row of rows) {
-    if (row.harness === target.harness && row.sessionId === target.sessionId) return row.id;
-    const child = row.children ? routeSelection(row.children, target) : null;
-    if (child) return child;
-  }
-  return null;
-}
-
-function Timeline({ snapshot }: { snapshot: AgentExplorerSnapshot | null }) {
-  const model = useRef(createMarbler([])).current;
-  useEffect(() => {
-    model.source.$(snapshot?.timeline ?? []);
-  }, [model, snapshot?.timeline]);
-  if (!snapshot?.timeline.length) return <div className="session-empty">no timed agent activity</div>;
-  return <div className="boop-agent-marble"><MarblerPanel model={model} /></div>;
-}
-
-export function BoopAgentExplorerPanel() {
-  const [ui, setUi] = useState(initialUi);
-  const [snapshot, setSnapshot] = useState<AgentExplorerSnapshot | null>(null);
-  const [error, setError] = useState("");
-  const request = useRef(0);
-  const updateUi = <K extends keyof BoopExplorerUiState>(key: K, value: BoopExplorerUiState[K]) => {
-    setUi((previous) => {
-      const next = { ...previous, [key]: value };
-      savePluginState<BoopExplorerUiState>(BOOP_AGENT_EXPLORER_PLUGIN_ID, { [key]: value });
-      return next;
-    });
-  };
+function BoopAgentExplorerPanelView() {
+  const model = useRef<ReturnType<typeof createNetworkModel> | null>(null);
+  model.current ??= createNetworkModel();
+  const query = model.current.query.$();
+  const events = model.current.query.data.$() ?? [];
+  const filter = model.current.filter.$();
   const refresh = () => {
-    const loader = loadGraph;
-    if (!loader) {
-      setError("Boop agent graph runner is unavailable");
-      return;
-    }
-    const sequence = ++request.current;
-    const query: AgentGraphQuery = {
-      ...(ui.cwd?.trim() ? { cwd: ui.cwd.trim() } : {}),
-      includeHistory: ui.includeHistory,
-    };
-    setError("");
-    void loader(query).then((graph) => {
-      if (sequence !== request.current) return;
-      const next = projectBoopAgentGraph(
-        graph,
-        ui.includeHistory ? Date.now() - HISTORY_WINDOW_MS : undefined,
-      );
-      setSnapshot(next);
-      const routeId = pendingSelection ? routeSelection(next.tree, pendingSelection) : null;
-      if (routeId) updateUi("selectedId", routeId);
-      pendingSelection = null;
-    }).catch((reason: unknown) => {
-      if (sequence === request.current) setError(String(reason));
-    });
+    pendingSelection = null;
+    model.current?.query.refetch();
   };
-  useEffect(() => {
-    refresh();
-    return () => { request.current += 1; };
-  }, [ui.cwd, ui.includeHistory]);
-  const expanded = ui.expanded as ExpandedState;
-  const rows = snapshot?.tree ?? [];
-  const selected = snapshot?.timeline.find((event) => event.id === ui.selectedId);
-  const summary = snapshot ? `${snapshot.tree.length} roots · ${snapshot.graph.nodes.length} agents · ${snapshot.timeline.length} events` : "";
-  const onExpandedChange = (next: ExpandedState) => {
-    const value = typeof next === "object" ? next : {};
-    updateUi("expanded", value as Record<string, boolean>);
+  const updateFilter = (value: string) => {
+    model.current?.filter.$(value);
+    const grid = model.current?.grid;
+    if (grid) grid.state.$({ ...grid.state.$(), globalFilter: value || undefined });
   };
+
   return (
-    <div className="v2-panel" data-testid="boop-agent-explorer">
+    <div className="v2-panel boop-network-panel" data-testid="boop-agent-explorer">
       <div className="act-bar">
-        <span className="spy-title">agent explorer · boop</span>
-        <span className="wt-count">{summary}</span>
+        <span className="spy-title">network · boop</span>
+        <span className="wt-count">{query.isLoading ? "loading" : `${events.length} events · past 7 days · cap ${EVENT_LIMIT}`}</span>
         <span className="spy-spacer" />
         <button type="button" onClick={refresh}>refresh</button>
       </div>
       <div className="wt-scan">
         <input
-          value={ui.filter}
-          placeholder="filter agents…"
-          onChange={(event) => updateUi("filter", event.currentTarget.value)}
+          value={filter}
+          placeholder="filter events…"
+          onChange={(event) => updateFilter(event.currentTarget.value)}
           onKeyDown={(event) => event.stopPropagation()}
         />
-        <input
-          value={ui.cwd ?? ""}
-          placeholder="cwd (optional)…"
-          onChange={(event) => updateUi("cwd", event.currentTarget.value || undefined)}
-          onKeyDown={(event) => event.stopPropagation()}
-        />
-        <label><input type="checkbox" checked={ui.includeHistory} onChange={(event) => updateUi("includeHistory", event.currentTarget.checked)} /> past 7 days</label>
       </div>
-      {error ? <div className="session-empty">{error}</div> : null}
-      <div className="panel-scroll boop-agent-explorer-body">
-        {rows.length === 0 && !error ? <div className="session-empty">no Boop agents</div> : null}
-        {rows.length > 0 ? (
-          <TreeTable
-            columns={TREE_COLUMNS}
-            data={rows}
-            getRowId={(row) => row.id}
-            getSubRows={(row) => row.children}
-            expanded={expanded}
-            onExpandedChange={onExpandedChange}
-            query={ui.filter}
-            onQueryChange={(query) => updateUi("filter", query)}
-            filter={treeFilter}
-            controls
-            searchPlaceholder="filter agents…"
-            rowClass={(row) => row.id === ui.selectedId ? "selected" : undefined}
-            onRowClick={(row) => updateUi("selectedId", row.id)}
-          />
-        ) : null}
-        <Timeline snapshot={snapshot} />
-        {selected ? <div className="act-status">selected event: {selected.id} · {selected.type}</div> : null}
+      {query.isError ? <div className="session-empty">{String(query.error)}</div> : null}
+      <div className="panel-scroll boop-agent-explorer-body" data-testid="boop-network-scroll-owner">
+        {!query.isLoading && events.length === 0 && !query.isError ? <div className="session-empty">no Boop activity in the past 7 days</div> : null}
+        {events.length > 0 ? <GridTable grid={model.current.grid} density="compact" scrollMode="external" /> : null}
       </div>
     </div>
   );
 }
+
+export const BoopAgentExplorerPanel = SignalReact(BoopAgentExplorerPanelView);
 
 export function registerBoopAgentExplorer(): void {
   registerPlugin({
     id: BOOP_AGENT_EXPLORER_PLUGIN_ID,
     panels: [{
       id: BOOP_AGENT_EXPLORER_PLUGIN_ID,
-      title: "Agent Explorer",
-      icon: "⌁",
-      iconLabel: "Agent Explorer",
+      title: "Network",
+      icon: "⇄",
+      iconLabel: "Boop Network",
       html: "",
       component: BoopAgentExplorerPanel,
     }],
     routes: [{
       id: `${BOOP_AGENT_EXPLORER_PLUGIN_ID}.route`,
       open: (path) => {
-        const match = boopAgentRoute.match(path);
-        if (!match.matched) return false;
-        setBoopAgentExplorerSelection(match.values.harness, match.values.sessionId);
+        const match = /^agent:\/\/([^/]+)\/(.+)$/.exec(path);
+        if (!match) return false;
+        setBoopAgentExplorerSelection(match[1] ?? "", decodeURIComponent(match[2] ?? ""));
         return true;
       },
     }],

@@ -687,6 +687,27 @@ async fn boop_agent_graph(cwd: Option<String>, include_history: bool) -> Result<
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn boop_trace_events(since_ms: u64, limit: u64) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bounded_limit = limit.clamp(1, 5_000);
+        let sql = format!(
+            "SELECT e.event_id, e.event_key, lane.value AS lane, COALESCE(trace.value,'') AS trace, COALESCE(session.value,'') AS session, COALESCE(src.value,'') AS from_lane, COALESCE(dst.value,'') AS to_lane, kind.value AS kind, e.started_ts, e.finished_ts, COALESCE(delivery.value,'') AS delivery_state, COALESCE(classification.value,'') AS classification, e.detail, e.created_ts FROM agent_trace_event e JOIN dict_session lane ON lane.id=e.lane_id LEFT JOIN dict_trace trace ON trace.id=e.trace_id LEFT JOIN dict_session session ON session.id=e.session_id LEFT JOIN dict_session src ON src.id=e.from_lane_id LEFT JOIN dict_session dst ON dst.id=e.to_lane_id JOIN dict_trace_kind kind ON kind.id=e.kind_id LEFT JOIN dict_trace_delivery delivery ON delivery.id=e.delivery_state_id LEFT JOIN dict_trace_classification classification ON classification.id=e.classification_id WHERE e.created_ts >= {since_ms} ORDER BY e.created_ts DESC, e.event_id DESC LIMIT {bounded_limit}"
+        );
+        let output = std::process::Command::new("boop")
+            .args(["db", &sql, "--format", "ndjson"])
+            .env("PATH", pty::path_env())
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+        String::from_utf8(output.stdout).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Per-build state directory. A release ("prod") build nests all of its state
 /// (headless-Chrome profile, sqlite dbs, config.json, captures, log) under a
 /// `prod` subfolder so it can run alongside a `tauri dev` ("dev") instance
@@ -1133,6 +1154,7 @@ pub fn run() {
             open_target,
             run_click,
             boop_agent_graph,
+            boop_trace_events,
             log_append,
             log_path,
             log_reveal,

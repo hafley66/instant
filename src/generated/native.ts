@@ -74,6 +74,7 @@ export type CommandName =
   | "open_target"
   | "run_click"
   | "boop_agent_graph"
+  | "boop_trace_events"
   | "log_append"
   | "log_path"
   | "log_reveal";
@@ -197,6 +198,7 @@ export namespace commands {
     export const openTarget = "open_target";
     export const runClick = "run_click";
     export const boopAgentGraph = "boop_agent_graph";
+    export const boopTraceEvents = "boop_trace_events";
     export const logAppend = "log_append";
     export const logPath = "log_path";
     export const logReveal = "log_reveal";

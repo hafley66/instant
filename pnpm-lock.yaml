@@ -14,17 +14,17 @@ importers:
   .:
     dependencies:
       '@hafley66/grid':
-        specifier: 0.1.6
-        version: 0.1.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.7
+        version: 0.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
       '@hafley66/json-rx':
         specifier: 0.1.2
         version: 0.1.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/md':
         specifier: file:packages/md
-        version: file:packages/md(@hafley66/signals@0.1.0(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
+        version: file:packages/md(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
       '@hafley66/signals':
-        specifier: 0.1.0
-        version: 0.1.0(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.1
+        version: 0.1.1(react@19.2.7)(vite@8.1.5)
       '@oddbird/css-anchor-positioning':
         specifier: ^0.9.0
         version: 0.9.0
@@ -82,6 +82,9 @@ importers:
       jsonata:
         specifier: ^2.2.2
         version: 2.2.2
+      lodash:
+        specifier: ^4.17.21
+        version: 4.18.1
       marked:
         specifier: ^18.0.5
         version: 18.0.6
@@ -371,8 +374,8 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hafley66/grid@0.1.6':
-    resolution: {integrity: sha512-GKdcbHHTq2ks8UqikEZ4i90ZRkIRhiK/1lVwjWzKt5dmVxvOUAvviOJJyEgC0WM13eBzdvSID9Ph6mqGi4OJzg==}
+  '@hafley66/grid@0.1.7':
+    resolution: {integrity: sha512-Ny+T0FFUGjWcEnYj/cF9Ae4dWWqSsmrNsoyhnT5Hffwf4fF0mQFS0xCQLdN7JlAjBrVXrSKTlpSgwv+CTa4voA==}
     peerDependencies:
       react: '>=18.0.0'
     peerDependenciesMeta:
@@ -410,8 +413,8 @@ packages:
       react:
         optional: true
 
-  '@hafley66/signals@0.1.0':
-    resolution: {integrity: sha512-tcUA6Cbj2KM1KYhhtGvkW0ATDH3buYuSusk3tMKk86J6rPhpRlY8CsGNMx2R/aaaLrgDpfZSwEous6F4n7qqLw==}
+  '@hafley66/signals@0.1.1':
+    resolution: {integrity: sha512-f3PMKywdn2H92BMFYpkGfszBMBizvfJIfPHtxNA0DJUAhOl5WqomxUNRfhARcyCrB8WLeAp1yFTFMOzrWVipSQ==}
     peerDependencies:
       react: '>=18.0.0'
       vite: '>=5.0.0'
@@ -814,6 +817,12 @@ packages:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
+  '@tanstack/react-virtual@3.14.9':
+    resolution: {integrity: sha512-qZyr0FZDP8rDC4WBhsryIZmAd9bveJvFGUJJtskWaew6/0dTRS6wZxnR6VQ5bY2KwL3LjerrHqQLk3a0GKcPXQ==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   '@tanstack/store@0.11.1':
     resolution: {integrity: sha512-mzTOBhypOuDJAy/D8n2MfUZ1HFkXnmSETviRyhqEC8LUE7/IZQExOTxMANj3KjTofYTkFNpBY67qaVrT41YccA==}
 
@@ -827,6 +836,9 @@ packages:
 
   '@tanstack/virtual-core@3.17.5':
     resolution: {integrity: sha512-AXfBC3sq6PuYSwyxYORqqgHCNjPGAvKJvZuBBJ1klhztWBB5cgqgwsq8+fNfaQJG7/K4xYBja9S90QFn2zmQAg==}
+
+  '@tanstack/virtual-core@3.17.7':
+    resolution: {integrity: sha512-bp+v10y65sp2H7WpWfIMyxTNfl8ZVfxFTLRjPIFRryi6FV/J33z4IS53WO4pTk36KlvJ4iLiQz+oaydDC1xbcA==}
 
   '@tauri-apps/api@2.11.1':
     resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==}
@@ -2824,11 +2836,12 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hafley66/grid@0.1.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/grid@0.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0
-      '@hafley66/signals': 0.1.0(react@19.2.7)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1(react@19.2.7)(vite@8.1.5)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tanstack/react-virtual': 3.14.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       devalue: 5.9.0
       lodash: 4.18.1
       rxjs: 7.8.2
@@ -2863,9 +2876,9 @@ snapshots:
       - supports-color
       - vue
 
-  '@hafley66/md@file:packages/md(@hafley66/signals@0.1.0(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
+  '@hafley66/md@file:packages/md(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
     dependencies:
-      '@hafley66/signals': 0.1.0(react@19.2.7)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
       dockview: 6.6.1(react@19.2.7)
       mermaid: 11.16.0
@@ -2888,7 +2901,7 @@ snapshots:
     optionalDependencies:
       react: 19.2.7
 
-  '@hafley66/signals@0.1.0(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0
       history: 5.3.0
@@ -3251,6 +3264,12 @@ snapshots:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
 
+  '@tanstack/react-virtual@3.14.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      '@tanstack/virtual-core': 3.17.7
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+
   '@tanstack/store@0.11.1': {}
 
   '@tanstack/table-core@8.21.3': {}
@@ -3260,6 +3279,8 @@ snapshots:
       '@tanstack/store': 0.11.1
 
   '@tanstack/virtual-core@3.17.5': {}
+
+  '@tanstack/virtual-core@3.17.7': {}
 
   '@tauri-apps/api@2.11.1': {}
 
