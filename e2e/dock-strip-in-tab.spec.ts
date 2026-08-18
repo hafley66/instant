@@ -143,6 +143,27 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
   expect(pageErrors).toEqual([]);
 });
 
+test("period summons the focused session family tree in the terminal strip", async ({ page }) => {
+  await seed(page);
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+
+  const strip = page.getByTestId("in-tab-strip");
+  await expect(strip).toBeVisible();
+  await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
+  await expect(page.getByTestId("strip-scope")).toHaveCount(0);
+  await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
+
+  const root = page.locator("tr").filter({ hasText: "parent-s1" });
+  await expect(root).toBeVisible();
+  await root.locator(".tt-twisty").click();
+  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
+  await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
+  await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
+  await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
+  await strip.screenshot({ path: "test-results/strip-family-tree.png" });
+});
+
 // Receipt (a): the summon bugs. A terminal whose sid has no tmux row and no
 // related agent session had NO way to show the strip — the first hotkey press
 // wrote open:false (absent entry read as open), and the shell refused to render
