@@ -29,7 +29,7 @@ export function setBoopAgentExplorerSelection(harness: string, sessionId: string
 }
 
 function timestamp(value: number): string {
-  return new Date(value).toISOString().slice(11, 23);
+  return new Date(value).toISOString().slice(11, 19);
 }
 
 function duration(row: BoopNetworkEvent): string {
@@ -38,15 +38,15 @@ function duration(row: BoopNetworkEvent): string {
 }
 
 const columns = [
-  { accessorKey: "created_ts", header: "Time", cell: ({ row }: { row: { original: BoopNetworkEvent } }) => timestamp(row.original.created_ts) },
-  { accessorKey: "kind", header: "Event" },
-  { accessorKey: "lane", header: "Lane" },
-  { accessorKey: "from_lane", header: "From" },
-  { accessorKey: "to_lane", header: "To" },
-  { accessorKey: "session", header: "Session" },
-  { accessorKey: "classification", header: "State" },
-  { id: "duration", header: "Duration", cell: ({ row }: { row: { original: BoopNetworkEvent } }) => duration(row.original) },
-  { accessorKey: "detail", header: "Detail" },
+  { accessorKey: "created_ts", header: "Time", size: 110, cell: ({ row }: { row: { original: BoopNetworkEvent } }) => timestamp(row.original.created_ts) },
+  { accessorKey: "kind", header: "Event", size: 110 },
+  { accessorKey: "lane", header: "Lane", size: 150 },
+  { accessorKey: "from_lane", header: "From", size: 130 },
+  { accessorKey: "to_lane", header: "To", size: 130 },
+  { accessorKey: "session", header: "Session", size: 130 },
+  { accessorKey: "classification", header: "State", size: 110 },
+  { id: "duration", header: "Duration", size: 100, cell: ({ row }: { row: { original: BoopNetworkEvent } }) => duration(row.original) },
+  { accessorKey: "detail", header: "Detail", size: 220 },
 ] as unknown as GridConfig<BoopNetworkEvent>["columnDefs"];
 
 type NetworkInput = { sinceMs: number; limit: number };

@@ -6,7 +6,14 @@ import {
 
 const TOTAL = 2_000;
 let revision = 0;
-(window as Window & { __boopNetworkCalls?: number }).__boopNetworkCalls = 0;
+type NetworkFixtureWindow = Window & {
+  __boopNetworkCalls?: number;
+  __boopNetworkQueries?: Array<{ sinceMs: number; limit: number }>;
+};
+
+const fixtureWindow = window as NetworkFixtureWindow;
+fixtureWindow.__boopNetworkCalls = 0;
+fixtureWindow.__boopNetworkQueries = [];
 
 function fixture() {
   const now = Date.now();
@@ -29,7 +36,8 @@ function fixture() {
 }
 
 setBoopAgentExplorerRunner(async (query) => {
-  (window as Window & { __boopNetworkCalls?: number }).__boopNetworkCalls = revision + 1;
+  fixtureWindow.__boopNetworkCalls = revision + 1;
+  fixtureWindow.__boopNetworkQueries?.push(query);
   if (query.limit !== TOTAL) throw new Error(`unexpected limit ${query.limit}`);
   revision += 1;
   return fixture();
