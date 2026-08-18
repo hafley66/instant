@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
-import { diagramElementAtPoint, diagramElementKey, findDiagramFences, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
 
 function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): Terminal {
   const lines = rows.map((text) => ({
@@ -189,5 +189,75 @@ describe("diagram location precedence", () => {
         tmux --> xterm",
         ]
       `);
+  });
+});
+
+type ScriptStub = {
+  src: string;
+  listeners: Map<string, () => void>;
+  addEventListener: (event: string, listener: () => void) => void;
+};
+
+function scriptRecorder() {
+  const scripts: ScriptStub[] = [];
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("document", {
+    createElement: () => {
+      const listeners = new Map<string, () => void>();
+      const script: ScriptStub = {
+        src: "",
+        listeners,
+        addEventListener: (event, listener) => { listeners.set(event, listener); },
+      };
+      scripts.push(script);
+      return script;
+    },
+    head: { appendChild: (script: ScriptStub) => script },
+  });
+  return scripts;
+}
+
+describe("mermaid bundle loader", () => {
+  it("reports the network reason a script element hides", async () => {
+    const scripts = scriptRecorder();
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Load failed"); }));
+
+    const pending = loadMermaid();
+    scripts[0].listeners.get("error")!();
+
+    await expect(pending).rejects.toThrow(/mermaid\.min\.js.* did not load: TypeError: Load failed/);
+  });
+
+  it("reports the served status when the bundle is reachable but never executes", async () => {
+    const scripts = scriptRecorder();
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404, statusText: "Not Found" })));
+
+    const pending = loadMermaid();
+    scripts[0].listeners.get("error")!();
+
+    await expect(pending).rejects.toThrow(/did not load: HTTP 404 Not Found/);
+  });
+
+  it("names the missing global when the bundle runs without publishing its API", async () => {
+    const scripts = scriptRecorder();
+
+    const pending = loadMermaid();
+    scripts[0].listeners.get("load")!();
+
+    await expect(pending).rejects.toThrow(/ran without defining globalThis\.mermaid/);
+  });
+
+  it("retries after a failed load instead of holding the rejected attempt", async () => {
+    const scripts = scriptRecorder();
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Load failed"); }));
+
+    const first = loadMermaid();
+    scripts[0].listeners.get("error")!();
+    await expect(first).rejects.toThrow();
+
+    const second = loadMermaid();
+    expect(scripts).toHaveLength(2);
+    scripts[1].listeners.get("error")!();
+    await expect(second).rejects.toThrow();
   });
 });
