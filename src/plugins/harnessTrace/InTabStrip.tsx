@@ -52,6 +52,19 @@ export function toggleTermStripFor(sid: string): void {
   store.set({ termStrip: { ...store.get().termStrip, [sid]: next } });
 }
 
+export function toggleFamilyStripFor(sid: string): void {
+  const entries = store.get().termStrip;
+  const entry = entries[sid] ?? null;
+  const alreadyOpen = entry?.open === true && entry.family === true;
+  if (!alreadyOpen) invalidateAgentTreeRows();
+  store.set({
+    termStrip: {
+      ...entries,
+      [sid]: { open: !alreadyOpen, showActive: false, network: false, family: true },
+    },
+  });
+}
+
 // Summon the strip open and flip the network (waterfall) view on it, so the
 // diagram is reachable even when the strip has zero related rows.
 export function toggleNetworkFor(sid: string): void {
@@ -119,8 +132,13 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     () => StripPolicy.history(nodes, sid, scope, nativeSessionId),
     [nodes, sid, scope, nativeSessionId],
   );
+  const familyMode = entry?.family ?? false;
+  const familyNodes = useMemo(
+    () => StripPolicy.family(nodes, sid, nativeSessionId),
+    [nodes, sid, nativeSessionId],
+  );
   const showActive = entry?.showActive ?? true;
-  const visibleNodes = showActive ? external : historyNodes;
+  const visibleNodes = familyMode ? familyNodes : showActive ? external : historyNodes;
   const index = useMemo(() => indexAgentTree(visibleNodes), [visibleNodes]);
   // The search box forces every branch open (TreeTable's `true` sentinel),
   // which a lazy tree cannot honor for unmaterialized children; the filter
@@ -230,11 +248,11 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           </button>
         )}
         <span className="spy-title" data-testid="strip-count">
-          {index.size} {showActive ? "external shells" : "sessions"}
+          {index.size} {familyMode ? "family sessions" : showActive ? "external shells" : "sessions"}
         </span>
         {viewing && <span className="spy-viewing">{viewing}</span>}
         <span className="spy-spacer" />
-        <span className="act-check" title="check for active shells only; uncheck to include session history">
+        {!familyMode && <span className="act-check" title="check for active shells only; uncheck to include session history">
           <input
             type="checkbox"
             id={"showactive-" + sid}
@@ -243,16 +261,16 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
             onChange={(e) => setShowActive(e.target.checked)}
           />
           <label htmlFor={"showactive-" + sid}>Show active</label>
-        </span>
-        <button
+        </span>}
+        {!familyMode && <button
           type="button"
           data-testid="strip-network-toggle"
           title={networkView ? "show table view" : "show network view"}
           onClick={() => setNetwork(!networkView)}
         >
           {networkView ? "table" : "network"}
-        </button>
-        <button
+        </button>}
+        {!familyMode && <button
           type="button"
           data-testid="strip-scope"
           title={
@@ -263,7 +281,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
           onClick={() => setChosenScope(scope === "related" ? "all" : "related")}
         >
           scope: {scope}
-        </button>
+        </button>}
         <button type="button" onClick={load}>
           refresh
         </button>

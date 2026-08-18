@@ -97,6 +97,30 @@ describe("StripPolicy.nativeIds", () => {
   });
 });
 
+describe("StripPolicy.family", () => {
+  it("keeps the focused session's complete tree and excludes unrelated roots", () => {
+    expect(StripPolicy.family(TAB_TREE, "s1").map((entry) => entry.id)).toMatchInlineSnapshot(`
+      [
+        "claude-s1",
+        "claude-sub",
+        "oc-lane",
+        "oc-sub",
+      ]
+    `);
+  });
+
+  it("walks from an exact child session through its ancestors before collecting the family", () => {
+    expect(StripPolicy.family(TAB_TREE, "missing-tmux", "oc-lane").map((entry) => entry.id)).toMatchInlineSnapshot(`
+      [
+        "claude-s1",
+        "claude-sub",
+        "oc-lane",
+        "oc-sub",
+      ]
+    `);
+  });
+});
+
 describe("StripPolicy.external", () => {
   it("keeps only the externals of this tab's tree, never the claude rows the TUI shows", () => {
     const ids = StripPolicy.external(TAB_TREE, "s1", "related").map((n) => n.id);
