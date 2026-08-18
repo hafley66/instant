@@ -18,12 +18,13 @@ function depthOf(node: AgentSessionNode, byId: Map<string, AgentSessionNode>): n
   return depth;
 }
 
-function familyGeometry(nodes: AgentSessionNode[]): Geometry {
+export function familyGeometry(nodes: AgentSessionNode[]): Geometry {
   const bounded = nodes.slice().sort((a, b) => a.ts.localeCompare(b.ts) || a.id.localeCompare(b.id)).slice(0, MAX_NODES);
   const byId = new Map(bounded.map((node) => [node.id, node]));
   const times = bounded.map((node) => Date.parse(node.ts)).filter(Number.isFinite);
-  const first = Math.min(...times, 0);
-  const span = Math.max(1, Math.max(...times, first + 1) - first);
+  const first = times.length > 0 ? Math.min(...times) : 0;
+  const last = times.length > 0 ? Math.max(...times) : first + 1;
+  const span = Math.max(1, last - first);
   const positions = new Float32Array(bounded.length * 2);
   const index = new Map(bounded.map((node, i) => [node.id, i]));
   const edges: [number, number][] = [];
