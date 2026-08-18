@@ -30,7 +30,7 @@ import { readPluginState, savePluginState } from "./pluginState";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 import { SessionSidebar } from "./sessionSidebar";
-import { BoopExternalShellStrip } from "./3_BoopExternalShellStrip";
+import { InTabStrip } from "./plugins/harnessTrace/InTabStrip";
 import { restoredTerminalSessionIds } from "./0_dockRestore";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { panelApiVisibility$ } from "./0_panelVisibility";
@@ -306,7 +306,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
           />
         )}
       </div>
-      <BoopExternalShellStrip sid={sid} onLayout={refitForStrip} />
+      <InTabStrip sid={sid} onLayout={refitForStrip} />
     </div>
   );
 }
