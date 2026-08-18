@@ -26,15 +26,35 @@ const ROWS = [
   // "going on", the trace page keeps history).
   { id: "oc-finished", harness: "opencode", sessionId: "oc-finished", parentId: "parent-s1", parentKind: "dispatch", ts: "2026-08-03T08:00:00Z", lastActivity: "2026-08-03T08:30:00Z", status: "done", cwd: "~/projects/demo" },
 ];
+const FAMILY_GRAPH = {
+  schema_version: 1,
+  sessions: [
+    { session: { harness: "claude", id: "parent-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_000_000, last_activity_ts: 1_754_243_600_000 },
+    { session: { harness: "claude", id: "child-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_600_000, last_activity_ts: 1_754_243_000_000 },
+    { session: { harness: "opencode", id: "oc-finished" }, cwd: "/Users/e2e/projects/demo", tmux: null, state: "dead", started_ts: 1_754_233_000_000, finished_ts: 1_754_234_800_000 },
+  ],
+  edges: [
+    { parent: { harness: "claude", id: "parent-s1" }, child: { harness: "claude", id: "child-s1" }, kind: "subagent", first_ts: 1_754_240_600_000, last_ts: 1_754_240_600_000 },
+  ],
+  shells: [
+    { lane: "oc-lane", parent_lane: "parent-s1", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: "s1", tmux_session: "s1", tmux_pane: null, state: "live", started_ts: 1_754_241_200_000 },
+    { lane: "oc-sub", parent_lane: "oc-lane", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: null, tmux_session: null, tmux_pane: "%9", state: "done", started_ts: 1_754_241_800_000 },
+  ],
+};
 
 async function seed(page: import("@playwright/test").Page) {
   // relTime cells render against Date.now(); freeze it so the PNGs are
   // date-independent.
   await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
-  await page.addInitScript(({ mailDir, envelopes, registry, rows }) => {
+  await page.addInitScript(({ mailDir, envelopes, registry, rows, graph }) => {
     const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
     w.__instantE2eNativeResults = {
       harness_trace_rows: rows,
+      boop_agent_graph: (args?: Record<string, unknown>) => {
+        (w as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ??= [];
+        (w as Window & { __boopGraphRequests: Record<string, unknown>[] }).__boopGraphRequests.push(args ?? {});
+        return JSON.stringify(graph);
+      },
       list_dir: (args?: Record<string, unknown>) => {
         if (args?.path === mailDir) {
           return { entries: [
@@ -55,7 +75,7 @@ async function seed(page: import("@playwright/test").Page) {
         return null;
       },
     };
-  }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS });
+  }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS, graph: FAMILY_GRAPH });
 }
 
 test("in-tab strip: external-only lazy tree under the term, mail preview, back", async ({ page }) => {
@@ -161,6 +181,12 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
+  const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ cwd: "/Users/e2e/projects/demo", include_history: true, tmux: "s1" });
+  expect(typeof requests[0].history_since_ts).toBe("number");
+  await page.getByRole("button", { name: "refresh" }).click();
+  await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
 });
 

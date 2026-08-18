@@ -1,7 +1,7 @@
 // Frozen CONTRACT2 state model plus the seam types shared by the two panels of
 // the harness-trace plugin (the flat trace panel and the dock strip tree).
 export type Harness = "claude" | "opencode" | "codex" | "kimi" | "shell";
-export type ParentKind = "subagent" | "dispatch";
+export type ParentKind = string;
 export type SessionStatus = "live" | "idle" | "done" | "dead";
 
 // Frozen CONTRACT2 row model: what the dock strip renders as a tree.
