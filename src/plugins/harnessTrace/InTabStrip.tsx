@@ -23,6 +23,8 @@ import { mailAgentIdFor } from "./0_mail";
 import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
+import { tabMetaById } from "../../terminal";
+import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
 
 export interface InTabStripProps {
   sid: string;
@@ -104,7 +106,17 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   // An absent entry is the auto-appear state: load enough data to decide
   // whether related rows exist. Only an explicit dismissal suspends the feed.
   const dataEnabled = entry?.open !== false || current !== null;
-  const { nodes, liveTmux, registry, error, load } = useAgentTree(dataEnabled);
+  const familyMode = entry?.family ?? false;
+  const familyCwd =
+    tabMetaById(sid)?.cwd ??
+    store.get().sessions.find((session) => session.name === StripPolicy.tmuxNameOf(sid))?.paths?.[0] ??
+    null;
+  const familyQuery = useMemo(
+    () => (familyMode ? focusedFamilyQuery(sid, familyCwd) : null),
+    [familyMode, sid, familyCwd],
+  );
+  const family = useBoopFamily(familyQuery);
+  const { nodes, liveTmux, registry, error, load } = useAgentTree(!familyMode && dataEnabled);
 
   const networkView = entry?.network ?? false;
   useLiveProbeRender("InTabStrip", sid, { networkView, nodeCount: nodes.length });
@@ -132,11 +144,7 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     () => StripPolicy.history(nodes, sid, scope, nativeSessionId),
     [nodes, sid, scope, nativeSessionId],
   );
-  const familyMode = entry?.family ?? false;
-  const familyNodes = useMemo(
-    () => StripPolicy.family(nodes, sid, nativeSessionId),
-    [nodes, sid, nativeSessionId],
-  );
+  const familyNodes = family.nodes;
   const showActive = entry?.showActive ?? true;
   const visibleNodes = familyMode ? familyNodes : showActive ? external : historyNodes;
   const index = useMemo(() => indexAgentTree(visibleNodes), [visibleNodes]);
@@ -282,14 +290,14 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
         >
           scope: {scope}
         </button>}
-        <button type="button" onClick={load}>
+        <button type="button" onClick={familyMode ? family.load : load}>
           refresh
         </button>
       </div>
       {current?.kind === "mail-preview" ? (
         <MailPreview agentId={current.agentId} />
-      ) : error ? (
-        <div className="session-empty">{error}</div>
+      ) : (familyMode ? family.error : error) ? (
+        <div className="session-empty">{familyMode ? family.error : error}</div>
       ) : networkView ? (
         <Waterfall nodes={visibleNodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
       ) : index.size === 0 ? (

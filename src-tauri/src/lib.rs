@@ -664,19 +664,44 @@ fn run_click_blocking(command: String, cwd: String) -> Result<String, String> {
     Ok(s)
 }
 
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+struct BoopAgentGraphQuery {
+    cwd: Option<String>,
+    include_history: bool,
+    tmux: Option<String>,
+    history_since_ts: Option<u64>,
+}
+
+fn boop_agent_graph_args(query: &BoopAgentGraphQuery) -> Vec<String> {
+    let mut args = vec![
+        "agent".to_owned(),
+        "sessions".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+    ];
+    if let Some(cwd) = query.cwd.as_deref().filter(|value| !value.trim().is_empty()) {
+        args.push("--cwd".to_owned());
+        args.push(cwd.to_owned());
+    }
+    if query.include_history {
+        args.push("--history".to_owned());
+    }
+    if let Some(tmux) = query.tmux.as_deref().filter(|value| !value.trim().is_empty()) {
+        args.push("--tmux".to_owned());
+        args.push(tmux.to_owned());
+    }
+    if let Some(since) = query.history_since_ts {
+        args.push("--history-since-ts".to_owned());
+        args.push(since.to_string());
+    }
+    args
+}
+
 #[tauri::command]
-async fn boop_agent_graph(cwd: Option<String>, include_history: bool) -> Result<String, String> {
+async fn boop_agent_graph(query: BoopAgentGraphQuery) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut command = std::process::Command::new("boop");
-        command
-            .args(["agent", "sessions", "--format", "json"])
-            .env("PATH", pty::path_env());
-        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
-            command.arg("--cwd").arg(cwd);
-        }
-        if include_history {
-            command.arg("--history");
-        }
+        command.args(boop_agent_graph_args(&query)).env("PATH", pty::path_env());
         let output = command.output().map_err(|error| error.to_string())?;
         if !output.status.success() {
             return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
@@ -685,6 +710,37 @@ async fn boop_agent_graph(cwd: Option<String>, include_history: bool) -> Result<
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod boop_graph_bridge_tests {
+    use super::{boop_agent_graph_args, BoopAgentGraphQuery};
+
+    #[test]
+    fn focused_graph_query_serializes_and_preserves_exact_tmux_cutoff() {
+        let query = BoopAgentGraphQuery {
+            cwd: Some("/repo".into()),
+            include_history: true,
+            tmux: Some("claude-focused".into()),
+            history_since_ts: Some(1_755_000_000_000),
+        };
+        assert_eq!(
+            serde_json::to_value(&query).unwrap(),
+            serde_json::json!({
+                "cwd": "/repo",
+                "include_history": true,
+                "tmux": "claude-focused",
+                "history_since_ts": 1_755_000_000_000u64,
+            })
+        );
+        assert_eq!(
+            boop_agent_graph_args(&query),
+            vec![
+                "agent", "sessions", "--format", "json", "--cwd", "/repo", "--history",
+                "--tmux", "claude-focused", "--history-since-ts", "1755000000000"
+            ].into_iter().map(String::from).collect::<Vec<_>>()
+        );
+    }
 }
 
 #[tauri::command]
