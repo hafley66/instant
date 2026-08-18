@@ -172,6 +172,13 @@ test("period summons the focused session family tree in the terminal strip", asy
   const strip = page.getByTestId("in-tab-strip");
   await expect(strip).toBeVisible();
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
+  const familyGraph = page.getByTestId("boop-family-graph");
+  await expect(familyGraph).toHaveAttribute("data-node-count", "5");
+  await expect(familyGraph).toHaveAttribute("data-edge-count", "4");
+  await expect(familyGraph).toHaveAttribute("data-truncated-count", "0");
+  await expect(page.getByTestId("boop-family-grapht")).toHaveCount(1);
+  const familyRenderCount = Number(await familyGraph.getAttribute("data-render-count"));
+  expect(familyRenderCount).toBeGreaterThan(0);
   await expect(page.getByTestId("strip-scope")).toHaveCount(0);
   await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
 
@@ -181,6 +188,8 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
+  await page.locator("tr").filter({ hasText: "child-s1" }).hover();
+  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveClass(/boop-family-linked/);
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
   const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(requests).toHaveLength(1);
@@ -193,6 +202,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   expect(typeof requestQuery.history_since_ts).toBe("number");
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
+  await expect.poll(() => familyGraph.getAttribute("data-render-count"), { timeout: 1_500 }).toBe(String(familyRenderCount));
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
 });
 

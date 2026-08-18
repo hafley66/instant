@@ -16,6 +16,7 @@ export function TableRow<T>(props: {
   onFocusRow: (index: number) => void;
   columns: TreeColumn<T>[];
   onRowClick?: (row: T, e: MouseEvent) => void;
+  onRowHover?: (row: T | null) => void;
   onRowDoubleClick?: (row: T, e: MouseEvent) => void;
   onRowContextMenu?: (row: T, e: MouseEvent) => void;
   onToggleExpand?: (row: T, willExpand: boolean) => void;
@@ -53,6 +54,8 @@ export function TableRow<T>(props: {
       data-entity-kind={ent?.kind}
       data-entity-value={ent?.value}
       onMouseDown={() => props.onFocusRow(props.index)}
+      onMouseEnter={() => props.onRowHover?.(data)}
+      onMouseLeave={() => props.onRowHover?.(null)}
       onClick={
         props.onRowClick
           ? (e) => {
