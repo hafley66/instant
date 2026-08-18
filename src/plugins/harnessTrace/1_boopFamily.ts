@@ -141,7 +141,7 @@ function fetchFamily(query: BoopFamilyQuery, refresh: boolean): void {
   if (!refresh && (entry.data || entry.promise)) return;
   const generation = ++entry.generation;
   entry.error = "";
-  entry.promise = invoke<string>("boop_agent_graph", query as unknown as Record<string, unknown>)
+  entry.promise = invoke<string>("boop_agent_graph", { query })
     .then((payload) => {
       if (generation !== entry.generation) return;
       const graph = typeof payload === "string" ? JSON.parse(payload) as BoopGraph : payload as unknown as BoopGraph;

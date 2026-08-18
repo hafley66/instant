@@ -184,9 +184,13 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
   const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(requests).toHaveLength(1);
-  expect(requests[0]).toEqual(expect.objectContaining({ include_history: true, tmux: "s1" }));
-  expect(requests[0]).not.toHaveProperty("cwd");
-  expect(typeof requests[0].history_since_ts).toBe("number");
+  expect(requests[0]).toEqual({
+    query: expect.objectContaining({ include_history: true, tmux: "s1" }),
+  });
+  expect(requests[0]).not.toHaveProperty("include_history");
+  const requestQuery = requests[0].query as Record<string, unknown>;
+  expect(requestQuery).not.toHaveProperty("cwd");
+  expect(typeof requestQuery.history_since_ts).toBe("number");
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
