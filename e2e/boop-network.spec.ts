@@ -12,6 +12,16 @@ test("bounds and virtualizes the Boop network waterfall through its panel scroll
   expect(Date.now() - (firstQuery?.sinceMs ?? 0)).toBeLessThan(7 * 24 * 60 * 60 * 1_000 + 30_000);
 
   await expect(page.getByText("2000 events · past 7 days · cap 2000")).toBeVisible();
+  const graph = page.getByTestId("boop-network-graph");
+  await expect(graph).toHaveAttribute("data-node-count", "2000");
+  await expect(graph).toHaveAttribute("data-edge-count", "1998");
+  const graphtCanvas = page.getByTestId("boop-network-grapht");
+  await expect(graphtCanvas).toBeVisible();
+  await expect(graphtCanvas).toHaveCount(1);
+  expect(await graphtCanvas.evaluate((canvas) => ({
+    width: (canvas as HTMLCanvasElement).width,
+    height: (canvas as HTMLCanvasElement).height,
+  }))).toMatchObject({ width: 1280, height: 180 });
   await expect(page.getByRole("columnheader")).toHaveText([
     "Time", "Event", "Lane", "From", "To", "Session", "State", "Duration", "Detail",
   ]);

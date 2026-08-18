@@ -11,6 +11,7 @@ import {
   parseBoopNetworkEvents,
   type BoopNetworkEvent,
 } from "./1_boopNetwork";
+import { BoopNetworkGraph } from "./1a_BoopNetworkGraph";
 
 const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const EVENT_LIMIT = 2_000;
@@ -123,6 +124,7 @@ function BoopAgentExplorerPanelView() {
         />
       </div>
       {query.isError ? <div className="session-empty">{String(query.error)}</div> : null}
+      {events.length > 0 ? <BoopNetworkGraph events={events} /> : null}
       <div className="panel-scroll boop-agent-explorer-body" data-testid="boop-network-scroll-owner">
         {!query.isLoading && events.length === 0 && !query.isError ? <div className="session-empty">no Boop activity in the past 7 days</div> : null}
         {events.length > 0 ? <GridTable grid={model.current.grid} density="compact" scrollMode="external" /> : null}
