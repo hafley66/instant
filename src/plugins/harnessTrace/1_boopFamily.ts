@@ -118,22 +118,23 @@ type FamilyEntry = {
   data: AgentSessionNode[] | null;
   error: string;
   promise: Promise<void> | null;
+  fetchedAt: number;
   generation: number;
   consumers: number;
-  disposeTimer: ReturnType<typeof setTimeout> | null;
 };
 const cache = new Map<string, FamilyEntry>();
 const cacheVersion = Signal(0);
+const FAMILY_STALE_MS = 5 * 60 * 1000;
 const entryFor = (key: string): FamilyEntry => {
   const existing = cache.get(key);
   if (existing) return existing;
-  const entry: FamilyEntry = { data: null, error: "", promise: null, generation: 0, consumers: 0, disposeTimer: null };
+  const entry: FamilyEntry = { data: null, error: "", promise: null, fetchedAt: 0, generation: 0, consumers: 0 };
   cache.set(key, entry);
   return entry;
 };
 
 function keyOf(query: BoopFamilyQuery): string {
-  return JSON.stringify(query);
+  return query.tmux;
 }
 
 function publish(): void {
@@ -143,7 +144,8 @@ function publish(): void {
 function fetchFamily(query: BoopFamilyQuery, refresh: boolean): void {
   const key = keyOf(query);
   const entry = entryFor(key);
-  if (!refresh && (entry.data || entry.promise)) return;
+  if (entry.promise) return;
+  if (!refresh && entry.data && Date.now() - entry.fetchedAt < FAMILY_STALE_MS) return;
   const generation = ++entry.generation;
   entry.error = "";
   entry.promise = invoke<string>("boop_agent_graph", { query })
@@ -151,6 +153,7 @@ function fetchFamily(query: BoopFamilyQuery, refresh: boolean): void {
       if (generation !== entry.generation) return;
       const graph = typeof payload === "string" ? JSON.parse(payload) as BoopGraph : payload as unknown as BoopGraph;
       entry.data = normalizeBoopFamily(graph);
+      entry.fetchedAt = Date.now();
     })
     .catch((reason: unknown) => {
       if (generation === entry.generation) entry.error = String(reason);
@@ -173,20 +176,9 @@ export function useBoopFamily(query: BoopFamilyQuery | null): {
     if (!query) return;
     const entry = entryFor(key);
     entry.consumers += 1;
-    if (entry.disposeTimer) {
-      clearTimeout(entry.disposeTimer);
-      entry.disposeTimer = null;
-    }
     fetchFamily(query, false);
     return () => {
       entry.consumers -= 1;
-      if (entry.consumers !== 0) return;
-      entry.disposeTimer = setTimeout(() => {
-        if (entry.consumers !== 0) return;
-        entry.generation += 1;
-        cache.delete(key);
-        publish();
-      });
     };
   }, [key, query]);
   const load = useCallback(() => {

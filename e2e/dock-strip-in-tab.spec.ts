@@ -203,6 +203,18 @@ test("period summons the focused session family tree in the terminal strip", asy
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
   await expect.poll(() => familyGraph.getAttribute("data-render-count"), { timeout: 1_500 }).toBe(String(familyRenderCount));
+
+  // Closing and reopening the panel keeps the tmux-scoped family result. The
+  // moving seven-day cutoff must not manufacture a new cache identity or drop
+  // the populated table while another Boop sync runs.
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(strip).toBeHidden();
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
+  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
+  await page.waitForTimeout(250);
+  const reopenedRequests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
+  expect(reopenedRequests).toHaveLength(2);
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
 });
 
