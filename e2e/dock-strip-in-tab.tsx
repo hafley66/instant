@@ -30,12 +30,16 @@ registerPlugin({
 registerHarnessTracePlugin();
 
 // Spy on the strip's click = go there path (the panel calls this bridge).
-const w = window as Window & { __dockStripOpened?: string; __termRefits?: number };
+const w = window as Window & { __dockStripOpened?: string; __termRefits?: number; __termLayoutHeights?: number[] };
 setDockStrip({ onOpen: (name) => { w.__dockStripOpened = name; } });
 // Count the refits the host is asked for (main.ts wires this to fitTerm, which
 // resizes the pty): the strip owes one whenever its height moves the xterm's
 // bottom edge, and silence the rest of the time.
-setDockHooks({ onTermLayout: () => { w.__termRefits = (w.__termRefits ?? 0) + 1; } });
+setDockHooks({ onTermLayout: () => {
+  w.__termRefits = (w.__termRefits ?? 0) + 1;
+  const height = document.querySelector(".term-slot")?.getBoundingClientRect().height;
+  if (height !== undefined) w.__termLayoutHeights = [...(w.__termLayoutHeights ?? []), height];
+} });
 
 // s1 = this tab's claude cwd, s2 = the other tree's claude, s2-codex = that
 // tree's dispatched codex lane (one going session per pane, so it needs one).

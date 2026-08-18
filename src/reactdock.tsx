@@ -229,8 +229,12 @@ function sbDefault() {
 function TerminalPanel(props: IDockviewPanelProps) {
   const sid = termSid(props.params.panelId as string);
   const id = props.params.panelId as string;
+  const slotResizeObserver = useRef<ResizeObserver | null>(null);
+  const slotResizeFrame = useRef<number | null>(null);
   const setSlot = useCallback(
     (slot: HTMLDivElement | null) => {
+      slotResizeObserver.current?.disconnect();
+      slotResizeObserver.current = null;
       if (!slot) {
         terminalSlots.delete(id);
         return;
@@ -238,8 +242,16 @@ function TerminalPanel(props: IDockviewPanelProps) {
       terminalSlots.set(id, slot);
       const node = dynamicNodes.get(id);
       if (node) slot.appendChild(node);
+      slotResizeObserver.current = new ResizeObserver(() => {
+        if (slotResizeFrame.current !== null) cancelAnimationFrame(slotResizeFrame.current);
+        slotResizeFrame.current = requestAnimationFrame(() => {
+          slotResizeFrame.current = null;
+          hooks.onTermLayout(sid);
+        });
+      });
+      slotResizeObserver.current.observe(slot);
     },
-    [id],
+    [id, sid],
   );
   // Per-terminal right "session sidebar" (file explorer now; touched files +
   // agent turns layer in later). Open + width persist in the store keyed by
@@ -270,6 +282,8 @@ function TerminalPanel(props: IDockviewPanelProps) {
 
     return () => {
       sub.dispose();
+      slotResizeObserver.current?.disconnect();
+      if (slotResizeFrame.current !== null) cancelAnimationFrame(slotResizeFrame.current);
       const pool = document.getElementById("panel-pool");
       const node = dynamicNodes.get(id);
       if (pool && node) pool.appendChild(node);

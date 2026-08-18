@@ -61,7 +61,7 @@ export function FocusedFamilySplit({ sid, term, strip, onCommittedLayout }: Focu
 
   return (
     <PanelGroup direction="vertical" id={`focused-family-${sid}`} data-testid="focused-family-split" style={{ flex: "1 1 auto", minHeight: 0 }} onLayout={(layout) => { latestLayout.current = [layout[0], layout[1]]; }}>
-      <Panel id={`focused-family-term-${sid}`} defaultSize={initialLayout[0]} minSize={25}>
+      <Panel id={`focused-family-term-${sid}`} className="focused-family-term-panel" defaultSize={initialLayout[0]} minSize={25}>
         {term}
       </Panel>
       <PanelResizeHandle className="meme-sash meme-sash-horizontal" data-testid="focused-family-resize" onDragging={(dragging) => { if (!dragging) saveLayout(); }} onBlur={saveLayout} />

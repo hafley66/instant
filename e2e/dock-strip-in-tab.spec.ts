@@ -184,7 +184,7 @@ test("period summons the focused session family tree in the terminal strip", asy
 
   const root = page.locator("tr").filter({ hasText: "parent-s1" });
   await expect(root).toBeVisible();
-  await root.locator(".tt-twisty").click();
+  // Focused families open with their persisted descendants visible.
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
@@ -210,21 +210,27 @@ test("focused family strip saves a vertical drag layout and refits after each co
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   const refits = () => page.evaluate(() => (window as Window & { __termRefits?: number }).__termRefits ?? 0);
+  const layoutHeights = () => page.evaluate(() => (window as Window & { __termLayoutHeights?: number[] }).__termLayoutHeights ?? []);
 
   const beforeOpen = await refits();
   await page.keyboard.press(`${MOD}+Shift+Period`);
   const handle = page.getByTestId("focused-family-resize");
   await expect(handle).toBeVisible();
-  await expect.poll(refits).toBe(beforeOpen + 1);
+  await expect.poll(refits).toBeGreaterThan(beforeOpen);
 
   const beforeDrag = await refits();
+  const beforeDragHeights = await layoutHeights();
   const handleBox = await handle.boundingBox();
   expect(handleBox).not.toBeNull();
   await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
   await page.mouse.down();
   await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y - 60, { steps: 4 });
   await page.mouse.up();
-  await expect.poll(refits).toBe(beforeDrag + 1);
+  await expect.poll(refits).toBeGreaterThan(beforeDrag);
+  await expect.poll(async () => {
+    const heights = await layoutHeights();
+    return heights.at(-1);
+  }).not.toBe(beforeDragHeights.at(-1));
   // The public store is not exposed in production; localStorage is the durable
   // pluginState mirror and is the persistence receipt this page can inspect.
   const layout = await page.evaluate(() => {

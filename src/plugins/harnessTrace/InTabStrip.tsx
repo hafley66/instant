@@ -151,6 +151,11 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
     [nodes, sid, scope, nativeSessionId],
   );
   const familyNodes = family.nodes;
+  useEffect(() => {
+    if (familyMode && familyNodes.length > 0) {
+      setExpanded(Object.fromEntries(familyNodes.map((node) => [node.id, true])));
+    }
+  }, [familyMode, familyNodes.length]);
   const showActive = entry?.showActive ?? true;
   const visibleNodes = familyMode ? familyNodes : showActive ? external : historyNodes;
   const index = useMemo(() => indexAgentTree(visibleNodes), [visibleNodes]);
