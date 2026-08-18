@@ -1,5 +1,31 @@
 import { expect, test } from "@playwright/test";
 
+type StabilityReceipt = {
+  fps: number[];
+  fpsDeltaRatio: number;
+  initialApiCalls: number;
+  initialRenderCount: number;
+  refreshedApiCalls: number;
+  refreshedRenderCount: number;
+  backend: string | undefined;
+};
+
+async function measuredFps(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => new Promise<number>((resolve) => {
+    let frames = 0;
+    const started = performance.now();
+    const frame = (now: number) => {
+      frames += 1;
+      if (now - started >= 1_000) {
+        resolve(frames * 1_000 / (now - started));
+        return;
+      }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }));
+}
+
 test("bounds and virtualizes the Boop network waterfall through its panel scroll owner", async ({ page }, testInfo) => {
   await page.goto("/e2e-boop-network.html?e2e=1");
 
@@ -22,6 +48,16 @@ test("bounds and virtualizes the Boop network waterfall through its panel scroll
     width: (canvas as HTMLCanvasElement).width,
     height: (canvas as HTMLCanvasElement).height,
   }))).toMatchObject({ width: 1280, height: 180 });
+  await expect(graph).toHaveAttribute("data-backend", "webgl");
+  const initialRenderCount = Number(await graph.getAttribute("data-render-count"));
+  expect(initialRenderCount).toBeGreaterThan(0);
+  expect(initialRenderCount).toBeLessThanOrEqual(3);
+  const fps = [await measuredFps(page), await measuredFps(page)];
+  expect(Math.min(...fps)).toBeGreaterThan(30);
+  const fpsDeltaRatio = Math.abs(fps[0] - fps[1]) / Math.max(...fps);
+  expect(fpsDeltaRatio).toBeLessThanOrEqual(0.2);
+  await expect.poll(() => graph.getAttribute("data-render-count"), { timeout: 1_500 }).toBe(String(initialRenderCount));
+  await expect.poll(() => page.evaluate(() => (window as Window & { __boopNetworkCalls?: number }).__boopNetworkCalls), { timeout: 1_500 }).toBe(1);
   await expect(page.getByRole("columnheader")).toHaveText([
     "Time", "Event", "Lane", "From", "To", "Session", "State", "Duration", "Detail",
   ]);
@@ -59,6 +95,26 @@ test("bounds and virtualizes the Boop network waterfall through its panel scroll
   await expect(page.getByText("revision-2 event-1999")).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as Window & { __boopNetworkCalls?: number }).__boopNetworkCalls)).toBe(2);
   await expect(page.getByText("revision-1 event-1999")).toHaveCount(0);
+  await expect(graph).toHaveAttribute("data-node-count", "2000");
+  const refreshedRenderCount = Number(await graph.getAttribute("data-render-count"));
+  expect(refreshedRenderCount).toBeGreaterThan(0);
+  expect(refreshedRenderCount).toBeLessThanOrEqual(3);
+  await expect.poll(() => graph.getAttribute("data-render-count"), { timeout: 1_500 }).toBe(String(refreshedRenderCount));
+  await expect.poll(() => page.evaluate(() => (window as Window & { __boopNetworkCalls?: number }).__boopNetworkCalls), { timeout: 1_500 }).toBe(2);
+  const receipt: StabilityReceipt = {
+    fps,
+    fpsDeltaRatio,
+    initialApiCalls: 1,
+    initialRenderCount,
+    refreshedApiCalls: 2,
+    refreshedRenderCount,
+    backend: await graph.getAttribute("data-backend") ?? undefined,
+  };
+  await testInfo.attach("boop-network-stability", {
+    body: JSON.stringify(receipt, null, 2),
+    contentType: "application/json",
+  });
+  console.log("BOOP_NETWORK_STABILITY", JSON.stringify(receipt));
   const endScreenshot = testInfo.outputPath("boop-network-end-after-refresh.png");
   await page.screenshot({ path: endScreenshot, fullPage: true });
   await testInfo.attach("boop-network-end-after-refresh", { path: endScreenshot, contentType: "image/png" });

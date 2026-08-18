@@ -46,10 +46,16 @@ export function BoopNetworkGraph({ events }: BoopNetworkGraphProps) {
     if (!element || events.length === 0) return;
     let disposed = false;
     let projection: PixiProjection | null = null;
+    let renderCount = 0;
+    const render = () => {
+      projection?.render();
+      renderCount += 1;
+      element.dataset.renderCount = String(renderCount);
+    };
     const resize = new ResizeObserver((entries) => {
       const width = Math.max(1, Math.floor(entries[0]?.contentRect.width ?? 1));
       projection?.resize(width, 180);
-      projection?.render();
+      render();
     });
     const initialize = async () => {
       const width = Math.max(1, Math.floor(element.getBoundingClientRect().width));
@@ -70,8 +76,10 @@ export function BoopNetworkGraph({ events }: BoopNetworkGraphProps) {
       next.app.canvas.dataset.testid = "boop-network-grapht";
       element.dataset.nodeCount = String(events.length);
       element.dataset.edgeCount = String(next.currentEdgeCount());
+      element.dataset.backend = next.actualBackend;
       resize.observe(element);
-      await next.firstRender();
+      render();
+      await next.settleFrames(4);
     };
     void initialize();
     return () => {
