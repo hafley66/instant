@@ -31,6 +31,7 @@ import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 import { SessionSidebar } from "./sessionSidebar";
 import { InTabStrip } from "./plugins/harnessTrace/InTabStrip";
+import { FocusedFamilySplit } from "./plugins/harnessTrace/2_FocusedFamilySplit";
 import { restoredTerminalSessionIds } from "./0_dockRestore";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { panelApiVisibility$ } from "./0_panelVisibility";
@@ -254,6 +255,14 @@ function TerminalPanel(props: IDockviewPanelProps) {
   const source = sb.source ?? "turns";
   const placement = sb.placement ?? "right";
   const sizes = sb.sizes ?? ([62, 38] as [number, number]);
+  const [familyOpen, setFamilyOpen] = useState(() => {
+    const entry = store.get().termStrip[sid];
+    return entry?.open === true && entry.family === true;
+  });
+  useEffect(() => store.subscribe(() => {
+    const entry = store.get().termStrip[sid];
+    setFamilyOpen(entry?.open === true && entry.family === true);
+  }, ["termStrip"]), [sid]);
 
   useEffect(() => {
     const sub = props.api.onDidDimensionsChange(() => hooks.onTermLayout(sid));
@@ -287,9 +296,8 @@ function TerminalPanel(props: IDockviewPanelProps) {
   // returns the BORDER box. Any padding/border on .term-host gets silently
   // counted as renderable area, rounding cols/rows one too large whenever the
   // panel height lands within ~6px of a cell boundary -> tmux/xterm row drift.
-  return (
-    <div className="dv-host dv-host-term term-panel" data-sidebar-placement={placement} style={{ display: "flex", flexDirection: "column" }}>
-      <div className="term-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
+  const term = (
+    <div className="term-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
         <div className="term-slot" ref={setSlot} />
         {open && (
           <SessionSidebar
@@ -305,8 +313,13 @@ function TerminalPanel(props: IDockviewPanelProps) {
             onPatch={patchSidebar}
           />
         )}
-      </div>
-      <InTabStrip sid={sid} onLayout={refitForStrip} />
+    </div>
+  );
+  const strip = <InTabStrip sid={sid} onLayout={refitForStrip} resizable={familyOpen} />;
+
+  return (
+    <div className="dv-host dv-host-term term-panel" data-sidebar-placement={placement} style={{ display: "flex", flexDirection: "column" }}>
+      {familyOpen ? <FocusedFamilySplit sid={sid} term={term} strip={strip} onCommittedLayout={refitForStrip} /> : <>{term}{strip}</>}
     </div>
   );
 }
