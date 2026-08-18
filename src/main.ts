@@ -23,8 +23,7 @@ import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
-import { toggleNetworkFor, toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
-import { BOOP_AGENT_EXPLORER_PLUGIN_ID } from "./0_boopAgentExplorerTypes";
+import { toggleFamilyStripFor, toggleNetworkFor, toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
@@ -192,6 +191,12 @@ function toggleTermStrip() {
   toggleTermStripFor(id);
 }
 
+function toggleTermFamily() {
+  const id = getFocusedTermId();
+  if (!id) return;
+  toggleFamilyStripFor(id);
+}
+
 // Summon the strip and flip its network (waterfall) view on the focused terminal.
 function toggleNetwork() {
   const id = getFocusedTermId();
@@ -221,7 +226,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
   { id: "term.strip", keys: ["$mod+Shift+x"], title: "Toggle External Shells", group: "View", run: toggleTermStrip },
-  { id: "boop.network", keys: ["$mod+Shift+Period"], title: "Toggle Boop Network", group: "View", run: () => togglePanel(BOOP_AGENT_EXPLORER_PLUGIN_ID) },
+  { id: "boop.family", keys: ["$mod+Shift+Period"], title: "Toggle Boop Family Tree", group: "View", run: toggleTermFamily },
   { id: "panel.agents.shortcut", keys: [], title: "Toggle Agents", group: "Panel", run: () => togglePanel("agents") },
   { id: "term.network", keys: ["$mod+Shift+N"], title: "Toggle Network View", group: "View", run: toggleNetwork },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.

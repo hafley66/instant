@@ -11,7 +11,10 @@ import { store } from "../src/state";
 import { setHomeDir } from "../src/core";
 import { wireContextMenu } from "../src/ctxmenu";
 import { installKeymap } from "../src/keymap";
-import { toggleTermStripFor } from "../src/plugins/harnessTrace/InTabStrip";
+import {
+  toggleFamilyStripFor,
+  toggleTermStripFor,
+} from "../src/plugins/harnessTrace/InTabStrip";
 
 setHomeDir("/Users/e2e");
 // ?term=<sid> mounts the terminal for another session id: "s3" has no tmux row
@@ -52,7 +55,8 @@ wireContextMenu(() => []);
 // production body against this page's terminal (the focused-terminal lookup is
 // main.ts's job and has no dock chrome here).
 installKeymap([
-  { id: "term.strip", keys: ["$mod+Shift+x", "$mod+Shift+Period"], run: () => toggleTermStripFor(TERM_SID) },
+  { id: "term.strip", keys: ["$mod+Shift+x"], run: () => toggleTermStripFor(TERM_SID) },
+  { id: "term.family", keys: ["$mod+Shift+Period"], run: () => toggleFamilyStripFor(TERM_SID) },
 ]);
 
 // Wait for the dock to initialize, then add a terminal panel for session "s1"

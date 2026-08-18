@@ -17,6 +17,21 @@ function descendantsOf(nodes: AgentSessionNode[], seed: Set<string>): Set<string
   return reachable;
 }
 
+function familyOf(nodes: AgentSessionNode[], seed: Set<string>): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const roots = new Set(seed);
+  for (const id of seed) {
+    let node = byId.get(id);
+    const seen = new Set<string>();
+    while (node?.parentId && !seen.has(node.id)) {
+      seen.add(node.id);
+      roots.add(node.parentId);
+      node = byId.get(node.parentId);
+    }
+  }
+  return descendantsOf(nodes, roots);
+}
+
 // This tab's own harness session (the row joined to its tmux session) plus
 // subagents descending from it. Transitive: a subagent of a subagent remains
 // inside the TUI's own list regardless of which harness owns the pane.
@@ -93,6 +108,12 @@ export const StripPolicy: IStripPolicy = {
 
   nativeIds(nodes, sid, nativeSessionId) {
     return nativeSessionIds(nodes, tmuxNameOf(sid), nativeSessionId);
+  },
+
+  family(nodes, sid, nativeSessionId) {
+    const native = nativeSessionIds(nodes, tmuxNameOf(sid), nativeSessionId);
+    const ids = familyOf(nodes, native);
+    return nodes.filter((node) => ids.has(node.id));
   },
 
   // Done/dead rows stay out of the strip on every scope: the bar answers

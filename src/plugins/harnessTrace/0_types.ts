@@ -254,6 +254,7 @@ export interface ITermStripEntry {
   open: boolean;
   showActive?: boolean;
   network?: boolean;
+  family?: boolean;
 }
 
 // How wide the strip casts. "related" = trees joined to this terminal's tmux
@@ -277,6 +278,7 @@ export interface IStripPolicy {
   // this tab: the claude session joined to this terminal plus its claude-native
   // subagent descendants. The strip must not duplicate them.
   nativeIds(nodes: AgentSessionNode[], sid: string, nativeSessionId?: string | null): Set<string>;
+  family(nodes: AgentSessionNode[], sid: string, nativeSessionId?: string | null): AgentSessionNode[];
   // The strip's row set: everything in scope minus nativeIds. Dropping a native
   // parent promotes its external children to roots (indexAgentTree's orphan
   // law), which is how a dispatched lane surfaces as a top-level shell.
