@@ -4079,3 +4079,21 @@ body[data-skin="ac3"] .meme-canvas-wrap {
 .paint-caption-style { min-width: 26px; min-height: 22px; padding: 0 4px; font-weight: 700; opacity: 0.55; }
 .paint-caption-style.on { opacity: 1; color: var(--panel-fg, #111); background: var(--row-active-bg, #b8d6ff); }
 .paint-caption-error { color: #c0392b; max-width: 300px; overflow-wrap: anywhere; }
+
+/* Marbler is embedded inside a dock panel. Its standalone demo stylesheet also
+   declares page-shell dimensions; these rules bind those dimensions to the
+   Instant panel and leave the document shell under Instant's ownership. */
+html body { min-width: 0; }
+.boop-network-panel { min-height: 0; }
+.boop-marbler { display: flex; min-height: 0; flex: 1; overflow: hidden; }
+.boop-marbler > .app-shell {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.boop-marbler .network-panel { min-height: 0; }
+.boop-marbler .grid-scroller { min-height: 0; }

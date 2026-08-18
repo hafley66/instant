@@ -17,14 +17,17 @@ fixtureWindow.__boopNetworkQueries = [];
 
 function fixture() {
   const now = Date.now();
-  return Array.from({ length: TOTAL }, (_, index) => JSON.stringify({
+  return Array.from({ length: TOTAL }, (_, index) => {
+    const lane = index % 2 === 0 ? "codex-luna-a" : "claude-haiku-b";
+    const peer = lane === "codex-luna-a" ? "claude-haiku-b" : "codex-luna-a";
+    return JSON.stringify({
     event_id: index + 1,
     event_key: `network-event-${index.toString().padStart(4, "0")}`,
-    lane: index % 2 === 0 ? "codex-luna-a" : "claude-haiku-b",
+    lane,
     trace: "trace-network-e2e",
     session: `session-${index % 4}`,
-    from_lane: index % 3 === 0 ? "coordinator" : "",
-    to_lane: index % 3 === 0 ? `worker-${index % 8}` : "",
+    from_lane: index % 3 === 0 ? lane : "",
+    to_lane: index % 3 === 0 ? peer : "",
     kind: index % 3 === 0 ? "delivery" : index % 3 === 1 ? "turn-start" : "turn-finish",
     started_ts: now - index * 10,
     finished_ts: index % 3 === 2 ? now - index * 10 + 7 : null,
@@ -32,7 +35,8 @@ function fixture() {
     classification: index % 3 === 2 ? "completed" : "started",
     detail: `revision-${revision} event-${index.toString().padStart(4, "0")}`,
     created_ts: now - index * 10,
-  })).join("\n");
+    });
+  }).join("\n");
 }
 
 setBoopAgentExplorerRunner(async (query) => {

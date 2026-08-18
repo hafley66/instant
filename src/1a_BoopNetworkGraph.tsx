@@ -1,93 +1,122 @@
-import type { Geometry } from "@hafley66/grapht";
-import { PixiProjection } from "@hafley66/grapht-render-pixijs";
-import { useEffect, useRef } from "react";
+import { createMarbler, MarblerPanel, type MarbleEvent, type MarbleFrame, type MarblePhase } from "@hafley66/marbler";
+import { useMemo } from "react";
 import type { BoopNetworkEvent } from "./1_boopNetwork";
 
-type BoopNetworkGraphProps = { events: BoopNetworkEvent[] };
+type LaneAccumulator = {
+  id: string;
+  start: number;
+  end: number;
+  harness: string;
+  phases: MarblePhase[];
+  frames: MarbleFrame[];
+  failed: boolean;
+};
 
-function band(value: string, count: number): number {
-  let hash = 0;
-  for (const character of value) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return hash % count;
+const eventStart = (event: BoopNetworkEvent): number => event.started_ts ?? event.created_ts;
+const eventEnd = (event: BoopNetworkEvent): number => event.finished_ts ?? event.created_ts + 1;
+
+function phaseKind(event: BoopNetworkEvent): MarblePhase["kind"] {
+  if (event.kind.includes("delivery") || event.from_lane) return "send";
+  if (event.kind.includes("open") || event.kind.includes("start")) return "queue";
+  if (event.kind.includes("finish") || event.kind.includes("exit")) return "receive";
+  if (event.classification === "idle") return "wait";
+  return "work";
 }
 
-function eventGeometry(events: BoopNetworkEvent[]): Geometry {
-  const chronological = events.slice().reverse();
-  const laneIndex = new Map<string, number>();
-  const previousByLane = new Map<string, number>();
-  const edges: [number, number][] = [];
-  const positions = new Float32Array(chronological.length * 2);
-  const first = chronological[0]?.created_ts ?? 0;
-  const last = chronological[chronological.length - 1]?.created_ts ?? first + 1;
-  const span = Math.max(1, last - first);
-
-  chronological.forEach((event, index) => {
-    const lane = laneIndex.get(event.lane) ?? laneIndex.size;
-    laneIndex.set(event.lane, lane);
-    positions[index * 2] = ((event.created_ts - first) / span) * 1_000;
-    positions[index * 2 + 1] = lane * 96 + band(`${event.kind}:${event.session}`, 12) * 7;
-    const previous = previousByLane.get(event.lane);
-    if (previous !== undefined) edges.push([previous, index]);
-    previousByLane.set(event.lane, index);
-  });
-
-  return {
-    nodeIds: chronological.map((event) => event.event_key),
-    positions,
-    edges,
-  };
+function frameKind(event: BoopNetworkEvent): MarbleFrame["kind"] {
+  if (event.kind.includes("error") || event.classification === "failed") return "error";
+  if (event.kind.includes("delivery")) return event.to_lane === event.lane ? "mail-in" : "mail-out";
+  if (event.kind.includes("turn-start")) return "turn-start";
+  if (event.kind.includes("turn-finish")) return "turn-finish";
+  if (event.kind.includes("exit")) return "exit";
+  if (event.kind.includes("finish")) return "result";
+  return "spawn";
 }
 
-export function BoopNetworkGraph({ events }: BoopNetworkGraphProps) {
-  const host = useRef<HTMLDivElement>(null);
+function frameDirection(event: BoopNetworkEvent): MarbleFrame["direction"] {
+  if (event.from_lane && event.from_lane === event.lane) return "out";
+  if (event.to_lane && event.to_lane === event.lane) return "in";
+  return "self";
+}
 
-  useEffect(() => {
-    const element = host.current;
-    if (!element || events.length === 0) return;
-    let disposed = false;
-    let projection: PixiProjection | null = null;
-    let renderCount = 0;
-    const render = () => {
-      projection?.render();
-      renderCount += 1;
-      element.dataset.renderCount = String(renderCount);
+function framePeer(event: BoopNetworkEvent): string | null {
+  if (event.from_lane && event.from_lane !== event.lane) return event.from_lane;
+  if (event.to_lane && event.to_lane !== event.lane) return event.to_lane;
+  return null;
+}
+
+function phaseRanges(phases: MarblePhase[]): MarblePhase[] {
+  const ranges = new Map<MarblePhase["kind"], { start: number; end: number }>();
+  for (const phase of phases) {
+    if (phase.start === null || phase.end === null) continue;
+    const range = ranges.get(phase.kind);
+    if (range) {
+      range.start = Math.min(range.start, phase.start);
+      range.end = Math.max(range.end, phase.end);
+    } else {
+      ranges.set(phase.kind, { start: phase.start, end: phase.end });
+    }
+  }
+  return [...ranges].map(([kind, range]) => ({ kind, ...range }));
+}
+
+export function projectBoopEventsToMarbler(events: BoopNetworkEvent[]): MarbleEvent[] {
+  if (events.length === 0) return [];
+  const origin = Math.min(...events.map(eventStart));
+  const lanes = new Map<string, LaneAccumulator>();
+  for (const event of events.slice().sort((left, right) => eventStart(left) - eventStart(right))) {
+    const start = eventStart(event) - origin;
+    const end = Math.max(start + 1, eventEnd(event) - origin);
+    const lane = lanes.get(event.lane) ?? {
+      id: event.lane,
+      start,
+      end,
+      harness: event.session || event.trace || "agent",
+      phases: [],
+      frames: [],
+      failed: false,
     };
-    const resize = new ResizeObserver((entries) => {
-      const width = Math.max(1, Math.floor(entries[0]?.contentRect.width ?? 1));
-      projection?.resize(width, 180);
-      render();
+    lane.start = Math.min(lane.start, start);
+    lane.end = Math.max(lane.end, end);
+    lane.failed ||= event.kind.includes("error") || event.classification === "failed";
+    lane.phases.push({ kind: phaseKind(event), start, end });
+    lane.frames.push({
+      id: event.event_key,
+      t: start,
+      kind: frameKind(event),
+      direction: frameDirection(event),
+      peer: framePeer(event),
+      preview: event.detail || event.kind,
+      repeat: 1,
     });
-    const initialize = async () => {
-      const width = Math.max(1, Math.floor(element.getBoundingClientRect().width));
-      const next = new PixiProjection(element, eventGeometry(events), {
-        renderer: "webgl",
-        representation: "particles",
-        width,
-        height: 180,
-        devicePixelRatio: window.devicePixelRatio || 1,
-        backgroundColor: 0x10141c,
-      });
-      await next.init();
-      if (disposed) {
-        next.dispose();
-        return;
-      }
-      projection = next;
-      next.app.canvas.dataset.testid = "boop-network-grapht";
-      element.dataset.nodeCount = String(events.length);
-      element.dataset.edgeCount = String(next.currentEdgeCount());
-      element.dataset.backend = next.actualBackend;
-      resize.observe(element);
-      render();
-      await next.settleFrames(4);
-    };
-    void initialize();
-    return () => {
-      disposed = true;
-      resize.disconnect();
-      projection?.dispose();
-    };
-  }, [events]);
+    lanes.set(event.lane, lane);
+  }
+  return [...lanes.values()]
+    .sort((left, right) => left.start - right.start || left.id.localeCompare(right.id))
+    .map((lane) => ({
+      id: lane.id,
+      name: lane.id,
+      method: "AGENT",
+      status: lane.failed ? 500 : 200,
+      type: "tool",
+      initiator: lane.harness,
+      size: `${lane.frames.length} events`,
+      start: lane.start,
+      duration: Math.max(1, lane.end - lane.start),
+      from: lane.frames.find((frame) => frame.peer)?.peer ?? lane.id,
+      to: lane.id,
+      preview: `${lane.frames.length} lifecycle and message events`,
+      phases: phaseRanges(lane.phases),
+      frames: lane.frames,
+      parentId: null,
+    }));
+}
 
-  return <div ref={host} data-testid="boop-network-graph" style={{ width: "100%", height: 180, overflow: "hidden", flex: "0 0 180px" }} />;
+export function BoopNetworkGraph({ events }: { events: BoopNetworkEvent[] }) {
+  const model = useMemo(() => {
+    const next = createMarbler(projectBoopEventsToMarbler(events));
+    next.selectedId.$(null);
+    return next;
+  }, [events]);
+  return <div className="boop-marbler" data-testid="boop-network-marbler"><MarblerPanel model={model} /></div>;
 }
