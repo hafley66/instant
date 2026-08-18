@@ -26,8 +26,8 @@ importers:
         specifier: 0.1.2
         version: 0.1.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/marbler':
-        specifier: link:../hafley-rxjs/packages/marbler
-        version: link:../hafley-rxjs/packages/marbler
+        specifier: 0.0.1
+        version: 0.0.1(vite@8.1.5)
       '@hafley66/md':
         specifier: file:packages/md
         version: file:packages/md(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
@@ -398,11 +398,22 @@ packages:
       react:
         optional: true
 
+  '@hafley66/grid@0.1.8':
+    resolution: {integrity: sha512-3G1IRSSx/TBhJVGJ1D/uKdkcMXpN+hljV8Ra6EvYKi0rMbEvdUiXR6UBVf6HO9yXCwJ1q0QLtvEHmV+kUbQJSg==}
+    peerDependencies:
+      react: '>=18.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+
   '@hafley66/json-rx@0.1.2':
     resolution: {integrity: sha512-bRW5OtFaQ3K8VUj0Wr97cWnqrEAhl2WxPs4j3hLcnIt1BtwOQwtbY3cIzE2PkcoFSkPpcGfsr1idn2S+5QS0hw==}
     peerDependencies:
       react: ^19.0.0
       rxjs: ^7.8.0
+
+  '@hafley66/marbler@0.0.1':
+    resolution: {integrity: sha512-Lg+X+eQroi+JKdALJ+V4NJvsyeYz+y9p8swoOEXtbhN5GDywyBMVDFO86P1k4LR5c3ls9Z8QdfJYYiEoALxStA==}
 
   '@hafley66/md@file:packages/md':
     resolution: {directory: packages/md, type: directory}
@@ -438,6 +449,14 @@ packages:
       react:
         optional: true
       vite:
+        optional: true
+
+  '@hafley66/virtualizations@0.1.0':
+    resolution: {integrity: sha512-BaUcowodo89ZfgE0qVZZz6x6UF39A3z/op/3kKlvCS1bw2jpiuDjKY15YzWqMnhgJAZk3Hr8xeRC0QzlgPRY8w==}
+    peerDependencies:
+      react: '>=18.0.0'
+    peerDependenciesMeta:
+      react:
         optional: true
 
   '@iconify/types@2.0.0':
@@ -2133,6 +2152,11 @@ packages:
     peerDependencies:
       react: ^19.2.7
 
+  react-dom@19.2.8:
+    resolution: {integrity: sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==}
+    peerDependencies:
+      react: ^19.2.8
+
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
@@ -2156,6 +2180,10 @@ packages:
 
   react@19.2.7:
     resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
+    engines: {node: '>=0.10.0'}
+
+  react@19.2.8:
+    resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
     engines: {node: '>=0.10.0'}
 
   regex-recursion@6.0.2:
@@ -2920,6 +2948,23 @@ snapshots:
       - react-dom
       - vite
 
+  '@hafley66/grid@0.1.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)':
+    dependencies:
+      '@hafley66/path': 0.1.0
+      '@hafley66/signals': 0.1.1(react@19.2.8)(vite@8.1.5)
+      '@hafley66/virtualizations': 0.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tanstack/react-table': 9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tanstack/react-virtual': 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      devalue: 5.9.0
+      lodash: 4.18.1
+      rxjs: 7.8.2
+      zod: 4.4.3
+    optionalDependencies:
+      react: 19.2.8
+    transitivePeerDependencies:
+      - react-dom
+      - vite
+
   '@hafley66/json-rx@0.1.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
     dependencies:
       '@emotion/react': 11.14.0(@types/react@19.2.17)(react@19.2.7)
@@ -2943,6 +2988,19 @@ snapshots:
       - solid-js
       - supports-color
       - vue
+
+  '@hafley66/marbler@0.0.1(vite@8.1.5)':
+    dependencies:
+      '@hafley66/grid': 0.1.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1(react@19.2.8)(vite@8.1.5)
+      '@tanstack/react-table': 9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      pixi.js: 8.19.0
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+      rxjs: 7.8.2
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - vite
 
   '@hafley66/md@file:packages/md(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
     dependencies:
@@ -2979,6 +3037,25 @@ snapshots:
     optionalDependencies:
       react: 19.2.7
       vite: 8.1.5
+
+  '@hafley66/signals@0.1.1(react@19.2.8)(vite@8.1.5)':
+    dependencies:
+      '@hafley66/path': 0.1.0
+      history: 5.3.0
+      immer: 10.2.0
+      lodash: 4.18.1
+      rxjs: 7.8.2
+    optionalDependencies:
+      react: 19.2.8
+      vite: 8.1.5
+
+  '@hafley66/virtualizations@0.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@tanstack/react-virtual': 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+    optionalDependencies:
+      react: 19.2.8
+    transitivePeerDependencies:
+      - react-dom
 
   '@iconify/types@2.0.0': {}
 
@@ -3314,6 +3391,13 @@ snapshots:
       react-dom: 19.2.7(react@19.2.7)
       use-sync-external-store: 1.6.0(react@19.2.7)
 
+  '@tanstack/react-store@0.11.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@tanstack/store': 0.11.1
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+      use-sync-external-store: 1.6.0(react@19.2.8)
+
   '@tanstack/react-table@8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@tanstack/table-core': 8.21.3
@@ -3328,6 +3412,14 @@ snapshots:
     transitivePeerDependencies:
       - react-dom
 
+  '@tanstack/react-table@9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@tanstack/react-store': 0.11.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@tanstack/table-core': 9.1.2
+      react: 19.2.8
+    transitivePeerDependencies:
+      - react-dom
+
   '@tanstack/react-virtual@3.14.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@tanstack/virtual-core': 3.17.5
@@ -3339,6 +3431,12 @@ snapshots:
       '@tanstack/virtual-core': 3.17.7
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
+
+  '@tanstack/react-virtual@3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@tanstack/virtual-core': 3.17.7
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   '@tanstack/store@0.11.1': {}
 
@@ -4847,6 +4945,11 @@ snapshots:
       react: 19.2.7
       scheduler: 0.27.0
 
+  react-dom@19.2.8(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      scheduler: 0.27.0
+
   react-is@16.13.1: {}
 
   react-is@18.3.1: {}
@@ -4868,6 +4971,8 @@ snapshots:
       react-dom: 19.2.7(react@19.2.7)
 
   react@19.2.7: {}
+
+  react@19.2.8: {}
 
   regex-recursion@6.0.2:
     dependencies:
@@ -5149,6 +5254,10 @@ snapshots:
   use-sync-external-store@1.6.0(react@19.2.7):
     dependencies:
       react: 19.2.7
+
+  use-sync-external-store@1.6.0(react@19.2.8):
+    dependencies:
+      react: 19.2.8
 
   uuid@14.0.1: {}
 
