@@ -9,6 +9,7 @@
 // while it is the router's top. The auto-height, 240px-capped scroll area
 // reports its height changes up to the host so the xterm refits.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { SignalReact } from "@hafley66/signals/react";
 import type { ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { store } from "../../state";
@@ -23,7 +24,6 @@ import { mailAgentIdFor } from "./0_mail";
 import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
-import { tabMetaById } from "../../terminal";
 import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
 
 export interface InTabStripProps {
@@ -44,6 +44,7 @@ const STYLE =
   // Virtual rows need the wrap itself to scroll: height:auto above kills
   // .tt-scroll's height:100%, so cap it here (act-bar eats the other 24px).
   ".term-strip .tt-scroll{max-height:216px}";
+const NO_RESUME_TABS: Record<string, { sessionId?: string }> = {};
 
 // The toggle command's whole body (main.ts binds it to the hotkey, the e2e
 // harness binds the same command): the policy decides what a press writes.
@@ -81,7 +82,7 @@ export function toggleNetworkFor(sid: string): void {
   });
 }
 
-export function InTabStrip({ sid, onLayout }: InTabStripProps) {
+function InTabStripView({ sid, onLayout }: InTabStripProps) {
   const [, setVersion] = useState(0);
   useEffect(() => termViewRouter.subscribe(() => setVersion((v) => v + 1)), []);
 
@@ -90,11 +91,6 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   // null until the scope button is pressed; the policy widens an empty default.
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
-  const resumeTabs = useSyncExternalStore(
-    useCallback((notify: () => void) => store.subscribe(notify, ["resumeTabs"]), []),
-    () => store.get().resumeTabs,
-  );
-  const nativeSessionId = resumeTabs[StripPolicy.tmuxNameOf(sid)]?.sessionId ?? null;
 
   // Per-terminal open state (Toggle Relations Strip command).
   const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
@@ -107,13 +103,17 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
   // whether related rows exist. Only an explicit dismissal suspends the feed.
   const dataEnabled = entry?.open !== false || current !== null;
   const familyMode = entry?.family ?? false;
-  const familyCwd =
-    tabMetaById(sid)?.cwd ??
-    store.get().sessions.find((session) => session.name === StripPolicy.tmuxNameOf(sid))?.paths?.[0] ??
-    null;
+  const externalResumeTabs = useSyncExternalStore(
+    useCallback(
+      (notify: () => void) => familyMode ? () => {} : store.subscribe(notify, ["resumeTabs"]),
+      [familyMode],
+    ),
+    () => familyMode ? NO_RESUME_TABS : store.get().resumeTabs,
+  );
+  const nativeSessionId = externalResumeTabs[StripPolicy.tmuxNameOf(sid)]?.sessionId ?? null;
   const familyQuery = useMemo(
-    () => (familyMode ? focusedFamilyQuery(sid, familyCwd) : null),
-    [familyMode, sid, familyCwd],
+    () => (familyMode ? focusedFamilyQuery(StripPolicy.tmuxNameOf(sid)) : null),
+    [familyMode, sid],
   );
   const family = useBoopFamily(familyQuery);
   const { nodes, liveTmux, registry, error, load } = useAgentTree(!familyMode && dataEnabled);
@@ -302,7 +302,9 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
         <Waterfall nodes={visibleNodes} nowMs={Date.now()} onOpen={openWaterfallId} onLayout={onLayout} />
       ) : index.size === 0 ? (
         <div className="session-empty strip-empty" data-testid="strip-empty">
-          {scope === "related"
+          {familyMode
+            ? "no focused family sessions in the last seven days"
+            : scope === "related"
             ? `no related sessions for tmux ${StripPolicy.tmuxNameOf(sid)} — the join is by tmux session name, so a tab opened outside tmux never matches one; widen the scope to look anyway.`
             : "no external shells: every agent session here belongs to a claude tab's own list."}
         </div>
@@ -329,3 +331,5 @@ export function InTabStrip({ sid, onLayout }: InTabStripProps) {
     </div>
   );
 }
+
+export const InTabStrip = SignalReact(InTabStripView);

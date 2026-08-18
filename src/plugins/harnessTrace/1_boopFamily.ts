@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect } from "react";
+import { Signal } from "@hafley66/signals";
 import { invoke } from "../../generated/native";
 import { tildify } from "../../core";
 import type { AgentSessionNode, Harness, ParentKind, SessionStatus } from "./0_types";
@@ -36,7 +37,6 @@ type GraphShell = {
 };
 type BoopGraph = { sessions: GraphSession[]; edges: GraphEdge[]; shells: GraphShell[] };
 export type BoopFamilyQuery = {
-  cwd: string | null;
   include_history: boolean;
   tmux: string;
   history_since_ts: number;
@@ -53,9 +53,7 @@ const parentKindOf = (kind: string): ParentKind =>
 
 export function normalizeBoopFamily(raw: BoopGraph, now = Date.now()): AgentSessionNode[] {
   const parentByChild = new Map<string, GraphEdge>();
-  for (const edge of raw.edges) {
-    if (edge.kind === "spawned") parentByChild.set(identityKey(edge.child), edge);
-  }
+  for (const edge of raw.edges) parentByChild.set(identityKey(edge.child), edge);
   const nodes = raw.sessions.map((session): AgentSessionNode => {
     const edge = parentByChild.get(identityKey(session.session));
     return {
@@ -116,19 +114,25 @@ type FamilyEntry = {
   error: string;
   promise: Promise<void> | null;
   generation: number;
-  listeners: Set<() => void>;
+  consumers: number;
+  disposeTimer: ReturnType<typeof setTimeout> | null;
 };
 const cache = new Map<string, FamilyEntry>();
+const cacheVersion = Signal(0);
 const entryFor = (key: string): FamilyEntry => {
   const existing = cache.get(key);
   if (existing) return existing;
-  const entry: FamilyEntry = { data: null, error: "", promise: null, generation: 0, listeners: new Set() };
+  const entry: FamilyEntry = { data: null, error: "", promise: null, generation: 0, consumers: 0, disposeTimer: null };
   cache.set(key, entry);
   return entry;
 };
 
 function keyOf(query: BoopFamilyQuery): string {
   return JSON.stringify(query);
+}
+
+function publish(): void {
+  cacheVersion.$(cacheVersion.$() + 1);
 }
 
 function fetchFamily(query: BoopFamilyQuery, refresh: boolean): void {
@@ -148,9 +152,9 @@ function fetchFamily(query: BoopFamilyQuery, refresh: boolean): void {
     })
     .finally(() => {
       if (generation === entry.generation) entry.promise = null;
-      for (const listener of entry.listeners) listener();
+      publish();
     });
-  for (const listener of entry.listeners) listener();
+  publish();
 }
 
 export function useBoopFamily(query: BoopFamilyQuery | null): {
@@ -159,31 +163,37 @@ export function useBoopFamily(query: BoopFamilyQuery | null): {
   load: () => void;
 } {
   const key = query ? keyOf(query) : "disabled";
-  const subscribe = useCallback((listener: () => void) => {
-    if (!query) return () => {};
-    const entry = entryFor(key);
-    entry.listeners.add(listener);
-    return () => entry.listeners.delete(listener);
-  }, [key, query]);
-  const snapshot = useSyncExternalStore(subscribe, () => {
-    const entry = entryFor(key);
-    return `${entry.data ? "ready" : "pending"}:${entry.error}`;
-  });
+  cacheVersion.$();
   useEffect(() => {
-    if (query) fetchFamily(query, false);
+    if (!query) return;
+    const entry = entryFor(key);
+    entry.consumers += 1;
+    if (entry.disposeTimer) {
+      clearTimeout(entry.disposeTimer);
+      entry.disposeTimer = null;
+    }
+    fetchFamily(query, false);
+    return () => {
+      entry.consumers -= 1;
+      if (entry.consumers !== 0) return;
+      entry.disposeTimer = setTimeout(() => {
+        if (entry.consumers !== 0) return;
+        entry.generation += 1;
+        cache.delete(key);
+        publish();
+      });
+    };
   }, [key, query]);
   const load = useCallback(() => {
     if (query) fetchFamily(query, true);
   }, [query]);
   if (!query) return { nodes: [], error: "", load: () => {} };
   const entry = entryFor(key);
-  void snapshot;
   return { nodes: entry.data ?? [], error: entry.error, load };
 }
 
-export function focusedFamilyQuery(sid: string, cwd: string | null): BoopFamilyQuery {
+export function focusedFamilyQuery(sid: string): BoopFamilyQuery {
   return {
-    cwd,
     include_history: true,
     tmux: sid.startsWith("s:") ? sid.slice(2) : sid,
     history_since_ts: Date.now() - 7 * 24 * 60 * 60 * 1000,

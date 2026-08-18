@@ -35,6 +35,7 @@ const FAMILY_GRAPH = {
   ],
   edges: [
     { parent: { harness: "claude", id: "parent-s1" }, child: { harness: "claude", id: "child-s1" }, kind: "subagent", first_ts: 1_754_240_600_000, last_ts: 1_754_240_600_000 },
+    { parent: { harness: "claude", id: "parent-s1" }, child: { harness: "opencode", id: "oc-finished" }, kind: "dispatch", first_ts: 1_754_233_000_000, last_ts: 1_754_234_800_000 },
   ],
   shells: [
     { lane: "oc-lane", parent_lane: "parent-s1", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: "s1", tmux_session: "s1", tmux_pane: null, state: "live", started_ts: 1_754_241_200_000 },
@@ -183,11 +184,39 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
   const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(requests).toHaveLength(1);
-  expect(requests[0]).toMatchObject({ cwd: "/Users/e2e/projects/demo", include_history: true, tmux: "s1" });
+  expect(requests[0]).toEqual(expect.objectContaining({ include_history: true, tmux: "s1" }));
+  expect(requests[0]).not.toHaveProperty("cwd");
   expect(typeof requests[0].history_since_ts).toBe("number");
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
+});
+
+test("family bridge renders empty and error states from a Claude identity fixture", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
+  await page.addInitScript(() => {
+    const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+    const claudeGraph = {
+      schema_version: 1,
+      sessions: [{ session: { harness: "claude", id: "4bf4853d-claude-root" }, tmux: "s1", state: "idle" }],
+      edges: [],
+      shells: [],
+    };
+    let calls = 0;
+    w.__instantE2eNativeResults = {
+      harness_trace_rows: [],
+      boop_agent_graph: () => {
+        calls += 1;
+        if (calls === 1) return JSON.stringify({ ...claudeGraph, sessions: [] });
+        throw new Error("boop graph unavailable for claude:4bf4853d-claude-root");
+      },
+    };
+  });
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+  await expect(page.getByTestId("strip-empty")).toContainText("no focused family sessions");
+  await page.getByRole("button", { name: "refresh" }).click();
+  await expect(page.getByText("boop graph unavailable for claude:4bf4853d-claude-root")).toBeVisible();
 });
 
 // Receipt (a): the summon bugs. A terminal whose sid has no tmux row and no
