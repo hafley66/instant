@@ -14,6 +14,10 @@ type GraphSession = {
   started_ts?: number | null;
   last_activity_ts?: number | null;
   finished_ts?: number | null;
+  model?: string | null;
+  provider?: string | null;
+  preset?: string | null;
+  input_tokens?: number | null;
 };
 type GraphEdge = {
   parent: GraphIdentity;
@@ -34,6 +38,10 @@ type GraphShell = {
   state: string;
   started_ts?: number | null;
   registered_at?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  preset?: string | null;
+  input_tokens?: number | null;
 };
 type BoopGraph = { sessions: GraphSession[]; edges: GraphEdge[]; shells: GraphShell[] };
 export type BoopFamilyQuery = {
@@ -71,6 +79,10 @@ export function normalizeBoopFamily(raw: BoopGraph, now = Date.now()): AgentSess
       lastActivity: iso(session.last_activity_ts ?? session.finished_ts ?? session.started_ts, now),
       status: statusOf(session.state),
       cwd: session.cwd ? tildify(session.cwd) : "",
+      model: session.model ?? null,
+      provider: session.provider ?? null,
+      preset: session.preset ?? null,
+      tokens: session.input_tokens == null ? null : { in: session.input_tokens, at: iso(session.last_activity_ts, now) },
       tmuxSession: session.tmux ?? null,
       tmuxMatches: session.tmux ? [session.tmux] : [],
     };
@@ -97,6 +109,10 @@ export function normalizeBoopFamily(raw: BoopGraph, now = Date.now()): AgentSess
       lastActivity: iso(shell.started_ts, shell.registered_at ? Date.parse(shell.registered_at) : now),
       status: statusOf(shell.state),
       cwd: shell.cwd ? tildify(shell.cwd) : "",
+      model: shell.model ?? null,
+      provider: shell.provider ?? null,
+      preset: shell.preset ?? null,
+      tokens: shell.input_tokens == null ? null : { in: shell.input_tokens, at: iso(shell.started_ts, now) },
       tmuxSession: tmux,
       tmuxMatches: tmux ? [tmux] : [],
     });

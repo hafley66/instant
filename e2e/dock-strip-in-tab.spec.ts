@@ -16,7 +16,7 @@ const REGISTRY = JSON.stringify({
   "lane-oc": { sessionId: "oc-lane", harness: "opencode", tmux: "s1" },
 });
 const ROWS = [
-  { id: "parent-s1", harness: "claude", sessionId: "parent-s1", parentId: null, parentKind: null, ts: "2026-08-03T10:00:00Z", lastActivity: "2026-08-03T11:00:00Z", status: "live", cwd: "~/projects/demo" },
+  { id: "parent-s1", harness: "claude", sessionId: "parent-s1", parentId: null, parentKind: null, ts: "2026-08-03T10:00:00Z", lastActivity: "2026-08-03T11:00:00Z", status: "live", cwd: "~/projects/demo", model: "claude-sonnet-4", inputTokens: 18340 },
   { id: "child-s1", harness: "claude", sessionId: "child-s1", parentId: "parent-s1", parentKind: "subagent", ts: "2026-08-03T10:10:00Z", lastActivity: "2026-08-03T10:50:00Z", status: "live", cwd: "~/projects/demo" },
   { id: "oc-lane", harness: "opencode", sessionId: "oc-lane", parentId: "parent-s1", parentKind: "dispatch", ts: "2026-08-03T10:20:00Z", lastActivity: "2026-08-03T10:55:00Z", status: "live", cwd: "~/projects/demo" },
   { id: "oc-sub", harness: "opencode", sessionId: "oc-sub", parentId: "oc-lane", parentKind: "subagent", ts: "2026-08-03T10:30:00Z", lastActivity: "2026-08-03T10:45:00Z", status: "idle", cwd: "~/projects/demo" },
@@ -29,7 +29,7 @@ const ROWS = [
 const FAMILY_GRAPH = {
   schema_version: 1,
   sessions: [
-    { session: { harness: "claude", id: "parent-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_000_000, last_activity_ts: 1_754_243_600_000 },
+    { session: { harness: "claude", id: "parent-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_000_000, last_activity_ts: 1_754_243_600_000, model: "claude-sonnet-4", provider: "anthropic", preset: "sonnet", input_tokens: 18340 },
     { session: { harness: "claude", id: "child-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_600_000, last_activity_ts: 1_754_243_000_000 },
     { session: { harness: "opencode", id: "oc-finished" }, cwd: "/Users/e2e/projects/demo", tmux: null, state: "dead", started_ts: 1_754_233_000_000, finished_ts: 1_754_234_800_000 },
   ],
@@ -38,16 +38,22 @@ const FAMILY_GRAPH = {
     { parent: { harness: "claude", id: "parent-s1" }, child: { harness: "opencode", id: "oc-finished" }, kind: "dispatch", first_ts: 1_754_233_000_000, last_ts: 1_754_234_800_000 },
   ],
   shells: [
-    { lane: "oc-lane", parent_lane: "parent-s1", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: "s1", tmux_session: "s1", tmux_pane: null, state: "live", started_ts: 1_754_241_200_000 },
+    { lane: "oc-lane", parent_lane: "parent-s1", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: "s1", tmux_session: "s1", tmux_pane: null, state: "live", started_ts: 1_754_241_200_000, model: "deepseek-v4-flash", provider: "openrouter", preset: "flash4", input_tokens: 9240 },
     { lane: "oc-sub", parent_lane: "oc-lane", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: null, tmux_session: null, tmux_pane: "%9", state: "done", started_ts: 1_754_241_800_000 },
   ],
 };
+const FAMILY_EVENTS = [
+  { event_id: 1, event_key: "spawn-parent", lane: "parent-s1", trace: "family", session: "parent-s1", from_lane: "", to_lane: "parent-s1", kind: "supervisor-start", started_ts: 1_754_240_000_000, finished_ts: null, delivery_state: "", classification: "live", detail: "Claude root started", created_ts: 1_754_240_000_000 },
+  { event_id: 2, event_key: "dispatch-oc", lane: "parent-s1", trace: "family", session: "parent-s1", from_lane: "parent-s1", to_lane: "oc-lane", kind: "delivery", started_ts: 1_754_241_200_000, finished_ts: 1_754_241_200_080, delivery_state: "delivered", classification: "live", detail: "implement focused family panel", created_ts: 1_754_241_200_000 },
+  { event_id: 3, event_key: "turn-oc", lane: "oc-lane", trace: "family", session: "oc-lane", from_lane: "parent-s1", to_lane: "oc-lane", kind: "turn-start", started_ts: 1_754_241_201_000, finished_ts: 1_754_241_206_000, delivery_state: "", classification: "live", detail: "editing InTabStrip", created_ts: 1_754_241_201_000 },
+  { event_id: 4, event_key: "result-oc", lane: "oc-lane", trace: "family", session: "oc-lane", from_lane: "oc-lane", to_lane: "parent-s1", kind: "delivery", started_ts: 1_754_241_207_000, finished_ts: 1_754_241_207_090, delivery_state: "delivered", classification: "completed", detail: "tests and receipt ready", created_ts: 1_754_241_207_000 },
+];
 
 async function seed(page: import("@playwright/test").Page) {
   // relTime cells render against Date.now(); freeze it so the PNGs are
   // date-independent.
   await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
-  await page.addInitScript(({ mailDir, envelopes, registry, rows, graph }) => {
+  await page.addInitScript(({ mailDir, envelopes, registry, rows, graph, events }) => {
     const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
     w.__instantE2eNativeResults = {
       harness_trace_rows: rows,
@@ -56,6 +62,7 @@ async function seed(page: import("@playwright/test").Page) {
         (w as Window & { __boopGraphRequests: Record<string, unknown>[] }).__boopGraphRequests.push(args ?? {});
         return JSON.stringify(graph);
       },
+      boop_trace_events: () => events.map((event) => JSON.stringify(event)).join("\n"),
       list_dir: (args?: Record<string, unknown>) => {
         if (args?.path === mailDir) {
           return { entries: [
@@ -76,7 +83,7 @@ async function seed(page: import("@playwright/test").Page) {
         return null;
       },
     };
-  }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS, graph: FAMILY_GRAPH });
+  }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS, graph: FAMILY_GRAPH, events: FAMILY_EVENTS });
 }
 
 test("in-tab strip: external-only lazy tree under the term, mail preview, back", async ({ page }) => {
@@ -172,22 +179,30 @@ test("period summons the focused session family tree in the terminal strip", asy
   const strip = page.getByTestId("in-tab-strip");
   await expect(strip).toBeVisible();
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
-  const familyGraph = page.getByTestId("boop-family-graph");
-  await expect(familyGraph).toHaveAttribute("data-node-count", "5");
-  await expect(familyGraph).toHaveAttribute("data-edge-count", "4");
-  await expect(familyGraph).toHaveAttribute("data-truncated-count", "0");
-  await expect(page.getByTestId("boop-family-grapht")).toHaveCount(1);
-  const familyRenderCount = Number(await familyGraph.getAttribute("data-render-count"));
-  expect(familyRenderCount).toBeGreaterThan(0);
+  const marbler = page.getByTestId("marbler");
+  await expect(marbler).toBeVisible();
+  await expect(page.getByTestId("time-navigator")).toBeVisible();
+  await expect(marbler).toContainText("2 events");
   await expect(page.getByTestId("strip-scope")).toHaveCount(0);
   await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
 
   const root = page.locator("tr").filter({ hasText: "parent-s1" });
   await expect(root).toBeVisible();
+  await expect(root).toContainText("18k");
+  await expect(root).toContainText("claude-sonnet-4");
+  await expect(root).toContainText("anthropic");
+  await expect(root).toContainText("sonnet");
   // Focused families open with their persisted descendants visible.
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
+  await page.getByRole("columnheader", { name: "activity" }).click();
+  const nestedOrder = await page.locator(".focused-family-table tr.dtable-row .s-name").allTextContents();
+  expect(nestedOrder[0]).toBe("parent-s1");
+  expect(new Set(nestedOrder.slice(1))).toEqual(new Set(["child-s1", "oc-lane", "oc-sub", "oc-finished"]));
+  const rootPadding = await root.locator("td").filter({ has: page.locator(".s-name") }).evaluate((cell) => getComputedStyle(cell).paddingLeft);
+  const childPadding = await page.locator("tr").filter({ hasText: "child-s1" }).locator("td").filter({ has: page.locator(".s-name") }).evaluate((cell) => getComputedStyle(cell).paddingLeft);
+  expect(Number.parseFloat(childPadding)).toBeGreaterThan(Number.parseFloat(rootPadding));
   await page.locator("tr").filter({ hasText: "child-s1" }).hover();
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveClass(/boop-family-linked/);
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
@@ -202,7 +217,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   expect(typeof requestQuery.history_since_ts).toBe("number");
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
-  await expect.poll(() => familyGraph.getAttribute("data-render-count"), { timeout: 1_500 }).toBe(String(familyRenderCount));
+  await expect(marbler).toBeVisible();
 
   // Closing and reopening the panel keeps the tmux-scoped family result. The
   // moving seven-day cutoff must not manufacture a new cache identity or drop
@@ -215,7 +230,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   await page.waitForTimeout(250);
   const reopenedRequests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(reopenedRequests).toHaveLength(2);
-  await strip.screenshot({ path: "test-results/strip-family-tree.png" });
+  await page.screenshot({ path: "test-results/focused-family-network-v3.png", fullPage: true });
 });
 
 test("focused family strip saves a vertical drag layout and refits after each committed change", async ({ page }) => {
@@ -250,7 +265,7 @@ test("focused family strip saves a vertical drag layout and refits after each co
     return state.harnessTrace.familyStripLayouts.s1 as [number, number];
   });
   expect(layout).toHaveLength(2);
-  expect(layout[1]).toBeGreaterThan(30);
+  expect(layout[1]).toBeGreaterThan(40);
 
   const beforeClose = await refits();
   await page.keyboard.press(`${MOD}+Shift+Period`);
@@ -266,37 +281,20 @@ test("focused family strip saves a vertical drag layout and refits after each co
   expect(restoredStrip!.height / restoredSplit!.height).toBeCloseTo(layout[1] / 100, 1);
 });
 
-test("wheel grows the focused family dock while pinch remains owned by its timeline", async ({ page }, testInfo) => {
+test("wheel stays inside the family timeline and never resizes the terminal dock", async ({ page }, testInfo) => {
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   await page.keyboard.press(`${MOD}+Shift+Period`);
 
-  const split = page.getByTestId("focused-family-split");
   const strip = page.getByTestId("in-tab-strip");
-  const surface = page.getByTestId("focused-family-wheel-surface");
+  const timeline = page.getByTestId("time-navigator");
   const initial = await strip.boundingBox();
   expect(initial).not.toBeNull();
-  await strip.screenshot({ path: testInfo.outputPath("family-dock-initial.png") });
-
-  await surface.dispatchEvent("wheel", { deltaY: -600, deltaX: 0, ctrlKey: false });
-  await expect.poll(async () => (await strip.boundingBox())?.height ?? 0).toBeGreaterThan(initial!.height + 40);
-  const grown = await strip.boundingBox();
-  await strip.screenshot({ path: testInfo.outputPath("family-dock-grown.png") });
-
-  await surface.dispatchEvent("wheel", { deltaY: -2_000, deltaX: 0, ctrlKey: false });
-  const clamped = await strip.boundingBox();
-  const splitBox = await split.boundingBox();
-  expect(clamped!.height / splitBox!.height).toBeCloseTo(0.75, 1);
-  await strip.screenshot({ path: testInfo.outputPath("family-dock-maximum.png") });
-
-  await surface.dispatchEvent("wheel", { deltaY: 300, deltaX: 0, ctrlKey: true });
-  const afterPinch = await strip.boundingBox();
-  expect(afterPinch!.height).toBeCloseTo(clamped!.height, 0);
-
-  await surface.dispatchEvent("wheel", { deltaY: 2_000, deltaX: 0, ctrlKey: false });
-  const minimum = await strip.boundingBox();
-  expect(minimum!.height / splitBox!.height).toBeCloseTo(0.15, 1);
-  await strip.screenshot({ path: testInfo.outputPath("family-dock-minimum.png") });
+  await timeline.dispatchEvent("wheel", { deltaY: 300, deltaX: 0, ctrlKey: false });
+  await timeline.dispatchEvent("wheel", { deltaY: -300, deltaX: 0, ctrlKey: true });
+  const after = await strip.boundingBox();
+  expect(after!.height).toBeCloseTo(initial!.height, 0);
+  await strip.screenshot({ path: testInfo.outputPath("family-network-wheel-owned.png") });
 });
 
 test("focused family graph and table save an independent vertical layout", async ({ page }) => {
@@ -305,30 +303,32 @@ test("focused family graph and table save an independent vertical layout", async
   await page.keyboard.press(`${MOD}+Shift+Period`);
 
   const split = page.getByTestId("focused-family-content-split");
-  const graph = page.getByTestId("boop-family-graph");
+  const graph = page.getByTestId("marbler");
+  const graphPanel = page.locator("#focused-family-graph-s1");
   const table = page.locator(".focused-family-table");
   const handle = page.getByTestId("focused-family-content-resize");
   await expect(split).toBeVisible();
   await expect(handle).toBeVisible();
 
-  const beforeGraph = await graph.boundingBox();
+  const beforeGraph = await graphPanel.boundingBox();
   const handleBox = await handle.boundingBox();
   expect(beforeGraph).not.toBeNull();
   expect(handleBox).not.toBeNull();
   await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
   await page.mouse.down();
-  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 40, { steps: 4 });
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y - 40, { steps: 4 });
   await page.mouse.up();
 
-  const afterGraph = await graph.boundingBox();
-  expect(afterGraph!.height).toBeGreaterThan(beforeGraph!.height + 20);
+  const afterGraph = await graphPanel.boundingBox();
+  expect(afterGraph!.height).toBeLessThan(beforeGraph!.height - 20);
+  await expect.poll(async () => (await graph.boundingBox())?.height ?? 0).toBeCloseTo(afterGraph!.height, 0);
   await expect(table.locator(".tt-scroll")).toHaveCSS("max-height", "none");
   const layout = await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem("pluginState") ?? "{}");
     return state.harnessTrace.familyContentLayouts.s1 as [number, number];
   });
   expect(layout).toHaveLength(2);
-  expect(layout[0]).toBeGreaterThan(38);
+  expect(layout[0]).toBeLessThan(70);
 });
 
 test("family bridge renders empty and error states from a Claude identity fixture", async ({ page }) => {

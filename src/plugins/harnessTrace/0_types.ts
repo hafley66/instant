@@ -19,6 +19,9 @@ export interface AgentSessionNode {
   lastActivity: string;       // ISO, from session store mtime/db
   status: SessionStatus;
   cwd: string;                // tildified, display-ready
+  model?: string | null;
+  provider?: string | null;
+  preset?: string | null;
   // The instant tmux session this agent runs in, joined by cwd/chip-path match
   // against the store's tmux rows (null = none; row is dimmed, click is a no-op).
   tmuxSession: string | null;
@@ -46,6 +49,9 @@ export interface HarnessTraceRow {
   lastActivity: string;
   status: SessionStatus;
   cwd: string;
+  model?: string | null;
+  provider?: string | null;
+  preset?: string | null;
   inputTokens?: number | null;
   // The route updater's token stamp for this lane (see MailTokens/AgentSessionNode).
   tokens?: MailTokens | null;

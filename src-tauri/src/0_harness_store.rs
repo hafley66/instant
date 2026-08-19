@@ -42,6 +42,7 @@ pub struct HarnessSession {
     pub source_path: Option<String>,
     pub title: Option<String>,
     pub model: Option<String>,
+    pub provider: Option<String>,
     pub input_tokens: Option<u64>,
     pub parent_id: Option<String>,
     pub parent_kind: Option<&'static str>,
@@ -191,6 +192,7 @@ fn claude_session(path: &Path, parent_id: Option<String>) -> Option<HarnessSessi
         source_path: Some(path.to_string_lossy().into_owned()),
         title: None,
         model: None,
+        provider: Some("anthropic".to_string()),
         input_tokens,
         parent_kind: parent_id.as_ref().map(|_| "subagent"),
         parent_id,
@@ -334,7 +336,7 @@ impl HarnessStore for OpencodeStore {
         };
         // tokens.total is OpenCode's complete context reading. tokens.input
         // excludes cache reads and stays small for a large cached context.
-        let sql = "SELECT s.id,s.directory,s.title,s.time_created,s.time_updated,(SELECT MAX(json_extract(m.data,'$.tokens.total')) FROM message m WHERE m.session_id=s.id),(SELECT json_extract(m.data,'$.modelID') FROM message m WHERE m.session_id=s.id AND json_extract(m.data,'$.modelID') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1) FROM session s WHERE s.time_archived IS NULL AND (?1 IS NULL OR s.directory=?1) ORDER BY s.time_updated DESC";
+        let sql = "SELECT s.id,s.directory,s.title,s.time_created,s.time_updated,(SELECT MAX(COALESCE(json_extract(m.data,'$.tokens.total'),json_extract(m.data,'$.tokens.input'))) FROM message m WHERE m.session_id=s.id),(SELECT json_extract(m.data,'$.modelID') FROM message m WHERE m.session_id=s.id AND json_extract(m.data,'$.modelID') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1),(SELECT json_extract(m.data,'$.providerID') FROM message m WHERE m.session_id=s.id AND json_extract(m.data,'$.providerID') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1) FROM session s WHERE s.time_archived IS NULL AND (?1 IS NULL OR s.directory=?1) ORDER BY s.time_updated DESC";
         let Ok(mut stmt) = conn.prepare(sql) else {
             return vec![];
         };
@@ -346,6 +348,7 @@ impl HarnessStore for OpencodeStore {
                 source_path: None,
                 title: row.get(2)?,
                 model: row.get::<_, Option<String>>(6)?,
+                provider: row.get::<_, Option<String>>(7)?,
                 input_tokens: row.get::<_, Option<i64>>(5)?.map(|n| n as u64),
                 parent_id: None,
                 parent_kind: None,
@@ -428,11 +431,17 @@ impl HarnessStore for CodexStore {
                 continue;
             };
             let mut model = None;
+            let mut provider = None;
             let mut input_tokens = None;
             for value in head.iter().chain(tail_values(&path).iter()) {
                 if value.get("type").and_then(Value::as_str) == Some("turn_context") {
                     model = value
                         .pointer("/payload/model")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    provider = value
+                        .pointer("/payload/model_provider")
+                        .or_else(|| value.pointer("/payload/modelProvider"))
                         .and_then(Value::as_str)
                         .map(str::to_string);
                 }
@@ -456,6 +465,7 @@ impl HarnessStore for CodexStore {
                 source_path: Some(path.to_string_lossy().into_owned()),
                 title: None,
                 model,
+                provider,
                 input_tokens,
                 parent_id,
                 parent_kind,
@@ -502,11 +512,12 @@ impl HarnessStore for CodexStore {
 
 // Sum the input-side usage from the last kimi wire.jsonl line that carries one,
 // plus the model on that line; output tokens are not the context reading.
-fn kimi_wire_meta(wire: &Path) -> (Option<u64>, Option<String>) {
+fn kimi_wire_meta(wire: &Path) -> (Option<u64>, Option<String>, Option<String>) {
     let mut tokens = None;
     let mut model = None;
+    let mut provider = None;
     let Ok(file) = fs::File::open(wire) else {
-        return (tokens, model);
+        return (tokens, model, provider);
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         let Some(value) = json(&line) else {
@@ -522,8 +533,11 @@ fn kimi_wire_meta(wire: &Path) -> (Option<u64>, Option<String>) {
         if let Some(name) = value.get("model").and_then(Value::as_str) {
             model = Some(name.to_string());
         }
+        if let Some(name) = value.get("provider").and_then(Value::as_str) {
+            provider = Some(name.to_string());
+        }
     }
-    (tokens, model)
+    (tokens, model, provider)
 }
 
 fn wire_num(value: &Value, key: &str) -> u64 {
@@ -567,7 +581,7 @@ impl HarnessStore for KimiStore {
                     continue;
                 };
                 let wire = path.join("agents/main/wire.jsonl");
-                let (input_tokens, model) = kimi_wire_meta(&wire);
+                let (input_tokens, model, provider) = kimi_wire_meta(&wire);
                 out.push(HarnessSession {
                     id,
                     harness: self.id().as_str(),
@@ -575,6 +589,7 @@ impl HarnessStore for KimiStore {
                     source_path: Some(wire.to_string_lossy().into_owned()),
                     title: None,
                     model,
+                    provider,
                     input_tokens,
                     parent_id: None,
                     parent_kind: None,

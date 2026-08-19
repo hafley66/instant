@@ -1,7 +1,5 @@
-import { Signal } from "@hafley66/signals";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
-import { auditTime, filter, fromEvent, map, share, tap } from "rxjs";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { readPluginState, savePluginState } from "../../pluginState";
 
 export interface HarnessTraceUiState {
@@ -9,11 +7,9 @@ export interface HarnessTraceUiState {
   familyContentLayouts?: Record<string, [number, number]>;
 }
 
-const DEFAULT_LAYOUT: [number, number] = [70, 30];
-const DEFAULT_CONTENT_LAYOUT: [number, number] = [38, 62];
+const DEFAULT_LAYOUT: [number, number] = [60, 40];
+const DEFAULT_CONTENT_LAYOUT: [number, number] = [70, 30];
 const MIN_STRIP_SIZE = 15;
-const MAX_STRIP_SIZE = 75;
-const WHEEL_PERCENT_SCALE = 0.05;
 
 function layoutFor(sid: string): [number, number] {
   const layout = readPluginState<HarnessTraceUiState>("harnessTrace", {}).familyStripLayouts?.[sid];
@@ -40,9 +36,6 @@ export interface FocusedFamilySplitProps {
 export function FocusedFamilySplit({ sid, term, strip, onCommittedLayout }: FocusedFamilySplitProps) {
   const initialLayout = useMemo(() => layoutFor(sid), [sid]);
   const latestLayout = useRef(initialLayout);
-  const stripPanel = useRef<ImperativePanelHandle | null>(null);
-  const stripHost = useRef<HTMLDivElement | null>(null);
-  const gestureState = useMemo(() => Signal({ panelSize: initialLayout[1] }), [sid]);
   const frame = useRef<number | null>(null);
   const notifyAfterCommit = () => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
@@ -67,41 +60,14 @@ export function FocusedFamilySplit({ sid, term, strip, onCommittedLayout }: Focu
     notifyAfterCommit();
   };
 
-  useEffect(() => {
-    const host = stripHost.current;
-    if (!host) return;
-    const wheel$ = fromEvent<WheelEvent>(host, "wheel", { capture: true, passive: false }).pipe(
-      filter((event) => !event.ctrlKey && Math.abs(event.deltaY) >= Math.abs(event.deltaX)),
-      map((event) => {
-        const current = gestureState.panelSize.$();
-        const next = Math.min(MAX_STRIP_SIZE, Math.max(MIN_STRIP_SIZE, current - event.deltaY * WHEEL_PERCENT_SCALE));
-        return { event, current, next };
-      }),
-      filter(({ current, next }) => current !== next),
-      tap(({ event, next }) => {
-        event.preventDefault();
-        event.stopPropagation();
-        gestureState.panelSize.$(next);
-        stripPanel.current?.resize(next);
-      }),
-      share(),
-    );
-    const resize = wheel$.subscribe();
-    const persist = wheel$.pipe(auditTime(120)).subscribe(() => saveLayout());
-    return () => {
-      resize.unsubscribe();
-      persist.unsubscribe();
-    };
-  }, [gestureState]);
-
   return (
     <PanelGroup direction="vertical" id={`focused-family-${sid}`} data-testid="focused-family-split" style={{ flex: "1 1 auto", minHeight: 0 }} onLayout={(layout) => { latestLayout.current = [layout[0], layout[1]]; }}>
       <Panel id={`focused-family-term-${sid}`} className="focused-family-term-panel" defaultSize={initialLayout[0]} minSize={25}>
         {term}
       </Panel>
       <PanelResizeHandle className="meme-sash meme-sash-horizontal" data-testid="focused-family-resize" onDragging={(dragging) => { if (!dragging) saveLayout(); }} onBlur={saveLayout} />
-      <Panel ref={stripPanel} id={`focused-family-strip-${sid}`} defaultSize={initialLayout[1]} minSize={MIN_STRIP_SIZE} maxSize={MAX_STRIP_SIZE}>
-        <div ref={stripHost} data-testid="focused-family-wheel-surface" style={{ height: "100%", minHeight: 0 }}>
+      <Panel id={`focused-family-strip-${sid}`} defaultSize={initialLayout[1]} minSize={MIN_STRIP_SIZE}>
+        <div data-testid="focused-family-wheel-surface" style={{ height: "100%", minHeight: 0 }}>
           {strip}
         </div>
       </Panel>
@@ -122,7 +88,7 @@ export function FocusedFamilyContentSplit(props: { sid: string; graph: ReactNode
 
   return (
     <PanelGroup direction="vertical" id={`focused-family-content-${props.sid}`} data-testid="focused-family-content-split" style={{ flex: "1 1 auto", minHeight: 0 }} onLayout={(layout) => { latestLayout.current = [layout[0], layout[1]]; }}>
-      <Panel id={`focused-family-graph-${props.sid}`} defaultSize={initialLayout[0]} minSize={15}>
+      <Panel id={`focused-family-graph-${props.sid}`} className="focused-family-network-panel" defaultSize={initialLayout[0]} minSize={15} style={{ display: "flex", minHeight: 0 }}>
         {props.graph}
       </Panel>
       <PanelResizeHandle className="meme-sash meme-sash-horizontal" data-testid="focused-family-content-resize" onDragging={(dragging) => { if (!dragging) saveLayout(); }} onBlur={saveLayout} />
