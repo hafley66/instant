@@ -30,6 +30,12 @@ export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
     sortValue: (r) => r.id,
   },
   {
+    id: "created",
+    header: "created",
+    cell: (r) => <span title={r.ts}>{relTime(Date.parse(r.ts) || 0)}</span>,
+    sortValue: (r) => r.ts,
+  },
+  {
     id: "dot",
     header: "",
     cell: (r) => <span className={"dot" + (r.status === "live" ? " on" : "")} />,

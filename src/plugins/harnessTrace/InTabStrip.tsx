@@ -25,7 +25,9 @@ import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
 import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
-import { BoopFamilyGraph } from "../../1b_BoopFamilyGraph";
+import { BoopNetworkGraph } from "../../1a_BoopNetworkGraph";
+import { useBoopTraceEvents } from "../../1c_boopNetworkQuery";
+import { familyIdsOf, scopeEventsToFamily } from "./1_boopFamilyNetwork";
 import { FocusedFamilyContentSplit } from "./2_FocusedFamilySplit";
 
 export interface InTabStripProps {
@@ -48,7 +50,7 @@ const STYLE =
   // Virtual rows need the wrap itself to scroll: height:auto above kills
   // .tt-scroll's height:100%, so cap it here (act-bar eats the other 24px).
   ".term-strip .tt-scroll{max-height:216px}";
-const FAMILY_GRAPH_STYLE = ".boop-family-graph{background:#10141c}.focused-family-table{height:100%;min-height:0;overflow:hidden}.focused-family-table .tt-wrap{height:100%}.focused-family-table .tt-scroll{max-height:none}.focused-family-table td,.focused-family-table th{line-height:19px}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
+const FAMILY_GRAPH_STYLE = ".boop-family-graph{background:#10141c}.focused-family-graph{height:100%;min-height:0;display:flex;flex-direction:column}.focused-family-graph .boop-marbler{flex:1 1 auto}.focused-family-table{height:100%;min-height:0;overflow:hidden}.focused-family-table .tt-wrap{height:100%}.focused-family-table .tt-scroll{max-height:none}.focused-family-table td,.focused-family-table th{line-height:19px}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
 const NO_RESUME_TABS: Record<string, { sessionId?: string }> = {};
 
 // The toggle command's whole body (main.ts binds it to the hotkey, the e2e
@@ -122,6 +124,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
     [familyMode, sid],
   );
   const family = useBoopFamily(familyQuery);
+  const trace = useBoopTraceEvents();
   const { nodes, liveTmux, registry, error, load } = useAgentTree(!familyMode && dataEnabled);
 
   const networkView = entry?.network ?? false;
@@ -151,6 +154,11 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
     [nodes, sid, scope, nativeSessionId],
   );
   const familyNodes = family.nodes;
+  const familyIds = useMemo(() => familyIdsOf(familyNodes), [familyNodes]);
+  const familyTraceEvents = useMemo(
+    () => scopeEventsToFamily(trace.events, familyIds),
+    [trace.events, familyIds],
+  );
   useEffect(() => {
     if (familyMode && familyNodes.length > 0) {
       setExpanded(Object.fromEntries(familyNodes.map((node) => [node.id, true])));
@@ -303,7 +311,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
         >
           scope: {scope}
         </button>}
-        <button type="button" onClick={familyMode ? family.load : load}>
+        <button type="button" onClick={familyMode ? () => { family.load(); trace.refetch(); } : load}>
           refresh
         </button>
       </div>
@@ -324,7 +332,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
       ) : (
         familyMode ? <FocusedFamilyContentSplit
           sid={sid}
-          graph={<BoopFamilyGraph nodes={visibleNodes} selectedId={linkedId} onSelect={setLinkedId} onHover={setLinkedId} />}
+          graph={<div className="focused-family-graph"><BoopNetworkGraph events={familyTraceEvents} /></div>}
           table={<div className="focused-family-table"><TreeTable<AgentTreeNode>
           columns={columns}
           data={tree}
@@ -333,6 +341,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
           getRowCanExpand={(r) => index.hasChildren(r.id)}
           expanded={expanded}
           onExpandedChange={setExpanded}
+          defaultSorting={[{ id: "created", desc: false }]}
           virtual
           controls
           filter={stripFilter}

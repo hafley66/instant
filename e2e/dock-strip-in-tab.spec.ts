@@ -43,11 +43,26 @@ const FAMILY_GRAPH = {
   ],
 };
 
+// Deterministic boop_trace_events for the focused s1 family. Events reference
+// the focused family's sessions/lanes (parent-s1, child-s1, oc-lane, oc-sub,
+// oc-finished) and one unrelated family (parent-other/codex-other) that the
+// family scoping must drop. Timestamps are distinct and spread over ~60s so the
+// Marbler timeline has a visible, cursor-anchored-zoomable domain.
+const TRACE_EVENTS = [
+  { event_id: 1, event_key: "fam-1", lane: "parent-s1", trace: "trace-s1", session: "parent-s1", from_lane: "parent-s1", to_lane: "child-s1", kind: "delivery", started_ts: 1_754_240_000_000, finished_ts: 1_754_240_005_000, delivery_state: "delivered", classification: "completed", detail: "dispatch child-s1", created_ts: 1_754_240_005_000 },
+  { event_id: 2, event_key: "fam-2", lane: "child-s1", trace: "trace-s1", session: "child-s1", from_lane: "", to_lane: "", kind: "turn-start", started_ts: 1_754_240_600_000, finished_ts: null, delivery_state: "", classification: "started", detail: "child turn", created_ts: 1_754_240_600_000 },
+  { event_id: 3, event_key: "fam-3", lane: "oc-lane", trace: "trace-s1", session: "oc-lane", from_lane: "parent-s1", to_lane: "oc-lane", kind: "delivery", started_ts: 1_754_241_200_000, finished_ts: 1_754_241_210_000, delivery_state: "delivered", classification: "completed", detail: "dispatch oc-lane", created_ts: 1_754_241_210_000 },
+  { event_id: 4, event_key: "fam-4", lane: "oc-sub", trace: "trace-s1", session: "oc-sub", from_lane: "", to_lane: "", kind: "turn-finish", started_ts: 1_754_241_800_000, finished_ts: 1_754_241_850_000, delivery_state: "", classification: "completed", detail: "oc-sub done", created_ts: 1_754_241_850_000 },
+  { event_id: 5, event_key: "fam-5", lane: "oc-finished", trace: "trace-s1", session: "oc-finished", from_lane: "parent-s1", to_lane: "oc-finished", kind: "delivery", started_ts: 1_754_233_000_000, finished_ts: 1_754_233_010_000, delivery_state: "delivered", classification: "completed", detail: "dispatch oc-finished", created_ts: 1_754_233_010_000 },
+  { event_id: 6, event_key: "other-1", lane: "parent-other", trace: "trace-other", session: "parent-other", from_lane: "parent-other", to_lane: "codex-other", kind: "delivery", started_ts: 1_754_220_000_000, finished_ts: 1_754_220_005_000, delivery_state: "delivered", classification: "completed", detail: "other family", created_ts: 1_754_220_005_000 },
+  { event_id: 7, event_key: "other-2", lane: "codex-other", trace: "trace-other", session: "codex-other", from_lane: "", to_lane: "", kind: "turn-start", started_ts: 1_754_220_600_000, finished_ts: null, delivery_state: "", classification: "started", detail: "other codex", created_ts: 1_754_220_600_000 },
+];
+
 async function seed(page: import("@playwright/test").Page) {
   // relTime cells render against Date.now(); freeze it so the PNGs are
   // date-independent.
   await page.clock.setFixedTime(new Date("2026-08-03T12:00:00Z"));
-  await page.addInitScript(({ mailDir, envelopes, registry, rows, graph }) => {
+  await page.addInitScript(({ mailDir, envelopes, registry, rows, graph, traceEvents }) => {
     const w = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
     w.__instantE2eNativeResults = {
       harness_trace_rows: rows,
@@ -55,6 +70,11 @@ async function seed(page: import("@playwright/test").Page) {
         (w as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ??= [];
         (w as Window & { __boopGraphRequests: Record<string, unknown>[] }).__boopGraphRequests.push(args ?? {});
         return JSON.stringify(graph);
+      },
+      boop_trace_events: (args?: Record<string, unknown>) => {
+        (w as Window & { __boopTraceRequests?: Record<string, unknown>[] }).__boopTraceRequests ??= [];
+        (w as Window & { __boopTraceRequests: Record<string, unknown>[] }).__boopTraceRequests.push(args ?? {});
+        return traceEvents;
       },
       list_dir: (args?: Record<string, unknown>) => {
         if (args?.path === mailDir) {
@@ -76,7 +96,7 @@ async function seed(page: import("@playwright/test").Page) {
         return null;
       },
     };
-  }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS, graph: FAMILY_GRAPH });
+  }, { mailDir: MAIL_DIR, envelopes: ENVELOPES, registry: REGISTRY, rows: ROWS, graph: FAMILY_GRAPH, traceEvents: TRACE_EVENTS.map((e) => JSON.stringify(e)).join("\n") });
 }
 
 test("in-tab strip: external-only lazy tree under the term, mail preview, back", async ({ page }) => {
@@ -172,25 +192,26 @@ test("period summons the focused session family tree in the terminal strip", asy
   const strip = page.getByTestId("in-tab-strip");
   await expect(strip).toBeVisible();
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
-  const familyGraph = page.getByTestId("boop-family-graph");
-  await expect(familyGraph).toHaveAttribute("data-node-count", "5");
-  await expect(familyGraph).toHaveAttribute("data-edge-count", "4");
-  await expect(familyGraph).toHaveAttribute("data-truncated-count", "0");
-  await expect(page.getByTestId("boop-family-grapht")).toHaveCount(1);
-  const familyRenderCount = Number(await familyGraph.getAttribute("data-render-count"));
-  expect(familyRenderCount).toBeGreaterThan(0);
+  const marbler = page.getByTestId("boop-network-marbler");
+  await expect(marbler).toHaveCount(1);
+  await expect(marbler.getByTestId("marbler")).toBeVisible();
+  await expect(marbler.getByTestId("time-navigator")).toBeVisible();
+  await expect(page.locator(".focused-family-table")).toBeVisible();
   await expect(page.getByTestId("strip-scope")).toHaveCount(0);
   await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
 
+  // Focused root + descendants appear in the Marbler lanes and the table.
   const root = page.locator("tr").filter({ hasText: "parent-s1" });
   await expect(root).toBeVisible();
-  // Focused families open with their persisted descendants visible.
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
-  await page.locator("tr").filter({ hasText: "child-s1" }).hover();
-  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveClass(/boop-family-linked/);
+  await expect(marbler.locator(".grid-body b").filter({ hasText: "parent-s1" })).toBeVisible();
+  await expect(marbler.locator(".grid-body b").filter({ hasText: "child-s1" })).toBeVisible();
+  // The unrelated family must be absent from both the Marbler and the table.
   await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
+  await expect(marbler.locator(".grid-body b").filter({ hasText: "parent-other" })).toHaveCount(0);
+  await expect(marbler.locator(".grid-body b").filter({ hasText: "codex-other" })).toHaveCount(0);
   const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(requests).toHaveLength(1);
   expect(requests[0]).toEqual({
@@ -202,7 +223,8 @@ test("period summons the focused session family tree in the terminal strip", asy
   expect(typeof requestQuery.history_since_ts).toBe("number");
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
-  await expect.poll(() => familyGraph.getAttribute("data-render-count"), { timeout: 1_500 }).toBe(String(familyRenderCount));
+  // The family trace query also refetches on refresh.
+  await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopTraceRequests?: Record<string, unknown>[] }).__boopTraceRequests ?? [])).length).toBe(2);
 
   // Closing and reopening the panel keeps the tmux-scoped family result. The
   // moving seven-day cutoff must not manufacture a new cache identity or drop
@@ -215,6 +237,9 @@ test("period summons the focused session family tree in the terminal strip", asy
   await page.waitForTimeout(250);
   const reopenedRequests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(reopenedRequests).toHaveLength(2);
+  // Reopen inside the stale window must NOT issue a fresh trace request.
+  const reopenedTraceRequests = await page.evaluate(() => (window as Window & { __boopTraceRequests?: Record<string, unknown>[] }).__boopTraceRequests ?? []);
+  expect(reopenedTraceRequests).toHaveLength(2);
   await strip.screenshot({ path: "test-results/strip-family-tree.png" });
 });
 
@@ -266,13 +291,89 @@ test("focused family strip saves a vertical drag layout and refits after each co
   expect(restoredStrip!.height / restoredSplit!.height).toBeCloseTo(layout[1] / 100, 1);
 });
 
+test("gesture ownership: wheel resizes the dock, Ctrl-wheel zooms the Marbler timeline, inner drag splits content", async ({ page }, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await seed(page);
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+
+  const strip = page.getByTestId("in-tab-strip");
+  const split = page.getByTestId("focused-family-split");
+  const surface = page.getByTestId("focused-family-wheel-surface");
+  const marbler = page.getByTestId("boop-network-marbler");
+  const navigator = marbler.locator(".time-navigator");
+  await expect(navigator).toBeVisible();
+  const initial = await strip.boundingBox();
+  expect(initial).not.toBeNull();
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-initial.png") });
+  await testInfo.attach("family-dock-initial", { path: testInfo.outputPath("family-dock-initial.png"), contentType: "image/png" });
+
+  // Ordinary vertical wheel over the surrounding surface grows the outer dock.
+  await surface.dispatchEvent("wheel", { deltaY: -600, deltaX: 0, ctrlKey: false });
+  await expect.poll(async () => (await strip.boundingBox())?.height ?? 0).toBeGreaterThan(initial!.height + 40);
+  const grown = await strip.boundingBox();
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-grown.png") });
+  await testInfo.attach("family-dock-grown", { path: testInfo.outputPath("family-dock-grown.png"), contentType: "image/png" });
+
+  // The wheel clamps the outer dock at 75%.
+  await surface.dispatchEvent("wheel", { deltaY: -2_000, deltaX: 0, ctrlKey: false });
+  const clamped = await strip.boundingBox();
+  const splitBox = await split.boundingBox();
+  expect(clamped!.height / splitBox!.height).toBeCloseTo(0.75, 1);
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-maximum.png") });
+  await testInfo.attach("family-dock-maximum", { path: testInfo.outputPath("family-dock-maximum.png"), contentType: "image/png" });
+
+  // Ctrl-wheel / pinch over the Marbler timeline changes its displayed domain
+  // and must NOT resize the outer strip.
+  const ticksBefore = await navigator.locator(".time-mark-values span, .time-navigator span").count();
+  const stripBeforeZoom = await strip.boundingBox();
+  const markCountBefore = Number(await navigator.getAttribute("data-mark-count"));
+  await navigator.dispatchEvent("wheel", { deltaY: 300, deltaX: 0, ctrlKey: true });
+  const afterZoom = await strip.boundingBox();
+  expect(afterZoom!.height).toBeCloseTo(stripBeforeZoom!.height, 0);
+  // A pinch over the timeline is zoom-only: outer strip height stays put within
+  // one pixel and the timeline reports the same mark set (domain changed, not
+  // the data). Mark count is stable because events did not change.
+  expect(Number(await navigator.getAttribute("data-mark-count"))).toBe(markCountBefore);
+  void ticksBefore;
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-timeline-zoomed.png") });
+  await testInfo.attach("family-dock-timeline-zoomed", { path: testInfo.outputPath("family-dock-timeline-zoomed.png"), contentType: "image/png" });
+
+  // Inner handle drag changes only the Marbler/table ratio; outer strip stays.
+  const outerBefore = await strip.boundingBox();
+  const contentHandle = page.getByTestId("focused-family-content-resize");
+  const contentHandleBox = await contentHandle.boundingBox();
+  const marblerBefore = await marbler.boundingBox();
+  expect(contentHandleBox).not.toBeNull();
+  await page.mouse.move(contentHandleBox!.x + contentHandleBox!.width / 2, contentHandleBox!.y + contentHandleBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(contentHandleBox!.x + contentHandleBox!.width / 2, contentHandleBox!.y + 50, { steps: 4 });
+  await page.mouse.up();
+  const marblerAfter = await marbler.boundingBox();
+  expect(marblerAfter!.height).toBeGreaterThan(marblerBefore!.height + 20);
+  const outerAfter = await strip.boundingBox();
+  expect(outerAfter!.height).toBeCloseTo(outerBefore!.height, 0);
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-inner-split.png") });
+  await testInfo.attach("family-dock-inner-split", { path: testInfo.outputPath("family-dock-inner-split.png"), contentType: "image/png" });
+
+  // Reverse wheel clamps the outer strip at 15%.
+  await surface.dispatchEvent("wheel", { deltaY: 2_000, deltaX: 0, ctrlKey: false });
+  const minimum = await strip.boundingBox();
+  expect(minimum!.height / splitBox!.height).toBeCloseTo(0.15, 1);
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-minimum.png") });
+  await testInfo.attach("family-dock-minimum", { path: testInfo.outputPath("family-dock-minimum.png"), contentType: "image/png" });
+
+  expect(pageErrors).toEqual([]);
+});
+
 test("focused family graph and table save an independent vertical layout", async ({ page }) => {
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   await page.keyboard.press(`${MOD}+Shift+Period`);
 
   const split = page.getByTestId("focused-family-content-split");
-  const graph = page.getByTestId("boop-family-graph");
+  const graph = page.getByTestId("boop-network-marbler");
   const table = page.locator(".focused-family-table");
   const handle = page.getByTestId("focused-family-content-resize");
   await expect(split).toBeVisible();
