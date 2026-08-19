@@ -29,7 +29,7 @@ const ROWS = [
 const FAMILY_GRAPH = {
   schema_version: 1,
   sessions: [
-    { session: { harness: "claude", id: "parent-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_000_000, last_activity_ts: 1_754_243_600_000, model: "claude-sonnet-4", provider: "anthropic", preset: "sonnet", input_tokens: 18340 },
+    { session: { harness: "claude", id: "parent-s1" }, cwd: "/Users/e2e/projects/demo", tmux: null, state: "idle", started_ts: 1_754_240_000_000, last_activity_ts: 1_754_243_600_000, model: "claude-sonnet-4", provider: "anthropic", preset: "sonnet", input_tokens: 18340 },
     { session: { harness: "claude", id: "child-s1" }, cwd: "/Users/e2e/projects/demo", tmux: "s1", state: "live", started_ts: 1_754_240_600_000, last_activity_ts: 1_754_243_000_000 },
     { session: { harness: "opencode", id: "oc-finished" }, cwd: "/Users/e2e/projects/demo", tmux: null, state: "dead", started_ts: 1_754_233_000_000, finished_ts: 1_754_234_800_000 },
   ],
@@ -38,6 +38,7 @@ const FAMILY_GRAPH = {
     { parent: { harness: "claude", id: "parent-s1" }, child: { harness: "opencode", id: "oc-finished" }, kind: "dispatch", first_ts: 1_754_233_000_000, last_ts: 1_754_234_800_000 },
   ],
   shells: [
+    { lane: "claude-coordinator", parent_lane: null, harness: "claude", session_id: "parent-s1", cwd: "/Users/e2e/projects/demo", tmux: "s1:0.0", tmux_session: "s1", tmux_pane: null, state: "live", started_ts: 1_754_240_000_000 },
     { lane: "oc-lane", parent_lane: "parent-s1", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: "s1", tmux_session: "s1", tmux_pane: null, state: "live", started_ts: 1_754_241_200_000, model: "deepseek-v4-flash", provider: "openrouter", preset: "flash4", input_tokens: 9240 },
     { lane: "oc-sub", parent_lane: "oc-lane", harness: "opencode", session_id: null, cwd: "/Users/e2e/projects/demo", tmux: null, tmux_session: null, tmux_pane: "%9", state: "done", started_ts: 1_754_241_800_000 },
   ],
@@ -192,6 +193,9 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(root).toContainText("claude-sonnet-4");
   await expect(root).toContainText("anthropic");
   await expect(root).toContainText("sonnet");
+  // Transcript activity may be idle while its adopted tmux route is live.
+  // The route's runtime observation owns the displayed liveness.
+  await expect(root).toContainText("live");
   // Focused families open with their persisted descendants visible.
   await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
   await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
