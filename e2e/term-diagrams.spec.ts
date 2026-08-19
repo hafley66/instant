@@ -113,8 +113,14 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     const expanded = page.locator('.diagram-lightbox[data-language="d2"]');
     await expect(expanded).toBeVisible();
     await expect(expanded).toContainText("PTY");
-    await expect(expanded.getByTitle("Zoom in")).toBeVisible();
-    await expect(expanded.getByTitle("Reset zoom and pan")).toBeVisible();
+    await expect(expanded.getByTitle(/zoom in/i)).toBeVisible();
+    await expect(expanded.getByTitle("fit the complete SVG")).toBeVisible();
+    const svgObject = expanded.locator(".diagram-vector-stage > svg");
+    await expect(svgObject).toHaveAttribute("viewBox", /\S+/);
+    const beforeZoom = await svgObject.getAttribute("viewBox");
+    await expanded.getByTitle(/zoom in/i).click();
+    await expect.poll(() => svgObject.getAttribute("viewBox")).not.toBe(beforeZoom);
+    await expect(expanded.locator(".panzoom-canvas")).toHaveCount(0);
     await testInfo.attach(`${harness.toLowerCase().replaceAll(" ", "-")}-diagram-lightbox`, {
       body: await expanded.screenshot(),
       contentType: "image/png",
@@ -286,6 +292,11 @@ test("opens a viewport-tall D2 target and retains clicked source entries", async
   await page.locator(".ctx-item", { hasText: "Expand Mermaid diagram" }).click();
   const second = page.locator('.diagram-lightbox[data-language="mermaid"]');
   await expect(second.getByText("2/2", { exact: true })).toBeVisible();
+  const mermaidSvg = second.locator(".diagram-vector-stage > svg");
+  const mermaidViewBox = await mermaidSvg.getAttribute("viewBox");
+  await second.getByTitle(/zoom in/i).click();
+  await expect.poll(() => mermaidSvg.getAttribute("viewBox")).not.toBe(mermaidViewBox);
+  await expect(second.locator(".panzoom-canvas")).toHaveCount(0);
   await second.getByTitle("Previous clicked diagram").click();
   await expect(page.locator('.diagram-lightbox[data-language="d2"]')).toBeVisible();
   await expect(page.locator(".diagram-lightbox-debug pre")).toContainText("node_27 -> node_28");
