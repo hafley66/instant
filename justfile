@@ -10,13 +10,6 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
-# Boop runs this once inside every newly created lane worktree before the
-# harness starts. Install checkout-local links, then use the repository's
-# standard production build recipe as the setup verification.
-boop-start:
-    corepack pnpm@10.12.4 install --frozen-lockfile
-    just build
-
 # full app: Rust backend + webview (this is the normal dev loop). The linker
 # shim signs the dev binary with the stable "Instant Dev" identity (run
 # `just signing-setup` once) so its macOS TCC grants survive rebuilds. Without
@@ -153,16 +146,6 @@ vscode-build:
 vscode-install: vscode-build
     cd vscode-ext && corepack pnpm@10.12.4 exec @vscode/vsce package --allow-missing-repository -o instant-activity.vsix
     code --install-extension vscode-ext/instant-activity.vsix
-
-# LIVE spawn gate: boots claude (--model sonnet) in the default tmux server, hails
-# it once over Boop to run one verbatim `opencode run`, polls the harness
-# stores for up to 6 minutes and renders the trace page from each sample, then
-# asserts structure + transitions over the recorded run. Wall-clock and
-# token-spending by construction: a user-named exception to the 10-second law,
-# never part of `just test` or `just verify`. SCRATCH defaults to $TMPDIR.
-livespawn scratch=(justfile_directory() / ".livespawn"):
-    node scripts/livespawn.ts --scratch {{scratch}}
-    LIVESPAWN_RUN={{scratch}}/run.json npx vitest run --config vitest.livespawn.config.ts
 
 # Isolated JSON-Rx v2 lab: deterministic runtime tests, strict lab typecheck,
 # and a Chromium screenshot receipt for the Claude + Codex stream states.

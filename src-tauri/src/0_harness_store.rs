@@ -53,9 +53,6 @@ pub struct HarnessSession {
 pub trait HarnessStore: Sync {
     fn id(&self) -> HarnessId;
     fn sessions(&self, home: &Path, cwd: Option<&str>) -> Vec<HarnessSession>;
-    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
-        self.sessions(home, None)
-    }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         self.sessions(home, Some(cwd))
             .into_iter()
@@ -270,9 +267,6 @@ impl HarnessStore for ClaudeStore {
         }
         sorted(out)
     }
-    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
-        crate::harness_trace_index::claude(home)
-    }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         let dir = claude_project_dir(home, cwd);
         let Ok(entries) = fs::read_dir(dir) else {
@@ -378,9 +372,6 @@ impl HarnessStore for OpencodeStore {
         };
         rows.flatten().collect()
     }
-    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
-        crate::harness_trace_index::opencode(home)
-    }
     fn messages(
         &self,
         session_id: &str,
@@ -478,9 +469,6 @@ impl HarnessStore for CodexStore {
             });
         }
         sorted(out)
-    }
-    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
-        crate::harness_trace_index::codex(home)
     }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         let db = home.join(".codex/state_5.sqlite");
@@ -600,9 +588,6 @@ impl HarnessStore for KimiStore {
         }
         sorted(out)
     }
-    fn trace_sessions(&self, home: &Path) -> Vec<HarnessSession> {
-        crate::harness_trace_index::kimi(home)
-    }
     fn session_ids(&self, home: &Path, cwd: &str) -> Vec<String> {
         let Ok(workspaces) = fs::read_dir(home.join(".kimi-code/sessions")) else {
             return vec![];
@@ -675,9 +660,6 @@ pub fn sessions(home: &Path, id: HarnessId, cwd: Option<&str>) -> Vec<HarnessSes
 }
 pub fn session_ids(home: &Path, id: HarnessId, cwd: &str) -> Vec<String> {
     store(id).session_ids(home, cwd)
-}
-pub fn trace_sessions(home: &Path, id: HarnessId) -> Vec<HarnessSession> {
-    store(id).trace_sessions(home)
 }
 pub fn resolve(home: &Path, id: HarnessId, cwd: &str) -> Option<HarnessSession> {
     sessions(home, id, Some(cwd)).into_iter().next()

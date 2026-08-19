@@ -77,48 +77,6 @@ pub struct AiMessage {
     pub locator: String, // "claude:<path>#L<n>" | "opencode:#msg=<id>"
 }
 
-fn cass_path() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(paths) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&paths).map(|dir| dir.join("cass")));
-    }
-    candidates.extend([
-        PathBuf::from("/opt/homebrew/bin/cass"),
-        PathBuf::from("/usr/local/bin/cass"),
-        home()?.join(".cargo/bin/cass"),
-        home()?.join(".local/bin/cass"),
-    ]);
-    candidates.into_iter().find(|path| path.is_file())
-}
-
-/// Read CASS's bounded, redacted swarm status snapshot for one workspace. CASS
-/// owns provider discovery and redaction; Instant only transports its JSON.
-#[tauri::command]
-pub async fn cass_swarm_status(cwd: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || cass_swarm_status_blocking(cwd))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-fn cass_swarm_status_blocking(cwd: String) -> Result<Value, String> {
-    let cass = cass_path().ok_or("cass is not installed")?;
-    let output = std::process::Command::new(cass)
-        .args(["swarm", "status", "--robot-format", "json"])
-        .current_dir(cwd)
-        .output()
-        .map_err(|error| format!("failed to run cass swarm status: {error}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(if stderr.is_empty() {
-            format!("cass swarm status exited with {}", output.status)
-        } else {
-            stderr
-        });
-    }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("cass swarm status returned invalid JSON: {error}"))
-}
-
 fn codex_session_path(session_id: &str) -> Option<PathBuf> {
     fn walk(dir: &PathBuf, id: &str) -> Option<PathBuf> {
         for entry in fs::read_dir(dir).ok()?.flatten() {

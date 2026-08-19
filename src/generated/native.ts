@@ -52,11 +52,9 @@ export type CommandName =
   | "fs_watch_release"
   | "harness_session"
   | "harness_sessions"
-  | "harness_trace_rows"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
-  | "cass_swarm_status"
   | "make_slack_emoji"
   | "magick_available"
   | "install_imagemagick"
@@ -73,8 +71,6 @@ export type CommandName =
   | "screenshot"
   | "open_target"
   | "run_click"
-  | "boop_agent_graph"
-  | "boop_trace_events"
   | "log_append"
   | "log_path"
   | "log_reveal";
@@ -161,14 +157,12 @@ export namespace commands {
   export namespace harness {
     export const harnessSession = "harness_session";
     export const harnessSessions = "harness_sessions";
-    export const harnessTraceRows = "harness_trace_rows";
   }
 
   export namespace ledger {
     export const listAiSessions = "list_ai_sessions";
     export const readAiMessages = "read_ai_messages";
     export const latestAiMessage = "latest_ai_message";
-    export const cassSwarmStatus = "cass_swarm_status";
   }
 
   export namespace meme {
@@ -197,8 +191,6 @@ export namespace commands {
     export const screenshot = "screenshot";
     export const openTarget = "open_target";
     export const runClick = "run_click";
-    export const boopAgentGraph = "boop_agent_graph";
-    export const boopTraceEvents = "boop_trace_events";
     export const logAppend = "log_append";
     export const logPath = "log_path";
     export const logReveal = "log_reveal";

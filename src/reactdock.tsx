@@ -26,12 +26,9 @@ import {
   panelInstanceForId,
   tabOverrideItems,
 } from "./plugin";
-import { readPluginState, savePluginState } from "./pluginState";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { confirmClose, dirtyMessage, dropDirtyProbe } from "./dirtyGuard";
 import { SessionSidebar } from "./sessionSidebar";
-import { InTabStrip } from "./plugins/harnessTrace/InTabStrip";
-import { FocusedFamilySplit } from "./plugins/harnessTrace/2_FocusedFamilySplit";
 import { restoredTerminalSessionIds } from "./0_dockRestore";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { panelApiVisibility$ } from "./0_panelVisibility";
@@ -220,10 +217,9 @@ export function setDockHooks(h: Partial<Hooks>) {
   hooks = { ...hooks, ...h };
 }
 
-// Default per-terminal sidebar entry: closed, 264px, Files/Touched split 62/38,
-// empty touched list. Used wherever a missing entry is read.
+// Default per-terminal filesystem sidebar entry.
 function sbDefault() {
-  return { open: false, width: 420, source: "turns" as const, sizes: [62, 38] as [number, number], touched: [] as string[] };
+  return { open: false, width: 420 };
 }
 
 function TerminalPanel(props: IDockviewPanelProps) {
@@ -253,8 +249,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
     },
     [id, sid],
   );
-  // Per-terminal right "session sidebar" (file explorer now; touched files +
-  // agent turns layer in later). Open + width persist in the store keyed by
+  // Per-terminal filesystem sidebar. Open + width persist in the store keyed by
   // session id, so each panel remembers its own. sb is the reactive snapshot;
   // the store subscription updates it on any termSidebar change (toggle + drag).
   const [sb, setSb] = useState(() => store.get().termSidebar[sid] ?? sbDefault());
@@ -264,18 +259,7 @@ function TerminalPanel(props: IDockviewPanelProps) {
   );
   const open = sb.open;
   const width = sb.width;
-  const source = sb.source ?? "turns";
   const placement = sb.placement ?? "right";
-  const sizes = sb.sizes ?? ([62, 38] as [number, number]);
-  const [familyOpen, setFamilyOpen] = useState(() => {
-    const entry = store.get().termStrip[sid];
-    return entry?.open === true && entry.family === true;
-  });
-  useEffect(() => store.subscribe(() => {
-    const entry = store.get().termStrip[sid];
-    setFamilyOpen(entry?.open === true && entry.family === true);
-  }, ["termStrip"]), [sid]);
-
   useEffect(() => {
     const sub = props.api.onDidDimensionsChange(() => hooks.onTermLayout(sid));
     hooks.onTermLayout(sid);
@@ -299,11 +283,6 @@ function TerminalPanel(props: IDockviewPanelProps) {
     store.set({ termSidebar: { ...store.get().termSidebar, [sid]: { ...cur, ...patch } } });
   };
 
-  // The in-tab relation strip under the xterm area changes the term slot's
-  // height, so refit the xterm whenever it appears, disappears, or a router
-  // push/pop changes the strip's content.
-  const refitForStrip = useCallback(() => hooks.onTermLayout(sid), [sid]);
-
   // dv-host-term carries the frame border + 2px inset (see styles.css), NOT
   // .term-host: xterm's FitAddon measures .xterm's parent (.term-host) via
   // getComputedStyle width/height, which under the global box-sizing: border-box
@@ -318,22 +297,16 @@ function TerminalPanel(props: IDockviewPanelProps) {
             sid={sid}
             getCwd={() => hooks.onTermCwd(sid)}
             width={width}
-            source={source}
             placement={placement}
-            sizes={sizes}
-            views={sb.views}
             onWidth={(px) => patchSidebar({ width: px })}
             onResizeEnd={() => hooks.onTermLayout(sid)}
-            onPatch={patchSidebar}
           />
         )}
     </div>
   );
-  const strip = <InTabStrip sid={sid} onLayout={refitForStrip} resizable={familyOpen} />;
-
   return (
     <div className="dv-host dv-host-term term-panel" data-sidebar-placement={placement} style={{ display: "flex", flexDirection: "column" }}>
-      {familyOpen ? <FocusedFamilySplit sid={sid} term={term} strip={strip} onCommittedLayout={refitForStrip} /> : <>{term}{strip}</>}
+      {term}
     </div>
   );
 }
@@ -806,12 +779,6 @@ export function addMdPanel(path: string, title: string) {
 
 export function togglePanel(id: string) {
   if (!api) return;
-  // Bottom-strip panels (CONTRACT2's dock strip) mount in their own bottom
-  // group rather than stacking inside the active group.
-  if (getPanel(id)?.bottomStrip) {
-    toggleStripPanel(id);
-    return;
-  }
   const existing = api.getPanel(id);
   if (existing) {
     void closePanelAfterConfirm(id);
@@ -829,52 +796,6 @@ export function togglePanel(id: string) {
     title: withOverride(id, def?.title ?? id),
     ...(def?.keepAlive ? { renderer: "always" as const } : {}),
     ...(position ? { position } : {}),
-  });
-}
-
-// The dock strip ("the tmux view" ask) is a persistent bottom pane: one panel
-// in its own bottom group spanning the workspace, placed below the active group
-// and sized to the persisted height. Open/closed + height persist via
-// readPluginState/savePluginState under "dock-strip" (not dockview's layout,
-// since "closed" is the important bit and that lives in pluginState).
-const STRIP_STATE_ID = "dock-strip";
-const STRIP_DEFAULT_HEIGHT = 220;
-interface StripState {
-  open?: boolean;
-  height?: number;
-}
-
-function stripState(): Required<StripState> {
-  const s = readPluginState<StripState>(STRIP_STATE_ID, {});
-  return { open: s.open ?? false, height: s.height ?? STRIP_DEFAULT_HEIGHT };
-}
-
-export function toggleStripPanel(id: string) {
-  if (!api) return;
-  const existing = api.getPanel(id);
-  if (existing) {
-    void closePanelAfterConfirm(id);
-    return;
-  }
-  const { height } = stripState();
-  const ref = api.activePanel ?? api.panels[0];
-  const def = getPanel(id);
-  // addPanel with position direction "below" (the active group) mounts the strip
-  // in its own bottom group and activates it, so it lays out visibly instead of
-  // landing in a zero-size render overlay.
-  const panel = api.addPanel({
-    id,
-    component: id,
-    params: { panelId: id },
-    title: withOverride(id, def?.title ?? id),
-    ...(def?.keepAlive ? { renderer: "always" as const } : {}),
-    ...(ref ? { position: { referencePanel: ref, direction: "below" as const } } : {}),
-  });
-  panel.group.api.setSize({ height });
-  savePluginState<StripState>(STRIP_STATE_ID, { open: true, height });
-  // Track drag-resizes of the strip's group so the persisted height follows.
-  panel.group.api.onDidSizeChange((e) => {
-    if (e.height) savePluginState<StripState>(STRIP_STATE_ID, { height: Math.round(e.height) });
   });
 }
 

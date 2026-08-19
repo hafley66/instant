@@ -19,11 +19,8 @@
     "test:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
-    "@hafley66/grapht": "0.1.0",
-    "@hafley66/grapht-render-pixijs": "0.1.1",
     "@hafley66/grid": "0.1.7",
     "@hafley66/json-rx": "0.1.2",
-    "@hafley66/marbler": "0.0.2",
     "@hafley66/md": "file:packages/md",
     "@hafley66/signals": "0.1.1",
     "@oddbird/css-anchor-positioning": "^0.9.0",

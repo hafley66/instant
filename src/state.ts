@@ -118,32 +118,11 @@ export interface AiMessage {
   locator: string;
 }
 
-export interface TermSidebarView {
-  sorting?: { id: string; desc: boolean }[];
-  columnSizing?: Record<string, number>;
-  query?: string;
-}
-
 export interface TermSidebarState {
   open: boolean;
   width: number;
-  source?: "files" | "turns";
   placement?: "right" | "bottom";
-  sizes?: [number, number];
-  touched?: string[];
-  views?: Partial<Record<"files" | "turns" | "touched", TermSidebarView>>;
 }
-
-// Per-terminal in-tab relations strip. Absent entry = open (the strip
-// auto-appears when the terminal has related agent sessions). showActive
-// absent = default true (the going-on table); false = the history waterfall.
-export interface TermStripState {
-  open: boolean;
-  showActive?: boolean;
-  network?: boolean;
-  family?: boolean;
-}
-
 // A favorited turn (Rust favorites::Fav) — a snapshot persisted to favorites.db,
 // surfaced here as runtime state (the db, not localStorage, is authoritative).
 export interface Fav extends AiMessage {
@@ -157,19 +136,13 @@ export interface Fav extends AiMessage {
 // xterm wiring is lost on reload, so we replay these on boot.
 export interface OpenTab {
   name: string;
-  // Boop can identify a pane as `%123`; keep that attach target separate from
-  // the stable tab identity and title.
+  // Keep a pane target separate from the stable tab identity and title.
   tmuxTarget?: string;
   command: string | null;
   cwd: string | null;
   graphics?: boolean; // kitty-graphics (awrit) tab — restore the overlay on reload
-  // Opened by a strip row to WATCH someone else's lane (DockStripPanel's
-  // bridge), never launched by the user here. Closing it must leave the lane
-  // running. Lifetime = this openTabs row: persisted, so it survives a reload
-  // and the reattach that follows, and gone the moment the tab closes
-  // (forgetTab drops the row). Reopening the same session from the tmux panel
-  // while a viewer tab is already open activates that tab, so it stays a
-  // viewer — the direction that cannot kill a lane by surprise.
+  // Viewer tabs attach to an existing tmux pane. Closing one must leave the
+  // session running. The flag persists with the tab across reloads.
   viewer?: boolean;
   browser?: boolean; // CDP browser tab — re-open the canvas on reload
   url?: string; // browser tab's URL (normalized) to reopen at
@@ -276,7 +249,6 @@ export interface AppState {
   // stack (percent units, sums to 100); touched = MRU list of paths opened from
   // this session's sidebar (most-recent first). Both persist per session id.
   termSidebar: Record<string, TermSidebarState>;
-  termStrip: Record<string, TermStripState>;
   zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
   // Per-tab zoom FACTOR, keyed by full dock panel id ("term:<sid>", "md:<path>",
   // …). Generic successor of tabZoom — see src/panelZoom.ts (persisted).
@@ -355,7 +327,6 @@ const PERSIST: (keyof AppState)[] = [
   "scanRoot",
   "sidebarWidth",
   "termSidebar",
-  "termStrip",
   "zoom",
   "panelZoom",
   "resumeTabs",
@@ -491,7 +462,6 @@ function load(): AppState {
     scanRoot: loadKey<string>("scanRoot", "~/projects"),
     sidebarWidth: loadKey<number>("sidebarWidth", 150),
     termSidebar: loadKey<Record<string, TermSidebarState>>("termSidebar", {}),
-    termStrip: loadKey<Record<string, TermStripState>>("termStrip", {}),
     zoom: loadKey<number>("zoom", 1),
     panelZoom: loadKey<Record<string, number>>("panelZoom", {}),
     resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),

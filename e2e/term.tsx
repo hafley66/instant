@@ -35,9 +35,6 @@ import { wireContextMenu } from "../src/ctxmenu";
 import { ctxItemsFor, setLastCtxPoint } from "../src/chrome";
 import { closeActiveTab, reopenLastTab } from "../src/tabs";
 import { openPreviewPanel } from "../src/preview";
-import { boopAgents, buildLaneTree, mergeLanes, type LaneInfo } from "../src/boopAgents";
-import { setDockStrip } from "../src/plugins/harnessTrace/DockStripPanel";
-import { toggleTermStripFor } from "../src/plugins/harnessTrace/InTabStrip";
 
 // Mock list_dir with a small fixture tree so the sidebar's file explorer has
 // rows to render. Other commands (open_session/resize_pty/write_pty) resolve
@@ -53,15 +50,7 @@ const E2E_VIEWER_LANE = E2E_PARAMS.get("lane") ?? "e2e-viewer";
 const E2E_VIEWER_PANE = E2E_PARAMS.get("pane") ?? "%1";
 const E2E_VIEWER_CONTENT = E2E_PARAMS.get("contentB64")
   ? atob(E2E_PARAMS.get("contentB64")!)
-  : "BOOP VIEWER FIXTURE\r\n";
-const E2E_BOOP_ROWS = E2E_PARAMS.get("boopRowsB64")
-  ? JSON.parse(atob(E2E_PARAMS.get("boopRowsB64")!)) as LaneInfo[]
-  : [];
-if (E2E_BOOP_ROWS.length > 0) {
-  const lanes = mergeLanes(E2E_BOOP_ROWS, {}, []);
-  boopAgents.$({ lanes, tree: buildLaneTree(lanes, []), sessions: [], costUsd: null, calls: 0 });
-}
-setDockStrip({ onOpen: (name, tmuxTarget) => openTab(name, { viewer: true, tmuxTarget }) });
+  : "VIEWER FIXTURE\r\n";
 const ROOT = "/tmp/term-e2e";
 const entry = (path: string, is_dir = false) => ({
   name: path.split("/").pop()!,
@@ -98,7 +87,6 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
     (window as Window & { __externalClosePty?: Record<string, unknown> }).__externalClosePty = args;
     return undefined;
   },
-  cass_status: { available: true, path: "/opt/homebrew/bin/cass" },
   list_dir: (args: Record<string, unknown> | undefined) => {
     const path = String(args?.path ?? ROOT);
     const children = DIRS[path];
@@ -257,13 +245,11 @@ type TermHooks = {
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
   openTab("e2e", { cwd: ROOT, command: E2E_WHEEL_HARNESS || undefined });
   // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
-  // Seed the pane split. Touched is derived from the session transcript; Turns
-  // is the initial source.
   const sid = sessionId("e2e");
   store.set({
     termSidebar: {
       ...store.get().termSidebar,
-      [sid]: { open: true, width: 460, source: "turns", sizes: [55, 45] },
+      [sid]: { open: true, width: 460 },
     },
   });
 };

@@ -22,8 +22,6 @@ import { initRail } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
-import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
-import { toggleFamilyStripFor, toggleNetworkFor, toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
@@ -120,60 +118,7 @@ import { isDraggingIn, wireOsDrop } from "./dnd";
 import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
-import { setAgentsPanel } from "./agentsPanelV2";
-import { boopAgents, BoopClient, findLane, startBoopPolling, subRowsFor, withLaneRoute } from "./boopAgents";
-import { harnessAdapter, harnessIds } from "./harness";
 import { startReactiveRuntime } from "./reactive/runtime";
-import { externalViewerTarget } from "./0_externalShells";
-import { setBoopAgentExplorerRunner } from "./2_boopAgentExplorerPanel";
-
-// Agents (boop) panel wiring: shellout runner + poll + bridge. New code here
-// calls Boop only; it never shells out to tmux directly.
-function registerAgentsPanel() {
-  const client = new BoopClient((line) => invoke<string>("run_click", { command: line, cwd: "" }));
-  const stop = startBoopPolling(client, (snap) => boopAgents.$(snap), 1500);
-  window.addEventListener("beforeunload", stop, { once: true });
-  const expand = (lane: string) => {
-    void client.route(lane).then((detail) => {
-      const snap = boopAgents.$();
-      boopAgents.$({
-        ...snap,
-        lanes: snap.lanes.map((l) => (l.lane === lane ? { ...l, route: detail } : l)),
-        tree: withLaneRoute(snap.tree, lane, detail),
-      });
-    });
-  };
-  setAgentsPanel({
-    onShow: () => {
-      // First poll already fired at registration; nothing to force here.
-    },
-    open: (row) => {
-      if (row.kind === "lane" && row.state === "live" && row.tmux) {
-        const target = externalViewerTarget(row.lane, row.tmux);
-        openTab(target.name, { viewer: target.viewer, tmuxTarget: target.tmuxTarget });
-        return;
-      }
-      if (row.kind === "session") {
-        const harness = harnessIds.find((id) => id === row.harness);
-        if (!harness) return;
-        openTab(`chat-${harness}-${row.sessionId}`, {
-          cwd: row.cwd,
-          command: harnessAdapter(harness).resume(row.sessionId),
-        });
-      }
-    },
-    canExpand: (row) => row.kind === "lane" && (row.addressable || (row.childLanes?.length ?? 0) > 0),
-    getSubRows: (row) => subRowsFor(row),
-    onToggle: (lane, willExpand) => {
-      const row = findLane(boopAgents.$().tree, lane);
-      if (willExpand && row?.addressable) expand(lane);
-    },
-    hail: (lane, body) =>
-      client.hail(lane, body, "instant").then(() => {
-        // no per-hail surface yet; the poll reflects the queued message next tick
-      }),
-  });
-}
 
 // Toggle the per-terminal right "session sidebar" (file explorer) on the
 // focused terminal. Each terminal remembers its own open state + width.
@@ -182,26 +127,6 @@ function toggleTermSidebar() {
   if (!id) return;
   const cur = store.get().termSidebar[id] ?? { open: false, width: 264 };
   store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
-}
-
-// Toggle the in-tab relations strip on the focused terminal.
-function toggleTermStrip() {
-  const id = getFocusedTermId();
-  if (!id) return;
-  toggleTermStripFor(id);
-}
-
-function toggleTermFamily() {
-  const id = getFocusedTermId();
-  if (!id) return;
-  toggleFamilyStripFor(id);
-}
-
-// Summon the strip and flip its network (waterfall) view on the focused terminal.
-function toggleNetwork() {
-  const id = getFocusedTermId();
-  if (!id) return;
-  toggleNetworkFor(id);
 }
 
 const TAB_COMMANDS: Command[] = [
@@ -225,10 +150,6 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
-  { id: "term.strip", keys: ["$mod+Shift+x"], title: "Toggle External Shells", group: "View", run: toggleTermStrip },
-  { id: "boop.family", keys: ["$mod+Shift+Period"], title: "Toggle Boop Family Tree", group: "View", run: toggleTermFamily },
-  { id: "panel.agents.shortcut", keys: [], title: "Toggle Agents", group: "Panel", run: () => togglePanel("agents") },
-  { id: "term.network", keys: ["$mod+Shift+N"], title: "Toggle Network View", group: "View", run: toggleNetwork },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
   { id: "ai.favTurn", keys: ["$mod+Shift+s"], title: "Favorite Latest AI Turn", group: "AI", run: () => void favoriteCurrentTurn() },
   // Reload the webview — recover from a crashed React render without restarting
@@ -323,13 +244,8 @@ async function main() {
 
   applyZoom(); // restore persisted webview zoom
   registerBuiltin();
-  setBoopAgentExplorerRunner((query) => invoke<string>("boop_trace_events", {
-    sinceMs: query.sinceMs,
-    limit: query.limit,
-  }));
   registerRulesPlugin();
   registerMetricsPlugin();
-  registerHarnessTracePlugin();
   registerFilesPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.
   void registerSprefa;
@@ -365,7 +281,6 @@ async function main() {
   registerPaint();
   registerV2Bridges();
   registerActivityBridge();
-  registerAgentsPanel();
   refreshFavorites();
   initRail(); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
   const stopReactiveRuntime = startReactiveRuntime();

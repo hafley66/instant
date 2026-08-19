@@ -8,8 +8,6 @@ mod fs_watch;
 mod harness;
 #[path = "0_harness_store.rs"]
 pub mod harness_store;
-#[path = "0a_harness_trace_index.rs"]
-mod harness_trace_index;
 mod kitty;
 mod ledger;
 #[path = "0_pty_events.rs"]
@@ -664,106 +662,6 @@ fn run_click_blocking(command: String, cwd: String) -> Result<String, String> {
     Ok(s)
 }
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-struct BoopAgentGraphQuery {
-    cwd: Option<String>,
-    include_history: bool,
-    tmux: Option<String>,
-    history_since_ts: Option<u64>,
-}
-
-fn boop_agent_graph_args(query: &BoopAgentGraphQuery) -> Vec<String> {
-    let mut args = vec![
-        "agent".to_owned(),
-        "sessions".to_owned(),
-        "--format".to_owned(),
-        "json".to_owned(),
-    ];
-    if let Some(cwd) = query.cwd.as_deref().filter(|value| !value.trim().is_empty()) {
-        args.push("--cwd".to_owned());
-        args.push(cwd.to_owned());
-    }
-    if query.include_history {
-        args.push("--history".to_owned());
-    }
-    if let Some(tmux) = query.tmux.as_deref().filter(|value| !value.trim().is_empty()) {
-        args.push("--tmux".to_owned());
-        args.push(tmux.to_owned());
-    }
-    if let Some(since) = query.history_since_ts {
-        args.push("--history-since-ts".to_owned());
-        args.push(since.to_string());
-    }
-    args
-}
-
-#[tauri::command]
-async fn boop_agent_graph(query: BoopAgentGraphQuery) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut command = std::process::Command::new("boop");
-        command.args(boop_agent_graph_args(&query)).env("PATH", pty::path_env());
-        let output = command.output().map_err(|error| error.to_string())?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
-        String::from_utf8(output.stdout).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[cfg(test)]
-mod boop_graph_bridge_tests {
-    use super::{boop_agent_graph_args, BoopAgentGraphQuery};
-
-    #[test]
-    fn focused_graph_query_serializes_and_preserves_exact_tmux_cutoff() {
-        let query = BoopAgentGraphQuery {
-            cwd: Some("/repo".into()),
-            include_history: true,
-            tmux: Some("claude-focused".into()),
-            history_since_ts: Some(1_755_000_000_000),
-        };
-        assert_eq!(
-            serde_json::to_value(&query).unwrap(),
-            serde_json::json!({
-                "cwd": "/repo",
-                "include_history": true,
-                "tmux": "claude-focused",
-                "history_since_ts": 1_755_000_000_000u64,
-            })
-        );
-        assert_eq!(
-            boop_agent_graph_args(&query),
-            vec![
-                "agent", "sessions", "--format", "json", "--cwd", "/repo", "--history",
-                "--tmux", "claude-focused", "--history-since-ts", "1755000000000"
-            ].into_iter().map(String::from).collect::<Vec<_>>()
-        );
-    }
-}
-
-#[tauri::command]
-async fn boop_trace_events(since_ms: u64, limit: u64) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let bounded_limit = limit.clamp(1, 5_000);
-        let sql = format!(
-            "SELECT e.event_id, e.event_key, lane.value AS lane, COALESCE(trace.value,'') AS trace, COALESCE(session.value,'') AS session, COALESCE(src.value,'') AS from_lane, COALESCE(dst.value,'') AS to_lane, kind.value AS kind, e.started_ts, e.finished_ts, COALESCE(delivery.value,'') AS delivery_state, COALESCE(classification.value,'') AS classification, e.detail, e.created_ts FROM agent_trace_event e JOIN dict_session lane ON lane.id=e.lane_id LEFT JOIN dict_trace trace ON trace.id=e.trace_id LEFT JOIN dict_session session ON session.id=e.session_id LEFT JOIN dict_session src ON src.id=e.from_lane_id LEFT JOIN dict_session dst ON dst.id=e.to_lane_id JOIN dict_trace_kind kind ON kind.id=e.kind_id LEFT JOIN dict_trace_delivery delivery ON delivery.id=e.delivery_state_id LEFT JOIN dict_trace_classification classification ON classification.id=e.classification_id WHERE e.created_ts >= {since_ms} ORDER BY e.created_ts DESC, e.event_id DESC LIMIT {bounded_limit}"
-        );
-        let output = std::process::Command::new("boop")
-            .args(["db", &sql, "--format", "ndjson"])
-            .env("PATH", pty::path_env())
-            .output()
-            .map_err(|error| error.to_string())?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
-        String::from_utf8(output.stdout).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
 /// Per-build state directory. A release ("prod") build nests all of its state
 /// (headless-Chrome profile, sqlite dbs, config.json, captures, log) under a
 /// `prod` subfolder so it can run alongside a `tauri dev` ("dev") instance
@@ -1187,11 +1085,9 @@ pub fn run() {
             fs_watch::fs_watch_release,
             harness::harness_session,
             harness::harness_sessions,
-            harness::harness_trace_rows,
             ledger::list_ai_sessions,
             ledger::read_ai_messages,
             ledger::latest_ai_message,
-            ledger::cass_swarm_status,
             meme::make_slack_emoji,
             meme::magick_available,
             meme::install_imagemagick,
@@ -1209,8 +1105,6 @@ pub fn run() {
             screenshot,
             open_target,
             run_click,
-            boop_agent_graph,
-            boop_trace_events,
             log_append,
             log_path,
             log_reveal,

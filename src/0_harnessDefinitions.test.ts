@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { harnessDefinitionById } from "./0_harnessDefinitions";
 
 describe("HarnessDefinition.lane", () => {
-  it("builds Cass-visible launches through the central harness adapters", () => {
+  it("builds adapter-backed launches through the central harness adapters", () => {
     expect([
       harnessDefinitionById.claude.lane("/tmp/claude.md", "claude-opus-4-1"),
       harnessDefinitionById.codex.lane("/tmp/lane's brief.md", "gpt-5.6-terra"),

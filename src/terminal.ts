@@ -59,7 +59,6 @@ import { refreshTurns, warmTurns, tabSessions, unclaimedSession } from "./favori
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
-import { ViewerTabPolicy } from "./plugins/harnessTrace/0_viewerTab";
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import {
   renderSessionActive,
@@ -1044,12 +1043,12 @@ async function exitOrDetachTab(
   // Agent when: the live foreground proc looks like one (claude's version title,
   // opencode.exe, node/bun), the launch command names one, or the proc was
   // unknown (stale list) but the cwd has an on-disk agent session. A known
-  // non-agent proc (vim, …) is never killed.
+// non-agent proc (vim, …) is never killed.
   const isAgent =
     looksLikeAgentProc(proc) ||
     KNOWN_RESUME[bin] != null ||
     (proc === "" && sessions.length > 0);
-  if (ViewerTabPolicy.closeAction({ viewer: isViewer, agent: isAgent }) === "detach") {
+  if (isViewer || !isAgent) {
     invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
     return;
   }

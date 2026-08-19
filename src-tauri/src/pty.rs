@@ -837,16 +837,25 @@ mod tests {
     #[test]
     fn pane_attach_keeps_the_pane_target_after_resolving_its_session() {
         assert_eq!(
-            tmux_attach_args("boop-session", Some("%509")),
-            ["attach-session", "-d", "-t", "boop-session", ";", "select-pane", "-t", "%509"]
+            tmux_attach_args("viewer-session", Some("%509")),
+            [
+                "attach-session",
+                "-d",
+                "-t",
+                "viewer-session",
+                ";",
+                "select-pane",
+                "-t",
+                "%509"
+            ]
         );
     }
 
     #[test]
     fn session_attach_has_no_create_or_restart_arguments() {
         assert_eq!(
-            tmux_attach_args("boop-session", None),
-            ["attach-session", "-d", "-t", "boop-session"]
+            tmux_attach_args("viewer-session", None),
+            ["attach-session", "-d", "-t", "viewer-session"]
         );
     }
 
@@ -868,17 +877,33 @@ mod tests {
             .ok()
             .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
         let Some(pane) = pane.filter(|pane| !pane.is_empty()) else {
-            let _ = tmux_cmd_for_socket(Some(&socket)).arg("kill-server").status();
+            let _ = tmux_cmd_for_socket(Some(&socket))
+                .arg("kill-server")
+                .status();
             return;
         };
 
-        assert_eq!(tmux_target_session_on_socket(&pane, Some(&socket)), Ok(session.clone()));
+        assert_eq!(
+            tmux_target_session_on_socket(&pane, Some(&socket)),
+            Ok(session.clone())
+        );
         assert_eq!(
             tmux_attach_args(&session, Some(&pane)),
-            ["attach-session", "-d", "-t", session.as_str(), ";", "select-pane", "-t", pane.as_str()]
+            [
+                "attach-session",
+                "-d",
+                "-t",
+                session.as_str(),
+                ";",
+                "select-pane",
+                "-t",
+                pane.as_str()
+            ]
         );
 
-        let _ = tmux_cmd_for_socket(Some(&socket)).arg("kill-server").status();
+        let _ = tmux_cmd_for_socket(Some(&socket))
+            .arg("kill-server")
+            .status();
         assert!(tmux_target_session_on_socket(&pane, Some(&socket)).is_err());
     }
 
