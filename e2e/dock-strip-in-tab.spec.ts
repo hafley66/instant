@@ -189,12 +189,18 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
   const table = page.getByTestId("focused-family-table");
   await expect(table).toBeVisible();
+  const viz = page.getByTestId("focused-family-viz");
+  await expect(viz).toBeVisible();
+  await expect(viz.locator(".family-node")).toHaveCount(5);
+  await expect(viz.locator(".family-edge")).toHaveCount(4);
   await expect(page.getByTestId("strip-scope")).toHaveCount(0);
   await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
 
   await expect(page.getByTestId("marbler")).toHaveCount(0);
   await expect(page.getByTestId("time-navigator")).toHaveCount(0);
   await expect(table.locator("tbody tr")).toHaveCount(5);
+  const [vizBox, headerBox] = await Promise.all([viz.boundingBox(), table.locator("thead").boundingBox()]);
+  expect(headerBox!.y).toBeGreaterThanOrEqual(vizBox!.y + vizBox!.height);
   const root = table.locator("tbody tr").filter({ hasText: "parent-s1" });
   await expect(root).toBeVisible();
   await expect(root).toContainText("18,340");

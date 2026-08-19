@@ -49,6 +49,36 @@ function familyRows(nodes: AgentSessionNode[], events: BoopNetworkEvent[]): Fami
   return (children.get(null) ?? []).map(build);
 }
 
+function flatten(rows: FamilyRow[]): FamilyRow[] {
+  return rows.flatMap((row) => [row, ...flatten(row.children ?? [])]);
+}
+
+function FamilyNetworkViz({ rows, bounds }: { rows: FamilyRow[]; bounds: { start: number; span: number } }) {
+  const lanes = flatten(rows);
+  const lane = new Map(lanes.map((row, index) => [row.id, index]));
+  const width = 1_000;
+  const labelWidth = 190;
+  const rowHeight = 24;
+  const height = Math.max(48, lanes.length * rowHeight + 16);
+  const x = (time: number) => labelWidth + ((time - bounds.start) / bounds.span) * (width - labelWidth - 16);
+  return <div className="family-network-viz" data-testid="focused-family-viz">
+    <svg viewBox={`0 0 ${width} ${height}`} style={{ height }} preserveAspectRatio="none" role="img" aria-label="Agent family lifecycle network">
+      {lanes.map((row, index) => {
+        const y = index * rowHeight + 14;
+        const first = row.phases.length ? Math.min(...row.phases.map((phase) => phase.start)) : bounds.start;
+        const parentY = row.parentId == null ? null : lane.get(row.parentId);
+        return <g key={row.id}>
+          <text x="8" y={y + 4}>{row.id}</text>
+          <line className="family-lane" x1={labelWidth} y1={y} x2={width - 16} y2={y} />
+          {parentY != null && <path className="family-edge" d={`M ${x(first)} ${parentY * rowHeight + 14} C ${x(first) - 18} ${parentY * rowHeight + 14}, ${x(first) - 18} ${y}, ${x(first)} ${y}`} />}
+          {row.phases.map((phase, phaseIndex) => <rect key={phaseIndex} className={`family-mark ${phase.kind}`} x={x(phase.start)} y={y - 5} width={Math.max(3, x(phase.end) - x(phase.start))} height="10" rx="2" />)}
+          <circle className={`family-node ${row.status}`} cx={x(first)} cy={y} r="4" />
+        </g>;
+      })}
+    </svg>
+  </div>;
+}
+
 function FocusedBoopNetworkView(props: { nodes: AgentSessionNode[] }) {
   const model = useRef<ReturnType<typeof endpoint.createQuery> | null>(null);
   model.current ??= endpoint.createQuery(Signal<Input | undefined>({ sinceMs: Date.now() - WEEK_MS, limit: LIMIT }), { staleTime: 5_000 });
@@ -74,15 +104,18 @@ function FocusedBoopNetworkView(props: { nodes: AgentSessionNode[] }) {
   if (query.isError) return <div className="session-empty">{String(query.error)}</div>;
   if (query.isLoading) return <div className="session-empty">loading family events…</div>;
   if (rows.length === 0) return <div className="session-empty">no focused family sessions in the last seven days</div>;
-  return <div className="focused-family-table" data-testid="focused-family-table"><TreeTable
-    columns={columns}
-    data={rows}
-    getRowId={(row) => row.id}
-    getSubRows={(row) => row.children}
-    defaultExpandedAll
-    virtual
-    rowTitle={(row) => `${row.id} · ${row.status}`}
-  /></div>;
+  return <div className="focused-family-table" data-testid="focused-family-table">
+    <FamilyNetworkViz rows={rows} bounds={bounds} />
+    <div className="focused-family-grid"><TreeTable
+      columns={columns}
+      data={rows}
+      getRowId={(row) => row.id}
+      getSubRows={(row) => row.children}
+      defaultExpandedAll
+      virtual
+      rowTitle={(row) => `${row.id} · ${row.status}`}
+    /></div>
+  </div>;
 }
 
 export const FocusedBoopNetwork = SignalReact(FocusedBoopNetworkView);
