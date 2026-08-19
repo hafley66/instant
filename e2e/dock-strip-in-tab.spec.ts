@@ -45,9 +45,9 @@ const FAMILY_GRAPH = {
 };
 const FAMILY_EVENTS = [
   { event_id: 1, event_key: "spawn-parent", lane: "parent-s1", trace: "family", session: "parent-s1", from_lane: "", to_lane: "parent-s1", kind: "supervisor-start", started_ts: 1_754_240_000_000, finished_ts: null, delivery_state: "", classification: "live", detail: "Claude root started", created_ts: 1_754_240_000_000 },
-  { event_id: 2, event_key: "dispatch-oc", lane: "parent-s1", trace: "family", session: "parent-s1", from_lane: "parent-s1", to_lane: "oc-lane", kind: "delivery", started_ts: 1_754_241_200_000, finished_ts: 1_754_241_200_080, delivery_state: "delivered", classification: "live", detail: "implement focused family panel", created_ts: 1_754_241_200_000 },
-  { event_id: 3, event_key: "turn-oc", lane: "oc-lane", trace: "family", session: "oc-lane", from_lane: "parent-s1", to_lane: "oc-lane", kind: "turn-start", started_ts: 1_754_241_201_000, finished_ts: 1_754_241_206_000, delivery_state: "", classification: "live", detail: "editing InTabStrip", created_ts: 1_754_241_201_000 },
-  { event_id: 4, event_key: "result-oc", lane: "oc-lane", trace: "family", session: "oc-lane", from_lane: "oc-lane", to_lane: "parent-s1", kind: "delivery", started_ts: 1_754_241_207_000, finished_ts: 1_754_241_207_090, delivery_state: "delivered", classification: "completed", detail: "tests and receipt ready", created_ts: 1_754_241_207_000 },
+  { event_id: 2, event_key: "dispatch-oc", lane: "parent-s1", trace: "family", session: "parent-s1", from_lane: "parent-s1", to_lane: "oc-lane", kind: "delivery", started_ts: 1_754_240_001_000, finished_ts: 1_754_240_001_080, delivery_state: "delivered", classification: "live", detail: "implement focused family panel", created_ts: 1_754_240_001_000 },
+  { event_id: 3, event_key: "turn-oc", lane: "oc-lane", trace: "family", session: "oc-lane", from_lane: "parent-s1", to_lane: "oc-lane", kind: "turn-start", started_ts: 1_754_240_002_000, finished_ts: 1_754_240_007_000, delivery_state: "", classification: "live", detail: "editing InTabStrip", created_ts: 1_754_240_002_000 },
+  { event_id: 4, event_key: "result-oc", lane: "oc-lane", trace: "family", session: "oc-lane", from_lane: "oc-lane", to_lane: "parent-s1", kind: "delivery", started_ts: 1_754_240_008_000, finished_ts: 1_754_240_008_090, delivery_state: "delivered", classification: "completed", detail: "tests and receipt ready", created_ts: 1_754_240_008_000 },
 ];
 
 async function seed(page: import("@playwright/test").Page) {
@@ -183,13 +183,22 @@ test("period summons the focused session family tree in the terminal strip", asy
   const marbler = page.getByTestId("marbler");
   await expect(marbler).toBeVisible();
   await expect(page.getByTestId("time-navigator")).toBeVisible();
-  await expect(marbler).toContainText("2 events");
+  await expect(marbler).toContainText("5 events");
   await expect(page.getByTestId("strip-scope")).toHaveCount(0);
   await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
 
-  const root = page.locator("tr").filter({ hasText: "parent-s1" });
+  await expect(page.locator(".focused-family-table")).toHaveCount(0);
+  await expect(marbler.locator(".grid-header")).toHaveCount(1);
+  await expect(marbler.locator(".grid-body > .grid-row")).toHaveCount(5);
+  await expect.poll(() => marbler.locator(".grid-scroller").evaluate((element) => element.scrollTop)).toBe(0);
+  const root = marbler.locator('.grid-body > .grid-row[data-event-id="parent-s1"]');
   await expect(root).toBeVisible();
-  await expect(root).toContainText("18k");
+  const [timelineBox, rootBox] = await Promise.all([
+    marbler.locator(".timeline").boundingBox(),
+    root.boundingBox(),
+  ]);
+  expect(rootBox?.y).toBeGreaterThanOrEqual((timelineBox?.y ?? 0) + (timelineBox?.height ?? 0));
+  await expect(root).toContainText("18,340 tok");
   await expect(root).toContainText("claude-sonnet-4");
   await expect(root).toContainText("anthropic");
   await expect(root).toContainText("sonnet");
@@ -197,19 +206,28 @@ test("period summons the focused session family tree in the terminal strip", asy
   // The route's runtime observation owns the displayed liveness.
   await expect(root).toContainText("live");
   // Focused families open with their persisted descendants visible.
-  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
-  await expect(page.locator("tr").filter({ hasText: "oc-lane" })).toBeVisible();
-  await expect(page.locator("tr").filter({ hasText: "oc-finished" })).toBeVisible();
-  await page.getByRole("columnheader", { name: "activity" }).click();
-  const nestedOrder = await page.locator(".focused-family-table tr.dtable-row .s-name").allTextContents();
+  await expect(marbler.locator('[data-event-id="child-s1"]')).toBeVisible();
+  await expect(marbler.locator('[data-event-id="oc-lane"]')).toBeVisible();
+  await expect(marbler.locator('[data-event-id="oc-finished"]')).toBeVisible();
+  const nestedOrder = await marbler.locator(".grid-body > .grid-row .name-stack b").allTextContents();
   expect(nestedOrder[0]).toBe("parent-s1");
   expect(new Set(nestedOrder.slice(1))).toEqual(new Set(["child-s1", "oc-lane", "oc-sub", "oc-finished"]));
-  const rootPadding = await root.locator("td").filter({ has: page.locator(".s-name") }).evaluate((cell) => getComputedStyle(cell).paddingLeft);
-  const childPadding = await page.locator("tr").filter({ hasText: "child-s1" }).locator("td").filter({ has: page.locator(".s-name") }).evaluate((cell) => getComputedStyle(cell).paddingLeft);
+  const rootPadding = await root.locator(".col-name").evaluate((cell) => getComputedStyle(cell).paddingLeft);
+  const child = marbler.locator('.grid-body > .grid-row[data-event-id="child-s1"]');
+  const childPadding = await child.locator(".col-name").evaluate((cell) => getComputedStyle(cell).paddingLeft);
   expect(Number.parseFloat(childPadding)).toBeGreaterThan(Number.parseFloat(rootPadding));
-  await page.locator("tr").filter({ hasText: "child-s1" }).hover();
-  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toHaveClass(/boop-family-linked/);
-  await expect(page.locator("tr").filter({ hasText: "parent-other" })).toHaveCount(0);
+  await child.hover();
+  await expect(child).toHaveClass(/hovered/);
+  await expect(marbler.locator('[data-event-id="parent-other"]')).toHaveCount(0);
+  const headerCells = await marbler.locator(".grid-header .cell").evaluateAll((cells) => cells.map((cell) => {
+    const rect = cell.getBoundingClientRect();
+    return { left: Math.round(rect.left), width: Math.round(rect.width), text: cell.textContent };
+  }));
+  const rowCells = await root.locator(":scope > .cell").evaluateAll((cells) => cells.map((cell) => {
+    const rect = cell.getBoundingClientRect();
+    return { left: Math.round(rect.left), width: Math.round(rect.width) };
+  }));
+  expect(headerCells.map(({ left, width }) => ({ left, width }))).toEqual(rowCells);
   const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(requests).toHaveLength(1);
   expect(requests[0]).toEqual({
@@ -230,7 +248,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(strip).toBeHidden();
   await page.keyboard.press(`${MOD}+Shift+Period`);
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
-  await expect(page.locator("tr").filter({ hasText: "child-s1" })).toBeVisible();
+  await expect(page.getByTestId("marbler").locator('[data-event-id="child-s1"]')).toBeVisible();
   await page.waitForTimeout(250);
   const reopenedRequests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(reopenedRequests).toHaveLength(2);
@@ -301,38 +319,20 @@ test("wheel stays inside the family timeline and never resizes the terminal dock
   await strip.screenshot({ path: testInfo.outputPath("family-network-wheel-owned.png") });
 });
 
-test("focused family graph and table save an independent vertical layout", async ({ page }) => {
+test("focused family uses one populated Marbler table that fills the dock", async ({ page }) => {
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   await page.keyboard.press(`${MOD}+Shift+Period`);
 
-  const split = page.getByTestId("focused-family-content-split");
+  const strip = page.getByTestId("in-tab-strip");
   const graph = page.getByTestId("marbler");
-  const graphPanel = page.locator("#focused-family-graph-s1");
-  const table = page.locator(".focused-family-table");
-  const handle = page.getByTestId("focused-family-content-resize");
-  await expect(split).toBeVisible();
-  await expect(handle).toBeVisible();
-
-  const beforeGraph = await graphPanel.boundingBox();
-  const handleBox = await handle.boundingBox();
-  expect(beforeGraph).not.toBeNull();
-  expect(handleBox).not.toBeNull();
-  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y - 40, { steps: 4 });
-  await page.mouse.up();
-
-  const afterGraph = await graphPanel.boundingBox();
-  expect(afterGraph!.height).toBeLessThan(beforeGraph!.height - 20);
-  await expect.poll(async () => (await graph.boundingBox())?.height ?? 0).toBeCloseTo(afterGraph!.height, 0);
-  await expect(table.locator(".tt-scroll")).toHaveCSS("max-height", "none");
-  const layout = await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem("pluginState") ?? "{}");
-    return state.harnessTrace.familyContentLayouts.s1 as [number, number];
-  });
-  expect(layout).toHaveLength(2);
-  expect(layout[0]).toBeLessThan(70);
+  await expect(page.getByTestId("focused-family-content-split")).toHaveCount(0);
+  await expect(page.locator(".focused-family-table")).toHaveCount(0);
+  await expect(graph.locator(".grid-scroller")).toBeVisible();
+  await expect(graph.locator(".grid-body > .grid-row")).toHaveCount(5);
+  const stripBox = await strip.boundingBox();
+  const graphBox = await graph.boundingBox();
+  expect(graphBox!.height).toBeGreaterThan(stripBox!.height - 30);
 });
 
 test("family bridge renders empty and error states from a Claude identity fixture", async ({ page }) => {

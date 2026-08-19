@@ -112,11 +112,12 @@ export function projectBoopEventsToMarbler(events: BoopNetworkEvent[]): MarbleEv
     }));
 }
 
-export function BoopNetworkGraph({ events }: { events: BoopNetworkEvent[] }) {
+export function BoopNetworkGraph({ events, rows, expandAll = false }: { events: BoopNetworkEvent[]; rows?: MarbleEvent[]; expandAll?: boolean }) {
   const model = useMemo(() => {
-    const next = createMarbler(projectBoopEventsToMarbler(events));
+    const next = createMarbler(rows ?? projectBoopEventsToMarbler(events));
+    if (expandAll) next.grid.state.$({ ...next.grid.state.$(), expanded: true });
     next.selectedId.$(null);
     return next;
-  }, [events]);
+  }, [events, rows, expandAll]);
   return <div className="boop-marbler" data-testid="boop-network-marbler"><MarblerPanel model={model} /></div>;
 }
