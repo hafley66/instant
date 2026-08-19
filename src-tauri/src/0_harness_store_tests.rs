@@ -91,7 +91,7 @@ fn four_stores_lower_into_one_session_shape() {
         concat!(
             r#"{"timestamp":"2026-01-02T03:04:05Z","type":"session_meta","payload":{"id":"codex-1","cwd":"/fixture","parent_thread_id":"codex-parent"}}"#,
             "\n",
-            r#"{"type":"turn_context","payload":{"model":"gpt-fixture"}}"#,
+            r#"{"type":"turn_context","payload":{"model":"gpt-fixture","model_provider":"openai"}}"#,
             "\n",
             r#"{"payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":21}}}}"#,
             "\n"
@@ -111,7 +111,7 @@ fn four_stores_lower_into_one_session_shape() {
         "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
          CREATE TABLE message (session_id TEXT, time_created INTEGER, data TEXT);
          INSERT INTO session VALUES ('opencode-1', '/fixture', 'OpenCode fixture', 100, 200, NULL);
-         INSERT INTO message VALUES ('opencode-1', 200, '{\"tokens\":{\"input\":13}}');",
+         INSERT INTO message VALUES ('opencode-1', 200, '{\"tokens\":{\"input\":13},\"providerID\":\"openrouter\"}');",
     )
     .unwrap();
     drop(db);
@@ -126,6 +126,7 @@ fn four_stores_lower_into_one_session_shape() {
             "sourceFile": session.source_path.as_deref().and_then(|path| Path::new(path).file_name()).and_then(|name| name.to_str()),
             "title": session.title,
             "model": session.model,
+            "provider": session.provider,
             "inputTokens": session.input_tokens,
             "parentId": session.parent_id,
             "parentKind": session.parent_kind,
@@ -143,6 +144,7 @@ fn four_stores_lower_into_one_session_shape() {
     "model": null,
     "parentId": null,
     "parentKind": null,
+    "provider": "anthropic",
     "sourceFile": "claude-1.jsonl",
     "title": null
   },
@@ -154,6 +156,7 @@ fn four_stores_lower_into_one_session_shape() {
     "model": null,
     "parentId": null,
     "parentKind": null,
+    "provider": "openrouter",
     "sourceFile": null,
     "title": "OpenCode fixture"
   },
@@ -165,6 +168,7 @@ fn four_stores_lower_into_one_session_shape() {
     "model": "gpt-fixture",
     "parentId": "codex-parent",
     "parentKind": "subagent",
+    "provider": "openai",
     "sourceFile": "rollout.jsonl",
     "title": null
   },
@@ -176,6 +180,7 @@ fn four_stores_lower_into_one_session_shape() {
     "model": null,
     "parentId": null,
     "parentKind": null,
+    "provider": null,
     "sourceFile": "wire.jsonl",
     "title": null
   }
@@ -196,7 +201,7 @@ fn opencode_tokens_take_max_not_latest() {
         "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
          CREATE TABLE message (session_id TEXT, time_created INTEGER, data TEXT);
          INSERT INTO session VALUES ('oc-1', '/fixture', NULL, 100, 300, NULL);
-         INSERT INTO message VALUES ('oc-1', 100, '{\"tokens\":{\"input\":50},\"modelID\":\"a-model\"}');
+         INSERT INTO message VALUES ('oc-1', 100, '{\"tokens\":{\"input\":50},\"modelID\":\"a-model\",\"providerID\":\"provider-a\"}');
          INSERT INTO message VALUES ('oc-1', 200, '{\"tokens\":{\"input\":0}}');",
     )
     .unwrap();
@@ -205,6 +210,7 @@ fn opencode_tokens_take_max_not_latest() {
     assert_eq!(session.id, "oc-1");
     assert_eq!(session.input_tokens, Some(50));
     assert_eq!(session.model.as_deref(), Some("a-model"));
+    assert_eq!(session.provider.as_deref(), Some("provider-a"));
 }
 
 #[test]

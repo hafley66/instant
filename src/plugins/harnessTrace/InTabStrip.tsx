@@ -10,7 +10,7 @@
 // reports its height changes up to the host so the xterm refits.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SignalReact } from "@hafley66/signals/react";
-import type { ExpandedState } from "@tanstack/react-table";
+import type { ExpandedState, SortingState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { store } from "../../state";
 import { TreeTable, type TreeColumn } from "../../treetable";
@@ -25,7 +25,7 @@ import { StripPolicy } from "./0_strip";
 import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
 import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
-import { BoopFamilyGraph } from "../../1b_BoopFamilyGraph";
+import { FocusedBoopNetwork } from "../../1c_FocusedBoopNetwork";
 import { FocusedFamilyContentSplit } from "./2_FocusedFamilySplit";
 
 export interface InTabStripProps {
@@ -97,6 +97,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const [linkedId, setLinkedId] = useState<string | null>(null);
+  const [familySorting, setFamilySorting] = useState<SortingState>([{ id: "started", desc: false }]);
 
   // Per-terminal open state (Toggle Relations Strip command).
   const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
@@ -122,7 +123,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
     [familyMode, sid],
   );
   const family = useBoopFamily(familyQuery);
-  const { nodes, liveTmux, registry, error, load } = useAgentTree(!familyMode && dataEnabled);
+  const { nodes, liveTmux, registry, error, load } = useAgentTree(dataEnabled);
 
   const networkView = entry?.network ?? false;
   useLiveProbeRender("InTabStrip", sid, { networkView, nodeCount: nodes.length });
@@ -150,7 +151,20 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
     () => StripPolicy.history(nodes, sid, scope, nativeSessionId),
     [nodes, sid, scope, nativeSessionId],
   );
-  const familyNodes = family.nodes;
+  const familyNodes = useMemo(() => {
+    const metadata = new Map(nodes.map((node) => [node.id, node]));
+    return family.nodes.map((node) => {
+      const trace = metadata.get(node.id);
+      if (!trace) return node;
+      return {
+        ...node,
+        model: node.model ?? trace.model ?? null,
+        provider: node.provider ?? trace.provider ?? null,
+        preset: node.preset ?? trace.preset ?? null,
+        tokens: node.tokens ?? trace.tokens ?? null,
+      };
+    });
+  }, [family.nodes, nodes]);
   useEffect(() => {
     if (familyMode && familyNodes.length > 0) {
       setExpanded(Object.fromEntries(familyNodes.map((node) => [node.id, true])));
@@ -166,7 +180,27 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
     () => (typeof expanded === "object" ? expanded : ({} as Record<string, boolean>)),
     [expanded],
   );
-  const tree = useMemo(() => materializeAgentTree(index, openIds), [index, openIds]);
+  const tree = useMemo(() => {
+    const value = materializeAgentTree(index, openIds);
+    if (!familyMode || familySorting.length === 0) return value;
+    const { id, desc } = familySorting[0];
+    const field = (row: AgentTreeNode): string | number => {
+      if (id === "last") return Date.parse(row.lastActivity) || 0;
+      if (id === "started") return Date.parse(row.ts) || 0;
+      if (id === "tokens") return row.tokens?.in ?? -1;
+      if (id === "session") return row.id;
+      return String(row[id as keyof AgentTreeNode] ?? "");
+    };
+    const sortLevel = (rows: AgentTreeNode[]): AgentTreeNode[] => rows
+      .map((row) => ({ ...row, children: sortLevel(row.children) }))
+      .sort((left, right) => {
+        const a = field(left);
+        const b = field(right);
+        const order = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
+        return desc ? -order : order;
+      });
+    return sortLevel(value);
+  }, [index, openIds, familyMode, familySorting]);
 
   const setShowActive = (next: boolean) =>
     store.set({
@@ -324,7 +358,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
       ) : (
         familyMode ? <FocusedFamilyContentSplit
           sid={sid}
-          graph={<BoopFamilyGraph nodes={visibleNodes} selectedId={linkedId} onSelect={setLinkedId} onHover={setLinkedId} />}
+          graph={<FocusedBoopNetwork nodes={visibleNodes} />}
           table={<div className="focused-family-table"><TreeTable<AgentTreeNode>
           columns={columns}
           data={tree}
@@ -333,6 +367,9 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
           getRowCanExpand={(r) => index.hasChildren(r.id)}
           expanded={expanded}
           onExpandedChange={setExpanded}
+          sorting={familySorting}
+          onSortingChange={setFamilySorting}
+          serverSort
           virtual
           controls
           filter={stripFilter}

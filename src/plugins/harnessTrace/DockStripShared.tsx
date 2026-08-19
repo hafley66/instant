@@ -51,6 +51,24 @@ export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
     sortValue: (r) => r.harness,
   },
   {
+    id: "model",
+    header: "model",
+    cell: (r) => <span className="s-meta" title={r.model ?? "not recorded"}>{r.model ?? "—"}</span>,
+    sortValue: (r) => r.model ?? "",
+  },
+  {
+    id: "provider",
+    header: "provider",
+    cell: (r) => <span className="s-meta" title={r.provider ?? "not recorded"}>{r.provider ?? "—"}</span>,
+    sortValue: (r) => r.provider ?? "",
+  },
+  {
+    id: "preset",
+    header: "preset",
+    cell: (r) => <span className="s-meta" title={r.preset ?? "not recorded"}>{r.preset ?? "—"}</span>,
+    sortValue: (r) => r.preset ?? "",
+  },
+  {
     id: "link",
     header: "link",
     cell: (r) => <span className="s-meta">{r.parentKind ?? "—"}</span>,
@@ -79,6 +97,12 @@ export const COLUMNS: TreeColumn<AgentTreeNode>[] = [
     header: "activity",
     cell: (r) => <span title={r.lastActivity}>{relTime(Date.parse(r.lastActivity) || 0)}</span>,
     sortValue: (r) => r.lastActivity,
+  },
+  {
+    id: "started",
+    header: "started",
+    cell: (r) => <span title={r.ts}>{relTime(Date.parse(r.ts) || 0)}</span>,
+    sortValue: (r) => r.ts,
   },
   {
     id: "cwd",
@@ -110,6 +134,9 @@ export function stripFilter(r: AgentTreeNode, q: string): boolean {
   const s = q.toLowerCase();
   return (
     r.harness.includes(s) ||
+    (r.model ?? "").toLowerCase().includes(s) ||
+    (r.provider ?? "").toLowerCase().includes(s) ||
+    (r.preset ?? "").toLowerCase().includes(s) ||
     r.id.toLowerCase().includes(s) ||
     r.from.toLowerCase().includes(s) ||
     r.why.toLowerCase().includes(s) ||
