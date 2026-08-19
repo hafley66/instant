@@ -13,7 +13,6 @@ export default defineConfig(async () => ({
     dedupe: ["react", "react-dom", "@hafley66/signals"],
     alias: {
       "@hafley66/boop-adapters": path.resolve(__dirname, "../hafley-rxjs/packages/boop-adapters/dist/index.js"),
-      "@hafley66/marbler": path.resolve(__dirname, "../hafley-rxjs/packages/marbler/src/index.ts"),
     },
   },
   // signalsJsx rewrites JSX imports after Vite's initial HTML/module scan, so

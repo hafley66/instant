@@ -12,7 +12,6 @@
     "baseUrl": ".",
     "paths": {
       "@hafley66/boop-adapters": ["../hafley-rxjs/packages/boop-adapters/dist/index.d.ts"],
-      "@hafley66/marbler": ["../hafley-rxjs/packages/marbler/src/index.ts"]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
