@@ -10,7 +10,7 @@
 // reports its height changes up to the host so the xterm refits.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SignalReact } from "@hafley66/signals/react";
-import type { ExpandedState, SortingState } from "@tanstack/react-table";
+import type { ExpandedState } from "@tanstack/react-table";
 import { invoke } from "../../generated/native";
 import { store } from "../../state";
 import { TreeTable, type TreeColumn } from "../../treetable";
@@ -26,7 +26,6 @@ import type { ITermStripEntry, StripScope } from "./0_types";
 import { useLiveProbeRender } from "../../1_LiveProbe";
 import { focusedFamilyQuery, useBoopFamily } from "./1_boopFamily";
 import { FocusedBoopNetwork } from "../../1c_FocusedBoopNetwork";
-import { FocusedFamilyContentSplit } from "./2_FocusedFamilySplit";
 
 export interface InTabStripProps {
   sid: string;
@@ -96,8 +95,6 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
   // null until the scope button is pressed; the policy widens an empty default.
   const [chosenScope, setChosenScope] = useState<StripScope | null>(null);
   const [expanded, setExpanded] = useState<ExpandedState>({});
-  const [linkedId, setLinkedId] = useState<string | null>(null);
-  const [familySorting, setFamilySorting] = useState<SortingState>([{ id: "started", desc: false }]);
 
   // Per-terminal open state (Toggle Relations Strip command).
   const [entry, setEntry] = useState<ITermStripEntry | null>(() => store.get().termStrip[sid] ?? null);
@@ -182,25 +179,8 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
   );
   const tree = useMemo(() => {
     const value = materializeAgentTree(index, openIds);
-    if (!familyMode || familySorting.length === 0) return value;
-    const { id, desc } = familySorting[0];
-    const field = (row: AgentTreeNode): string | number => {
-      if (id === "last") return Date.parse(row.lastActivity) || 0;
-      if (id === "started") return Date.parse(row.ts) || 0;
-      if (id === "tokens") return row.tokens?.in ?? -1;
-      if (id === "session") return row.id;
-      return String(row[id as keyof AgentTreeNode] ?? "");
-    };
-    const sortLevel = (rows: AgentTreeNode[]): AgentTreeNode[] => rows
-      .map((row) => ({ ...row, children: sortLevel(row.children) }))
-      .sort((left, right) => {
-        const a = field(left);
-        const b = field(right);
-        const order = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
-        return desc ? -order : order;
-      });
-    return sortLevel(value);
-  }, [index, openIds, familyMode, familySorting]);
+    return value;
+  }, [index, openIds]);
 
   const setShowActive = (next: boolean) =>
     store.set({
@@ -356,33 +336,7 @@ function InTabStripView({ sid, onLayout, resizable = false }: InTabStripProps) {
             : "no external shells: every agent session here belongs to a claude tab's own list."}
         </div>
       ) : (
-        familyMode ? <FocusedFamilyContentSplit
-          sid={sid}
-          graph={<FocusedBoopNetwork nodes={visibleNodes} />}
-          table={<div className="focused-family-table"><TreeTable<AgentTreeNode>
-          columns={columns}
-          data={tree}
-          getRowId={(r) => r.id}
-          getSubRows={(r) => r.children}
-          getRowCanExpand={(r) => index.hasChildren(r.id)}
-          expanded={expanded}
-          onExpandedChange={setExpanded}
-          sorting={familySorting}
-          onSortingChange={setFamilySorting}
-          serverSort
-          virtual
-          controls
-          filter={stripFilter}
-          searchPlaceholder="filter loaded rows…"
-          rowTitle={(r) => r.why || r.cwd}
-          rowClass={(r) => `${r.tmuxSession ? "dock-strip-row" : "dock-strip-row unjoined"}${r.id === linkedId ? " boop-family-linked" : ""}`}
-          onRowHover={(r) => setLinkedId(r?.id ?? null)}
-          onRowClick={(r) => setLinkedId(r.id)}
-          onRowDoubleClick={(r) => {
-            if (!index.hasChildren(r.id)) onOpenRow(r);
-          }}
-        /></div>}
-        /> : <TreeTable<AgentTreeNode>
+        familyMode ? <FocusedBoopNetwork nodes={visibleNodes} /> : <TreeTable<AgentTreeNode>
           columns={columns}
           data={tree}
           getRowId={(r) => r.id}
