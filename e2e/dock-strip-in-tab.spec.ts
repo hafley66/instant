@@ -266,6 +266,39 @@ test("focused family strip saves a vertical drag layout and refits after each co
   expect(restoredStrip!.height / restoredSplit!.height).toBeCloseTo(layout[1] / 100, 1);
 });
 
+test("wheel grows the focused family dock while pinch remains owned by its timeline", async ({ page }, testInfo) => {
+  await seed(page);
+  await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
+  await page.keyboard.press(`${MOD}+Shift+Period`);
+
+  const split = page.getByTestId("focused-family-split");
+  const strip = page.getByTestId("in-tab-strip");
+  const surface = page.getByTestId("focused-family-wheel-surface");
+  const initial = await strip.boundingBox();
+  expect(initial).not.toBeNull();
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-initial.png") });
+
+  await surface.dispatchEvent("wheel", { deltaY: -600, deltaX: 0, ctrlKey: false });
+  await expect.poll(async () => (await strip.boundingBox())?.height ?? 0).toBeGreaterThan(initial!.height + 40);
+  const grown = await strip.boundingBox();
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-grown.png") });
+
+  await surface.dispatchEvent("wheel", { deltaY: -2_000, deltaX: 0, ctrlKey: false });
+  const clamped = await strip.boundingBox();
+  const splitBox = await split.boundingBox();
+  expect(clamped!.height / splitBox!.height).toBeCloseTo(0.75, 1);
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-maximum.png") });
+
+  await surface.dispatchEvent("wheel", { deltaY: 300, deltaX: 0, ctrlKey: true });
+  const afterPinch = await strip.boundingBox();
+  expect(afterPinch!.height).toBeCloseTo(clamped!.height, 0);
+
+  await surface.dispatchEvent("wheel", { deltaY: 2_000, deltaX: 0, ctrlKey: false });
+  const minimum = await strip.boundingBox();
+  expect(minimum!.height / splitBox!.height).toBeCloseTo(0.15, 1);
+  await strip.screenshot({ path: testInfo.outputPath("family-dock-minimum.png") });
+});
+
 test("focused family graph and table save an independent vertical layout", async ({ page }) => {
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");

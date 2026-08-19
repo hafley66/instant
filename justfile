@@ -10,6 +10,13 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
+# Boop runs this once inside every newly created lane worktree before the
+# harness starts. Install checkout-local links, then use the repository's
+# standard production build recipe as the setup verification.
+boop-start:
+    corepack pnpm@10.12.4 install --frozen-lockfile
+    just build
+
 # full app: Rust backend + webview (this is the normal dev loop). The linker
 # shim signs the dev binary with the stable "Instant Dev" identity (run
 # `just signing-setup` once) so its macOS TCC grants survive rebuilds. Without
