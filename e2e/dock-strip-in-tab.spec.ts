@@ -187,25 +187,17 @@ test("period summons the focused session family tree in the terminal strip", asy
   const strip = page.getByTestId("in-tab-strip");
   await expect(strip).toBeVisible();
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
-  const marbler = page.getByTestId("marbler");
-  await expect(marbler).toBeVisible();
-  await expect(page.getByTestId("time-navigator")).toBeVisible();
-  await expect(marbler).toContainText("5 events");
+  const table = page.getByTestId("focused-family-table");
+  await expect(table).toBeVisible();
   await expect(page.getByTestId("strip-scope")).toHaveCount(0);
   await expect(page.getByTestId("strip-showactive")).toHaveCount(0);
 
-  await expect(page.locator(".focused-family-table")).toHaveCount(0);
-  await expect(marbler.locator(".grid-header")).toHaveCount(1);
-  await expect(marbler.locator(".grid-body > .grid-row")).toHaveCount(5);
-  await expect.poll(() => marbler.locator(".grid-scroller").evaluate((element) => element.scrollTop)).toBe(0);
-  const root = marbler.locator('.grid-body > .grid-row[data-event-id="parent-s1"]');
+  await expect(page.getByTestId("marbler")).toHaveCount(0);
+  await expect(page.getByTestId("time-navigator")).toHaveCount(0);
+  await expect(table.locator("tbody tr")).toHaveCount(5);
+  const root = table.locator("tbody tr").filter({ hasText: "parent-s1" });
   await expect(root).toBeVisible();
-  const [timelineBox, rootBox] = await Promise.all([
-    marbler.locator(".timeline").boundingBox(),
-    root.boundingBox(),
-  ]);
-  expect(rootBox?.y).toBeGreaterThanOrEqual((timelineBox?.y ?? 0) + (timelineBox?.height ?? 0));
-  await expect(root).toContainText("18,340 tok");
+  await expect(root).toContainText("18,340");
   await expect(root).toContainText("claude-sonnet-4");
   await expect(root).toContainText("anthropic");
   await expect(root).toContainText("sonnet");
@@ -213,28 +205,17 @@ test("period summons the focused session family tree in the terminal strip", asy
   // The route's runtime observation owns the displayed liveness.
   await expect(root).toContainText("live");
   // Focused families open with their persisted descendants visible.
-  await expect(marbler.locator('[data-event-id="child-s1"]')).toBeVisible();
-  await expect(marbler.locator('[data-event-id="oc-lane"]')).toBeVisible();
-  await expect(marbler.locator('[data-event-id="oc-finished"]')).toBeVisible();
-  const nestedOrder = await marbler.locator(".grid-body > .grid-row .name-stack b").allTextContents();
-  expect(nestedOrder[0]).toBe("parent-s1");
-  expect(new Set(nestedOrder.slice(1))).toEqual(new Set(["child-s1", "oc-lane", "oc-sub", "oc-finished"]));
-  const rootPadding = await root.locator(".col-name").evaluate((cell) => getComputedStyle(cell).paddingLeft);
-  const child = marbler.locator('.grid-body > .grid-row[data-event-id="child-s1"]');
-  const childPadding = await child.locator(".col-name").evaluate((cell) => getComputedStyle(cell).paddingLeft);
+  const child = table.locator("tbody tr").filter({ hasText: "child-s1" });
+  await expect(child).toBeVisible();
+  await expect(table.locator("tbody tr").filter({ hasText: "oc-lane" })).toBeVisible();
+  await expect(table.locator("tbody tr").filter({ hasText: "oc-finished" })).toBeVisible();
+  const rootPadding = await root.locator("td").nth(1).evaluate((cell) => getComputedStyle(cell).paddingLeft);
+  const childPadding = await child.locator("td").nth(1).evaluate((cell) => getComputedStyle(cell).paddingLeft);
   expect(Number.parseFloat(childPadding)).toBeGreaterThan(Number.parseFloat(rootPadding));
-  await child.locator(".col-name").hover();
-  await expect(child).toHaveClass(/hovered/);
-  await expect(marbler.locator('[data-event-id="parent-other"]')).toHaveCount(0);
-  const headerCells = await marbler.locator(".grid-header .cell").evaluateAll((cells) => cells.map((cell) => {
-    const rect = cell.getBoundingClientRect();
-    return { left: Math.round(rect.left), width: Math.round(rect.width), text: cell.textContent };
-  }));
-  const rowCells = await root.locator(":scope > .cell").evaluateAll((cells) => cells.map((cell) => {
-    const rect = cell.getBoundingClientRect();
-    return { left: Math.round(rect.left), width: Math.round(rect.width) };
-  }));
-  expect(headerCells.map(({ left, width }) => ({ left, width }))).toEqual(rowCells);
+  await expect(table.locator("tbody tr").filter({ hasText: "parent-other" })).toHaveCount(0);
+  await expect(root.locator(".family-waterfall .family-phase")).not.toHaveCount(0);
+  await table.getByRole("columnheader", { name: "Status" }).click();
+  await expect(table.locator("tbody tr")).toHaveCount(5);
   const requests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(requests).toHaveLength(1);
   expect(requests[0]).toEqual({
@@ -246,7 +227,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   expect(typeof requestQuery.history_since_ts).toBe("number");
   await page.getByRole("button", { name: "refresh" }).click();
   await expect.poll(async () => (await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? [])).length).toBe(2);
-  await expect(marbler).toBeVisible();
+  await expect(table).toBeVisible();
 
   // Closing and reopening the panel keeps the tmux-scoped family result. The
   // moving seven-day cutoff must not manufacture a new cache identity or drop
@@ -255,7 +236,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   await expect(strip).toBeHidden();
   await page.keyboard.press(`${MOD}+Shift+Period`);
   await expect(page.getByTestId("strip-count")).toHaveText("5 family sessions");
-  await expect(page.getByTestId("marbler").locator('[data-event-id="child-s1"]')).toBeVisible();
+  await expect(page.getByTestId("focused-family-table").locator("tbody tr").filter({ hasText: "child-s1" })).toBeVisible();
   await page.waitForTimeout(250);
   const reopenedRequests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(reopenedRequests).toHaveLength(2);
@@ -311,13 +292,14 @@ test("focused family strip saves a vertical drag layout and refits after each co
   expect(restoredStrip!.height / restoredSplit!.height).toBeCloseTo(layout[1] / 100, 1);
 });
 
-test("wheel stays inside the family timeline and never resizes the terminal dock", async ({ page }, testInfo) => {
+test("wheel stays inside the family table and never resizes the terminal dock", async ({ page }, testInfo) => {
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   await page.keyboard.press(`${MOD}+Shift+Period`);
 
   const strip = page.getByTestId("in-tab-strip");
-  const timeline = page.getByTestId("time-navigator");
+  const timeline = page.getByTestId("focused-family-table").locator(".tt-scroll");
+  await expect(page.getByTestId("focused-family-table").locator("tbody tr")).toHaveCount(5);
   const initial = await strip.boundingBox();
   expect(initial).not.toBeNull();
   await timeline.dispatchEvent("wheel", { deltaY: 300, deltaX: 0, ctrlKey: false });
@@ -327,17 +309,17 @@ test("wheel stays inside the family timeline and never resizes the terminal dock
   await strip.screenshot({ path: testInfo.outputPath("family-network-wheel-owned.png") });
 });
 
-test("focused family uses one populated Marbler table that fills the dock", async ({ page }) => {
+test("focused family uses one populated tree table that fills the dock", async ({ page }) => {
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   await page.keyboard.press(`${MOD}+Shift+Period`);
 
   const strip = page.getByTestId("in-tab-strip");
-  const graph = page.getByTestId("marbler");
+  const graph = page.getByTestId("focused-family-table");
   await expect(page.getByTestId("focused-family-content-split")).toHaveCount(0);
-  await expect(page.locator(".focused-family-table")).toHaveCount(0);
-  await expect(graph.locator(".grid-scroller")).toBeVisible();
-  await expect(graph.locator(".grid-body > .grid-row")).toHaveCount(5);
+  await expect(page.getByTestId("marbler")).toHaveCount(0);
+  await expect(graph.locator(".tt-scroll")).toBeVisible();
+  await expect(graph.locator("tbody tr")).toHaveCount(5);
   const stripBox = await strip.boundingBox();
   const graphBox = await graph.boundingBox();
   expect(graphBox!.height).toBeGreaterThan(stripBox!.height - 30);

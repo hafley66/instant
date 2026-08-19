@@ -47,7 +47,7 @@ const STYLE =
   // Virtual rows need the wrap itself to scroll: height:auto above kills
   // .tt-scroll's height:100%, so cap it here (act-bar eats the other 24px).
   ".term-strip .tt-scroll{max-height:216px}";
-const FAMILY_GRAPH_STYLE = ".boop-family-graph{background:#10141c}.focused-family-table{height:100%;min-height:0;overflow:hidden}.focused-family-table .tt-wrap{height:100%}.focused-family-table .tt-scroll{max-height:none}.focused-family-table td,.focused-family-table th{line-height:19px}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
+const FAMILY_GRAPH_STYLE = ".boop-family-graph{background:#10141c}.focused-family-table{height:100%;min-height:0;overflow:hidden}.focused-family-table .tt-wrap{height:100%}.focused-family-table .tt-scroll{max-height:none}.focused-family-table td,.focused-family-table th{height:30px;line-height:19px}.focused-family-table td:first-child b,.focused-family-table td:first-child small{display:block;overflow:hidden;text-overflow:ellipsis}.family-waterfall{position:relative;width:100%;height:12px;background:color-mix(in srgb,var(--frame) 22%,transparent)}.family-phase{position:absolute;top:1px;height:10px;min-width:2px}.family-phase.send{background:#d59b47}.family-phase.receive{background:#3f8dbd}.family-phase.work{background:#49a56b}.family-phase.error{background:#d05050}.boop-family-linked{background:rgba(74,127,223,.24)!important}";
 const NO_RESUME_TABS: Record<string, { sessionId?: string }> = {};
 
 // The toggle command's whole body (main.ts binds it to the hotkey, the e2e
