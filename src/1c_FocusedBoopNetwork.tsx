@@ -60,9 +60,9 @@ function FocusedBoopNetworkView(props: { nodes: AgentSessionNode[] }) {
   const events = useMemo(() => data.filter((event) =>
     ids.has(event.session ?? "") || ids.has(event.lane) || ids.has(event.from_lane ?? "") || ids.has(event.to_lane ?? ""),
   ), [data, ids]);
+  const rows = useMemo(() => familyRows(props.nodes, events), [props.nodes, events]);
   if (query.isError) return <div className="session-empty">{String(query.error)}</div>;
   if (query.isLoading) return <div className="session-empty">loading family events…</div>;
-  const rows = useMemo(() => familyRows(props.nodes, events), [props.nodes, events]);
   if (rows.length === 0) return <div className="session-empty">no focused family sessions in the last seven days</div>;
   return <BoopNetworkGraph events={events} rows={rows} expandAll />;
 }

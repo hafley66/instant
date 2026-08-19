@@ -63,7 +63,12 @@ async function seed(page: import("@playwright/test").Page) {
         (w as Window & { __boopGraphRequests: Record<string, unknown>[] }).__boopGraphRequests.push(args ?? {});
         return JSON.stringify(graph);
       },
-      boop_trace_events: () => events.map((event) => JSON.stringify(event)).join("\n"),
+      // Keep the query pending across at least one committed React render. This
+      // exercises the loading -> populated hook sequence used by the live app.
+      boop_trace_events: () => new Promise((resolve) => setTimeout(
+        () => resolve(events.map((event) => JSON.stringify(event)).join("\n")),
+        40,
+      )),
       list_dir: (args?: Record<string, unknown>) => {
         if (args?.path === mailDir) {
           return { entries: [
@@ -173,6 +178,8 @@ test("in-tab strip: external-only lazy tree under the term, mail preview, back",
 });
 
 test("period summons the focused session family tree in the terminal strip", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await seed(page);
   await page.goto("/e2e-dock-strip-in-tab.html?e2e=1");
   await page.keyboard.press(`${MOD}+Shift+Period`);
@@ -216,7 +223,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   const child = marbler.locator('.grid-body > .grid-row[data-event-id="child-s1"]');
   const childPadding = await child.locator(".col-name").evaluate((cell) => getComputedStyle(cell).paddingLeft);
   expect(Number.parseFloat(childPadding)).toBeGreaterThan(Number.parseFloat(rootPadding));
-  await child.hover();
+  await child.locator(".col-name").hover();
   await expect(child).toHaveClass(/hovered/);
   await expect(marbler.locator('[data-event-id="parent-other"]')).toHaveCount(0);
   const headerCells = await marbler.locator(".grid-header .cell").evaluateAll((cells) => cells.map((cell) => {
@@ -253,6 +260,7 @@ test("period summons the focused session family tree in the terminal strip", asy
   const reopenedRequests = await page.evaluate(() => (window as Window & { __boopGraphRequests?: Record<string, unknown>[] }).__boopGraphRequests ?? []);
   expect(reopenedRequests).toHaveLength(2);
   await page.screenshot({ path: "test-results/focused-family-network-v3.png", fullPage: true });
+  expect(pageErrors).toEqual([]);
 });
 
 test("focused family strip saves a vertical drag layout and refits after each committed change", async ({ page }) => {
