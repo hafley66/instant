@@ -106,6 +106,8 @@ export class TerminalTurnVisibilityV2 {
   generation = 0;
   frame = 0;
   disposed = false;
+  scanning = false;
+  rescanPending = false;
   subscription: Subscription;
 
   constructor(
@@ -118,10 +120,20 @@ export class TerminalTurnVisibilityV2 {
   }
 
   schedule() {
+    if (this.scanning) {
+      this.rescanPending = true;
+      return;
+    }
     if (this.disposed || this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
-      void this.scan();
+      this.scanning = true;
+      void this.scan().finally(() => {
+        this.scanning = false;
+        if (!this.rescanPending) return;
+        this.rescanPending = false;
+        this.schedule();
+      });
     });
   }
 

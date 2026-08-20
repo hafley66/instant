@@ -88,6 +88,7 @@ export async function unclaimedSession(
 const ledgerCache = new Map<string, AiMessage[]>();
 export const tabTurns = new Map<string, AiMessage[]>();
 const boopTurnCache = new Map<string, { readAt: number; turns: BoopTurn[] }>();
+const boopTurnReads = new Map<string, Promise<BoopTurn[]>>();
 export let boopFavorites: BoopFavorite[] = [];
 // Where each session's ledger actually lives (the cwd that resolved it), keyed by
 // `editor:session_id`. fav_add needs this cwd so a favorite resumes in the right
@@ -99,9 +100,17 @@ export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
   if (!session) return [];
   const cached = boopTurnCache.get(session);
   if (cached && performance.now() - cached.readAt < 1000) return cached.turns;
-  const turns = await invoke<BoopTurn[]>("boop_turns", { session }).catch(() => []);
-  boopTurnCache.set(session, { readAt: performance.now(), turns });
-  return turns;
+  const active = boopTurnReads.get(session);
+  if (active) return active;
+  const read = invoke<BoopTurn[]>("boop_turns", { session })
+    .catch(() => [] as BoopTurn[])
+    .then((turns) => {
+      boopTurnCache.set(session, { readAt: performance.now(), turns });
+      return turns;
+    })
+    .finally(() => boopTurnReads.delete(session));
+  boopTurnReads.set(session, read);
+  return read;
 }
 
 export async function favoriteBoopTurn(turn: BoopTurn): Promise<void> {
