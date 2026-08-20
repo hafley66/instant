@@ -670,10 +670,10 @@ export function openTab(
       // path split across rows resolves as one token.
       const wrapped = wrappedLineRows(id, y - 1);
       if (!wrapped) return cb(undefined);
-      const activate = (e: MouseEvent, t: string) => {
-        if (!e.metaKey) return; // ⌘ required; plain click stays with the app
-        void dispatchClick(t, tabMetaById(id)?.cwd ?? "", "terminal");
-      };
+      // CmdClickGestureTracker owns activation on pointerup. The link provider
+      // supplies xterm's underline and hit range only. Dispatching here as well
+      // opens media twice and races two preview renders for one gesture.
+      const activate = () => {};
       // One scanner owns the span boundaries (see termTokens.ts), so the
       // underline covers the path and stops there: hovering `Update(src/x.ts)`
       // highlights `src/x.ts`, never the call envelope around it.

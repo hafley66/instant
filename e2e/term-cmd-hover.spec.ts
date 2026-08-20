@@ -153,17 +153,25 @@ for (const image of [
   test(`⌘-click reconstructs a manually wrapped ${image.extension} path`, async ({ page }) => {
     await openTerm(page);
     const path = `/tmp/term-e2e/artifacts/v2-terminal-${image.tail}`;
+    await page.evaluate(() => {
+      const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
+      target.__instantE2eNativeResults!.read_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+      target.__instantE2eNativeResults!.read_text = '<svg viewBox="0 0 20 20"><rect width="20" height="20" fill="lime"/></svg>';
+    });
     await writeLines(page, [
       "/tmp/term-e2e/artifacts/v2-terminal-",
       `  ${image.tail}`,
     ]);
     const point = await page.evaluate(() => window.__term!.point(1, 8));
     await page.keyboard.down("Meta");
+    const eventCount = await page.evaluate(() => window.__cmdClickEvents?.length ?? 0);
     await page.mouse.move(point!.x, point!.y);
     await page.mouse.click(point!.x, point!.y);
     await page.keyboard.up("Meta");
     await expect.poll(() => page.evaluate(() => window.__cmdClickEvents?.at(-1)?.token)).toBe(path);
+    await expect.poll(() => page.evaluate(() => window.__cmdClickEvents?.length ?? 0)).toBe(eventCount + 1);
     await expect(page.locator(".dv-default-tab", { hasText: image.tail })).toBeVisible();
+    await expect(page.locator(image.extension === "PNG" ? ".fs-preview-img" : ".svg-document-viewer")).toBeVisible();
   });
 }
 

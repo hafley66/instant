@@ -70,6 +70,11 @@ export function openPreviewPanel(
 }
 
 export async function openPathInInstant(path: string, line?: number): Promise<void> {
+  const extension = path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
+  if (!line && IMAGE_EXTS.has(extension)) {
+    openPreviewPanel(path);
+    return;
+  }
   try {
     await invoke("list_dir", { path });
     savePluginState<{ root?: string }>("files", { root: path });
