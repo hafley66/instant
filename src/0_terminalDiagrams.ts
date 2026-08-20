@@ -1,7 +1,7 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { auditTime, debounceTime, Subject, type Subscription } from "rxjs";
+import { debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
@@ -369,7 +369,7 @@ export class TerminalDiagramOverlay {
       this.scheduleFrame();
     });
     this.recoverySubscription = this.recoveryEvents.pipe(
-      auditTime(80),
+      debounceTime(80),
     ).subscribe(() => this.scheduleFrame());
     const onClick = (event: MouseEvent) => {
       if (event.button !== 0 || !this.openAtClientPoint(event.clientX, event.clientY)) return;
@@ -381,10 +381,9 @@ export class TerminalDiagramOverlay {
       { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.projection) {
+          this.root.hidden = true;
           this.positionElements();
-          if (!this.scrolling && (
-            this.root.hidden || performance.now() - this.lastScrollAt < 600
-          )) this.recoveryEvents.next();
+          if (!this.scrolling) this.recoveryEvents.next();
         }
         else this.scheduleFrame();
       }),

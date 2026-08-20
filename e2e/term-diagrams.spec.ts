@@ -524,7 +524,7 @@ test("clips projected source rows when wrapped Boop lines reach the viewport bot
   await expect(mermaid).toHaveAttribute("data-diagram-locator", "boop:e2e-codex-1:53");
 });
 
-test("does not repaint the committed diagram during PTY writes", async ({ page }) => {
+test("hides a committed diagram while new PTY text is arriving", async ({ page }) => {
   await openTerminal(page);
   await page.evaluate(() => window.__term!.resize(80, 12));
   await writeFixture(page, renderedCliOutput("Codex"));
@@ -533,24 +533,22 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
   await expect(mermaid).toContainText("Mermaid");
   const result = await page.evaluate(async () => {
-    const samples: boolean[] = [];
+    const hiddenSamples: boolean[] = [];
     const root = document.querySelector<HTMLElement>(".term-diagrams")!;
     let mutations = 0;
     const observer = new MutationObserver((records) => { mutations += records.length; });
     observer.observe(root, { childList: true, subtree: true });
-    for (let index = 0; index < 30; index++) {
+    for (let index = 0; index < 20; index++) {
       window.__term!.write(`\rworking ${index}`);
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      const diagram = root?.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]');
-      const svg = diagram?.querySelector<SVGElement>("svg");
-      const box = svg?.getBoundingClientRect();
-      samples.push(Boolean(root && !root.hidden && diagram?.textContent?.includes("Mermaid") && box?.width && box.height));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      hiddenSamples.push(root.hidden);
     }
+    await new Promise((resolve) => setTimeout(resolve, 200));
     observer.disconnect();
-    return { samples, mutations };
+    return { hiddenSamples, visibleAfterIdle: !root.hidden, mutations };
   });
 
-  expect(result).toEqual({ samples: Array(30).fill(true), mutations: 0 });
+  expect(result).toEqual({ hiddenSamples: Array(20).fill(true), visibleAfterIdle: true, mutations: 0 });
 
   await page.screenshot({ path: "artifacts/v2-overlay-before-scroll.png", fullPage: true });
   const tether = await page.evaluate(async () => {

@@ -91,6 +91,8 @@ export type Tab = {
   outputTail: string;
 };
 
+const structuredOverlaysEnabled = false;
+
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 export const tabs = new Map<string, Tab>();
@@ -607,7 +609,9 @@ export function openTab(
     turnVisibility,
     () => store.get().inlineDiagrams,
   );
-  const structured = graphics || !turnVisibility ? undefined : new TerminalStructuredOverlay(term, el, turnVisibility);
+  const structured = graphics || !turnVisibility || !structuredOverlaysEnabled
+    ? undefined
+    : new TerminalStructuredOverlay(term, el, turnVisibility);
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";

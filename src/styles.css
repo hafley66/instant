@@ -1059,6 +1059,10 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   width: 100% !important;
   height: 100% !important;
 }
+.diagram-lightbox .diagram-vector-stage > svg {
+  max-width: none !important;
+  max-height: none !important;
+}
 .term-diagram-error {
   align-items: flex-start;
   justify-content: flex-start;

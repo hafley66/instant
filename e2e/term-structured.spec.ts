@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { resolve } from "node:path";
 
-test("projects Boop table and list regions onto xterm and expands them", async ({ page }) => {
+test.skip("projects Boop table and list regions onto xterm and expands them", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1&structured=1");
   await page.getByTestId("open-term").click();
   await expect(page.locator(".term-host")).toBeVisible();
