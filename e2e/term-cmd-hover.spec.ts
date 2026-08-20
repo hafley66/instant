@@ -146,6 +146,44 @@ test("⌘-click resolves an HTML report from the tmux cwd and opens Chromium", a
   });
 });
 
+for (const image of [
+  { extension: "PNG", tail: "context-queue.png" },
+  { extension: "SVG", tail: "context-graph.svg" },
+]) {
+  test(`⌘-click reconstructs a manually wrapped ${image.extension} path`, async ({ page }) => {
+    await openTerm(page);
+    const path = `/tmp/term-e2e/artifacts/v2-terminal-${image.tail}`;
+    await writeLines(page, [
+      "/tmp/term-e2e/artifacts/v2-terminal-",
+      `  ${image.tail}`,
+    ]);
+    const point = await page.evaluate(() => window.__term!.point(1, 8));
+    await page.keyboard.down("Meta");
+    await page.mouse.move(point!.x, point!.y);
+    await page.mouse.click(point!.x, point!.y);
+    await page.keyboard.up("Meta");
+    await expect.poll(() => page.evaluate(() => window.__cmdClickEvents?.at(-1)?.token)).toBe(path);
+    await expect(page.locator(".dv-default-tab", { hasText: image.tail })).toBeVisible();
+  });
+}
+
+test("⌘-click reconstructs a manually wrapped absolute folder without repository search", async ({ page }) => {
+  await openTerm(page);
+  const path = "/Users/chrishafley/projects/instant/.worktrees/terminal-context-queue-v2";
+  await writeLines(page, [
+    "/Users/chrishafley/projects/instant/.worktrees/terminal-",
+    "  context-queue-v2",
+  ]);
+  const point = await page.evaluate(() => window.__term!.point(1, 8));
+  await page.keyboard.down("Meta");
+  await page.mouse.click(point!.x, point!.y);
+  await page.keyboard.up("Meta");
+  await expect.poll(() => page.evaluate(() => window.__cmdClickEvents?.at(-1))).toMatchObject({
+    token: path,
+    routeId: "file",
+  });
+});
+
 test("hover card snapshot", async ({ page }) => {
   await openTerm(page);
   await writeLines(page, [LINE_UPDATE]);

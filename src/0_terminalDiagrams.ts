@@ -365,7 +365,6 @@ export class TerminalDiagramOverlay {
     ).subscribe(() => {
       this.scrolling = false;
       this.positionElements();
-      this.root.hidden = false;
       this.scheduleFrame();
     });
     this.recoverySubscription = this.recoveryEvents.pipe(
@@ -381,7 +380,6 @@ export class TerminalDiagramOverlay {
       { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.projection) {
-          this.root.hidden = true;
           this.positionElements();
           if (!this.scrolling) this.recoveryEvents.next();
         }
@@ -408,7 +406,6 @@ export class TerminalDiagramOverlay {
       this.scrolling = true;
       this.lastScrollAt = performance.now();
       this.positionElements();
-      this.root.hidden = true;
       this.scrollEvents.next();
     } else {
       this.scheduleFrame();

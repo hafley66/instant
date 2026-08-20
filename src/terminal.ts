@@ -10,6 +10,8 @@ import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
 import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
+import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
+import { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { TerminalWheelRouter } from "./0_terminalWheel";
 import { runMatchingCommand } from "./keymap";
 import {
@@ -85,6 +87,8 @@ export type Tab = {
   structured?: TerminalStructuredOverlay;
   turnVisibility?: TerminalTurnVisibilityV2;
   viewport?: XtermViewportAdapter;
+  lineAnchors?: TerminalLineAnchors;
+  contextQueue?: TerminalContextQueue;
   cmdClickGesture?: CmdClickGestureTracker;
   wheel?: TerminalWheelRouter;
   harness: HarnessObservation;
@@ -433,6 +437,9 @@ function wordAt(id: string, clientX: number, clientY: number): string {
   const col = Math.max(0, Math.min(t.term.cols - 1, Math.floor((clientX - rect.left) / cellW)));
   const buf = t.term.buffer.active;
   const bufferRow = buf.viewportY + row;
+  const softRows = softPathRows(id, bufferRow);
+  const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
+  if (soft && col >= soft.range.startCol && col < soft.range.endCol) return soft.text;
   const wrapped = wrappedLineRows(id, bufferRow);
   if (!wrapped) return "";
   const joined = joinWrappedRows(wrapped.rows);
@@ -470,6 +477,8 @@ export function openTab(
     stale?.overlay?.dispose();
     stale?.diagrams?.dispose();
     stale?.structured?.dispose();
+    stale?.contextQueue?.dispose();
+    stale?.lineAnchors?.dispose();
     stale?.turnVisibility?.dispose();
     stale?.viewport?.dispose();
     stale?.cmdClickGesture?.dispose();
@@ -602,6 +611,7 @@ export function openTab(
     () => boopTurnsForTab(id),
     tmuxPane,
   );
+  const lineAnchors = graphics || !viewport ? undefined : new TerminalLineAnchors(term, viewport);
   const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
     term,
     el,
@@ -612,6 +622,13 @@ export function openTab(
   const structured = graphics || !turnVisibility || !structuredOverlaysEnabled
     ? undefined
     : new TerminalStructuredOverlay(term, el, turnVisibility);
+  const contextQueue = graphics || !turnVisibility || !lineAnchors ? undefined : new TerminalContextQueue(
+    term,
+    el,
+    turnVisibility,
+    lineAnchors,
+    (text) => { void invoke(commands.pty.writePty, { id, data: text }).catch(() => {}); term.focus(); },
+  );
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";
@@ -620,7 +637,7 @@ export function openTab(
     (up, lines) => { void invoke(commands.pty.scrollSession, { name: tmuxTarget ?? name, up, lines }).catch(() => {}); },
     () => diagrams?.viewportScrolled(),
   );
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, turnVisibility, cmdClickGesture, wheel, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, harness, outputTail: "" });
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -1105,6 +1122,8 @@ export function onTermClosed(id: string) {
   t.overlay?.dispose();
   t.diagrams?.dispose();
   t.structured?.dispose();
+  t.contextQueue?.dispose();
+  t.lineAnchors?.dispose();
   t.turnVisibility?.dispose();
   t.viewport?.dispose();
   t.cmdClickGesture?.dispose();
