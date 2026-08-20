@@ -71,8 +71,18 @@ export function openPreviewPanel(
 
 export async function openPathInInstant(path: string, line?: number): Promise<void> {
   const extension = path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
-  if (!line && IMAGE_EXTS.has(extension)) {
-    openPreviewPanel(path);
+  // Command-click resolution has already located relative files. An
+  // extension-bearing leaf can route immediately, avoiding list_dir(path),
+  // which enumerates a directory merely to learn that a file is ENOTDIR.
+  // This covers images, PDF, D2, Markdown, HTML, and ordinary source files.
+  if (extension) {
+    const browserUrl = !line && browserFileUrl(path, getHomeDir());
+    if (browserUrl) {
+      const { openBrowserTab } = await import("./browser");
+      await openBrowserTab(browserUrl);
+      return;
+    }
+    openPreviewPanel(path, line);
     return;
   }
   try {
