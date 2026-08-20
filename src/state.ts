@@ -69,6 +69,7 @@ export interface CapturePerms {
   screen_recording: boolean;
   accessibility: boolean;
   tap_active: boolean;
+  tap_expected: boolean;
 }
 // Mirror of capture::CaptureStatus — the outcome of the last capture gesture.
 export interface CaptureStatus {

@@ -1066,6 +1066,44 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   white-space: pre-wrap;
   font: 11px/1.3 Menlo, Monaco, monospace;
 }
+.term-structured-overlays {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+.term-structured-overlay {
+  position: absolute;
+  border: 1px solid #5c9f72;
+  color: #b9f6ca;
+  background: color-mix(in srgb, var(--term-bg) 92%, #235c35);
+  font: 12px Menlo, Monaco, monospace;
+  text-align: left;
+  padding: 4px 10px;
+  pointer-events: auto;
+}
+.term-structured-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: #0008;
+}
+.term-structured-modal section {
+  max-width: min(900px, 90vw);
+  max-height: 80vh;
+  overflow: auto;
+  color: var(--panel-fg);
+  background: var(--panel-bg);
+  border: 2px ridge var(--frame-dark);
+  padding: 8px;
+}
+.term-structured-modal header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.term-structured-modal table { border-collapse: collapse; min-width: 480px; }
+.term-structured-modal th, .term-structured-modal td { border: 2px ridge var(--frame-dark); padding: 6px 10px; text-align: left; }
+.term-structured-modal ul { margin: 0; padding: 8px 28px; }
 /* Panels now live in dock zones (see .panel / .zone); visibility is the active
    tab's .hidden toggle, not a body[data-panel] swap. */
 .spy-spacer {

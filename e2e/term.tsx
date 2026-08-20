@@ -35,16 +35,51 @@ import { wireContextMenu } from "../src/ctxmenu";
 import { ctxItemsFor, setLastCtxPoint } from "../src/chrome";
 import { closeActiveTab, reopenLastTab } from "../src/tabs";
 import { openPreviewPanel } from "../src/preview";
+import { cmdClickRouter, wireDomCmdClick } from "../src/clickrules";
 
 // Mock list_dir with a small fixture tree so the sidebar's file explorer has
 // rows to render. Other commands (open_session/resize_pty/write_pty) resolve
 // undefined, which the app tolerates in e2e (all invokes are .catch'd).
 type E2eWindow = Window & { __instantE2eNativeResults?: Record<string, unknown> };
+const cmdClickEvents: unknown[] = [];
+(window as Window & { __cmdClickEvents?: unknown[] }).__cmdClickEvents = cmdClickEvents;
+(window as Window & { __viewportChanges?: unknown[] }).__viewportChanges = [];
+const cmdClickReadout = document.createElement("pre");
+cmdClickReadout.dataset.testid = "cmd-click-event-readout";
+Object.assign(cmdClickReadout.style, {
+  position: "fixed", right: "12px", bottom: "12px", zIndex: "1001", margin: "0",
+  padding: "8px 12px", color: "#b8dfff", background: "#101418", border: "1px solid #62a4d4",
+  font: "12px monospace", pointerEvents: "none",
+});
+const domEvents: string[] = [];
+const paintCmdClickEvents = (route = "waiting") => {
+  cmdClickReadout.textContent = [
+    `PREVIOUS DOM EVENTS SEEN: ${domEvents.join(" -> ") || "none"}`,
+    "ACTIVATION EDGE: pointerup",
+    `ROUTE: ${route}`,
+  ].join("\n");
+};
+paintCmdClickEvents();
+document.body.appendChild(cmdClickReadout);
+cmdClickRouter.gestures.subscribe((event) => {
+  domEvents.push(event.type);
+  paintCmdClickEvents();
+});
+cmdClickRouter.routed.subscribe((event) => {
+  cmdClickEvents.push(event);
+  paintCmdClickEvents(event.routeId ?? "unhandled");
+});
 const NOW = Date.now();
+const turnLabel = (index: number) => index < 26
+  ? String.fromCharCode(65 + index)
+  : `A${String.fromCharCode(65 + index - 26)}`;
 const E2E_PARAMS = new URLSearchParams(window.location.search);
 const E2E_HARNESS = E2E_PARAMS.get("harness") === "kimi" ? "kimi" : "codex";
 const E2E_WHEEL_HARNESS = E2E_PARAMS.get("wheelHarness");
 const E2E_NO_HARNESS = E2E_PARAMS.has("noHarness");
+const E2E_EDGE_TURNS = E2E_PARAMS.has("edgeTurns");
+const E2E_THREE_TURNS = E2E_PARAMS.get("edgeTurns") === "3";
+const E2E_STRUCTURED = E2E_PARAMS.has("structured");
 const E2E_VIEWER = E2E_PARAMS.has("viewer");
 const E2E_VIEWER_LANE = E2E_PARAMS.get("lane") ?? "e2e-viewer";
 const E2E_VIEWER_PANE = E2E_PARAMS.get("pane") ?? "%1";
@@ -73,7 +108,71 @@ const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`]);
 const REPORT = `${ROOT}/.worktrees/terminal-inline-diagrams/playwright-report/index.html`;
 DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
 
+const BOOP_TURNS = E2E_STRUCTURED ? [{
+  session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 301,
+  ts: NOW, role: "assistant",
+  said: [
+    "STRUCTURED TURN START",
+    "| Item | Visibility |",
+    "| --- | --- |",
+    "| alpha | visible |",
+    "| beta | hidden |",
+    "- first visible item",
+    "- second visible item",
+    "STRUCTURED TURN END",
+  ].join("\n"),
+}] : E2E_THREE_TURNS ? [
+  {
+    session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 201,
+    ts: NOW - 3000, role: "assistant",
+    said: ["TOP THREE HIDDEN", "TOP THREE VISIBLE", ...Array.from({ length: 20 }, (_, index) => `TOP THREE BODY ${index}`)].join("\n"),
+  },
+  {
+    session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 202,
+    ts: NOW - 2000, role: "assistant",
+    said: ["MIDDLE START", ...Array.from({ length: 8 }, (_, index) => `MIDDLE BODY ${index}`), "MIDDLE END"].join("\n"),
+  },
+  {
+    session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 203,
+    ts: NOW - 1000, role: "assistant",
+    said: ["BOTTOM THREE START", ...Array.from({ length: 20 }, (_, index) => `BOTTOM THREE BODY ${index}`), "BOTTOM THREE HIDDEN"].join("\n"),
+  },
+] : E2E_EDGE_TURNS ? [
+  {
+    session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 101,
+    ts: NOW - 2000, role: "assistant",
+    said: ["TOP HIDDEN", "TOP VISIBLE", ...Array.from({ length: 30 }, (_, index) => `TOP BODY ${index}`)].join("\n"),
+  },
+  {
+    session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 102,
+    ts: NOW - 1000, role: "assistant",
+    said: ["BOTTOM START", ...Array.from({ length: 30 }, (_, index) => `BOTTOM BODY ${index}`), "BOTTOM HIDDEN"].join("\n"),
+  },
+] : [...Array.from({ length: 52 }, (_, index) => ({
+  session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: index + 1,
+  ts: NOW - (52 - index) * 1000, role: "assistant", said: turnLabel(index),
+})), {
+  session: `e2e-${E2E_HARNESS}-1`, harness: E2E_HARNESS, turn: 53,
+  ts: NOW, role: "assistant",
+  said: [
+    "```d2",
+    "PTY -> tmux",
+    "tmux -> xterm",
+    'xterm -> "D2 renderer"',
+    "```",
+    "```mermaid",
+    "flowchart LR",
+    "PTY --> tmux",
+    "tmux --> xterm",
+    "xterm --> Mermaid",
+    "```",
+  ].join("\n"),
+}];
+
 (window as E2eWindow).__instantE2eNativeResults = {
+  boop_mux_capture: "",
+  boop_favorites: [],
+  boop_favorite_toggle: [],
   list_sessions: [],
   open_session: (args: Record<string, unknown> | undefined) => {
     if (args?.attachOnly === true) {
@@ -180,6 +279,7 @@ DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
       locator: "codex:/tmp/term-e2e/e2e-codex-1.jsonl#L7",
     },
   ],
+  boop_turns: BOOP_TURNS,
   read_text: "# Terminal\n\n## Sidebar UX\n\nA heading target.\n",
 };
 
@@ -229,12 +329,14 @@ type TermHooks = {
   resize: (cols: number, rows: number) => void;
   dims: () => { cols: number; rows: number } | null;
   scroll: (lines: number) => void;
+  selection: () => string;
 };
 (window as Window & { __term?: TermHooks }).__term = {
   write: (data) => writeTerm(sessionId("e2e"), data),
   point: (row, col) => termCellPoint(sessionId("e2e"), row, col),
   resize: (cols, rows) => resizeTerm(sessionId("e2e"), cols, rows),
   dims: () => termDims(sessionId("e2e")),
+  selection: () => tabs.get(sessionId("e2e"))?.term.getSelection() ?? "",
   scroll: (lines) => {
     const tab = tabs.get(sessionId("e2e"));
     if (tab) tab.term.scrollToLine(Math.max(0, tab.term.buffer.active.viewportY + lines));
@@ -252,6 +354,49 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = 
       [sid]: { open: true, width: 460 },
     },
   });
+  const events: unknown[] = [];
+  (window as Window & { __visibleTurnEvents?: unknown[] }).__visibleTurnEvents = events;
+  const readout = document.createElement("pre");
+  readout.dataset.testid = "visible-turn-readout";
+  Object.assign(readout.style, {
+    position: "fixed", right: "12px", top: "8px", zIndex: "1000", margin: "0",
+    padding: "8px 12px", color: "#b8ffb8", background: "#101810", border: "1px solid #62d462",
+    font: "12px monospace", pointerEvents: "none",
+  });
+  readout.textContent = "Boop visible turns: scanning";
+  document.body.appendChild(readout);
+  tabs.get(sid)?.turnVisibility?.changes.subscribe((event) => {
+    events.push(event);
+    const letter = (turn: { said: string }) => turn.said;
+    const visible = new Set(event.visible.map((turn) => turn.id));
+    const all = BOOP_TURNS.map((turn) => ({ id: `${turn.session}:${turn.turn}`, said: turn.said }));
+    const tab = tabs.get(sid);
+    const buffer = tab?.term.buffer.active;
+    const xtermRows = tab && buffer
+      ? Array.from({ length: tab.term.rows }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "")
+      : [];
+    if (E2E_EDGE_TURNS) {
+      const clippedAbove = E2E_THREE_TURNS ? "TOP THREE HIDDEN" : "TOP HIDDEN";
+      const clippedBelow = E2E_THREE_TURNS ? "BOTTOM THREE HIDDEN" : "BOTTOM HIDDEN";
+      readout.textContent = [
+        `XTERM TOP ROW: ${xtermRows[0] || "blank"}`,
+        `XTERM BOTTOM ROW: ${xtermRows.at(-1) || "blank"}`,
+        `CLIPPED ABOVE, BOOP ONLY: ${clippedAbove}`,
+        `CLIPPED BELOW, BOOP ONLY: ${clippedBelow}`,
+        `PROJECTED TURN IDS: ${event.visible.map((turn) => turn.id).join(" ")}`,
+      ].join("\n");
+      return;
+    }
+    readout.textContent = [
+      `VISIBLE XTERM/TMUX: ${event.visible.map(letter).join(" ") || "none"}`,
+      `NOT ON SCREEN, IN BOOP DB: ${all.filter((turn) => !visible.has(turn.id)).map(letter).join(" ") || "none"}`,
+      `ENTERED: ${event.entered.map(letter).join(" ") || "none"}`,
+      `EXITED: ${event.exited.map(letter).join(" ") || "none"}`,
+    ].join("\n");
+  });
+  tabs.get(sid)?.viewport?.changes.subscribe((event) => {
+    (window as Window & { __viewportChanges?: unknown[] }).__viewportChanges?.push(event);
+  });
 };
 document.querySelector<HTMLButtonElement>("[data-testid=open-viewer]")!.onclick = () => {
   openTab(E2E_VIEWER_LANE, { viewer: true, tmuxTarget: E2E_VIEWER_PANE });
@@ -264,6 +409,7 @@ mountReactDock(document.getElementById("dock")!);
 initRail();
 document.addEventListener("contextmenu", (event) => setLastCtxPoint(event.clientX, event.clientY), true);
 wireContextMenu(ctxItemsFor);
+wireDomCmdClick();
 
 // A reload is the same persisted-open-tab replay that the desktop composition
 // root performs. This fixture keeps the replay explicit so the lifecycle test

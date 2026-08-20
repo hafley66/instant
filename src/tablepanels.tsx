@@ -10,6 +10,7 @@ import { TreeTable, type TreeColumn } from "./treetable";
 import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import type { SessionSort, SessionSortKey, Fav } from "./state";
 import type { HarnessId } from "./harnessTypes";
+import type { BoopFavorite } from "./00a_terminalIntersection";
 
 // ---- tmux v2 ----
 export interface TmuxRow {
@@ -611,6 +612,7 @@ export interface ActCapturePerms {
   screen_recording: boolean;
   accessibility: boolean;
   tap_active: boolean;
+  tap_expected: boolean;
 }
 export interface ActCaptureStatus {
   kind: string;
@@ -717,7 +719,7 @@ function ActStatusBar() {
       </span>,
     );
   }
-  if (perms && !perms.tap_active) {
+  if (perms?.tap_expected && !perms.tap_active) {
     banners.push(
       <span key="tap" className="act-warn" title="Grant Accessibility / Input Monitoring to instant in System Settings → Privacy & Security, then relaunch.">
         ⚠ Input access off — no gestures captured
@@ -856,7 +858,7 @@ export function ActivityPanelV2() {
 export interface FavTreeRow {
   id: string;
   kind: "session" | "turn";
-  editor: HarnessId;
+  editor: HarnessId | "boop";
   label: string; // session: cwd basename / short id · turn: role
   starredAt: number; // session: max(created) · turn: this fav's `created`
   // session
@@ -868,6 +870,7 @@ export interface FavTreeRow {
   role?: string;
   preview?: string;
   fav?: Fav; // the underlying fav (copy/locate/remove payload)
+  boopFav?: BoopFavorite;
   children?: FavTreeRow[];
 }
 
@@ -880,6 +883,7 @@ export interface FavBridge {
   copy: (f: Fav) => void; // full text → clipboard
   locate: (f: Fav) => void; // reveal the source (jsonl line / db id)
   remove: (f: Fav) => void;
+  removeBoop: (f: BoopFavorite) => void;
 }
 let favBridge: FavBridge | null = null;
 export function setFavoritesPanel(b: FavBridge) {
@@ -941,7 +945,8 @@ function FavActionsCell({ row }: { row: FavTreeRow }) {
       </span>
     );
   }
-  const f = row.fav!;
+  const f = row.fav;
+  const boop = row.boopFav;
   return (
     <span className="wt-actions">
       <button
@@ -949,12 +954,13 @@ function FavActionsCell({ row }: { row: FavTreeRow }) {
         title="copy full text"
         onClick={(e) => {
           e.stopPropagation();
-          favBridge?.copy(f);
+          if (f) favBridge?.copy(f);
+          else if (boop) navigator.clipboard.writeText(boop.body).catch(() => {});
         }}
       >
         copy
       </button>
-      <button
+      {f && <button
         className="wt-act"
         title="reveal source"
         onClick={(e) => {
@@ -963,13 +969,14 @@ function FavActionsCell({ row }: { row: FavTreeRow }) {
         }}
       >
         locate
-      </button>
+      </button>}
       <button
         className="wt-act"
         title="remove favorite"
         onClick={(e) => {
           e.stopPropagation();
-          favBridge?.remove(f);
+          if (f) favBridge?.remove(f);
+          else if (boop) favBridge?.removeBoop(boop);
         }}
       >
         ×

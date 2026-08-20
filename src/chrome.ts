@@ -9,18 +9,12 @@ import { store, type AppState, type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
-import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, relTime } from "./core";
+import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
 import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
-  tabTurns,
-  searchTurns,
-  ledgerQuery,
-  isTurnFav,
-  favoriteTurn,
-  unfavoriteTurn,
-  turnCwd,
-  warmTurns,
+  favoriteBoopTurn,
+  isBoopTurnFav,
 } from "./favorites";
 import { inScope, toggleScope } from "./sprefa";
 import { openTabAtPwd } from "./tabs";
@@ -334,33 +328,26 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
     const diagram = pointedTab?.[1].diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY)
       ?? (id ? tabs.get(id)?.diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY) : null);
     const meta = id ? tabMetaById(id) : null;
-    const turns = id ? tabTurns.get(id) ?? [] : [];
-    const matches = id && meta ? searchTurns(turns, ledgerQuery(id, lastCtxY)) : [];
+    const projectedTurn = id
+      ? tabs.get(id)?.turnVisibility?.turnAtClientPoint(lastCtxX, lastCtxY) ?? null
+      : null;
     const turnItems: CtxItem[] = [];
     const noop = () => {};
-    if (matches.length && meta) {
+    if (projectedTurn) {
+      const preview = projectedTurn.said.replace(/\s+/g, " ").trim();
       turnItems.push({
-        label: `${matches.length} turn match${matches.length > 1 ? "es" : ""} (★ to save)`,
+        label: `Boop ${projectedTurn.session}:${projectedTurn.turn} · ${projectedTurn.role}`,
         action: noop,
         disabled: true,
       });
-      for (const m of matches) {
-        const p = m.preview.slice(0, 44);
-        const star = isTurnFav(m) ? "✓" : "★";
-        turnItems.push({
-          label: `${star} ${m.role} · ${relTime(m.ts)} · ${p}${m.preview.length > 44 ? "…" : ""}`,
-          action: () =>
-            void (isTurnFav(m)
-              ? unfavoriteTurn(m)
-              : favoriteTurn(m, turnCwd.get(`${m.editor}:${m.session_id}`) ?? meta.cwd)),
-        });
-      }
+      turnItems.push({
+        label: `${isBoopTurnFav(projectedTurn) ? "✓" : "★"} ${preview.slice(0, 60)}${preview.length > 60 ? "…" : ""}`,
+        action: () => void favoriteBoopTurn(projectedTurn),
+      });
       turnItems.push({ sep: true });
     } else if (meta) {
-      // No match — cache may be cold (warm for next time) or no ledger text hit.
-      if (id) void warmTurns(id);
       turnItems.push({
-        label: turns.length ? "no turn matches selection" : "no AI session for this tab",
+        label: "no Boop turn at pointer",
         action: noop,
         disabled: true,
       });

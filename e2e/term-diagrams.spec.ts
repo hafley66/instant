@@ -6,13 +6,30 @@ type TermHooks = {
   resize: (cols: number, rows: number) => void;
   dims: () => { cols: number; rows: number } | null;
   scroll: (lines: number) => void;
+  selection: () => string;
 };
 
 declare global {
   interface Window {
     __term?: TermHooks;
+    __visibleTurnEvents?: Array<{
+      visible: Array<{ id: string }>;
+      entered: Array<{ id: string }>;
+      exited: Array<{ id: string }>;
+    }>;
+    __viewportChanges?: Array<{ kind: string; cols: number; rows: number; viewportY: number; bufferLength: number }>;
   }
 }
+
+test("emits xterm geometry when its row and column count changes", async ({ page }) => {
+  await openTerminal(page);
+  await page.evaluate(() => window.__term!.resize(70, 10));
+  await expect.poll(() => page.evaluate(() => window.__viewportChanges?.at(-1))).toMatchObject({
+    kind: "resize",
+    cols: 70,
+    rows: 10,
+  });
+});
 
 const output = (harness: "Codex" | "Claude Code") => [
   `${harness} response:`,
@@ -62,6 +79,109 @@ async function writeFixture(page: Page, text: string) {
     window.__term!.write(`\x1b[2J\x1b[H${"\r\n".repeat(30)}${fixture}`);
   }, text);
 }
+
+test("emits Boop turn ids as terminal viewport contents change", async ({ page }, testInfo) => {
+  await openTerminal(page);
+  const rows = (await page.evaluate(() => window.__term!.dims()))!.rows;
+  await page.evaluate(({ count }) => {
+    const label = (index: number) => index < 26
+      ? String.fromCharCode(65 + index)
+      : `A${String.fromCharCode(65 + index - 26)}`;
+    window.__term!.write(`\x1b[2J\x1b[H${Array.from({ length: count }, (_, index) =>
+      `⏺ ${label(index)}`
+    ).join("\r\n")}`);
+  }, { count: rows });
+
+  await expect.poll(() => page.evaluate(() => window.__visibleTurnEvents?.at(-1)?.visible.map((turn) => turn.id)))
+    .toEqual(Array.from({ length: rows }, (_, index) => `e2e-codex-1:${index + 1}`));
+
+  await testInfo.attach("boop-turn-11-visible", {
+    body: await page.locator(".term-host").screenshot(),
+    contentType: "image/png",
+  });
+
+  await page.evaluate(({ count }) => {
+    const label = (index: number) => index < 26
+      ? String.fromCharCode(65 + index)
+      : `A${String.fromCharCode(65 + index - 26)}`;
+    window.__term!.write(`\x1b[2J\x1b[H${Array.from({ length: count }, (_, index) =>
+      `⏺ ${label(index + 10)}`
+    ).join("\r\n")}`);
+  }, { count: rows });
+
+  await expect.poll(() => page.evaluate(() => window.__visibleTurnEvents?.at(-1))).toMatchObject({
+    visible: Array.from({ length: rows }, (_, index) => ({ id: `e2e-codex-1:${index + 11}` })),
+    entered: Array.from({ length: 10 }, (_, index) => ({ id: `e2e-codex-1:${rows + index + 1}` })),
+    exited: Array.from({ length: 10 }, (_, index) => ({ id: `e2e-codex-1:${index + 1}` })),
+  });
+
+  await testInfo.attach("boop-turn-12-visible", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+  await page.screenshot({ path: "artifacts/boop-turn-visibility-v2.png", fullPage: true });
+});
+
+test("right-click resolves partially visible turns at both viewport edges", async ({ page }, testInfo) => {
+  await openTerminal(page, "e2e=1&edgeTurns=1");
+  const rows = (await page.evaluate(() => window.__term!.dims()))!.rows;
+  const topRows = Math.max(2, Math.floor(rows / 2));
+  const screen = [
+    "TOP VISIBLE",
+    ...Array.from({ length: topRows - 1 }, (_, index) => `TOP BODY ${index}`),
+    "BOTTOM START",
+    ...Array.from({ length: rows - topRows - 1 }, (_, index) => `BOTTOM BODY ${index}`),
+  ];
+  await page.evaluate((lines) => window.__term!.write(`\x1b[2J\x1b[H${lines.join("\r\n")}`), screen);
+  await expect.poll(() => page.evaluate(() => window.__visibleTurnEvents?.at(-1)?.visible.map((turn) => turn.id)))
+    .toEqual(["e2e-codex-1:101", "e2e-codex-1:102"]);
+
+  const top = await page.evaluate(() => window.__term!.point(0, 2));
+  await page.mouse.click(top!.x, top!.y, { button: "right" });
+  await expect(page.locator(".ctx-menu")).toContainText("Boop e2e-codex-1:101 · assistant");
+  await page.screenshot({ path: "artifacts/boop-turn-context-top-partial.png", fullPage: true });
+  await testInfo.attach("top-partial-turn-context", { body: await page.screenshot(), contentType: "image/png" });
+
+  await page.keyboard.press("Escape");
+  const bottom = await page.evaluate((row) => window.__term!.point(row, 2), rows - 1);
+  await page.mouse.click(bottom!.x, bottom!.y, { button: "right" });
+  await expect(page.locator(".ctx-menu")).toContainText("Boop e2e-codex-1:102 · assistant");
+  await page.screenshot({ path: "artifacts/boop-turn-context-bottom-partial.png", fullPage: true });
+  await testInfo.attach("bottom-partial-turn-context", { body: await page.screenshot(), contentType: "image/png" });
+});
+
+test("right-click distinguishes partial edge turns around a complete middle turn", async ({ page }, testInfo) => {
+  await openTerminal(page, "e2e=1&edgeTurns=3");
+  const rows = (await page.evaluate(() => window.__term!.dims()))!.rows;
+  const middle = ["MIDDLE START", ...Array.from({ length: 8 }, (_, index) => `MIDDLE BODY ${index}`), "MIDDLE END"];
+  const remaining = rows - middle.length;
+  const topCount = Math.floor(remaining / 2);
+  const bottomCount = remaining - topCount;
+  const screen = [
+    "TOP THREE VISIBLE",
+    ...Array.from({ length: topCount - 1 }, (_, index) => `TOP THREE BODY ${index}`),
+    ...middle,
+    "BOTTOM THREE START",
+    ...Array.from({ length: bottomCount - 1 }, (_, index) => `BOTTOM THREE BODY ${index}`),
+  ];
+  await page.evaluate((lines) => window.__term!.write(`\x1b[2J\x1b[H${lines.join("\r\n")}`), screen);
+  await expect.poll(() => page.evaluate(() => window.__visibleTurnEvents?.at(-1)?.visible.map((turn) => turn.id)))
+    .toEqual(["e2e-codex-1:201", "e2e-codex-1:202", "e2e-codex-1:203"]);
+
+  const cases = [
+    { row: 0, turn: 201, receipt: "three-turn-top-partial" },
+    { row: topCount + 4, turn: 202, receipt: "three-turn-middle-complete" },
+    { row: rows - 1, turn: 203, receipt: "three-turn-bottom-partial" },
+  ];
+  for (const entry of cases) {
+    const point = await page.evaluate((row) => window.__term!.point(row, 2), entry.row);
+    await page.mouse.click(point!.x, point!.y, { button: "right" });
+    await expect(page.locator(".ctx-menu")).toContainText(`Boop e2e-codex-1:${entry.turn} · assistant`);
+    await page.screenshot({ path: `artifacts/${entry.receipt}.png`, fullPage: true });
+    await testInfo.attach(entry.receipt, { body: await page.screenshot(), contentType: "image/png" });
+    await page.keyboard.press("Escape");
+  }
+});
 
 async function settleScroll(page: Page) {
   await page.evaluate(async () => {
@@ -140,7 +260,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     });
   });
 
-  test(`matches ${harness} viewport lines to ledger Mermaid and D2`, async ({ page }) => {
+  test(`matches ${harness} viewport lines to Boop Mermaid and D2 regions`, async ({ page }) => {
     await openTerminal(page);
     await writeFixture(page, renderedCliOutput(harness));
     await settleScroll(page);
@@ -197,7 +317,7 @@ test("wheel routes to tmux copy-mode without moving xterm scrollback", async ({ 
   await expect(diagram).toContainText("Mermaid");
 });
 
-test("renders explicit terminal fences while the AI ledger has no matching visible message", async ({ page }) => {
+test("renders explicit terminal fences while Boop has no matching visible turn", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
     const target = window as Window & {
@@ -227,7 +347,7 @@ test("renders explicit terminal fences while the AI ledger has no matching visib
   await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
 });
 
-test("renders a stripped Claude timeline while the AI ledger has no matching visible message", async ({ page }) => {
+test("renders a stripped Claude timeline while Boop has no matching visible turn", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
     const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown> };
@@ -321,26 +441,24 @@ test("does not infer D2 from Rust return types and arrow comments", async ({ pag
   await expect(page.locator(".term-diagram")).toHaveCount(0);
 });
 
-test("waits for a slow AI ledger before rendering fence-stripped Mermaid", async ({ page }) => {
+test("waits for slow Boop turns before rendering fence-stripped Mermaid", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1");
   await page.evaluate(() => {
     const target = window as Window & {
       __instantE2eNativeResults?: Record<string, unknown>;
-      __resolveDiagramLedger?: () => void;
+      __resolveBoopTurns?: () => void;
     };
     if (target.__instantE2eNativeResults) {
-      let resolveLedger!: (messages: unknown[]) => void;
-      const pending = new Promise<unknown[]>((resolve) => { resolveLedger = resolve; });
-      target.__instantE2eNativeResults.read_ai_messages = () => pending;
-      target.__resolveDiagramLedger = () => resolveLedger([{
-          editor: "codex",
-          session_id: "e2e-codex-1",
-          id: "slow-ledger-diagram",
-          seq: 1,
+      let resolveTurns!: (turns: unknown[]) => void;
+      const pending = new Promise<unknown[]>((resolve) => { resolveTurns = resolve; });
+      target.__instantE2eNativeResults.boop_turns = () => pending;
+      target.__resolveBoopTurns = () => resolveTurns([{
+          session: "e2e-codex-1",
+          harness: "codex",
+          turn: 900,
           role: "assistant",
           ts: Date.now(),
-          preview: "one round, repeated 2580 times",
-          text: [
+          said: [
             "```mermaid",
             "flowchart TB",
             "  subgraph round[one round, repeated 2580 times]",
@@ -348,7 +466,6 @@ test("waits for a slow AI ledger before rendering fence-stripped Mermaid", async
             "  end",
             "```",
           ].join("\n"),
-          locator: "codex:/tmp/slow-ledger.jsonl#L1",
         }]);
     }
   });
@@ -366,13 +483,13 @@ test("waits for a slow AI ledger before rendering fence-stripped Mermaid", async
   await page.waitForTimeout(500);
   await expect(mermaid).toHaveCount(0);
   await page.evaluate(() => {
-    (window as Window & { __resolveDiagramLedger?: () => void }).__resolveDiagramLedger?.();
+    (window as Window & { __resolveBoopTurns?: () => void }).__resolveBoopTurns?.();
   });
   await expect(mermaid.locator("svg")).toBeVisible({ timeout: 4000 });
   await expect(mermaid).toContainText("one round, repeated 2580 times");
 });
 
-test("keeps later scrolled prose outside the ledger Mermaid source", async ({ page }) => {
+test("keeps later scrolled prose outside the Boop Mermaid source", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, scrolledMermaidOutput);
   await settleScroll(page);
@@ -384,13 +501,10 @@ test("keeps later scrolled prose outside the ledger Mermaid source", async ({ pa
   await expect(mermaid).not.toHaveClass(/term-diagram-error/);
 });
 
-test("renders full ledger diagrams when the viewport contains only one source line", async ({ page }) => {
+test("renders full Boop diagrams when the viewport contains only one source line", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, "tmux -> xterm\r\nPTY --> tmux");
   await settleScroll(page);
-
-  await page.waitForTimeout(500);
-  expect(await page.locator(".term-diagram").count()).toBe(0);
 
   const d2 = page.locator('.term-diagram[data-language="d2"]');
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
@@ -398,7 +512,7 @@ test("renders full ledger diagrams when the viewport contains only one source li
   await expect(mermaid).toContainText("Mermaid");
 });
 
-test("covers physical terminal rows used by wrapped ledger source lines", async ({ page }) => {
+test("clips projected source rows when wrapped Boop lines reach the viewport bottom", async ({ page }) => {
   await openTerminal(page);
   await page.evaluate(() => window.__term!.resize(12, 24));
   await writeFixture(page, renderedCliOutput("Codex"));
@@ -406,7 +520,8 @@ test("covers physical terminal rows used by wrapped ledger source lines", async 
 
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
   await expect(mermaid).toContainText("Mermaid");
-  await expect(mermaid).toHaveAttribute("data-source-rows", "8");
+  await expect(mermaid).toHaveAttribute("data-source-rows", "2");
+  await expect(mermaid).toHaveAttribute("data-diagram-locator", "boop:e2e-codex-1:53");
 });
 
 test("does not repaint the committed diagram during PTY writes", async ({ page }) => {
@@ -437,6 +552,7 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
 
   expect(result).toEqual({ samples: Array(30).fill(true), mutations: 0 });
 
+  await page.screenshot({ path: "artifacts/v2-overlay-before-scroll.png", fullPage: true });
   const tether = await page.evaluate(async () => {
     const before = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
     const beforeKey = before.dataset.diagramKey;
@@ -459,6 +575,7 @@ test("does not repaint the committed diagram during PTY writes", async ({ page }
       sameAfterDebouncedScan: afterDebounce === before,
     };
   });
+  await page.screenshot({ path: "artifacts/v2-overlay-after-scroll.png", fullPage: true });
   expect(new Set(tether.keys).size).toBe(1);
   expect(tether).toEqual({
     movedImmediately: true,

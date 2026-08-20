@@ -9,6 +9,7 @@ import { commands, invoke } from "./generated/native";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
+import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
 import { TerminalWheelRouter } from "./0_terminalWheel";
 import { runMatchingCommand } from "./keymap";
 import {
@@ -31,7 +32,7 @@ import {
   activePanelChangedTime,
   termPanelId,
 } from "./reactdock";
-import { dispatchClick, clickIntent, resolveReference } from "./clickrules";
+import { cmdClickRouter, dispatchClick, clickIntent, resolveReference } from "./clickrules";
 import { tokenAtColumn } from "./termTokens";
 import {
   joinWrappedRows,
@@ -55,7 +56,10 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { refreshTurns, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { boopTurnsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
+import { NativeTmuxPane, XtermViewportAdapter } from "./00a_terminalIntersection";
+import { CmdClickGestureTracker } from "./0_clickRouter";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
@@ -78,6 +82,10 @@ export type Tab = {
   graphics?: boolean;
   overlay?: GraphicsOverlay;
   diagrams?: TerminalDiagramOverlay;
+  structured?: TerminalStructuredOverlay;
+  turnVisibility?: TerminalTurnVisibilityV2;
+  viewport?: XtermViewportAdapter;
+  cmdClickGesture?: CmdClickGestureTracker;
   wheel?: TerminalWheelRouter;
   harness: HarnessObservation;
   outputTail: string;
@@ -459,6 +467,10 @@ export function openTab(
     const stale = tabs.get(id);
     stale?.overlay?.dispose();
     stale?.diagrams?.dispose();
+    stale?.structured?.dispose();
+    stale?.turnVisibility?.dispose();
+    stale?.viewport?.dispose();
+    stale?.cmdClickGesture?.dispose();
     stale?.wheel?.dispose();
     stale?.term.dispose();
     stale?.el.remove();
@@ -580,20 +592,31 @@ export function openTab(
   const live = store.get().sessions.find((s) => s.name === name);
   const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
+  const tmuxTarget = opts.tmuxTarget;
+  const viewport = graphics ? undefined : new XtermViewportAdapter(term);
+  const tmuxPane = graphics ? undefined : new NativeTmuxPane(tmuxTarget ?? name);
+  const turnVisibility = graphics || !viewport ? undefined : new TerminalTurnVisibilityV2(
+    viewport,
+    () => boopTurnsForTab(id),
+    tmuxPane,
+  );
   const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
     term,
     el,
     undefined,
-    () => refreshTurns(id),
+    turnVisibility,
     () => store.get().inlineDiagrams,
   );
-  const tmuxTarget = opts.tmuxTarget;
+  const structured = graphics || !turnVisibility ? undefined : new TerminalStructuredOverlay(term, el, turnVisibility);
+  const cmdClickGesture = new CmdClickGestureTracker();
+  cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
+  el.dataset.cmdClickGesture = "pointerup";
   const wheel = graphics ? undefined : new TerminalWheelRouter(
     term,
     (up, lines) => { void invoke(commands.pty.scrollSession, { name: tmuxTarget ?? name, up, lines }).catch(() => {}); },
     () => diagrams?.viewportScrolled(),
   );
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, wheel, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, turnVisibility, cmdClickGesture, wheel, harness, outputTail: "" });
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -628,7 +651,7 @@ export function openTab(
       if (!wrapped) return cb(undefined);
       const activate = (e: MouseEvent, t: string) => {
         if (!e.metaKey) return; // ⌘ required; plain click stays with the app
-        dispatchClick(t, tabMetaById(id)?.cwd ?? "");
+        void dispatchClick(t, tabMetaById(id)?.cwd ?? "", "terminal");
       };
       // One scanner owns the span boundaries (see termTokens.ts), so the
       // underline covers the path and stops there: hovering `Update(src/x.ts)`
@@ -738,37 +761,130 @@ export function openTab(
     { capture: true },
   );
 
+  let forcedDoubleClickSelection = false;
+  const forceDoubleClickSelection = (e: MouseEvent) => {
+    if (e.button !== 0 || e.metaKey || e.altKey) return;
+    const secondPress = e.type === "mousedown" && e.detail === 2;
+    const matchingRelease = e.type === "mouseup" && forcedDoubleClickSelection;
+    if (!secondPress && !matchingRelease) return;
+    forcedDoubleClickSelection = secondPress;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    (e.target as HTMLElement).dispatchEvent(new MouseEvent(e.type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail: e.detail,
+      screenX: e.screenX,
+      screenY: e.screenY,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      ctrlKey: e.ctrlKey,
+      altKey: true,
+      shiftKey: e.shiftKey,
+      metaKey: e.metaKey,
+      button: e.button,
+      buttons: e.buttons,
+    }));
+    if (matchingRelease) forcedDoubleClickSelection = false;
+  };
+  el.addEventListener("mousedown", forceDoubleClickSelection, { capture: true });
+  el.addEventListener("mouseup", forceDoubleClickSelection, { capture: true });
+
+  const pointerInput = (e: PointerEvent) => ({
+    pointerId: e.pointerId,
+    x: e.clientX,
+    y: e.clientY,
+    button: e.button,
+    metaKey: e.metaKey,
+  });
   el.addEventListener(
-    "mousedown",
+    "pointerdown",
     (e) => {
-      // tmux mouse mode reports button-2 into the PTY before the browser's
-      // contextmenu event can reach our global menu. Claim it at the host edge,
-      // then synthesize the normal event so favorites/terminal actions use the
-      // same context-menu path every time.
-      if (e.button === 2) {
-        e.preventDefault();
-        e.stopPropagation();
-        el.dispatchEvent(new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: e.clientX,
-          clientY: e.clientY,
-          screenX: e.screenX,
-          screenY: e.screenY,
-        }));
-        return;
-      }
       if (!e.metaKey || e.button !== 0) return;
       const sel = term.getSelection().trim();
       const word = sel || wordAt(id, e.clientX, e.clientY);
       if (!word) return;
-      if (!sel && looksOpenable(word)) return; // link provider handles this hit
+      if (!cmdClickGesture.pointerDown(pointerInput(e), word)) return;
       e.preventDefault();
-      e.stopPropagation();
-      dispatchClick(word, tabMetaById(id)?.cwd ?? "");
+      e.stopImmediatePropagation();
     },
     { capture: true },
   );
+  el.addEventListener("pointermove", (e) => cmdClickGesture.pointerMove(pointerInput(e)), { capture: true });
+  el.addEventListener("pointercancel", (e) => cmdClickGesture.pointerCancel(pointerInput(e)), { capture: true });
+  el.addEventListener("pointerup", (e) => {
+    const word = cmdClickGesture.pointerUp(pointerInput(e));
+    if (!word) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    void dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal");
+  }, { capture: true });
+
+  const cellAtPoint = (clientX: number, clientY: number) => {
+    const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) return null;
+    const rect = screen.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    return {
+      col: Math.min(term.cols - 1, Math.max(0, Math.floor((clientX - rect.left) / (rect.width / term.cols || 1)))),
+      row: term.buffer.active.viewportY + Math.min(term.rows - 1, Math.max(0, Math.floor((clientY - rect.top) / (rect.height / term.rows || 1)))),
+    };
+  };
+  let selectionDrag: {
+    col: number;
+    row: number;
+    x: number;
+    y: number;
+    active: boolean;
+    selection?: { col: number; row: number; length: number };
+  } | null = null;
+  el.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.metaKey) return;
+    const cell = cellAtPoint(event.clientX, event.clientY);
+    if (cell) selectionDrag = { ...cell, x: event.clientX, y: event.clientY, active: false };
+  }, { capture: true });
+  el.addEventListener("pointermove", (event) => {
+    if (!selectionDrag || !(event.buttons & 1)) return;
+    const cell = cellAtPoint(event.clientX, event.clientY);
+    if (!cell) return;
+    if (!selectionDrag.active && Math.hypot(event.clientX - selectionDrag.x, event.clientY - selectionDrag.y) <= 4) return;
+    selectionDrag.active = true;
+    const start = selectionDrag.row * term.cols + selectionDrag.col;
+    const end = cell.row * term.cols + cell.col;
+    const first = Math.min(start, end);
+    selectionDrag.selection = {
+      col: first % term.cols,
+      row: Math.floor(first / term.cols),
+      length: Math.abs(end - start) + 1,
+    };
+    term.select(selectionDrag.selection.col, selectionDrag.selection.row, selectionDrag.selection.length);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, { capture: true });
+  el.addEventListener("pointerup", (event) => {
+    if (!selectionDrag) return;
+    const completed = selectionDrag.selection;
+    selectionDrag = null;
+    if (!completed) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    term.focus();
+    requestAnimationFrame(() => term.select(completed.col, completed.row, completed.length));
+  }, { capture: true });
+  el.addEventListener("pointercancel", () => { selectionDrag = null; }, { capture: true });
+
+  // Right-click must be claimed before tmux mouse mode consumes it.
+  el.addEventListener("mousedown", (e) => {
+    if (e.button !== 2) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+      screenX: e.screenX, screenY: e.screenY,
+    }));
+  }, { capture: true });
 
   // Click anywhere in the host (incl. padding around the xterm) focuses the
   // terminal, so keyboard + scroll work without hunting for the text area.
@@ -984,6 +1100,10 @@ export function onTermClosed(id: string) {
   const isViewer = store.get().openTabs.find((o) => o.name === name)?.viewer ?? false;
   t.overlay?.dispose();
   t.diagrams?.dispose();
+  t.structured?.dispose();
+  t.turnVisibility?.dispose();
+  t.viewport?.dispose();
+  t.cmdClickGesture?.dispose();
   t.wheel?.dispose();
   t.term.dispose();
   t.el.remove();

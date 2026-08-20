@@ -13,6 +13,8 @@ import { tabs, tabMetaById, tabCwds } from "./terminal";
 import { openWorktree, resumeLaunch, sessionsForWorktree } from "./worktrees";
 import { harnessAdapter, harnessesForCommand, type HarnessId } from "./harness";
 import { boundSessionFirst, type ResolvedSession } from "./0a_terminalSessionCandidates";
+import type { BoopTurn } from "./0_terminalTurnVisibility";
+import type { BoopFavorite } from "./00a_terminalIntersection";
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
@@ -85,10 +87,35 @@ export async function unclaimedSession(
 // stay synchronous.
 const ledgerCache = new Map<string, AiMessage[]>();
 export const tabTurns = new Map<string, AiMessage[]>();
+const boopTurnCache = new Map<string, { readAt: number; turns: BoopTurn[] }>();
+export let boopFavorites: BoopFavorite[] = [];
 // Where each session's ledger actually lives (the cwd that resolved it), keyed by
 // `editor:session_id`. fav_add needs this cwd so a favorite resumes in the right
 // folder — paths[0] (tabMetaById) can be a subdir the session wasn't keyed under.
 export const turnCwd = new Map<string, string>();
+
+export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
+  const session = (await sessionsForTab(id))[0]?.sessionId;
+  if (!session) return [];
+  const cached = boopTurnCache.get(session);
+  if (cached && performance.now() - cached.readAt < 1000) return cached.turns;
+  const turns = await invoke<BoopTurn[]>("boop_turns", { session }).catch(() => []);
+  boopTurnCache.set(session, { readAt: performance.now(), turns });
+  return turns;
+}
+
+export async function favoriteBoopTurn(turn: BoopTurn): Promise<void> {
+  const wasFavorite = isBoopTurnFav(turn);
+  await invoke<BoopFavorite[]>("boop_favorite_toggle", { turn }).then((favorites) => {
+    boopFavorites = favorites;
+    store.set({ aiFavs: [...store.get().aiFavs] });
+    flashStatus(wasFavorite ? "unfavorited Boop turn" : `★ favorited ${turn.role} turn ${turn.turn}`);
+  }, (error) => console.error("boop_favorite_toggle", error));
+}
+
+export function isBoopTurnFav(turn: Pick<BoopTurn, "session" | "turn">): boolean {
+  return boopFavorites.some((favorite) => favorite.source === `turn:${turn.session}:${turn.turn}`);
+}
 async function turnsFor(
   editor: HarnessId,
   sessionId: string,
@@ -139,109 +166,6 @@ export async function refreshTurns(id: string): Promise<AiMessage[] | null> {
   }
   tabTurns.set(id, []);
   return [];
-}
-
-// --- on-screen turn identification (the alt-screen blocks text selection, so we
-// read the xterm buffer directly). Each harness marks turn boundaries visually:
-// claude prefixes assistant turns with a ⏺ bullet; opencode paints message blocks
-// with a non-default background. We find the block under the pointer via those
-// signatures, then match its rendered text to a ledger turn. ---
-// Turn-boundary glyphs: claude's ⏺ assistant bullet + the › chevron on human
-// turns; opencode delimits with a non-default bg run instead.
-const TURN_BULLETS = new Set(["⏺", "●", "◉", "⏵", "•", "◆", "›", "❯", "»", "▶", "🭬"]);
-
-function rowText(line: import("@xterm/xterm").IBufferLine): string {
-  return line.translateToString(true);
-}
-// First visible glyph + whether any cell has a non-default bg (opencode block).
-function rowSignature(line: import("@xterm/xterm").IBufferLine, cols: number) {
-  let firstGlyph = "";
-  let hasBg = false;
-  for (let x = 0; x < cols; x++) {
-    const cell = line.getCell(x);
-    if (!cell) continue;
-    if (!hasBg && !cell.isBgDefault()) hasBg = true;
-    const ch = cell.getChars();
-    if (!firstGlyph && ch && ch.trim()) firstGlyph = ch;
-    if (firstGlyph && hasBg) break;
-  }
-  return { isBullet: TURN_BULLETS.has(firstGlyph), hasBg };
-}
-
-// The rendered text block under clientY: bounded by claude bullets if present,
-// else by an opencode bg-color run, else a ±pad line window.
-function blockTextAt(id: string, clientY: number): string {
-  const t = tabs.get(id);
-  if (!t) return "";
-  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
-  const rect = screen.getBoundingClientRect();
-  const cellH = rect.height / t.term.rows || 1;
-  let vr = Math.floor((clientY - rect.top) / cellH);
-  vr = Math.max(0, Math.min(t.term.rows - 1, vr));
-  const buf = t.term.buffer.active;
-  const top = buf.viewportY;
-  const rows: { text: string; isBullet: boolean; hasBg: boolean }[] = [];
-  for (let r = 0; r < t.term.rows; r++) {
-    const line = buf.getLine(top + r);
-    if (!line) {
-      rows.push({ text: "", isBullet: false, hasBg: false });
-      continue;
-    }
-    const sig = rowSignature(line, t.term.cols);
-    rows.push({ text: rowText(line), isBullet: sig.isBullet, hasBg: sig.hasBg });
-  }
-  const hasBullets = rows.some((r) => r.isBullet);
-  let lo = vr;
-  let hi = vr;
-  if (hasBullets) {
-    while (lo > 0 && !rows[lo].isBullet) lo--;
-    while (hi < rows.length - 1 && !rows[hi + 1].isBullet) hi++;
-  } else if (rows[vr].hasBg) {
-    while (lo > 0 && rows[lo - 1].hasBg) lo--;
-    while (hi < rows.length - 1 && rows[hi + 1].hasBg) hi++;
-  } else {
-    lo = Math.max(0, vr - 4);
-    hi = Math.min(rows.length - 1, vr + 4);
-  }
-  return rows
-    .slice(lo, hi + 1)
-    .map((r) => r.text)
-    .join("\n")
-    .trim();
-}
-
-const normText = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
-
-// The search query for a right-click: the live selection if there is one, else
-// the rendered block under the pointer (surrounding lines, signature-bounded).
-export function ledgerQuery(id: string, clientY: number): string {
-  const sel = tabs.get(id)?.term.getSelection()?.trim();
-  if (sel && sel.length >= 3) return sel;
-  return blockTextAt(id, clientY);
-}
-
-// Fuzzy match the rendered terminal block against the tab's ledger turns. The
-// screen text carries words the ledger never had (box-drawing, markdown, tool
-// chrome, line-wrap fragments), so a strict ALL-words AND over-rejects — claude
-// almost never matched. Instead: tokenize on non-alphanumerics (drops the
-// chrome), keep distinct words ≥3 chars, and keep a turn that contains a MAJORITY
-// (≥60%, min 2) of them. Ranked: exact contiguous phrase, then coverage ratio,
-// then recency.
-export function searchTurns(turns: AiMessage[], query: string, limit = 6): AiMessage[] {
-  const words = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3))];
-  if (!words.length) return [];
-  const nq = normText(query);
-  const need = Math.min(words.length, Math.max(2, Math.ceil(words.length * 0.6)));
-  const scored: { t: AiMessage; score: number }[] = [];
-  for (const t of turns) {
-    const text = normText(t.text);
-    let hit = 0;
-    for (const w of words) if (text.includes(w)) hit++;
-    if (hit < need) continue;
-    scored.push({ t, score: (text.includes(nq) ? 1000 : 0) + hit / words.length });
-  }
-  scored.sort((a, b) => b.score - a.score || b.t.seq - a.t.seq);
-  return scored.slice(0, limit).map((s) => s.t);
 }
 
 // Is this turn already in favorites? (identity = editor + session + message id)
@@ -386,6 +310,34 @@ function favTreeRows(): FavTreeRow[] {
       })),
     });
   }
+  const boopGroups = new Map<string, BoopFavorite[]>();
+  for (const favorite of boopFavorites) {
+    const session = favorite.source.match(/^turn:(.*):\d+$/)?.[1] ?? "unknown";
+    const list = boopGroups.get(session);
+    if (list) list.push(favorite);
+    else boopGroups.set(session, [favorite]);
+  }
+  for (const [session, list] of boopGroups) {
+    rows.push({
+      id: `boop:${session}`,
+      kind: "session",
+      editor: "boop",
+      label: session,
+      starredAt: Math.max(...list.map((favorite) => favorite.created_ts * 1000)),
+      sessionId: session,
+      count: list.length,
+      children: list.map((favorite) => ({
+        id: `boop-favorite:${favorite.favorite_id}`,
+        kind: "turn" as const,
+        editor: "boop" as const,
+        label: favorite.source,
+        starredAt: favorite.created_ts * 1000,
+        role: "turn",
+        preview: favorite.body.replace(/\s+/g, " ").slice(0, 120),
+        boopFav: favorite,
+      })),
+    });
+  }
   rows.sort((a, b) => b.starredAt - a.starredAt);
   return rows;
 }
@@ -395,7 +347,7 @@ function favTreeRows(): FavTreeRow[] {
 // live session in that cwd is reattached by openWorktree; otherwise the agent
 // relaunches against the saved conversation id.
 function resumeFavSession(r: FavTreeRow) {
-  if (r.kind !== "session" || !r.cwd || !r.sessionId) return;
+  if (r.kind !== "session" || r.editor === "boop" || !r.cwd || !r.sessionId) return;
   openWorktree(r.cwd, "", r.cwd, resumeLaunch(r.editor, r.sessionId), true);
 }
 
@@ -440,12 +392,22 @@ export function registerFavoritesPlugin() {
       })
         .then((favs) => store.set({ aiFavs: favs }))
         .catch((e) => console.error("fav_remove", e)),
+    removeBoop: (favorite) => {
+      const match = favorite.source.match(/^turn:(.*):(\d+)$/);
+      if (!match) return;
+      const turn = boopTurnCache.get(match[1])?.turns.find((candidate) => candidate.turn === Number(match[2]));
+      if (!turn) return;
+      void favoriteBoopTurn(turn);
+    },
   });
 }
 
 export function refreshFavorites() {
-  invoke<Fav[]>("fav_list")
-    .then((favs) => store.set({ aiFavs: favs }))
+  Promise.all([invoke<Fav[]>("fav_list"), invoke<BoopFavorite[]>("boop_favorites")])
+    .then(([favs, favorites]) => {
+      boopFavorites = favorites;
+      store.set({ aiFavs: favs });
+    })
     .catch(() => {});
 }
 

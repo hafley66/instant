@@ -38,3 +38,8 @@ tungstenite = "0.29"
 arboard = "3"
 notify = "8.2"
 ignore = "0.4"
+boop-mux = { git = "https://github.com/hafley66/hafley-rs.git", rev = "b4bbbff27aa42c29807a137f3d2e2d62abcfc66e" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSThread"] }

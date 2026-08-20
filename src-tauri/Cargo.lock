@@ -325,6 +325,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "boop-mux"
+version = "0.0.2"
+source = "git+https://github.com/hafley66/hafley-rs.git?rev=b4bbbff27aa42c29807a137f3d2e2d62abcfc66e#b4bbbff27aa42c29807a137f3d2e2d62abcfc66e"
+dependencies = [
+ "anyhow",
+ "tmux_interface",
+ "tracing",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2033,12 +2043,15 @@ version = "0.1.14"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "boop-mux",
  "core-foundation 0.10.1",
  "core-graphics 0.25.0",
  "ignore",
  "libc",
  "mouse_position",
  "notify",
+ "objc2-app-kit",
+ "objc2-foundation",
  "png 0.17.16",
  "portable-pty",
  "rusqlite",
@@ -4267,6 +4280,12 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
+name = "tmux_interface"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb02603b24fb7fe7ad0fd11653bee5abf9cf4a9883b3618daaed2a6338d8288"
 
 [[package]]
 name = "tokio"

@@ -1,4 +1,8 @@
 mod activity;
+#[path = "0_boop.rs"]
+mod boop;
+#[path = "0_tmux.rs"]
+mod boop_tmux;
 mod capture;
 mod cdp;
 mod config;
@@ -382,6 +386,34 @@ fn set_switcher_visible(app: &AppHandle, on: bool) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_skip_taskbar(!on);
     }
+}
+
+#[cfg(target_os = "macos")]
+fn activate_window(win: &tauri::WebviewWindow) -> serde_json::Value {
+    use objc2_app_kit::{NSApplication, NSWindow};
+    use objc2_foundation::MainThreadMarker;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return serde_json::json!({ "error": "not_main_thread" });
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    let Ok(ns_window_ptr) = win.ns_window() else {
+        return serde_json::json!({ "error": "ns_window_unavailable", "app_active": app.isActive() });
+    };
+    let ns_window: &NSWindow = unsafe { &*ns_window_ptr.cast() };
+    ns_window.makeKeyAndOrderFront(None);
+    serde_json::json!({
+        "app_active": app.isActive(),
+        "window_key": ns_window.isKeyWindow(),
+        "window_main": ns_window.isMainWindow(),
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_window(_win: &tauri::WebviewWindow) -> serde_json::Value {
+    serde_json::json!({ "unsupported": true })
 }
 
 /// Toggle the summon window. When showing, anchor it to the mouse cursor.
@@ -931,12 +963,20 @@ pub fn run() {
             });
             app.manage(activity::WatcherState(Mutex::new(activity::WatcherStatus::default())));
 
-            activity::spawn_server(app.handle().clone());
+            if !skip_shared_globals {
+                activity::spawn_server(app.handle().clone());
+            }
             pty::reap_orphan_graphics(); // clean awrit orphans from a prior crash/restart
             cdp::reap_orphans(); // clean headless-Chrome orphans from a prior SIGTERM
 
-            // Menu-bar accessory app: no Dock tile, no Cmd-Tab entry.
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            // A directly shown secondary instance must become a regular app
+            // before set_focus(), otherwise AppKit may report focus success
+            // while leaving the accessory process unable to receive keys.
+            let _ = app.set_activation_policy(if skip_shared_globals {
+                tauri::ActivationPolicy::Regular
+            } else {
+                tauri::ActivationPolicy::Accessory
+            });
 
             if skip_shared_globals {
                 // No tray or summon gesture, so show directly. INSTANT_ISOLATED
@@ -950,11 +990,12 @@ pub fn run() {
                         serde_json::json!({ "result": show_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": show_result.err().map(|e| format!("{e:?}")) }),
                     );
                     let focus_result = win.set_focus();
+                    let native_focus = activate_window(&win);
                     log_event(
                         app.handle(),
                         if focus_result.is_ok() { "INFO" } else { "ERROR" },
                         "startup_window_focus",
-                        serde_json::json!({ "result": focus_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": focus_result.err().map(|e| format!("{e:?}")) }),
+                        serde_json::json!({ "result": focus_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": focus_result.err().map(|e| format!("{e:?}")), "native": native_focus }),
                     );
                 }
                 return Ok(());
@@ -1085,6 +1126,11 @@ pub fn run() {
             fs_watch::fs_watch_release,
             harness::harness_session,
             harness::harness_sessions,
+            boop::boop_turns,
+            boop::boop_favorite_add,
+            boop::boop_favorites,
+            boop::boop_favorite_toggle,
+            boop_tmux::boop_mux_capture,
             ledger::list_ai_sessions,
             ledger::read_ai_messages,
             ledger::latest_ai_message,

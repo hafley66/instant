@@ -5,13 +5,8 @@ import { auditTime, debounceTime, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
-import {
-  diagramsFromMessageTail,
-  isGenericMermaidDeclaration,
-  normalizedDiagramLines,
-  type MessageDiagram,
-} from "./0_terminalDiagramMessages";
-import type { AiMessage } from "./state";
+import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import type { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
 
 type DiagramLanguage = "mermaid" | "d2";
 export type DiagramFence = {
@@ -25,6 +20,12 @@ export type DiagramFence = {
   messageId?: string;
 };
 type LogicalLine = { text: string; start: number; end: number };
+function normalizedDiagramLines(code: string): string[] {
+  return code
+    .split("\n")
+    .map((line) => line.toLowerCase().replace(/^\s*[•●]\s?/, "").replace(/\s+/g, " ").trim())
+    .filter((line) => /[a-z0-9]/.test(line) && line.length >= 4);
+}
 export type TerminalDiagramLayout = {
   maxViewportHeightRatio: number;
   maxBlankRows: number;
@@ -110,59 +111,6 @@ function logicalLines(term: Terminal, from: number, through: number): LogicalLin
     }
   }
   return lines;
-}
-
-function normalizeTerminalLine(line: string): string {
-  return stripTuiBullet(line).toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-export function locateMessageDiagrams(term: Terminal, diagrams: MessageDiagram[]): DiagramFence[] {
-  const buffer = term.buffer.active;
-  const viewportTop = buffer.viewportY;
-  const viewportEnd = Math.min(buffer.length - 1, viewportTop + term.rows - 1);
-  const lines = logicalLines(term, viewportTop, viewportEnd);
-  const normalized = lines.map((line) => normalizeTerminalLine(line.text));
-  const anchorOwners = new Map<string, Set<number>>();
-  diagrams.forEach((diagram, diagramIndex) => {
-    normalizedDiagramLines(diagram.code).forEach((text) => {
-      const owners = anchorOwners.get(text) ?? new Set<number>();
-      owners.add(diagramIndex);
-      anchorOwners.set(text, owners);
-    });
-  });
-  const found: DiagramFence[] = [];
-  for (const [diagramIndex, diagram] of diagrams.entries()) {
-    const sourceLines = normalizedDiagramLines(diagram.code);
-    const anchors = sourceLines
-      .map((text, sourceIndex) => ({ text, sourceIndex }))
-      .filter(({ text }) => diagram.language !== "mermaid" || !isGenericMermaidDeclaration(text))
-      .filter(({ text }) => anchorOwners.get(text)?.size === 1 && anchorOwners.get(text)?.has(diagramIndex))
-      .sort((a, b) => b.text.length - a.text.length);
-    let hit: { terminalIndex: number; sourceIndex: number } | null = null;
-    for (const anchor of anchors) {
-      const terminalIndex = normalized.findIndex((line) => line === anchor.text || line.includes(anchor.text));
-      if (terminalIndex >= 0) {
-        hit = { terminalIndex, sourceIndex: anchor.sourceIndex };
-        break;
-      }
-    }
-    if (!hit) continue;
-    const estimatedStartIndex = hit.terminalIndex - hit.sourceIndex;
-    const firstLine = lines[Math.max(0, estimatedStartIndex)];
-    const lastLine = lines[Math.min(lines.length - 1, estimatedStartIndex + sourceLines.length - 1)];
-    const start = Math.max(viewportTop, firstLine.start);
-    const end = Math.min(viewportEnd, lastLine.end);
-    found.push({
-      language: diagram.language,
-      code: diagram.code,
-      start,
-      end: Math.max(start, end),
-      inferred: false,
-      locator: diagram.locator,
-      messageId: diagram.messageId,
-    });
-  }
-  return found;
 }
 
 export function findDiagramFences(term: Terminal): DiagramFence[] {
@@ -387,7 +335,6 @@ export class TerminalDiagramOverlay {
   frame = 0;
   painting = false;
   repaintPending = false;
-  activityEvents = new Subject<void>();
   activitySubscription: Subscription | null = null;
   scrollEvents = new Subject<void>();
   scrollSubscription: Subscription;
@@ -406,17 +353,13 @@ export class TerminalDiagramOverlay {
     readonly term: Terminal,
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
-    readonly messages?: () => Promise<AiMessage[] | null>,
+    readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
     readonly enabled: () => boolean = () => true,
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
     host.appendChild(this.root);
-    if (messages) {
-      this.activitySubscription = this.activityEvents.pipe(
-        debounceTime(1000),
-      ).subscribe(() => this.scheduleFrame());
-    }
+    if (projection) this.activitySubscription = projection.changes.subscribe(() => this.scheduleFrame());
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(80),
     ).subscribe(() => {
@@ -433,23 +376,15 @@ export class TerminalDiagramOverlay {
       event.preventDefault();
       event.stopImmediatePropagation();
     };
-    const onMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0 || !this.diagramAtClientPoint(event.clientX, event.clientY)) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    host.addEventListener("mousedown", onMouseDown, { capture: true });
     host.addEventListener("click", onClick, { capture: true });
     this.disposables = [
-      { dispose: () => host.removeEventListener("mousedown", onMouseDown, { capture: true }) },
       { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
-        if (this.messages) {
+        if (this.projection) {
           this.positionElements();
           if (!this.scrolling && (
             this.root.hidden || performance.now() - this.lastScrollAt < 600
           )) this.recoveryEvents.next();
-          this.activityEvents.next();
         }
         else this.scheduleFrame();
       }),
@@ -470,13 +405,12 @@ export class TerminalDiagramOverlay {
   }
 
   viewportScrolled() {
-    if (this.messages) {
+    if (this.projection) {
       this.scrolling = true;
       this.lastScrollAt = performance.now();
       this.positionElements();
       this.root.hidden = true;
       this.scrollEvents.next();
-      this.activityEvents.next();
     } else {
       this.scheduleFrame();
     }
@@ -543,7 +477,7 @@ export class TerminalDiagramOverlay {
     });
   }
 
-  async paint(suppliedMessages?: AiMessage[] | null) {
+  async paint() {
     if (!this.enabled()) {
       this.root.hidden = true;
       return;
@@ -557,20 +491,24 @@ export class TerminalDiagramOverlay {
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
     const direct = findDiagramFences(this.term).filter((fence) => !fence.inferred);
-    let messages = suppliedMessages;
-    if (messages === undefined && this.messages) {
-      messages = await this.messages();
-      if (generation !== this.generation) return;
-    }
-    const ledger = messages
-      ? locateMessageDiagrams(this.term, diagramsFromMessageTail(messages))
-      : [];
+    const projected = this.projection?.visible.flatMap((turn) => turn.regions
+      .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
+        region.kind === "mermaid" || region.kind === "d2")
+      .map((region): DiagramFence => ({
+        language: region.kind,
+        code: region.text,
+        start: region.bufferStart,
+        end: region.bufferEnd,
+        inferred: false,
+        locator: `boop:${region.turnId}`,
+        messageId: region.turnId,
+      }))) ?? [];
     // Keep exact, explicit terminal fences available while the harness ledger
     // is empty, delayed, or unable to locate its source in the visible buffer.
     // mergeLocatedDiagrams replaces a clipped terminal prefix with its complete
     // ledger match while retaining the visible source when estimates disagree.
     // Inferred arrow-shaped output remains excluded from `direct` above.
-    const fences = mergeLocatedDiagrams(direct, ledger);
+    const fences = mergeLocatedDiagrams(direct, projected);
     const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
@@ -718,7 +656,6 @@ export class TerminalDiagramOverlay {
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.activitySubscription?.unsubscribe();
-    this.activityEvents.complete();
     this.scrollSubscription.unsubscribe();
     this.scrollEvents.complete();
     this.recoverySubscription.unsubscribe();

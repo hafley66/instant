@@ -111,11 +111,14 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
     // cells with underscores before those bytes ever reach xterm. Force UTF-8
     // on every client, including clients attaching to an already-live server.
     c.arg("-u");
-    if !cfg!(debug_assertions) {
+    let configured_socket = socket
+        .map(str::to_owned)
+        .or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+    if !cfg!(debug_assertions) && configured_socket.is_none() {
         c.args(["-L", "instant-prod"]);
     }
-    if let Some(socket) = socket {
-        c.args(["-L", socket]);
+    if let Some(socket) = configured_socket {
+        c.args(["-L", &socket]);
     }
     c
 }
@@ -458,8 +461,12 @@ pub async fn open_session(
         // Match tmux_cmd's socket so the pty's own server is the same one all the
         // management commands talk to (prod = private socket; dev = default).
         c.arg("-u");
-        if !cfg!(debug_assertions) {
+        let configured_socket = std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty());
+        if !cfg!(debug_assertions) && configured_socket.is_none() {
             c.args(["-L", "instant-prod"]);
+        }
+        if let Some(socket) = configured_socket {
+            c.args(["-L", &socket]);
         }
         if attach_only.unwrap_or(false) || attach_target.is_some() {
             let args = tmux_attach_args(&target_session, attach_target);

@@ -52,6 +52,11 @@ export type CommandName =
   | "fs_watch_release"
   | "harness_session"
   | "harness_sessions"
+  | "boop_turns"
+  | "boop_favorite_add"
+  | "boop_favorites"
+  | "boop_favorite_toggle"
+  | "boop_mux_capture"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
@@ -157,6 +162,17 @@ export namespace commands {
   export namespace harness {
     export const harnessSession = "harness_session";
     export const harnessSessions = "harness_sessions";
+  }
+
+  export namespace boop {
+    export const boopTurns = "boop_turns";
+    export const boopFavoriteAdd = "boop_favorite_add";
+    export const boopFavorites = "boop_favorites";
+    export const boopFavoriteToggle = "boop_favorite_toggle";
+  }
+
+  export namespace boop_mux {
+    export const boopMuxCapture = "boop_mux_capture";
   }
 
   export namespace ledger {

@@ -17,17 +17,21 @@ default:
 dev:
     CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 tauri dev
 
+# ordinary app with an OS-assigned free Vite port injected into Tauri's devUrl.
+dev-auto:
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" node "{{justfile_directory()}}/scripts/0_tauri-dev-auto.mjs"
+
 # same as `dev`, but with INSTANT_NO_GLOBALS=1: skips the tray icon, the global
 # Cmd+Alt+Space shortcut, and the double-click/double-cmd summon gesture, so
 # this instance doesn't fight the owner's always-running one. Use this for
 # agent/verification runs.
 dev-safe:
-    INSTANT_NO_GLOBALS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 tauri dev
+    INSTANT_NO_GLOBALS=1 INSTANT_TMUX_SOCKET=instant-dev-safe CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 tauri dev --config '{"build":{"beforeDevCommand":"corepack pnpm@10.12.4 run dev --port 1423","devUrl":"http://localhost:1423"}}'
 
 # isolated second instance: separate Vite port + summon shortcut, with no second
 # tray icon or process-wide summon gesture. Use Cmd+Shift+Space to summon it.
 dev-isolated:
-    INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 run tauri dev -- --config '{"build":{"beforeDevCommand":"corepack pnpm@10.12.4 run dev --port 1422","devUrl":"http://localhost:1422"}}'
+    INSTANT_ISOLATED=1 INSTANT_DIRECT_PTY=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="{{justfile_directory()}}/scripts/sign-link.sh" corepack pnpm@10.12.4 tauri dev --config '{"build":{"beforeDevCommand":"corepack pnpm@10.12.4 run dev --port 1422","devUrl":"http://localhost:1422"}}'
 
 # Print the combined frontend/backend app log. state=dev reads `tauri dev`;
 # state=prod reads the installed release bundle's isolated state directory.

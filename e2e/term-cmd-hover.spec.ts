@@ -12,6 +12,7 @@ type TermHooks = {
 declare global {
   interface Window {
     __term?: TermHooks;
+    __cmdClickEvents?: Array<{ token: string; cwd: string; source: string; routeId: string | null }>;
   }
 }
 
@@ -115,6 +116,16 @@ test("⌘-click on a resolved file opens it in a preview tab", async ({ page }) 
   // repo-relative form both land on the same tab.
   await expect(page.locator(".dv-default-tab", { hasText: "main.ts" })).toBeVisible();
   await expect(page.locator(".fs-preview .fs-preview-meta")).toContainText("/tmp/term-e2e/src/main.ts");
+  await expect.poll(() => page.evaluate(() => window.__cmdClickEvents?.at(-1))).toEqual({
+    token: "src/main.ts",
+    cwd: "/tmp/term-e2e",
+    source: "terminal",
+    routeId: "file",
+  });
+  await expect(page.getByTestId("cmd-click-event-readout")).toContainText(
+    "PREVIOUS DOM EVENTS SEEN: pointerdown -> pointerup",
+  );
+  await page.screenshot({ path: "artifacts/cmd-click-pointerup-events.png", fullPage: true });
 });
 
 test("⌘-click resolves an HTML report from the tmux cwd and opens Chromium", async ({ page }, testInfo) => {

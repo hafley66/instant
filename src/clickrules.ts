@@ -10,6 +10,7 @@ import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
 import { getFocusedTermId, tabMetaById } from "./terminal";
 import { splitLineRef, tokenAtColumn } from "./termTokens";
 import { looksLikePath, resolveRef } from "./refResolve";
+import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
 
 const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
 
@@ -39,16 +40,18 @@ export function resolveReference(rawToken: string, cwd: string): { path: string;
   return { path: cwd ? `${cwd.replace(/\/$/, "")}/${bare}` : bare, line };
 }
 
-export async function dispatchClick(rawToken: string, cwd: string) {
-  const token = rawToken.trim();
-  if (!token) return;
+export const cmdClickRouter = new CmdClickRouter();
+
+cmdClickRouter.register({
+  id: "file",
+  async handle({ token, cwd }) {
   // A path-shaped token goes to the resolver, which checks the cwd, the repo
   // root, and finally a filename search: agent output prints repo-relative
   // paths and bare filenames that do not exist under the shell's directory.
   const result = await resolveRef(token, cwd);
   if (result.kind === "choices") {
     openRefChoices(token, result.paths, result.line, cwd);
-    return;
+    return true;
   }
   // A file we located opens in Instant: markdown in the mdview tab, everything
   // else in the preview tab (which scrolls to the line and live-reloads). The
@@ -56,10 +59,17 @@ export async function dispatchClick(rawToken: string, cwd: string) {
   if (result.kind === "hit") {
     const { path, line } = result.ref;
     await openPathInInstant(path, line);
-    return;
+    return true;
   }
+  return false;
+  },
+});
+
+cmdClickRouter.register({
+  id: "configured-rule",
+  async handle({ token, cwd }) {
   const rule = clickRuleFor(token);
-  if (!rule) return;
+  if (!rule) return false;
   const command = rule.command.replace(/\$1/g, () => shQuote(token));
   let out = "";
   try {
@@ -68,6 +78,12 @@ export async function dispatchClick(rawToken: string, cwd: string) {
     out = String(e);
   }
   if (out.trim()) openClickPanel(token, out, cwd, rule);
+  return true;
+  },
+});
+
+export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown") {
+  return cmdClickRouter.dispatch({ token: rawToken, cwd, source });
 }
 
 // cwd to search from when a ⌘-click happens outside a terminal: the focused
@@ -106,7 +122,7 @@ export function wireDomCmdClick() {
       if (!word) return;
       e.preventDefault();
       e.stopPropagation();
-      void dispatchClick(word, activeCwd());
+      void dispatchClick(word, activeCwd(), t.closest(".rg-panel") ? "results" : "preview");
     },
     { capture: true },
   );

@@ -53,6 +53,7 @@ pub struct CapturePerms {
     pub screen_recording: bool,
     pub accessibility: bool,
     pub tap_active: bool,
+    pub tap_expected: bool,
 }
 
 /// Per-gesture outcome, emitted as `capture-status` so the panel can show the
@@ -72,6 +73,7 @@ pub fn capture_permissions(tap: State<TapActive>) -> CapturePerms {
         screen_recording: unsafe { CGPreflightScreenCaptureAccess() },
         accessibility: unsafe { AXIsProcessTrusted() },
         tap_active: tap.0.load(Ordering::Relaxed),
+        tap_expected: std::env::var("INSTANT_NO_GLOBALS").is_err(),
     }
 }
 
