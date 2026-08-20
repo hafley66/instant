@@ -1,6 +1,6 @@
 import { Signal, SignalCreator } from "@hafley66/signals";
 import type { Terminal } from "@xterm/xterm";
-import { Observable, Subscription, debounceTime, distinctUntilChanged, map, merge } from "rxjs";
+import { Subscription, debounceTime } from "rxjs";
 import type { XtermViewport } from "./00a_terminalIntersection";
 
 export type VisibleTerminalLine = { id: string; bufferStart: number; bufferEnd: number; viewportStart: number; viewportEnd: number; text: string };
@@ -11,17 +11,6 @@ export type TerminalLineAnchorEvent =
   | { kind: "exited"; id: string }
   | { kind: "viewport-jump"; previousTop: number; top: number }
   | { kind: "top-line-changed"; previousId: string; id: string };
-
-function domTextChanges(target: Node) {
-  return new Observable<void>((subscriber) => {
-    const observer = new MutationObserver(() => subscriber.next());
-    observer.observe(target, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
-  }).pipe(
-    map(() => target.textContent ?? ""),
-    distinctUntilChanged(),
-  );
-}
 
 function hashLine(value: string): string {
   let hash = 2166136261;
@@ -44,8 +33,11 @@ export class TerminalLineAnchors {
   previousTop = 0;
 
   constructor(readonly term: Terminal, readonly viewport: XtermViewport) {
-    const rows = term.element?.querySelector<HTMLElement>(".xterm-rows");
-    const activity = rows ? merge(viewport.changes, domTextChanges(rows)) : viewport.changes;
+    // xterm's renderer replaces many nested spans for one parsed write. A DOM
+    // MutationObserver here turns that renderer churn into a second render
+    // loop. The terminal API already reports every semantic source of viewport
+    // change: parsed writes, scrolling, and resizing.
+    const activity = viewport.changes;
     this.lifetime.add(activity.subscribe(() => { this.settled.$(false); this.schedule(); }));
     this.lifetime.add(activity.pipe(debounceTime(80)).subscribe(() => { this.refresh(); this.settled.$(true); }));
     this.refresh();
