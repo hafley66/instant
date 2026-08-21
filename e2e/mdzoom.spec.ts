@@ -60,6 +60,22 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator(".xterm-screen").first()).toBeVisible();
 });
 
+test("YAML frontmatter stays out of the rendered document and cannot widen it", async ({ page }) => {
+  await page.getByTestId("open-md").click();
+  const content = page.locator(".mdview-content");
+  await expect(content).toBeVisible();
+  await expect(content).not.toContainText("Frontmatter must stay metadata");
+  await expect(content).not.toContainText("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz");
+  expect(await content.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))).toMatchObject({
+    clientWidth: expect.any(Number),
+    scrollWidth: expect.any(Number),
+  });
+  expect(await content.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test("cmd+/-/0 zoom the markdown preview opened from a focused terminal", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));

@@ -67,13 +67,28 @@ export function projectTurnRegions(
     const anchors = source.slice(region.sourceStart, region.sourceEnd + 1);
     const hits = rows.flatMap((row) => {
       const normalized = normalize(row.text);
-      const relative = anchors.findIndex((anchor) => anchor.length >= 3 && (normalized === anchor || normalized.includes(anchor)));
-      return relative < 0 ? [] : [{ row, relative }];
+      return anchors.flatMap((anchor, relative) => anchor.length >= 3 && (
+        normalized === anchor || normalized.includes(anchor)
+      ) ? [{ row, relative, exact: normalized === anchor, offset: row.start - relative, weight: anchor.length }] : []);
     });
     if (!hits.length) return [];
-    const first = hits.reduce((left, hit) => hit.relative < left.relative ? hit : left);
-    const last = hits.reduce((right, hit) => hit.relative > right.relative ? hit : right);
-    const bufferStart = Math.max(turnSpan.bufferStart, first.row.start - first.relative);
+    const offsets = new Map<number, { count: number; exact: number; weight: number }>();
+    for (const hit of hits) {
+      const score = offsets.get(hit.offset) ?? { count: 0, exact: 0, weight: 0 };
+      score.count++;
+      score.exact += Number(hit.exact);
+      score.weight += hit.weight;
+      offsets.set(hit.offset, score);
+    }
+    const projectedStart = [...offsets].sort(([leftOffset, left], [rightOffset, right]) =>
+      right.count - left.count || right.exact - left.exact || right.weight - left.weight || leftOffset - rightOffset
+    )[0][0];
+    // Physical xterm wraps only move later source rows downward. Keep those
+    // matches when extending the region, while excluding unrelated occurrences
+    // above the chosen source-to-buffer alignment.
+    const aligned = hits.filter((hit) => hit.offset >= projectedStart);
+    const last = aligned.reduce((right, hit) => hit.relative > right.relative ? hit : right);
+    const bufferStart = Math.max(turnSpan.bufferStart, projectedStart);
     const missingAfter = region.sourceEnd - region.sourceStart - last.relative;
     const bufferEnd = Math.min(turnSpan.bufferEnd, last.row.end + missingAfter);
     return [{

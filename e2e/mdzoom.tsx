@@ -42,7 +42,14 @@ import { wireContextMenu } from "../src/ctxmenu";
 
 const ROOT = "/tmp/mdzoom-e2e";
 const DOC = `${ROOT}/zoom.md`;
-const DOC_TEXT = `# Zoom target
+const DOC_TEXT = `---
+title: Frontmatter must stay metadata
+labels:
+  - markdown
+wide: abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz
+---
+
+# Zoom target
 
 A paragraph with an [external link](https://example.com/research) under the heading.
 
@@ -97,6 +104,7 @@ installMdviewHost({
   listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
   openHref: async (href, sourcePath) => { openedHrefs.push({ href, sourcePath }); },
   watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
+  useRenderProbe: () => {},
   FileTree,
   registerZoomKind,
   resetPanelZoom,

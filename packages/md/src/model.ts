@@ -26,6 +26,26 @@ export interface MdDoc {
   folds: ListFolds; // foldable lists / multi-block list items (VSCode-style)
 }
 
+// YAML frontmatter is metadata for the document host. remark-parse treats its
+// opening/closing `---` lines as thematic breaks and the intervening YAML as
+// ordinary Markdown, which can produce malformed lists, headings, and very
+// wide rendered blocks. Mask it with spaces so all later mdast offsets remain
+// absolute offsets into the original source.
+function maskYamlFrontmatter(text: string): { markdown: string; contentStart: number } {
+  const bom = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const openingEnd = text.indexOf("\n", bom);
+  const opening = text.slice(bom, openingEnd < 0 ? text.length : openingEnd).replace(/\r$/, "");
+  if (opening !== "---" || openingEnd < 0) return { markdown: text, contentStart: 0 };
+
+  const closing = /^---[\t ]*\r?$/gm;
+  closing.lastIndex = openingEnd + 1;
+  const match = closing.exec(text);
+  if (!match) return { markdown: text, contentStart: 0 };
+  const contentStart = match.index + match[0].length;
+  const masked = text.slice(0, contentStart).replace(/[^\r\n]/g, " ") + text.slice(contentStart);
+  return { markdown: masked, contentStart };
+}
+
 export interface ListFolds {
   lists: Map<number, number>; // list start offset -> direct item count (≥2 items)
   firstItemToList: Map<number, number>; // a list's first item start -> list start (twisty handle)
@@ -86,7 +106,8 @@ function headingText(h: Heading): string {
 }
 
 export function parseMdSections(text: string): MdDoc {
-  const root = unified().use(remarkParse).parse(text) as Root;
+  const { markdown, contentStart } = maskYamlFrontmatter(text);
+  const root = unified().use(remarkParse).parse(markdown) as Root;
   const tree: MdSection[] = [];
   const stack: MdSection[] = []; // open sections, shallow -> deep
   const byId = new Map<string, MdSection>();
@@ -133,8 +154,11 @@ export function parseMdSections(text: string): MdDoc {
   };
   finalize(tree);
 
-  const pre =
-    firstHeadingStart > 0 ? text.slice(0, firstHeadingStart) : firstHeadingStart < 0 ? text : "";
+  const pre = firstHeadingStart > contentStart
+    ? text.slice(contentStart, firstHeadingStart)
+    : firstHeadingStart < 0
+      ? text.slice(contentStart)
+      : "";
   return { tree, preamble: pre.trim() ? pre : "", byId, folds: computeListFolds(root) };
 }
 

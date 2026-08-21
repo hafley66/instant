@@ -95,6 +95,73 @@ describe("parseMdSections", () => {
     expect(parseMdSections("# only a heading").preamble).toBe("");
   });
 
+  it("excludes YAML frontmatter while preserving source offsets", () => {
+    const text = [
+      "---",
+      "title: A document",
+      "labels:",
+      "  - one",
+      "  - two",
+      "wide: abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "---",
+      "",
+      "intro paragraph",
+      "",
+      "# Alpha",
+      "body",
+      "## Beta",
+      "tail",
+    ].join("\n");
+    const parsed = parseMdSections(text);
+    expect({
+      preamble: parsed.preamble.trim(),
+      tree: parsed.tree.map(({ id, start, ownStart, ownEnd, end, children }) => ({
+        id,
+        start,
+        ownStart,
+        ownEnd,
+        end,
+        children: children.map((child) => child.id),
+      })),
+      alphaBody: sliceOwn(text, parsed.byId.get("alpha")!).trim(),
+      betaBody: sliceOwn(text, parsed.byId.get("beta")!).trim(),
+      listFolds: parsed.folds.all,
+    }).toMatchInlineSnapshot(`
+      {
+        "alphaBody": "body",
+        "betaBody": "tail",
+        "listFolds": [],
+        "preamble": "intro paragraph",
+        "tree": [
+          {
+            "children": [
+              "beta",
+            ],
+            "end": 152,
+            "id": "alpha",
+            "ownEnd": 140,
+            "ownStart": 134,
+            "start": 127,
+          },
+        ],
+      }
+    `);
+  });
+
+  it("leaves an unterminated frontmatter opener as Markdown", () => {
+    const parsed = parseMdSections("---\ntitle: visible\n# Heading");
+    expect({ preamble: parsed.preamble, ids: [...parsed.byId.keys()] }).toMatchInlineSnapshot(`
+      {
+        "ids": [
+          "heading",
+        ],
+        "preamble": "---
+      title: visible
+      ",
+      }
+    `);
+  });
+
   it("slices each section's own body, excluding subsections", () => {
     expect(sliceOwn(DOC, doc.byId.get("alpha")!).trim()).toBe("alpha body");
     expect(sliceOwn(DOC, doc.byId.get("one")!)).toContain("one body");

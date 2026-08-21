@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { Signal } from "@hafley66/signals";
-import { Observable, Subscription, fromEvent } from "rxjs";
+import { Observable, Subscription } from "rxjs";
 import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
 import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
@@ -68,19 +68,14 @@ export class TerminalContextQueue {
     this.selectionAction.textContent = "+ next";
     this.selectionAction.hidden = true;
     this.queue.className = "term-context-queue";
-    this.root.append(this.gutter, this.selectionAction, this.queue);
+    this.queue.hidden = true;
+    this.root.append(this.gutter, this.queue);
     host.appendChild(this.root);
     this.projectionSubscription = projection.changes.subscribe(() => this.paintTables());
     this.anchorSubscription = anchors.events.$.subscribe(() => {
       this.paintTables();
       this.positionSelectionAction();
     });
-    this.lifetime.add(fromEvent<MouseEvent>(this.selectionAction, "mousedown").subscribe((event) => event.preventDefault()));
-    this.lifetime.add(fromEvent(this.selectionAction, "click").subscribe(() => this.addSelection()));
-    this.lifetime.add(new Observable<void>((subscriber) => {
-      const registration = term.onSelectionChange(() => subscriber.next());
-      return () => registration.dispose();
-    }).subscribe(() => this.captureSelection()));
     this.lifetime.add(new Observable<void>((subscriber) => {
       const scroll = term.onScroll(() => subscriber.next());
       const resize = term.onResize(() => subscriber.next());

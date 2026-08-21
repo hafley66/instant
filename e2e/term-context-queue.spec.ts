@@ -1,10 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { resolve } from "node:path";
 
+test("an empty terminal context queue has no visible shell", async ({ page }) => {
+  await page.goto("/e2e-term.html?e2e=1&structured=1");
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-context-root")).toBeAttached();
+  await expect(page.locator(".term-context-queue")).toBeHidden();
+});
+
 test("queues a complete Boop table and a terminal selection for the next prompt", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1&structured=1");
   await page.getByTestId("open-term").click();
   await expect(page.locator(".term-host")).toBeVisible();
+  await expect(page.locator(".term-context-queue")).toBeHidden();
   await page.evaluate(() => {
     const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown>; __writes?: Array<{ data: string }> };
     target.__writes = [];

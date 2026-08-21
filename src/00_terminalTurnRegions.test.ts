@@ -68,4 +68,37 @@ describe("terminal turn regions", () => {
       ]
     `);
   });
+
+  it("uses one consistent offset when sequence-diagram keywords repeat", () => {
+    const said = [
+      "prose before",
+      "```mermaid",
+      "sequenceDiagram",
+      "participant Host",
+      "participant Kid",
+      "activate Host",
+      "Host->>Kid: startup",
+      "deactivate Host",
+      "activate Kid",
+      "Kid->>Host: response",
+      "deactivate Kid",
+      "```",
+    ].join("\n");
+    expect(projectTurnRegions("s:9", said, { bufferStart: 100, bufferEnd: 140 }, [
+      { text: "older activate Host prose", start: 101, end: 101 },
+      { text: "sequenceDiagram", start: 120, end: 120 },
+      { text: "participant Host", start: 121, end: 121 },
+      { text: "participant Kid", start: 122, end: 122 },
+      { text: "activate Host", start: 123, end: 123 },
+      { text: "Host->>Kid: startup", start: 124, end: 124 },
+      { text: "deactivate Host", start: 125, end: 125 },
+      { text: "activate Kid", start: 126, end: 126 },
+      { text: "Kid->>Host: response", start: 127, end: 127 },
+      { text: "deactivate Kid", start: 128, end: 128 },
+    ], (line) => line.trim())).toMatchObject([{
+      kind: "mermaid",
+      bufferStart: 119,
+      bufferEnd: 129,
+    }]);
+  });
 });
