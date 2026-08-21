@@ -1,7 +1,7 @@
 {
   "name": "instant",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.16",
   "packageManager": "pnpm@10.12.4",
   "type": "module",
   "scripts": {
