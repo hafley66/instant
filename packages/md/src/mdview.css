@@ -184,6 +184,29 @@ body.xp-pixel .mdview-streamdown [data-streamdown="code-block-body"] *::-webkit-
   display: block;
 }
 
+/* Streamdown expresses Shiki token colors through utility classes backed by
+   these inline variables. Instant does not compile Streamdown's Tailwind
+   utilities, so apply the variables directly. */
+.mdview-streamdown [data-streamdown="code-block-body"] pre {
+  background: var(--sdm-bg, inherit);
+  color: var(--sdm-fg, inherit);
+}
+
+.mdview-streamdown [data-streamdown="code-block-body"] code span[style] {
+  color: var(--sdm-c, inherit);
+  background: var(--sdm-tbg, transparent);
+}
+
+body[data-mode="dark"] .mdview-streamdown [data-streamdown="code-block-body"] pre {
+  background: var(--shiki-dark-bg, var(--sdm-bg, inherit));
+  color: var(--shiki-dark, var(--sdm-fg, inherit));
+}
+
+body[data-mode="dark"] .mdview-streamdown [data-streamdown="code-block-body"] code span[style] {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+  background: var(--shiki-dark-bg, var(--sdm-tbg, transparent));
+}
+
 /* List/item folding (VSCode-style). The twisty floats into the list gutter so
    it sits on the first line regardless of tight/loose list rendering. */
 .md-twisty {

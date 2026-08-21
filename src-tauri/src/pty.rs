@@ -227,7 +227,7 @@ fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<Str
             "list-panes",
             "-a",
             "-F",
-            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}",
+            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}",
         ])
         .env("PATH", path_env())
         .output();
@@ -245,17 +245,86 @@ fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<Str
             v.push(val.to_string());
         }
     };
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
+    let rows: Vec<_> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let process_rows = rows.iter().any(|line| line.split('\t').nth(2) == Some("boop"))
+        .then(process_snapshot)
+        .unwrap_or_default();
+    for line in &rows {
         let mut it = line.split('\t');
         let Some(name) = it.next() else { continue };
         if let Some(path) = it.next() {
             push(&mut paths, name, path);
         }
         if let Some(cmd) = it.next() {
-            push(&mut commands, name, cmd);
+            let pane_pid = it.next().and_then(|value| value.parse().ok());
+            let resolved = if cmd == "boop" {
+                pane_pid.and_then(|pid| inner_agent_command(pid, &process_rows))
+            } else {
+                None
+            };
+            push(&mut commands, name, resolved.as_deref().unwrap_or(cmd));
         }
     }
     (paths, commands)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessRow {
+    pid: i32,
+    parent_pid: i32,
+    command: String,
+}
+
+fn process_snapshot() -> Vec<ProcessRow> {
+    let Ok(output) = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,command="])
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some(ProcessRow {
+                pid: fields.next()?.parse().ok()?,
+                parent_pid: fields.next()?.parse().ok()?,
+                command: fields.collect::<Vec<_>>().join(" "),
+            })
+        })
+        .collect()
+}
+
+fn harness_command(command: &str) -> Option<String> {
+    command.split_whitespace().find_map(|word| {
+        let executable = word.rsplit('/').next()?.trim_end_matches(".exe");
+        match executable {
+            "claude" | "ccz" => Some("claude".to_string()),
+            "codex" | "opencode" | "kimi" => Some(executable.to_string()),
+            _ => None,
+        }
+    })
+}
+
+fn inner_agent_command(pane_pid: i32, rows: &[ProcessRow]) -> Option<String> {
+    let mut frontier = vec![pane_pid];
+    let mut visited = std::collections::HashSet::new();
+    while !frontier.is_empty() {
+        let parents = std::mem::take(&mut frontier);
+        for row in rows.iter().filter(|row| parents.contains(&row.parent_pid)) {
+            if !visited.insert(row.pid) {
+                continue;
+            }
+            if let Some(command) = harness_command(&row.command) {
+                return Some(command);
+            }
+            frontier.push(row.pid);
+        }
+    }
+    None
 }
 
 /// Decode as much valid UTF-8 from `pending` as possible and return it, leaving
@@ -839,6 +908,25 @@ mod tests {
     #[test]
     fn pixel_dims_saturates_instead_of_overflowing() {
         assert_eq!(pixel_dims(u16::MAX, 1, Some(2), Some(1)), (u16::MAX, 1));
+    }
+
+    #[test]
+    fn boop_wrapper_resolves_the_inner_agent_process() {
+        let rows = vec![
+            ProcessRow { pid: 20, parent_pid: 10, command: "boop acp host".into() },
+            ProcessRow { pid: 30, parent_pid: 20, command: "/opt/homebrew/bin/node /opt/codex/bin/codex".into() },
+            ProcessRow { pid: 40, parent_pid: 10, command: "sleep 10".into() },
+        ];
+        assert_eq!(inner_agent_command(10, &rows).as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn boop_wrapper_without_an_agent_has_no_synthetic_process() {
+        let rows = vec![
+            ProcessRow { pid: 20, parent_pid: 10, command: "boop acp host".into() },
+            ProcessRow { pid: 30, parent_pid: 20, command: "sleep 10".into() },
+        ];
+        assert_eq!(inner_agent_command(10, &rows), None);
     }
 
     #[test]
