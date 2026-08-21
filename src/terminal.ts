@@ -797,37 +797,6 @@ export function openTab(
     { capture: true },
   );
 
-  let forcedDoubleClickSelection = false;
-  const forceDoubleClickSelection = (e: MouseEvent) => {
-    if (e.button !== 0 || e.metaKey || e.altKey) return;
-    const secondPress = e.type === "mousedown" && e.detail === 2;
-    const matchingRelease = e.type === "mouseup" && forcedDoubleClickSelection;
-    if (!secondPress && !matchingRelease) return;
-    forcedDoubleClickSelection = secondPress;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    (e.target as HTMLElement).dispatchEvent(new MouseEvent(e.type, {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: window,
-      detail: e.detail,
-      screenX: e.screenX,
-      screenY: e.screenY,
-      clientX: e.clientX,
-      clientY: e.clientY,
-      ctrlKey: e.ctrlKey,
-      altKey: true,
-      shiftKey: e.shiftKey,
-      metaKey: e.metaKey,
-      button: e.button,
-      buttons: e.buttons,
-    }));
-    if (matchingRelease) forcedDoubleClickSelection = false;
-  };
-  el.addEventListener("mousedown", forceDoubleClickSelection, { capture: true });
-  el.addEventListener("mouseup", forceDoubleClickSelection, { capture: true });
-
   const pointerInput = (e: PointerEvent) => ({
     pointerId: e.pointerId,
     x: e.clientX,
@@ -857,59 +826,6 @@ export function openTab(
     e.stopImmediatePropagation();
     void dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal");
   }, { capture: true });
-
-  const cellAtPoint = (clientX: number, clientY: number) => {
-    const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen) return null;
-    const rect = screen.getBoundingClientRect();
-    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
-    return {
-      col: Math.min(term.cols - 1, Math.max(0, Math.floor((clientX - rect.left) / (rect.width / term.cols || 1)))),
-      row: term.buffer.active.viewportY + Math.min(term.rows - 1, Math.max(0, Math.floor((clientY - rect.top) / (rect.height / term.rows || 1)))),
-    };
-  };
-  let selectionDrag: {
-    col: number;
-    row: number;
-    x: number;
-    y: number;
-    active: boolean;
-    selection?: { col: number; row: number; length: number };
-  } | null = null;
-  el.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.metaKey) return;
-    const cell = cellAtPoint(event.clientX, event.clientY);
-    if (cell) selectionDrag = { ...cell, x: event.clientX, y: event.clientY, active: false };
-  }, { capture: true });
-  el.addEventListener("pointermove", (event) => {
-    if (!selectionDrag || !(event.buttons & 1)) return;
-    const cell = cellAtPoint(event.clientX, event.clientY);
-    if (!cell) return;
-    if (!selectionDrag.active && Math.hypot(event.clientX - selectionDrag.x, event.clientY - selectionDrag.y) <= 4) return;
-    selectionDrag.active = true;
-    const start = selectionDrag.row * term.cols + selectionDrag.col;
-    const end = cell.row * term.cols + cell.col;
-    const first = Math.min(start, end);
-    selectionDrag.selection = {
-      col: first % term.cols,
-      row: Math.floor(first / term.cols),
-      length: Math.abs(end - start) + 1,
-    };
-    term.select(selectionDrag.selection.col, selectionDrag.selection.row, selectionDrag.selection.length);
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }, { capture: true });
-  el.addEventListener("pointerup", (event) => {
-    if (!selectionDrag) return;
-    const completed = selectionDrag.selection;
-    selectionDrag = null;
-    if (!completed) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    term.focus();
-    requestAnimationFrame(() => term.select(completed.col, completed.row, completed.length));
-  }, { capture: true });
-  el.addEventListener("pointercancel", () => { selectionDrag = null; }, { capture: true });
 
   // Right-click must be claimed before tmux mouse mode consumes it.
   el.addEventListener("mousedown", (e) => {
