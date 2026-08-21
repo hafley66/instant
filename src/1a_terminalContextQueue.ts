@@ -1,13 +1,12 @@
 import type { Terminal } from "@xterm/xterm";
 import { Signal } from "@hafley66/signals";
-import { Observable, Subscription } from "rxjs";
-import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import { debounceTime, filter, merge, Observable, share, startWith, Subscription, switchMap, take, tap } from "rxjs";
 import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
 
 export type PromptContextItem = {
   id: string;
-  kind: "selection" | "table";
+  kind: "selection" | "table" | "list";
   text: string;
   turnIds: string[];
   enabled: boolean;
@@ -35,10 +34,72 @@ function turnsAcrossRange(turns: VisibleTurn[], start: number, end: number): str
     .map((turn) => turn.id);
 }
 
-function tableRegions(turns: VisibleTurn[]): Array<ProjectedTurnRegion & { kind: "table" }> {
-  return turns.flatMap((turn) => turn.regions.filter(
-    (region): region is ProjectedTurnRegion & { kind: "table" } => region.kind === "table",
-  ));
+type StructuredSelectable = {
+  id: string;
+  kind: "table" | "list";
+  text: string;
+  turnId: string;
+  bufferRow: number;
+};
+
+const listItem = /^\s*(?:[│┃]\s*)?(?:[-+*•]|\d+[.)])\s+\S/;
+const tableSeparator = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+(?:\s*:?-{3,}:?\s*)\|?\s*$/;
+
+type VisibleSourceLine = { bufferStart: number; text: string };
+const projection_grace_ms = 2000;
+
+function normalizeSelectableLine(line: string): string {
+  return line.toLowerCase().replace(/[`_*~#|]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function selectableBufferRow(
+  region: VisibleTurn["regions"][number],
+  sourceRow: number,
+  sourceLine: string,
+  visibleLines: VisibleSourceLine[],
+): number | null {
+  if (region.sourceBufferRows?.[sourceRow] !== null && region.sourceBufferRows?.[sourceRow] !== undefined) {
+    return region.sourceBufferRows[sourceRow];
+  }
+  if (region.sourceBufferRows) {
+    const source = normalizeSelectableLine(sourceLine);
+    return visibleLines.find((line) => normalizeSelectableLine(line.text) === source)?.bufferStart ?? null;
+  }
+  return region.bufferStart + sourceRow;
+}
+
+export function structuredSelectables(
+  turns: Array<Pick<VisibleTurn, "regions">>,
+  visibleLines: VisibleSourceLine[] = [],
+): StructuredSelectable[] {
+  return turns.flatMap((turn) => turn.regions.flatMap((region): StructuredSelectable[] => {
+    if (region.kind !== "table" && region.kind !== "list") return [];
+    const lines = region.text.split("\n");
+    if (region.kind === "table") return lines.flatMap((line, sourceRow) => {
+      const bufferRow = selectableBufferRow(region, sourceRow, line, visibleLines);
+      return !line.trim() || tableSeparator.test(line) || bufferRow === null ? [] : [{
+        id: `${region.id}:row:${sourceRow}`,
+        kind: "table" as const,
+        text: line,
+        turnId: region.turnId,
+        bufferRow,
+      }];
+    });
+    const starts = lines.flatMap((line, sourceRow) => listItem.test(line) ? [sourceRow] : []);
+    const sourceItems = starts.flatMap((sourceRow, index): StructuredSelectable[] => {
+      const end = starts[index + 1] ?? lines.length;
+      const bufferRow = selectableBufferRow(region, sourceRow, lines[sourceRow], visibleLines);
+      if (bufferRow === null) return [];
+      return [{
+        id: `${region.id}:item:${sourceRow}`,
+        kind: "list" as const,
+        text: lines.slice(sourceRow, end).join("\n"),
+        turnId: region.turnId,
+        bufferRow,
+      }];
+    });
+    return sourceItems;
+  }));
 }
 
 export class TerminalContextQueue {
@@ -47,6 +108,10 @@ export class TerminalContextQueue {
   selectionAction = document.createElement("button");
   queue = document.createElement("section");
   items = new Map<string, PromptContextItem>();
+  checkboxes = new Map<string, HTMLInputElement>();
+  paintedLineIds = new Set<string>();
+  paintDirty = true;
+  revealFrame = 0;
   selection: TerminalSelectionSnapshot | null = null;
   readonly state = Signal<PromptContextItem[]>([]);
   readonly changes: Observable<PromptContextItem[]> = this.state.$;
@@ -60,6 +125,7 @@ export class TerminalContextQueue {
     readonly projection: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
     readonly anchors: TerminalLineAnchors,
     readonly paste: (text: string) => void,
+    readonly enabled: () => boolean,
   ) {
     this.root.className = "term-context-root";
     this.gutter.className = "term-context-gutter";
@@ -71,17 +137,31 @@ export class TerminalContextQueue {
     this.queue.hidden = true;
     this.root.append(this.gutter, this.queue);
     host.appendChild(this.root);
-    this.projectionSubscription = projection.changes.subscribe(() => this.paintTables());
-    this.anchorSubscription = anchors.events.$.subscribe(() => {
-      this.paintTables();
-      this.positionSelectionAction();
+    this.projectionSubscription = projection.changes.pipe(debounceTime(100)).subscribe(() => {
+      this.paintDirty = true;
+      if (!this.gutter.hidden) this.paintSelections();
     });
-    this.lifetime.add(new Observable<void>((subscriber) => {
-      const scroll = term.onScroll(() => subscriber.next());
-      const resize = term.onResize(() => subscriber.next());
-      return () => { scroll.dispose(); resize.dispose(); };
-    }).subscribe(() => this.paintTables()));
-    this.paintTables();
+    const viewport_changes = anchors.viewport.changes.pipe(share());
+    const selection_motion = anchors.events.$.pipe(filter((events) =>
+      events.some((event) =>
+        event.kind === "viewport-jump" || event.kind === "top-line-changed" ||
+        event.kind === "exited" && this.paintedLineIds.has(event.id) ||
+        "line" in event && this.paintedLineIds.has(event.line.id)),
+    ));
+    this.lifetime.add(anchors.events.$.subscribe(() => {
+      this.positionSelectionAction();
+    }));
+    const viewport_motion = viewport_changes.pipe(
+      filter((event) => event.kind === "scroll" || event.kind === "resize"),
+    );
+    this.anchorSubscription = merge(selection_motion, viewport_motion).pipe(
+      tap(() => this.invalidateSelections()),
+      switchMap(() => viewport_changes.pipe(startWith(null), debounceTime(650), take(1))),
+    ).subscribe(() => {
+      this.anchors.refresh();
+      if (this.paintDirty) this.paintSelections();
+    });
+    this.paintSelections();
   }
 
   captureSelection() {
@@ -134,58 +214,117 @@ export class TerminalContextQueue {
     this.renderQueue();
   }
 
-  toggleTable(region: ProjectedTurnRegion & { kind: "table" }, checked: boolean) {
+  toggleStructured(selectable: StructuredSelectable, checked: boolean) {
     if (checked) {
-      this.items.set(region.id, {
-        id: region.id,
-        kind: "table",
-        text: region.text,
-        turnIds: [region.turnId],
+      this.items.set(selectable.id, {
+        id: selectable.id,
+        kind: selectable.kind,
+        text: selectable.text,
+        turnIds: [selectable.turnId],
         enabled: true,
       });
     } else {
-      this.items.delete(region.id);
+      this.items.delete(selectable.id);
     }
     this.renderQueue();
   }
 
-  paintTables() {
+  invalidateSelections() {
+    this.paintDirty = true;
+    if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
+    this.revealFrame = 0;
+    this.gutter.hidden = true;
+  }
+
+  clearSelections() {
+    this.checkboxes.clear();
+    this.paintedLineIds.clear();
+    this.gutter.replaceChildren();
+    this.gutter.hidden = false;
+  }
+
+  activate() {
+    this.anchors.refresh();
+    this.paintDirty = true;
+    this.paintSelections();
+  }
+
+  paintSelections() {
+    if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
+    this.revealFrame = 0;
+    this.gutter.hidden = true;
+    if (!this.enabled()) {
+      this.clearSelections();
+      this.paintDirty = false;
+      return;
+    }
     const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) return;
     const top = this.term.buffer.active.viewportY;
     const bottom = top + this.term.rows - 1;
     const hostRect = this.host.getBoundingClientRect();
     const screenRect = screen.getBoundingClientRect();
-    const cellWidth = screenRect.width / this.term.cols;
     const live = new Set<string>();
-    for (const region of tableRegions(this.projection.visible)) {
-      if (region.bufferEnd < top || region.bufferStart > bottom) continue;
-      live.add(region.id);
-      const visibleRow = Math.max(top, region.bufferStart);
-      const line = this.term.buffer.active.getLine(visibleRow)?.translateToString(true) ?? "";
-      const wall = Math.max(0, line.search(/[|┌├└╭╰│┃]/));
-      const anchor = this.anchors.elementForBufferRow(visibleRow);
+    const now = performance.now();
+    this.paintedLineIds.clear();
+    const visibleByLineId = new Map(this.anchors.visible.$().map((line) => [line.id, line]));
+    for (const [id, checkbox] of this.checkboxes) {
+      checkbox.hidden = true;
+      const confirmed_at = Number(checkbox.dataset.confirmedAt ?? 0);
+      if (now - confirmed_at > projection_grace_ms) continue;
+      const lineId = checkbox.dataset.terminalLineId;
+      const line = lineId ? visibleByLineId.get(lineId) : undefined;
+      if (!line) continue;
+      const anchor = this.anchors.elementForBufferRow(line.bufferStart);
       if (!anchor) continue;
-      let checkbox = this.gutter.querySelector<HTMLInputElement>(`input[data-region-id="${CSS.escape(region.id)}"]`);
-      if (!checkbox) {
-        checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "term-context-table-check";
-        checkbox.dataset.regionId = region.id;
-        checkbox.title = "Add complete table to next prompt";
-        checkbox.addEventListener("mousedown", (event) => event.stopPropagation());
-        checkbox.addEventListener("change", () => this.toggleTable(region, checkbox!.checked));
-        this.gutter.appendChild(checkbox);
-      }
-      checkbox.checked = this.items.has(region.id);
+      live.add(id);
+      checkbox.hidden = false;
+      this.paintedLineIds.add(line.id);
       const anchorRect = anchor.getBoundingClientRect();
       Object.assign(checkbox.style, {
-        left: `${Math.max(2, screenRect.left - hostRect.left + wall * cellWidth - 20)}px`,
+        left: `${Math.max(2, screenRect.left - hostRect.left - 42)}px`,
         top: `${anchorRect.top - hostRect.top}px`,
       });
     }
-    this.gutter.querySelectorAll<HTMLInputElement>("input[data-region-id]").forEach((checkbox) => {
-      if (!live.has(checkbox.dataset.regionId ?? "")) checkbox.remove();
+    for (const selectable of structuredSelectables(this.projection.visible, this.anchors.visible.$())) {
+      if (selectable.bufferRow < top || selectable.bufferRow > bottom) continue;
+      live.add(selectable.id);
+      const anchor = this.anchors.elementForBufferRow(selectable.bufferRow);
+      if (!anchor) continue;
+      let checkbox = this.checkboxes.get(selectable.id);
+      if (!checkbox) {
+        checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "term-context-structured-check";
+        checkbox.dataset.regionId = selectable.id;
+        checkbox.title = `Add ${selectable.kind} row to next prompt`;
+        checkbox.addEventListener("mousedown", (event) => event.stopPropagation());
+        checkbox.addEventListener("change", () => this.toggleStructured(selectable, checkbox!.checked));
+        this.gutter.appendChild(checkbox);
+        this.checkboxes.set(selectable.id, checkbox);
+      }
+      checkbox.checked = this.items.has(selectable.id);
+      checkbox.hidden = false;
+      checkbox.dataset.confirmedAt = String(now);
+      checkbox.dataset.terminalLineId = anchor.dataset.terminalLineId;
+      if (anchor.dataset.terminalLineId) this.paintedLineIds.add(anchor.dataset.terminalLineId);
+      const anchorRect = anchor.getBoundingClientRect();
+      Object.assign(checkbox.style, {
+        left: `${Math.max(2, screenRect.left - hostRect.left - 42)}px`,
+        top: `${anchorRect.top - hostRect.top}px`,
+      });
+    }
+    for (const [id, checkbox] of this.checkboxes) {
+      const expired = now - Number(checkbox.dataset.confirmedAt ?? 0) > projection_grace_ms;
+      const over_limit = this.checkboxes.size > 512;
+      if (live.has(id) || !checkbox.hidden || !expired && !over_limit) continue;
+        checkbox.remove();
+        this.checkboxes.delete(id);
+    }
+    this.paintDirty = false;
+    this.revealFrame = requestAnimationFrame(() => {
+      this.revealFrame = 0;
+      if (!this.paintDirty && this.enabled()) this.gutter.hidden = false;
     });
   }
 
@@ -207,7 +346,7 @@ export class TerminalContextQueue {
       if (text) this.paste(text);
       this.items.clear();
       this.renderQueue();
-      this.paintTables();
+      this.paintSelections();
     });
     header.appendChild(pasteButton);
     this.queue.appendChild(header);
@@ -234,7 +373,7 @@ export class TerminalContextQueue {
       remove.addEventListener("click", () => {
         this.items.delete(item.id);
         this.renderQueue();
-        this.paintTables();
+        this.paintSelections();
       });
       row.append(enabled, textbox, remove);
       this.queue.appendChild(row);
@@ -246,6 +385,9 @@ export class TerminalContextQueue {
     this.projectionSubscription.unsubscribe();
     this.anchorSubscription.unsubscribe();
     this.lifetime.unsubscribe();
+    if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
+    this.checkboxes.clear();
+    this.paintedLineIds.clear();
     this.root.remove();
   }
 }

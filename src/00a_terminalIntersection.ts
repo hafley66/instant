@@ -88,10 +88,21 @@ export interface TmuxPane {
 }
 
 export class NativeTmuxPane implements TmuxPane {
+  session_id: string | null = null;
+  session_read_at = 0;
   constructor(readonly target: string, readonly socket?: string) {}
 
   captureVisible(): Promise<string> {
     return invoke<string>("boop_mux_capture", { target: this.target, socket: this.socket ?? null });
+  }
+
+  async session(): Promise<string | null> {
+    if (performance.now() - this.session_read_at < 1000) return this.session_id;
+    this.session_id = await invoke<string | null>("boop_mux_session", {
+      target: this.target, socket: this.socket ?? null,
+    }).catch(() => null);
+    this.session_read_at = performance.now();
+    return this.session_id;
   }
 }
 

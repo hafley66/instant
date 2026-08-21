@@ -27,6 +27,20 @@ export function registerBuiltin() {
         set: (on) => store.set({ showToolbar: on }),
       },
       {
+        id: "inlineDiagrams",
+        label: "Inline Mermaid/D2",
+        hint: "render diagram draw-overs in terminal messages",
+        get: () => store.get().inlineDiagrams,
+        set: (on) => store.set({ inlineDiagrams: on }),
+      },
+      {
+        id: "inlineStructuredSelectors",
+        label: "Table/list selection checkboxes",
+        hint: "show one gutter checkbox per table row and list item",
+        get: () => store.get().inlineStructuredSelectors,
+        set: (on) => store.set({ inlineStructuredSelectors: on }),
+      },
+      {
         id: "xpPixel",
         label: "Super XP (pixel font)",
         hint: "grainy bitmap font everywhere, incl. the terminal",

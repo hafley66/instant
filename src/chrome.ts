@@ -10,7 +10,7 @@ import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
-import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays } from "./terminal";
+import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays, syncInlineStructuredSelectors } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   favoriteBoopTurn,
@@ -119,6 +119,13 @@ export function syncInlineDiagrams(s: AppState) {
   button.classList.toggle("active", s.inlineDiagrams);
   button.setAttribute("aria-pressed", String(s.inlineDiagrams));
   syncInlineDiagramOverlays();
+}
+
+export function syncInlineStructured(s: AppState) {
+  const button = $("#structured-overlay-toggle") as HTMLButtonElement;
+  button.classList.toggle("active", s.inlineStructuredSelectors);
+  button.setAttribute("aria-pressed", String(s.inlineStructuredSelectors));
+  syncInlineStructuredSelectors();
 }
 
 // Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
@@ -410,6 +417,9 @@ export function wireChrome() {
 
   $("#diagram-toggle").onclick = () =>
     store.set({ inlineDiagrams: !store.get().inlineDiagrams });
+
+  $("#structured-overlay-toggle").onclick = () =>
+    store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors });
 
   $("#shot-btn").onclick = captureToPrompt;
   $("#send-menu-btn").onclick = (e) => openSendPicker(e.currentTarget as HTMLElement);

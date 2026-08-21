@@ -8,7 +8,7 @@ test("an empty terminal context queue has no visible shell", async ({ page }) =>
   await expect(page.locator(".term-context-queue")).toBeHidden();
 });
 
-test("queues a complete Boop table and a terminal selection for the next prompt", async ({ page }) => {
+test("queues individual Boop table rows and list items for the next prompt", async ({ page }) => {
   await page.goto("/e2e-term.html?e2e=1&structured=1");
   await page.getByTestId("open-term").click();
   await expect(page.locator(".term-host")).toBeVisible();
@@ -17,7 +17,7 @@ test("queues a complete Boop table and a terminal selection for the next prompt"
     const target = window as Window & { __instantE2eNativeResults?: Record<string, unknown>; __writes?: Array<{ data: string }> };
     target.__writes = [];
     target.__instantE2eNativeResults!.write_pty = (args: unknown) => target.__writes!.push(args as { data: string });
-    window.__term!.write(`\x1b[2J\x1b[H${"\r\n".repeat(6)}${[
+    window.__term!.write(`\x1b[2J\x1b[H${"scrollback fixture\r\n".repeat(100)}${[
       "STRUCTURED TURN START",
       "| Item | Visibility |",
       "| --- | --- |",
@@ -29,28 +29,41 @@ test("queues a complete Boop table and a terminal selection for the next prompt"
     ].join("\r\n")}`);
   });
 
-  const tableCheck = page.locator(".term-context-table-check");
-  await expect(tableCheck).toHaveCount(1);
+  await expect(page.locator(".xterm-rows")).toContainText("STRUCTURED TURN START");
+  const tableCheck = page.locator(".term-context-structured-check");
+  await expect(tableCheck).toHaveCount(5);
+  expect(await page.evaluate(async () => {
+    const gutter = document.querySelector(".term-context-gutter")!;
+    let childMutations = 0;
+    const observer = new MutationObserver((records) => {
+      childMutations += records.filter((record) => record.type === "childList").length;
+    });
+    observer.observe(gutter, { childList: true });
+    window.__term!.write("\rtyping in the prompt");
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    observer.disconnect();
+    return childMutations;
+  })).toBe(0);
+  expect(await page.evaluate(() => new Promise<boolean>((resolve) => {
+    const gutter = document.querySelector<HTMLElement>(".term-context-gutter")!;
+    const observer = new MutationObserver(() => {
+      if (!gutter.hidden) return;
+      observer.disconnect();
+      resolve(gutter.hidden);
+    });
+    observer.observe(gutter, { attributes: true, attributeFilter: ["hidden"] });
+    window.__term!.write("\r\nterminal output appended");
+  }))).toBe(true);
+  await expect(page.locator(".term-context-gutter")).toBeVisible();
+  await expect(tableCheck).toHaveCount(5);
   const wall = await page.evaluate(() => window.__term!.point(7, 0));
-  const box = await tableCheck.boundingBox();
+  const box = await tableCheck.first().boundingBox();
   expect(box!.x).toBeLessThan(wall!.x);
-  await tableCheck.check();
-  await expect(page.locator('.term-context-queue textarea')).toHaveValue([
-    "| Item | Visibility |",
-    "| --- | --- |",
-    "| alpha | visible |",
-    "| beta | hidden |",
-  ].join("\n"));
-
-  const start = await page.evaluate(() => window.__term!.point(11, 2));
-  const end = await page.evaluate(() => window.__term!.point(11, 20));
-  await page.mouse.move(start!.x, start!.y);
-  await page.mouse.down();
-  await page.mouse.move(end!.x, end!.y, { steps: 8 });
-  await page.mouse.up();
-  await expect(page.locator(".term-context-selection-add")).toBeVisible();
-  await page.locator(".term-context-selection-add").click();
+  await tableCheck.nth(1).check();
+  await tableCheck.nth(3).check();
   await expect(page.locator('.term-context-queue textarea')).toHaveCount(2);
+  await expect(page.locator('.term-context-queue textarea').nth(0)).toHaveValue("| alpha | visible |");
+  await expect(page.locator('.term-context-queue textarea').nth(1)).toHaveValue("- first visible item");
   await page.screenshot({ path: resolve("artifacts/v2-terminal-context-queue.png"), fullPage: true });
 
   await page.getByRole("button", { name: "Paste into prompt" }).click();

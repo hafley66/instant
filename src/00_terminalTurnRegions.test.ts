@@ -44,6 +44,19 @@ describe("terminal turn regions", () => {
     `);
   });
 
+  it("does not parse diff lines inside a generic code fence as list items", () => {
+    expect(detectTurnRegions("```diff\n- removed\n+ added\n```\n- actual item")).toMatchInlineSnapshot(`
+      [
+        {
+          "kind": "list",
+          "sourceEnd": 4,
+          "sourceStart": 4,
+          "text": "- actual item",
+        },
+      ]
+    `);
+  });
+
   it("projects a diagram through physically wrapped xterm rows", () => {
     const said = ["before", "```d2", "a -> a very long node name", "b -> c", "```", "after"].join("\n");
     expect(projectTurnRegions("s:4", said, { bufferStart: 20, bufferEnd: 29 }, [
@@ -55,10 +68,16 @@ describe("terminal turn regions", () => {
     ], (line) => line.trim().toLowerCase())).toMatchInlineSnapshot(`
       [
         {
-          "bufferEnd": 26,
-          "bufferStart": 21,
+          "bufferEnd": 25,
+          "bufferStart": 22,
           "id": "s:4:d2:1",
           "kind": "d2",
+          "sourceBufferRows": [
+            null,
+            22,
+            25,
+            null,
+          ],
           "sourceEnd": 4,
           "sourceStart": 1,
           "text": "a -> a very long node name
@@ -67,6 +86,18 @@ describe("terminal turn regions", () => {
         },
       ]
     `);
+  });
+
+  it("preserves each list item's physical row after a wrapped item", () => {
+    const said = "- first item wraps onto another physical row\n- second item";
+    const [region] = projectTurnRegions("s:10", said, { bufferStart: 30, bufferEnd: 33 }, [
+      { text: "- first item wraps onto another physical row", start: 30, end: 31 },
+      { text: "- second item", start: 32, end: 32 },
+    ], (line) => line.trim());
+    expect(region).toMatchObject({
+      kind: "list",
+      sourceBufferRows: [30, 32],
+    });
   });
 
   it("uses one consistent offset when sequence-diagram keywords repeat", () => {
@@ -97,8 +128,8 @@ describe("terminal turn regions", () => {
       { text: "deactivate Kid", start: 128, end: 128 },
     ], (line) => line.trim())).toMatchObject([{
       kind: "mermaid",
-      bufferStart: 119,
-      bufferEnd: 129,
+      bufferStart: 120,
+      bufferEnd: 128,
     }]);
   });
 });

@@ -12,9 +12,61 @@ export type ProjectedTurnRegion = TurnRegion & {
   turnId: string;
   bufferStart: number;
   bufferEnd: number;
+  sourceBufferRows?: Array<number | null>;
 };
 
+type RegionRowMatch = { source_row: number; row: { text: string; start: number; end: number } };
+
+export function alignRegionRows(
+  source: string[],
+  rows: Array<{ text: string; start: number; end: number }>,
+  normalize: (line: string) => string,
+): RegionRowMatch[] {
+  const left = source.map(normalize);
+  const right = rows.map((row) => normalize(row.text));
+  const score = (source_line: string, screen_line: string) => {
+    if (source_line.length < 3 || screen_line.length < 3) return 0;
+    if (source_line === screen_line) return 10_000 + source_line.length;
+    if (source_line.length >= 8 && screen_line.length >= 8 &&
+        (screen_line.includes(source_line) || source_line.includes(screen_line))) {
+      return 100 + Math.min(source_line.length, screen_line.length);
+    }
+    return 0;
+  };
+  const width = right.length + 1;
+  const values = new Int32Array((left.length + 1) * width);
+  for (let source_row = 1; source_row <= left.length; source_row++) {
+    for (let screen_row = 1; screen_row <= right.length; screen_row++) {
+      const cell = source_row * width + screen_row;
+      const matched = score(left[source_row - 1], right[screen_row - 1]);
+      values[cell] = Math.max(
+        values[(source_row - 1) * width + screen_row],
+        values[source_row * width + screen_row - 1],
+        matched ? values[(source_row - 1) * width + screen_row - 1] + matched : 0,
+      );
+    }
+  }
+  const matches: RegionRowMatch[] = [];
+  let source_row = left.length;
+  let screen_row = right.length;
+  while (source_row && screen_row) {
+    const cell = source_row * width + screen_row;
+    const matched = score(left[source_row - 1], right[screen_row - 1]);
+    if (matched && values[cell] === values[(source_row - 1) * width + screen_row - 1] + matched) {
+      matches.push({ source_row: source_row - 1, row: rows[screen_row - 1] });
+      source_row--;
+      screen_row--;
+    } else if (values[cell] === values[(source_row - 1) * width + screen_row]) {
+      source_row--;
+    } else {
+      screen_row--;
+    }
+  }
+  return matches.reverse();
+}
+
 const fence = /^\s*(`{3,}|~{3,})\s*(mermaid|d2)\s*$/i;
+const anyFence = /^\s*(`{3,}|~{3,})/;
 const tableSeparator = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+(?:\s*:?-{3,}:?\s*)\|?\s*$/;
 const tableRow = /^\s*\|.*\|\s*$/;
 const listRow = /^\s*(?:[-+*]|\d+[.)])\s+\S/;
@@ -24,16 +76,20 @@ export function detectTurnRegions(said: string): TurnRegion[] {
   const regions: TurnRegion[] = [];
   const occupied = new Set<number>();
   for (let start = 0; start < lines.length; start++) {
-    const open = lines[start].match(fence);
-    if (!open) continue;
-    const end = lines.findIndex((line, index) => index > start && new RegExp(`^\\s*${open[1][0]}{${open[1].length},}\\s*$`).test(line));
+    const boundary = lines[start].match(anyFence);
+    if (!boundary) continue;
+    const end = lines.findIndex((line, index) => index > start &&
+      new RegExp(`^\\s*${boundary[1][0]}{${boundary[1].length},}\\s*$`).test(line));
     if (end < 0) continue;
-    regions.push({
-      kind: open[2].toLowerCase() as "mermaid" | "d2",
-      sourceStart: start,
-      sourceEnd: end,
-      text: lines.slice(start + 1, end).join("\n"),
-    });
+    const open = lines[start].match(fence);
+    if (open) {
+      regions.push({
+        kind: open[2].toLowerCase() as "mermaid" | "d2",
+        sourceStart: start,
+        sourceEnd: end,
+        text: lines.slice(start + 1, end).join("\n"),
+      });
+    }
     for (let index = start; index <= end; index++) occupied.add(index);
     start = end;
   }
@@ -62,41 +118,21 @@ export function projectTurnRegions(
   rows: Array<{ text: string; start: number; end: number }>,
   normalize: (line: string) => string,
 ): ProjectedTurnRegion[] {
-  const source = said.split("\n").map(normalize);
   return detectTurnRegions(said).flatMap((region) => {
-    const anchors = source.slice(region.sourceStart, region.sourceEnd + 1);
-    const hits = rows.flatMap((row) => {
-      const normalized = normalize(row.text);
-      return anchors.flatMap((anchor, relative) => anchor.length >= 3 && (
-        normalized === anchor || normalized.includes(anchor)
-      ) ? [{ row, relative, exact: normalized === anchor, offset: row.start - relative, weight: anchor.length }] : []);
-    });
-    if (!hits.length) return [];
-    const offsets = new Map<number, { count: number; exact: number; weight: number }>();
-    for (const hit of hits) {
-      const score = offsets.get(hit.offset) ?? { count: 0, exact: 0, weight: 0 };
-      score.count++;
-      score.exact += Number(hit.exact);
-      score.weight += hit.weight;
-      offsets.set(hit.offset, score);
-    }
-    const projectedStart = [...offsets].sort(([leftOffset, left], [rightOffset, right]) =>
-      right.count - left.count || right.exact - left.exact || right.weight - left.weight || leftOffset - rightOffset
-    )[0][0];
-    // Physical xterm wraps only move later source rows downward. Keep those
-    // matches when extending the region, while excluding unrelated occurrences
-    // above the chosen source-to-buffer alignment.
-    const aligned = hits.filter((hit) => hit.offset >= projectedStart);
-    const last = aligned.reduce((right, hit) => hit.relative > right.relative ? hit : right);
-    const bufferStart = Math.max(turnSpan.bufferStart, projectedStart);
-    const missingAfter = region.sourceEnd - region.sourceStart - last.relative;
-    const bufferEnd = Math.min(turnSpan.bufferEnd, last.row.end + missingAfter);
+    const anchors = said.split("\n").slice(region.sourceStart, region.sourceEnd + 1);
+    const matches = alignRegionRows(anchors, rows, normalize);
+    if (!matches.length) return [];
+    const sourceBufferRows: Array<number | null> = anchors.map(() => null);
+    for (const match of matches) sourceBufferRows[match.source_row] = match.row.start;
+    const bufferStart = Math.max(turnSpan.bufferStart, Math.min(...matches.map((match) => match.row.start)));
+    const bufferEnd = Math.min(turnSpan.bufferEnd, Math.max(...matches.map((match) => match.row.end)));
     return [{
       ...region,
       id: `${turnId}:${region.kind}:${region.sourceStart}`,
       turnId,
       bufferStart,
       bufferEnd: Math.max(bufferStart, bufferEnd),
+      sourceBufferRows,
     }];
   });
 }

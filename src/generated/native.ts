@@ -53,10 +53,12 @@ export type CommandName =
   | "harness_session"
   | "harness_sessions"
   | "boop_turns"
+  | "boop_turns_recent"
   | "boop_favorite_add"
   | "boop_favorites"
   | "boop_favorite_toggle"
   | "boop_mux_capture"
+  | "boop_mux_session"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
@@ -166,6 +168,7 @@ export namespace commands {
 
   export namespace boop {
     export const boopTurns = "boop_turns";
+    export const boopTurnsRecent = "boop_turns_recent";
     export const boopFavoriteAdd = "boop_favorite_add";
     export const boopFavorites = "boop_favorites";
     export const boopFavoriteToggle = "boop_favorite_toggle";
@@ -173,6 +176,7 @@ export namespace commands {
 
   export namespace boop_mux {
     export const boopMuxCapture = "boop_mux_capture";
+    export const boopMuxSession = "boop_mux_session";
   }
 
   export namespace ledger {

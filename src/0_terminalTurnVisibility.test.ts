@@ -21,7 +21,7 @@ describe("terminal turn visibility v2", () => {
         {
           "bufferEnd": 41,
           "bufferStart": 40,
-          "confidence": "extended",
+          "confidence": "anchored",
           "harness": "codex",
           "id": "session-a:7",
           "provenance": "xterm+boop",
@@ -81,5 +81,41 @@ describe("terminal turn visibility v2", () => {
         },
       ]
     `);
+  });
+
+  it("selects the compact parent turn over an approval transcript containing the same response", () => {
+    const response = [
+      "Properties:",
+      "- Every streamed write resets the quiet timer.",
+      "- switchMap cancels the previous wait.",
+      "- No polling.",
+    ].join("\n");
+    const parent = { ...turn(14, response), session: "parent", ts: 140 };
+    const approval = {
+      ...turn(80, [
+        "Review the following proposed response:",
+        "<assistant_response>",
+        response,
+        "</assistant_response>",
+        "Return an approval decision.",
+      ].join("\n")),
+      session: "approval-child",
+      ts: 150,
+    };
+    expect(locateVisibleTurns([
+      { text: "Properties:", start: 70, end: 70 },
+      { text: "- Every streamed write resets the quiet timer.", start: 71, end: 71 },
+      { text: "- switchMap cancels the previous wait.", start: 72, end: 72 },
+      { text: "- No polling.", start: 73, end: 73 },
+    ], [approval, parent]).map(({ id, bufferStart, bufferEnd }) => ({ id, bufferStart, bufferEnd })))
+      .toMatchInlineSnapshot(`
+        [
+          {
+            "bufferEnd": 73,
+            "bufferStart": 70,
+            "id": "parent:14",
+          },
+        ]
+      `);
   });
 });

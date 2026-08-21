@@ -39,11 +39,29 @@ fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
         .collect()
 }
 
+fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String> {
+    let output = Command::new("boop")
+        .args(["db", "turn", "list", "--since", &since.to_string(), "--harness", harness,
+            "--role", "assistant", "--limit", "100", "--format", "ndjson"])
+        .env("PATH", crate::pty::path_env()).output()
+        .map_err(|error| format!("boop recent turn list: {error}"))?;
+    if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_string()); }
+    String::from_utf8_lossy(&output.stdout).lines().filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).map_err(|error| format!("boop recent turn row: {error}")))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn boop_turns(session: String) -> Result<Vec<BoopTurn>, String> {
     tauri::async_runtime::spawn_blocking(move || read_turns(&session))
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_turns_recent(since: i64, harness: String) -> Result<Vec<BoopTurn>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_recent_turns(since, &harness))
+        .await.map_err(|error| error.to_string())?
 }
 
 fn add_favorite(turn: &BoopTurn) -> Result<(), String> {

@@ -104,6 +104,7 @@ import {
   syncXpPixel,
   syncMode,
   syncInlineDiagrams,
+  syncInlineStructured,
   applyToolbar,
   syncSidebar,
   syncToggles,
@@ -148,6 +149,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
+  { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
@@ -208,6 +210,7 @@ async function main() {
   store.subscribe(syncXpPixel, ["xpPixel", "config"]);
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
+  store.subscribe(syncInlineStructured, ["inlineStructuredSelectors"]);
   store.subscribe(applyToolbar, ["showToolbar"]);
   store.subscribe(syncSidebar, ["sidebar"]);
   // dockview owns the layout; we only react: refit the active terminal
@@ -234,6 +237,7 @@ async function main() {
   syncXpPixel(store.get());
   syncMode(store.get());
   syncInlineDiagrams(store.get());
+  syncInlineStructured(store.get());
   applyToolbar(store.get());
   syncSidebar(store.get());
   renderWorktreesPanel();

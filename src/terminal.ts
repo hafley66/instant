@@ -58,8 +58,8 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { boopTurnsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
-import { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
+import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { TerminalTurnVisibilityV2, type BoopTurn } from "./0_terminalTurnVisibility";
 import { NativeTmuxPane, XtermViewportAdapter } from "./00a_terminalIntersection";
 import { CmdClickGestureTracker } from "./0_clickRouter";
 import { nextClosedOrder } from "./0_reopenOrder";
@@ -104,6 +104,9 @@ export const tabs = new Map<string, Tab>();
 export function syncInlineDiagramOverlays() {
   for (const tab of tabs.values()) tab.diagrams?.syncEnabled();
 }
+export function syncInlineStructuredSelectors() {
+  for (const tab of tabs.values()) tab.contextQueue?.paintSelections();
+}
 const inspectorTextCache = new Map<string, string>();
 
 export function observeTerminalOutput(id: string, chunk: string) {
@@ -118,6 +121,7 @@ export function observeTerminalOutput(id: string, chunk: string) {
   // banner. Re-read exactly once when output resolves that runtime identity so
   // a generic shell does not stay pinned to another editor's newest session.
   if (tab.harness.id && tab.harness.id !== previousHarness) void warmTurns(id);
+  if (tab.harness.id && tab.harness.id !== previousHarness) tab.turnVisibility?.schedule();
   tab.el.dataset.harness = tab.harness.id ?? "unknown";
   tab.el.dataset.harnessConfidence = tab.harness.confidence;
   tab.el.title = tab.harness.id
@@ -608,7 +612,17 @@ export function openTab(
   const tmuxPane = graphics ? undefined : new NativeTmuxPane(tmuxTarget ?? name);
   const turnVisibility = graphics || !viewport ? undefined : new TerminalTurnVisibilityV2(
     viewport,
-    () => boopTurnsForTab(id),
+    async () => {
+      const session_id = await tmuxPane?.session() ?? null;
+      const direct = session_id ? boopTurnsForSession(session_id) : boopTurnsForTab(id);
+      const activeHarness = tabs.get(id)?.harness.id ?? harness.id;
+      const candidates = activeHarness ? boopCandidateTurns(activeHarness) : Promise.resolve([]);
+      const unique = new Map<string, BoopTurn>();
+      for (const turn of (await Promise.all([direct, candidates])).flat()) {
+        unique.set(`${turn.session}:${turn.turn}`, turn);
+      }
+      return [...unique.values()];
+    },
     tmuxPane,
   );
   const lineAnchors = graphics || !viewport ? undefined : new TerminalLineAnchors(term, viewport);
@@ -628,6 +642,7 @@ export function openTab(
     turnVisibility,
     lineAnchors,
     (text) => { void invoke(commands.pty.writePty, { id, data: text }).catch(() => {}); term.focus(); },
+    () => store.get().inlineStructuredSelectors,
   );
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
@@ -1062,6 +1077,7 @@ export function onTermShown(id: string) {
   requestAnimationFrame(() => {
     t.fit.fit();
     t.diagrams?.activate();
+    t.contextQueue?.activate();
     invoke("resize_pty", {
       id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
     }).catch(() => {});

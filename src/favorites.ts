@@ -89,15 +89,15 @@ const ledgerCache = new Map<string, AiMessage[]>();
 export const tabTurns = new Map<string, AiMessage[]>();
 const boopTurnCache = new Map<string, { readAt: number; turns: BoopTurn[] }>();
 const boopTurnReads = new Map<string, Promise<BoopTurn[]>>();
+const boopCandidateCache = new Map<string, { readAt: number; turns: BoopTurn[] }>();
+const boopCandidateReads = new Map<string, Promise<BoopTurn[]>>();
 export let boopFavorites: BoopFavorite[] = [];
 // Where each session's ledger actually lives (the cwd that resolved it), keyed by
 // `editor:session_id`. fav_add needs this cwd so a favorite resumes in the right
 // folder — paths[0] (tabMetaById) can be a subdir the session wasn't keyed under.
 export const turnCwd = new Map<string, string>();
 
-export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
-  const session = (await sessionsForTab(id))[0]?.sessionId;
-  if (!session) return [];
+export async function boopTurnsForSession(session: string): Promise<BoopTurn[]> {
   const cached = boopTurnCache.get(session);
   if (cached && performance.now() - cached.readAt < 1000) return cached.turns;
   const active = boopTurnReads.get(session);
@@ -110,6 +110,32 @@ export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
     })
     .finally(() => boopTurnReads.delete(session));
   boopTurnReads.set(session, read);
+  return read;
+}
+
+export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
+  const sessions = await sessionsForTab(id);
+  const batches = await Promise.all(sessions.map(({ sessionId }) => boopTurnsForSession(sessionId)));
+  const unique = new Map<string, BoopTurn>();
+  for (const turn of batches.flat()) unique.set(`${turn.session}:${turn.turn}`, turn);
+  return [...unique.values()].sort((left, right) => left.ts - right.ts || left.turn - right.turn);
+}
+
+export async function boopCandidateTurns(harness: HarnessId): Promise<BoopTurn[]> {
+  const cached = boopCandidateCache.get(harness);
+  if (cached && performance.now() - cached.readAt < 10_000) return cached.turns;
+  const active = boopCandidateReads.get(harness);
+  if (active) return active;
+  const read = invoke<BoopTurn[]>("boop_turns_recent", {
+    since: Date.now() - 15 * 60 * 1000,
+    harness,
+  }).then(async (recent) => {
+    const sessions = [...new Set(recent.map((turn) => turn.session))];
+    const turns = (await Promise.all(sessions.map(boopTurnsForSession))).flat();
+    boopCandidateCache.set(harness, { readAt: performance.now(), turns });
+    return turns;
+  }).catch(() => [] as BoopTurn[]).finally(() => boopCandidateReads.delete(harness));
+  boopCandidateReads.set(harness, read);
   return read;
 }
 
