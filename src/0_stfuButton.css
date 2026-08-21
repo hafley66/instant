@@ -1,0 +1,136 @@
+/* Desk-mounted emergency button. One DOM element per part, CSS 3D only, no canvas. */
+.stfu-stage {
+  --stfu-tilt: 56deg;
+  --stfu-twist: -13deg;
+  --stfu-travel: 54px;
+  --stfu-wall: #6b0d0d;
+  perspective: 520px;
+  perspective-origin: 50% 30%;
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 40px 0 24px;
+  user-select: none;
+}
+
+/* the base the cap sits in, leaning away like it is bolted to the desk */
+.stfu-plate {
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  transform: rotateX(var(--stfu-tilt)) rotateZ(var(--stfu-twist));
+  transform-style: preserve-3d;
+  background: radial-gradient(circle at 42% 38%, #3b4048, #171a1f 62%, #0d0f12);
+  box-shadow: 0 40px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 6px #23262c;
+  display: grid;
+  place-items: center;
+}
+
+
+.stfu-cap:focus-visible { outline: 3px solid #ffd9d4; outline-offset: 6px; }
+.stfu-cap:disabled { cursor: progress; filter: saturate(0.6); }
+
+/* label rides the cap, counter-rotated so it reads flat to the viewer */
+.stfu-face {
+  transform: translateZ(1px);
+  font: 800 40px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 3px;
+  color: #ffe9e6;
+  text-shadow: 0 2px 0 #7c0808, 0 0 18px rgba(255, 90, 80, 0.55);
+  pointer-events: none;
+}
+
+
+.stfu-status {
+  font: 500 12px/1.4 ui-monospace, monospace;
+  color: #8b939e;
+  min-height: 1.4em;
+}
+
+/* label treatments, selected with data-label-mode on .stfu-stage */
+.stfu-stage[data-label-mode="flat"] .stfu-face { transform: translateZ(2px); }
+.stfu-stage[data-label-mode="big"] .stfu-face { transform: translateZ(1px); font-size: 76px; letter-spacing: 0; }
+.stfu-stage[data-label-mode="engraved"] .stfu-face {
+  transform: translateZ(2px);
+  color: #8d1414;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.65), 0 1px 0 rgba(255, 150, 140, 0.55);
+}
+
+/* overlay placement inside the instant window */
+#stfu-host {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 9999;
+  pointer-events: none;
+}
+#stfu-host .stfu-stage { pointer-events: auto; padding: 0; transform: scale(0.42); transform-origin: 100% 100%; }
+#stfu-host .stfu-status { position: absolute; bottom: -4px; right: 0; font-size: 26px; white-space: nowrap; }
+
+/* animatable extrusion unit; each disc sits at index * unit along Z */
+@property --stfu-unit {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+/* the cap is a real stack of discs, so the side wall is geometry rather than a shadow */
+.stfu-cap {
+  --stfu-unit: 1.55px;
+  --stfu-discs: 40;
+  position: relative;
+  width: 224px;
+  height: 224px;
+  border: 0;
+  padding: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  transition: --stfu-unit 90ms cubic-bezier(0.25, 0.9, 0.35, 1);
+}
+
+.stfu-cap:focus-visible { outline: 3px solid #ffd9d4; outline-offset: 8px; }
+.stfu-cap:disabled { cursor: progress; filter: saturate(0.65); }
+
+/* one ring of the cylinder wall */
+.stfu-disc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transform: translateZ(calc(var(--i) * var(--stfu-unit)));
+  background: var(--shade);
+}
+
+/* the pressable top face rides the top of the stack */
+.stfu-top {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transform: translateZ(calc(var(--stfu-discs) * var(--stfu-unit)));
+  background: radial-gradient(circle at 38% 30%, #ff6a5e, #e02020 46%, #a20d0d 80%, #8d0c0c);
+  box-shadow: inset 0 0 0 2px rgba(255, 160, 150, 0.25);
+}
+
+.stfu-stage.is-pressed .stfu-cap { --stfu-unit: 0.22px; }
+
+/* hover: the column extends, the cap brightens, the plate throws red light */
+.stfu-cap:hover { --stfu-unit: 1.95px; }
+
+.stfu-cap:hover .stfu-top {
+  background: radial-gradient(circle at 38% 30%, #ff8377, #f52a2a 46%, #b81111 80%, #9c0f0f);
+  box-shadow: inset 0 0 0 2px rgba(255, 190, 180, 0.4), 0 0 34px rgba(255, 60, 50, 0.45);
+}
+
+.stfu-cap:hover ~ * , .stfu-plate:has(.stfu-cap:hover) {
+  box-shadow: 0 40px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 6px #2e3138,
+    0 0 46px rgba(226, 40, 32, 0.28);
+}
+
+/* the label lifts a hair so it reads as catching the light */
+.stfu-cap:hover .stfu-face { text-shadow: 0 2px 0 #7c0808, 0 0 26px rgba(255, 120, 110, 0.8); }
+
+/* pressed beats hover: same property, higher specificity */
+.stfu-stage.is-pressed .stfu-cap:hover { --stfu-unit: 0.22px; }

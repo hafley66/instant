@@ -68,6 +68,9 @@
         <button id="diagram-toggle" title="Toggle inline Mermaid/D2 renders">
           ◇
         </button>
+        <button id="panic-toggle" title="Toggle the red panic button">
+          ⏹
+        </button>
         <button id="structured-overlay-toggle" title="Toggle table/list selection checkboxes">
           ☑
         </button>
@@ -91,6 +94,9 @@
            dockview mounts (see reactdock.tsx, terminal.ts, browser.ts). Every
            panel is a React `component` now; nothing is injected here. -->
       <div id="panel-pool" hidden></div>
+
+      <!-- panic button overlay, mounted by src/0_stfuButton.ts from main.ts -->
+      <div id="stfu-host"></div>
 
       <div class="rz" data-dir="North"></div>
       <div class="rz" data-dir="South"></div>

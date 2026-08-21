@@ -6,6 +6,7 @@
 // todo(test): add a boot smoke test that asserts registration and teardown order
 import "xp.css";
 import "./0_sourceFonts.css";
+import "./0_stfuButton.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
 import { listen } from "@tauri-apps/api/event";
@@ -25,6 +26,7 @@ import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
+import { mountStfuButton } from "./0_stfuButton";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
@@ -100,10 +102,12 @@ import {
   toggleClickThrough,
 } from "./overlay";
 import {
+  askText,
   syncSkin,
   syncXpPixel,
   syncMode,
   syncInlineDiagrams,
+  syncPanicButton,
   syncInlineStructured,
   applyToolbar,
   syncSidebar,
@@ -148,6 +152,11 @@ const TAB_COMMANDS: Command[] = [
   // The top toolbar is opt-in; these keep its actions reachable when it's hidden.
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
+  { id: "view.panicButton", keys: [], title: "Toggle Panic Button", group: "View", run: () => store.set({ panicButton: !store.get().panicButton }) },
+  { id: "view.panicBody", keys: [], title: "Set Panic Button Text", group: "View", run: async () => {
+    const next = await askText("what the panic button sends", store.get().panicBody);
+    if (next !== null) store.set({ panicBody: next });
+  } },
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
   { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors }) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
@@ -194,6 +203,10 @@ const TAB_COMMANDS: Command[] = [
 ];
 
 async function main() {
+  // Panic button: pastes a stop message into the visible tmux pane. Mounted first
+  // so it survives a later boot failure, which is exactly when you want it.
+  const stfuHost = document.getElementById("stfu-host");
+  if (stfuHost) mountStfuButton(stfuHost, { body: () => store.get().panicBody });
   // Resolve the home dir once so tildify() can stay synchronous during render.
   setHomeDir(await homeDir().catch(() => ""));
   await refreshConfig();
@@ -210,6 +223,7 @@ async function main() {
   store.subscribe(syncXpPixel, ["xpPixel", "config"]);
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
+  store.subscribe(syncPanicButton, ["panicButton"]);
   store.subscribe(syncInlineStructured, ["inlineStructuredSelectors"]);
   store.subscribe(applyToolbar, ["showToolbar"]);
   store.subscribe(syncSidebar, ["sidebar"]);
@@ -237,6 +251,7 @@ async function main() {
   syncXpPixel(store.get());
   syncMode(store.get());
   syncInlineDiagrams(store.get());
+  syncPanicButton(store.get());
   syncInlineStructured(store.get());
   applyToolbar(store.get());
   syncSidebar(store.get());

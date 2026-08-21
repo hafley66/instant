@@ -121,6 +121,14 @@ export function syncInlineDiagrams(s: AppState) {
   syncInlineDiagramOverlays();
 }
 
+export function syncPanicButton(s: AppState) {
+  const button = $("#panic-toggle") as HTMLButtonElement;
+  button.classList.toggle("active", s.panicButton);
+  button.setAttribute("aria-pressed", String(s.panicButton));
+  const host = document.getElementById("stfu-host");
+  if (host) host.hidden = !s.panicButton;
+}
+
 export function syncInlineStructured(s: AppState) {
   const button = $("#structured-overlay-toggle") as HTMLButtonElement;
   button.classList.toggle("active", s.inlineStructuredSelectors);
@@ -417,6 +425,9 @@ export function wireChrome() {
 
   $("#diagram-toggle").onclick = () =>
     store.set({ inlineDiagrams: !store.get().inlineDiagrams });
+
+  $("#panic-toggle").onclick = () =>
+    store.set({ panicButton: !store.get().panicButton });
 
   $("#structured-overlay-toggle").onclick = () =>
     store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors });

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><title>instant lab: panic button</title>
+    <style>
+      body { margin: 0; background: linear-gradient(#12161d, #07090c); }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+      .cell { position: relative; height: 520px; display: grid; place-items: center; }
+      .cell b { position: absolute; top: 14px; left: 18px; font: 700 13px ui-monospace, monospace;
+                color: #7f8896; letter-spacing: 1px; }
+    </style>
+  </head>
+  <body>
+    <div class="grid" id="grid"></div>
+    <script type="module">
+      import "/src/0_stfuButton.css"
+      import { mountStfuButton } from "/src/0_stfuButton.ts"
+      const grid = document.getElementById("grid")
+      window.cells = ["rest", "hover", "pressed"].map((name) => {
+        const cell = document.createElement("div"); cell.className = "cell"
+        const tag = document.createElement("b"); tag.textContent = name
+        cell.appendChild(tag); grid.appendChild(cell)
+        mountStfuButton(cell, { tiltDeg: 42, twistDeg: -8 })
+        return cell
+      })
+      window.cells[2].querySelector(".stfu-stage").classList.add("is-pressed")
+    </script>
+  </body>
+</html>

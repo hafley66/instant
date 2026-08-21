@@ -44,3 +44,21 @@ pub async fn boop_mux_session(target: String, socket: Option<String>) -> Result<
         })))
     }).await.map_err(|error| error.to_string())?
 }
+
+/// Sends a literal body plus Enter to a tmux pane. With no `target`, resolves the
+/// client's currently visible pane, so the keystrokes land wherever the user is looking.
+#[tauri::command]
+pub async fn boop_mux_send_keys(body: String, target: Option<String>, socket: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let socket = socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        let pane = match target {
+            Some(target) if !target.is_empty() => target,
+            _ => Tmux.current_pane(socket.as_deref()).ok_or("no visible tmux pane")?,
+        };
+        Tmux.send_keys_literal(socket.as_deref(), &pane, &body)
+            .map(|()| pane)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}

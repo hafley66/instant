@@ -34,6 +34,13 @@ export function registerBuiltin() {
         set: (on) => store.set({ inlineDiagrams: on }),
       },
       {
+        id: "panicButton",
+        label: "Panic button",
+        hint: "red STFU button, bottom right; pastes into the visible tmux pane",
+        get: () => store.get().panicButton,
+        set: (on) => store.set({ panicButton: on }),
+      },
+      {
         id: "inlineStructuredSelectors",
         label: "Table/list selection checkboxes",
         hint: "show one gutter checkbox per table row and list item",
