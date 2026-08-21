@@ -210,6 +210,8 @@ export interface AppState {
   inlineStructuredSelectors: boolean; // gutter checkboxes for terminal table rows and list items
   panicButton: boolean; // the red desk button overlay
   panicBody: string; // literal text the panic button pastes into the visible tmux pane
+  panicPos: { x: number; y: number }; // px offset from the default bottom-right corner
+  panicMode: "clear" | "paste" | "escape"; // what the panic button does to the pane
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
@@ -319,6 +321,8 @@ const PERSIST: (keyof AppState)[] = [
   "inlineStructuredSelectors",
   "panicButton",
   "panicBody",
+  "panicPos",
+  "panicMode",
   "sidebar",
   "active",
   "openTabs",
@@ -440,6 +444,8 @@ function load(): AppState {
     inlineStructuredSelectors: loadKey<boolean>("inlineStructuredSelectors", true),
     panicButton: loadKey<boolean>("panicButton", true),
     panicBody: loadKey<string>("panicBody", PANIC_BODY_DEFAULT),
+    panicPos: loadKey<{ x: number; y: number }>("panicPos", { x: 0, y: 0 }),
+    panicMode: loadKey<"clear" | "paste" | "escape">("panicMode", "clear"),
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),

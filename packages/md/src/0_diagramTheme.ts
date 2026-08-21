@@ -41,6 +41,32 @@ export function mermaidTheme(dark: boolean) {
       clusterBkg: palette.background,
       clusterBorder: palette.border,
       edgeLabelBackground: palette.background,
+      // Sequence diagrams derive their own colours from the surface variables
+      // rather than from textColor, which lands actor and note text within a
+      // few points of the background (measured: rgb(30,41,59) text on a
+      // rgb(15,23,42) background). Name every one of them.
+      actorBkg: palette.surface,
+      actorBorder: palette.border,
+      actorTextColor: palette.text,
+      actorLineColor: palette.line,
+      signalColor: palette.line,
+      signalTextColor: palette.text,
+      labelBoxBkgColor: palette.surfaceAlt,
+      labelBoxBorderColor: palette.border,
+      labelTextColor: palette.text,
+      loopTextColor: palette.text,
+      noteBkgColor: palette.surfaceMuted,
+      noteBorderColor: palette.border,
+      noteTextColor: palette.text,
+      activationBkgColor: palette.surfaceAlt,
+      activationBorderColor: palette.border,
+      sequenceNumberColor: palette.background,
+      // State, class, and ER diagrams reach for the same kind of derived slots.
+      labelColor: palette.text,
+      altBackground: palette.surfaceAlt,
+      classText: palette.text,
+      attributeBackgroundColorOdd: palette.surface,
+      attributeBackgroundColorEven: palette.surfaceAlt,
     },
   };
 }

@@ -153,6 +153,11 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
   { id: "view.panicButton", keys: [], title: "Toggle Panic Button", group: "View", run: () => store.set({ panicButton: !store.get().panicButton }) },
+  { id: "view.panicMode", keys: [], title: "Cycle Panic Button Mode", group: "View", run: () => {
+    const order = ["clear", "paste", "escape"] as const;
+    const next = order[(order.indexOf(store.get().panicMode) + 1) % order.length];
+    store.set({ panicMode: next });
+  } },
   { id: "view.panicBody", keys: [], title: "Set Panic Button Text", group: "View", run: async () => {
     const next = await askText("what the panic button sends", store.get().panicBody);
     if (next !== null) store.set({ panicBody: next });
@@ -206,7 +211,14 @@ async function main() {
   // Panic button: pastes a stop message into the visible tmux pane. Mounted first
   // so it survives a later boot failure, which is exactly when you want it.
   const stfuHost = document.getElementById("stfu-host");
-  if (stfuHost) mountStfuButton(stfuHost, { body: () => store.get().panicBody });
+  if (stfuHost) {
+    mountStfuButton(stfuHost, {
+      body: () => store.get().panicBody,
+      mode: () => store.get().panicMode,
+      position: store.get().panicPos,
+      onMoveEnd: (panicPos) => store.set({ panicPos }),
+    });
+  }
   // Resolve the home dir once so tildify() can stay synchronous during render.
   setHomeDir(await homeDir().catch(() => ""));
   await refreshConfig();

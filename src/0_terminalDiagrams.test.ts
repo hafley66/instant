@@ -58,6 +58,38 @@ describe("stripped terminal diagrams", () => {
       ]
     `);
   });
+
+  it("splits two zero-indent mermaid blocks separated by prose", () => {
+    // The first code row (`flowchart LR`) sits at column 0 while the node rows
+    // are indented, so codeIndent is 0. Without a blank-row boundary the first
+    // block runs to the end of the buffer and the second never renders.
+    const terminal = terminalWithRows([
+      "2. Today, four tables",
+      "mermaid",
+      "flowchart LR",
+      "  P[\"your program\"]",
+      "  R[\"registry.pl\"]",
+      "  P --> R",
+      "",
+      "3. After, one table",
+      "mermaid",
+      "flowchart LR",
+      "  P2[\"rel soopy.files\"]",
+      "  L2[\"LINKED_EXECUTORS\"]",
+      "  P2 --> L2",
+      "",
+    ]);
+
+    const fences = findDiagramFences(terminal);
+    expect(fences).toHaveLength(2);
+    expect(fences[0].start).toBe(1);
+    expect(fences[0].end).toBe(5);
+    expect(fences[0].code).toContain("registry.pl");
+    expect(fences[0].code).not.toContain("LINKED_EXECUTORS");
+    expect(fences[1].start).toBe(8);
+    expect(fences[1].end).toBe(12);
+    expect(fences[1].code).toContain("LINKED_EXECUTORS");
+  });
 });
 
 describe("svgAspectRatio", () => {

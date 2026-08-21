@@ -16,7 +16,7 @@ export type { MdviewHost } from "./ports";
 export { DiagramLightbox, diagramSvgMarkup } from "./0_DiagramLightbox";
 export type { DiagramLightboxEntry } from "./0_DiagramLightbox";
 export { d2ThemeId, diagramPalette, mermaidTheme } from "./0_diagramTheme";
-export { renderD2 } from "./d2";
+export { preloadD2, renderD2 } from "./d2";
 export { parseMdSections } from "./model";
 
 function MdInstance(props: IDockviewPanelProps) {

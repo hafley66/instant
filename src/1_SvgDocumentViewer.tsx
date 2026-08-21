@@ -102,6 +102,11 @@ export function SvgDocumentViewer({
   };
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
+    // preventDefault below cancels the compatibility mousedown, which is what
+    // dockview watches to activate a panel. Focus explicitly so panning a media
+    // tab still marks it active and cmd+W closes this tab rather than the last
+    // one that happened to be focused.
+    (event.currentTarget as HTMLElement).focus({ preventScroll: true });
     event.preventDefault();
     drag.current = {
       pointerId: event.pointerId,

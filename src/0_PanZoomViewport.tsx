@@ -57,6 +57,11 @@ export function PanZoomViewport({
   };
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    // preventDefault below cancels the compatibility mousedown, which is what
+    // dockview watches to activate a panel. Focus explicitly so panning a media
+    // tab still marks it active and cmd+W closes this tab rather than the last
+    // one that happened to be focused.
+    event.currentTarget.focus({ preventScroll: true });
     event.preventDefault();
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     event.currentTarget.setPointerCapture(event.pointerId);

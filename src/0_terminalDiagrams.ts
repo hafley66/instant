@@ -156,7 +156,20 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
     let end = index + 1;
     while (end + 1 < lines.length) {
       const next = stripTuiBullet(lines[end + 1].text);
-      if (next.trim() && next.length - next.trimStart().length < codeIndent) break;
+      const trimmed = next.trim();
+      if (!trimmed) {
+        // A block whose first code row sits at column 0 has no indentation to
+        // bound it, so `indent < 0` never fires and the block would run to the
+        // end of the buffer, swallowing every diagram after it. A blank row is
+        // the only boundary left. Indented blocks keep their internal blanks.
+        if (codeIndent === 0) break;
+        end++;
+        continue;
+      }
+      if (next.length - next.trimStart().length < codeIndent) break;
+      // A fresh language label opens the next diagram rather than continuing this one.
+      const nextLabel = trimmed.toLowerCase();
+      if (nextLabel === "mermaid" || nextLabel === "d2") break;
       end++;
     }
     const block = lines.slice(index + 1, end + 1);
