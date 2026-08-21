@@ -21,6 +21,10 @@ export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) 
       startOnLoad: false,
       ...mermaidTheme(dark),
       fontFamily: "Inter, -apple-system, BlinkMacSystemFont, Arial, sans-serif",
+      // Top-level htmlLabels is the only switch mermaid 11 honours; the per-diagram
+      // flowchart.htmlLabels alone still emits foreignObject, which WebKit rasterises
+      // once and cannot resharpen when the lightbox rewrites the viewBox to zoom.
+      htmlLabels: false,
       flowchart: { htmlLabels: false },
       securityLevel: "strict",
       suppressErrorRendering: true,

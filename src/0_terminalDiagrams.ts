@@ -276,6 +276,10 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<Render
   mermaid.initialize({
     startOnLoad: false,
     ...mermaidTheme(dark),
+    // Top-level htmlLabels is the only switch mermaid 11 honours; the per-diagram
+    // flowchart.htmlLabels alone still emits foreignObject, which WebKit rasterises
+    // once and cannot resharpen when the lightbox rewrites the viewBox to zoom.
+    htmlLabels: false,
     flowchart: { htmlLabels: false },
     securityLevel: "strict",
     suppressErrorRendering: true,
