@@ -1,16 +1,15 @@
+use boop_store::ident::{Store, TurnQuery};
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct BoopTurn {
-    session: String,
-    harness: String,
-    turn: i64,
-    ts: i64,
-    role: String,
-    said: String,
+    pub session: String,
+    pub harness: String,
+    pub turn: i64,
+    pub ts: i64,
+    pub role: String,
+    pub said: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -23,32 +22,64 @@ pub struct BoopFavorite {
     body: String,
 }
 
-fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
-    let output = std::process::Command::new("boop")
-        .args(["db", "turn", "list", "--session", session, "--format", "ndjson"])
-        .env("PATH", crate::pty::path_env())
-        .output()
-        .map_err(|error| format!("boop db turn list: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+fn boop_db_path() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("BOOP_DB").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
     }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).map_err(|error| format!("boop turn row: {error}")))
-        .collect()
+    Store::default_path().map_err(|error| error.to_string())
+}
+
+fn open_store_ro() -> Result<Store, String> {
+    let path = boop_db_path()?;
+    Store::open_readonly(path).map_err(|error| error.to_string())
+}
+
+fn open_store_rw() -> Result<Store, String> {
+    let path = boop_db_path()?;
+    Store::open(path).map_err(|error| error.to_string())
+}
+
+fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
+    let store = open_store_ro()?;
+    let query = TurnQuery {
+        session: Some(session.to_string()),
+        ..Default::default()
+    };
+    let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BoopTurn {
+            session: row.session,
+            harness: row.harness,
+            turn: row.turn,
+            ts: row.ts,
+            role: row.role,
+            said: row.said,
+        })
+        .collect())
 }
 
 fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String> {
-    let output = Command::new("boop")
-        .args(["db", "turn", "list", "--since", &since.to_string(), "--harness", harness,
-            "--role", "assistant", "--limit", "100", "--format", "ndjson"])
-        .env("PATH", crate::pty::path_env()).output()
-        .map_err(|error| format!("boop recent turn list: {error}"))?;
-    if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_string()); }
-    String::from_utf8_lossy(&output.stdout).lines().filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).map_err(|error| format!("boop recent turn row: {error}")))
-        .collect()
+    let store = open_store_ro()?;
+    let query = TurnQuery {
+        since: if since > 0 { Some(since as u64) } else { None },
+        harness: if !harness.is_empty() { Some(harness.to_string()) } else { None },
+        role: Some("assistant".to_string()),
+        limit: Some(100),
+        ..Default::default()
+    };
+    let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|row| BoopTurn {
+            session: row.session,
+            harness: row.harness,
+            turn: row.turn,
+            ts: row.ts,
+            role: row.role,
+            said: row.said,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -61,55 +92,36 @@ pub async fn boop_turns(session: String) -> Result<Vec<BoopTurn>, String> {
 #[tauri::command]
 pub async fn boop_turns_recent(since: i64, harness: String) -> Result<Vec<BoopTurn>, String> {
     tauri::async_runtime::spawn_blocking(move || read_recent_turns(since, &harness))
-        .await.map_err(|error| error.to_string())?
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
+    let store = open_store_rw()?;
     let source = format!("turn:{}:{}", turn.session, turn.turn);
-    let mut child = Command::new("boop")
-        .args(["db", "favorite", "add", "--source", &source])
-        .env("PATH", crate::pty::path_env())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("boop db favorite add: {error}"))?;
-    child.stdin.take().ok_or("boop favorite stdin unavailable")?
-        .write_all(turn.said.as_bytes())
-        .map_err(|error| format!("boop favorite stdin: {error}"))?;
-    let output = child.wait_with_output().map_err(|error| format!("boop favorite wait: {error}"))?;
-    if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    store
+        .favorite_add(&turn.said, "", &source, now)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn read_favorites() -> Result<Vec<BoopFavorite>, String> {
-    let output = Command::new("boop")
-        .args(["db", "favorite", "list", "--format", "ndjson"])
-        .env("PATH", crate::pty::path_env())
-        .output()
-        .map_err(|error| format!("boop db favorite list: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).map_err(|error| format!("boop favorite row: {error}")))
+    let store = open_store_ro()?;
+    let rows = store.query_favorites(None).map_err(|error| error.to_string())?;
+    rows.into_iter()
+        .map(|row| serde_json::from_value(row).map_err(|error| error.to_string()))
         .collect()
 }
 
-fn boop_db_path() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("BOOP_DB").filter(|path| !path.is_empty()) {
-        return Ok(PathBuf::from(path));
-    }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".agent").join("boop.db"))
-        .ok_or("HOME unavailable for Boop database".to_string())
-}
-
 fn remove_favorite_source(source: &str) -> Result<(), String> {
-    let connection = rusqlite::Connection::open(boop_db_path()?).map_err(|error| error.to_string())?;
-    connection.execute("DELETE FROM agent_favorite WHERE source=?1", [source])
+    let store = open_store_rw()?;
+    store
+        .connection()
+        .execute("DELETE FROM agent_favorite WHERE source=?1", [source])
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -156,5 +168,17 @@ mod tests {
         assert_eq!(row.session, "s1");
         assert_eq!(row.turn, 4);
         assert_eq!(row.said, "answer");
+    }
+
+    #[test]
+    fn direct_store_reads_live_boop_database() {
+        let store = open_store_ro();
+        assert!(store.is_ok(), "boop store opens read-only from default path");
+        let store = store.unwrap();
+        let turns = store.turn_rows(&TurnQuery {
+            limit: Some(5),
+            ..Default::default()
+        });
+        assert!(turns.is_ok(), "turn_rows query succeeds directly against boop-store");
     }
 }

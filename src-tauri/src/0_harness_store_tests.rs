@@ -42,8 +42,8 @@ fn claude_messages_resolve_one_exact_file_without_session_discovery() {
     let subagent = crate::ledger::read_claude(&subagent_path, "agent-1", None);
     let receipt = json!({
         "direct": direct.iter().map(|message| (&message.id, &message.text)).collect::<Vec<_>>(),
-        "subagent": subagent.iter().map(|message| (&message.id, &message.text)).collect::<Vec<_>>(),
         "missing": claude_session_path(&home, cwd, "absent"),
+        "subagent": subagent.iter().map(|message| (&message.id, &message.text)).collect::<Vec<_>>(),
     });
 
     assert_eq!(
@@ -120,16 +120,16 @@ fn four_stores_lower_into_one_session_shape() {
         .into_iter()
         .map(|id| resolve(&home, id, cwd).unwrap())
         .map(|session| json!({
+            "cwd": session.cwd,
             "harness": session.harness,
             "id": session.id,
-            "cwd": session.cwd,
-            "sourceFile": session.source_path.as_deref().and_then(|path| Path::new(path).file_name()).and_then(|name| name.to_str()),
-            "title": session.title,
-            "model": session.model,
-            "provider": session.provider,
             "inputTokens": session.input_tokens,
+            "model": session.model,
             "parentId": session.parent_id,
             "parentKind": session.parent_kind,
+            "provider": session.provider,
+            "sourceFile": session.source_path.as_deref().and_then(|path| Path::new(path).file_name()).and_then(|name| name.to_str()),
+            "title": session.title,
         }))
         .collect();
 
