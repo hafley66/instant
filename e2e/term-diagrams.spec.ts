@@ -183,6 +183,57 @@ test("right-click distinguishes partial edge turns around a complete middle turn
   }
 });
 
+test("right-click resolves table turn with unicode box-drawing characters", async ({ page }, testInfo) => {
+  await page.goto("/e2e-term.html?e2e=1");
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __instantE2eNativeResults?: Record<string, unknown>;
+    };
+    if (target.__instantE2eNativeResults) {
+      target.__instantE2eNativeResults.boop_turns = () => Promise.resolve([{
+        session: "e2e-codex-1",
+        harness: "codex",
+        turn: 10135,
+        role: "assistant",
+        ts: Date.now(),
+        said: [
+          "Claude, OpenCode, Kimi, or another harness can implement the same generic lifecycle with their native APIs.",
+          "",
+          "## Concepts shared with the researched systems",
+          "",
+          "| Boop mechanism | Common systems concept |",
+          "|---|---|",
+          "| Inspecting WebSocket relay | Sidecar or transparent protocol proxy |",
+          "| Unix domain sockets | Local IPC used by editors, language servers, daemons |",
+          "| Request-ID correlation | JSON-RPC, LSP, DAP, ACP |",
+        ].join("\n"),
+      }]);
+    }
+  });
+  await page.getByTestId("open-term").click();
+  await expect(page.locator(".term-host")).toBeVisible({ timeout: 10_000 });
+  const tableLines = [
+    "Claude, OpenCode, Kimi, or another harness can implement the same generic lifecycle with their native APIs.",
+    "",
+    "  ## Concepts shared with the researched systems",
+    "",
+    "   Boop mechanism                       Common systems concept",
+    "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "   Inspecting WebSocket relay           Sidecar or transparent protocol proxy",
+    "  ───────────────────────────────────  ──────────────────────────────────────────────────────",
+    "   Unix domain sockets                  Local IPC used by editors, language servers, daemons",
+  ];
+  await page.evaluate((lines) => window.__term!.write(`\x1b[2J\x1b[H${lines.join("\r\n")}`), tableLines);
+  await expect.poll(() => page.evaluate(() => window.__visibleTurnEvents?.at(-1)?.visible.map((turn) => turn.id)))
+    .toEqual(["e2e-codex-1:10135"]);
+
+  const point = await page.evaluate(() => window.__term!.point(6, 4));
+  await page.mouse.click(point!.x, point!.y, { button: "right" });
+  await expect(page.locator(".ctx-menu")).toContainText("Boop e2e-codex-1:10135 · assistant");
+  await page.screenshot({ path: "artifacts/boop-turn-context-unicode-table.png", fullPage: true });
+  await testInfo.attach("unicode-table-turn-context", { body: await page.screenshot(), contentType: "image/png" });
+});
+
 async function settleScroll(page: Page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => setTimeout(resolve, 100));

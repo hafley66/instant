@@ -31,8 +31,8 @@ const turnId = (turn: Pick<BoopTurn, "session" | "turn">) => `${turn.session}:${
 export function normalizeTurnLine(line: string): string {
   return line
     .toLowerCase()
-    .replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬]+\s*/, "")
-    .replace(/[`_*~#|]/g, " ")
+    .replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "")
+    .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬`_*~#|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

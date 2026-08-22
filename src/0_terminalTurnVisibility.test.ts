@@ -118,4 +118,33 @@ describe("terminal turn visibility v2", () => {
         ]
       `);
   });
+
+  it("normalizes unicode box-drawing characters in tables and borders to match markdown turns", () => {
+    const tableScreen = [
+      { text: "   Boop mechanism                       Common systems concept", start: 1, end: 1 },
+      { text: "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", start: 2, end: 2 },
+      { text: "   Inspecting WebSocket relay           Sidecar or transparent protocol proxy", start: 3, end: 3 },
+      { text: "  ───────────────────────────────────  ──────────────────────────────────────────────────────", start: 4, end: 4 },
+      { text: "   Unix domain sockets                  Local IPC used by editors, language servers, daemons", start: 5, end: 5 },
+    ];
+    const markdownTurn = turn(10135, [
+      "| Boop mechanism | Common systems concept |",
+      "|---|---|",
+      "| Inspecting WebSocket relay | Sidecar or transparent protocol proxy |",
+      "| Unix domain sockets | Local IPC used by editors, language servers, daemons |",
+    ].join("\n"));
+
+    expect(normalizeTurnLine(tableScreen[1].text)).toBe("");
+    expect(normalizeTurnLine(tableScreen[2].text)).toBe("inspecting websocket relay sidecar or transparent protocol proxy");
+    expect(locateVisibleTurns(tableScreen, [markdownTurn]).map(({ id, bufferStart, bufferEnd }) => ({ id, bufferStart, bufferEnd })))
+      .toMatchInlineSnapshot(`
+        [
+          {
+            "bufferEnd": 5,
+            "bufferStart": 1,
+            "id": "session-a:10135",
+          },
+        ]
+      `);
+  });
 });
