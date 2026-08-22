@@ -30,6 +30,29 @@
   transition: opacity 140ms linear;
 }
 
+/* Subtext printed on the cap, so it rides the tilt with the label. Absolute
+   inside .stfu-top, which is already positioned, so it never pushes the label
+   off the cap's centre. */
+.stfu-subface {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 44px;
+  text-align: center;
+  font: 700 26px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 1px;
+  color: #ffd8d2;
+  opacity: 0.72;
+  text-shadow: 0 1px 0 #7c0808;
+  pointer-events: none;
+}
+
+/* data-sub-mode picks which copy shows; both are always in the DOM */
+.stfu-stage[data-sub-mode="below"] .stfu-subface,
+.stfu-stage[data-sub-mode="cap"] .stfu-sub,
+.stfu-stage[data-sub-mode="off"] .stfu-subface,
+.stfu-stage[data-sub-mode="off"] .stfu-sub { display: none; }
+
 /* the send readout lands on the same bottom line, so the subtitle steps aside */
 .stfu-stage:has(.stfu-status:not(:empty)) .stfu-sub { opacity: 0; }
 

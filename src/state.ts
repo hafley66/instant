@@ -212,6 +212,7 @@ export interface AppState {
   panicBody: string; // literal text the panic button pastes into the visible tmux pane
   panicPos: { x: number; y: number }; // px offset from the default bottom-right corner
   panicMode: "clear" | "paste" | "escape"; // what the panic button does to the pane
+  panicSub: "below" | "cap" | "both" | "off"; // where the panic button subtext sits
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
@@ -323,6 +324,7 @@ const PERSIST: (keyof AppState)[] = [
   "panicBody",
   "panicPos",
   "panicMode",
+  "panicSub",
   "sidebar",
   "active",
   "openTabs",
@@ -446,6 +448,7 @@ function load(): AppState {
     panicBody: loadKey<string>("panicBody", PANIC_BODY_DEFAULT),
     panicPos: loadKey<{ x: number; y: number }>("panicPos", { x: 0, y: 0 }),
     panicMode: loadKey<"clear" | "paste" | "escape">("panicMode", "clear"),
+    panicSub: loadKey<"below" | "cap" | "both" | "off">("panicSub", "below"),
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),

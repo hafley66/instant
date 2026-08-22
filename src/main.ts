@@ -108,6 +108,7 @@ import {
   syncMode,
   syncInlineDiagrams,
   syncPanicButton,
+  syncPanicSub,
   syncInlineStructured,
   applyToolbar,
   syncSidebar,
@@ -157,6 +158,11 @@ const TAB_COMMANDS: Command[] = [
     const order = ["clear", "paste", "escape"] as const;
     const next = order[(order.indexOf(store.get().panicMode) + 1) % order.length];
     store.set({ panicMode: next });
+  } },
+  { id: "view.panicSub", keys: [], title: "Cycle Panic Button Subtext", group: "View", run: () => {
+    const order = ["below", "cap", "both", "off"] as const;
+    const next = order[(order.indexOf(store.get().panicSub) + 1) % order.length];
+    store.set({ panicSub: next });
   } },
   { id: "view.panicBody", keys: [], title: "Set Panic Button Text", group: "View", run: async () => {
     const next = await askText("what the panic button sends", store.get().panicBody);
@@ -216,6 +222,7 @@ async function main() {
       body: () => store.get().panicBody,
       mode: () => store.get().panicMode,
       position: store.get().panicPos,
+      subMode: store.get().panicSub,
       onMoveEnd: (panicPos) => store.set({ panicPos }),
     });
   }
@@ -236,6 +243,7 @@ async function main() {
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
   store.subscribe(syncPanicButton, ["panicButton"]);
+  store.subscribe(syncPanicSub, ["panicSub"]);
   store.subscribe(syncInlineStructured, ["inlineStructuredSelectors"]);
   store.subscribe(applyToolbar, ["showToolbar"]);
   store.subscribe(syncSidebar, ["sidebar"]);

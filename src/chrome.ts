@@ -129,6 +129,11 @@ export function syncPanicButton(s: AppState) {
   if (host) host.hidden = !s.panicButton;
 }
 
+export function syncPanicSub(s: AppState) {
+  const stage = document.querySelector(".stfu-stage") as HTMLElement | null;
+  if (stage) stage.dataset.subMode = s.panicSub;
+}
+
 export function syncInlineStructured(s: AppState) {
   const button = $("#structured-overlay-toggle") as HTMLButtonElement;
   button.classList.toggle("active", s.inlineStructuredSelectors);

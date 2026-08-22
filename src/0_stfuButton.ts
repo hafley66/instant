@@ -29,6 +29,10 @@ export type StfuButtonOptions = {
   twistDeg?: number
   /** "counter" keeps the label facing you, the others let it lie on the cap. */
   labelMode?: "counter" | "flat" | "big" | "engraved"
+  /** Small line of subtext. Empty string drops it. */
+  subtitle?: string
+  /** Where the subtext sits: flat under the plate, skewed on the cap, or both. */
+  subMode?: "below" | "cap" | "both" | "off"
   /** "clear" wipes the input line first, "paste" appends to a draft, "escape" interrupts only. */
   mode?: "clear" | "paste" | "escape" | (() => "clear" | "paste" | "escape")
   /** Offset in px from the default corner, restored on mount. */
@@ -45,6 +49,8 @@ const DEFAULTS = {
   tiltDeg: 42,
   twistDeg: -8,
   labelMode: "big" as const,
+  subtitle: "(please)",
+  subMode: "below" as const,
 }
 
 /** Hold this long without sliding and the button detaches for repositioning. */
@@ -60,6 +66,7 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
   stage.style.setProperty("--stfu-tilt", `${opts.tiltDeg}deg`)
   stage.style.setProperty("--stfu-twist", `${opts.twistDeg}deg`)
   stage.dataset.labelMode = opts.labelMode
+  stage.dataset.subMode = opts.subMode
 
   const DISCS = 40
   // Each disc is one ring of the cylinder wall, darkening with depth. Stacking real
@@ -76,10 +83,13 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
     <div class="stfu-plate">
       <button class="stfu-cap" type="button" aria-label="${opts.label}" style="--stfu-discs:${DISCS}">
         ${wall}
-        <span class="stfu-top"><span class="stfu-face">${opts.label}</span></span>
+        <span class="stfu-top">
+          <span class="stfu-face">${opts.label}</span>
+          <span class="stfu-subface">${opts.subtitle}</span>
+        </span>
       </button>
     </div>
-    <span class="stfu-sub" aria-hidden="true">(please)</span>
+    <span class="stfu-sub" aria-hidden="true">${opts.subtitle}</span>
     <output class="stfu-status" aria-live="polite"></output>`
 
   const cap = stage.querySelector(".stfu-cap") as HTMLButtonElement
