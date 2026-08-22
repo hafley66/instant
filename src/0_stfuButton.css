@@ -28,7 +28,6 @@
 
 
 .stfu-cap:focus-visible { outline: 3px solid #ffd9d4; outline-offset: 6px; }
-.stfu-cap:disabled { cursor: progress; filter: saturate(0.6); }
 
 /* label rides the cap, counter-rotated so it reads flat to the viewer */
 .stfu-face {
@@ -105,7 +104,12 @@
 }
 
 .stfu-cap:focus-visible { outline: 3px solid #ffd9d4; outline-offset: 8px; }
-.stfu-cap:disabled { cursor: progress; filter: saturate(0.65); }
+.stfu-cap:disabled { cursor: progress; }
+/* The greyed-out look during a send rides the leaves. A filter on .stfu-cap
+   itself forces transform-style: flat, which drops all 40 discs onto one
+   plane and reads as a permanently pressed button. */
+.stfu-cap:disabled .stfu-disc,
+.stfu-cap:disabled .stfu-top { filter: saturate(0.65); }
 
 /* one ring of the cylinder wall */
 .stfu-disc {
