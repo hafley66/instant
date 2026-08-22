@@ -39,10 +39,26 @@ fn open_store_rw() -> Result<Store, String> {
     Store::open(path).map_err(|error| error.to_string())
 }
 
+/// Turn visibility matches the visible pane against recent turns; a session's
+/// full history (2806 rows / 9.4MB measured 2026-08-22) re-read on every scan
+/// was instant's top CPU cost. Read only the newest window.
+const TURN_WINDOW: u64 = 300;
+
 fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
     let store = open_store_ro()?;
+    let last_turn: Option<u64> = store
+        .connection()
+        .query_row(
+            "SELECT MAX(t.turn) FROM agent_turn t
+             WHERE t.session_id = (SELECT id FROM dict_session WHERE value = ?1)",
+            [session],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(|error| error.to_string())?
+        .map(|turn| turn.max(0) as u64);
     let query = TurnQuery {
         session: Some(session.to_string()),
+        turn_from: last_turn.map(|turn| turn.saturating_sub(TURN_WINDOW)),
         ..Default::default()
     };
     let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;

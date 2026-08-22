@@ -44,3 +44,8 @@ boop-store = { path = "../../hafley-rs/crates/boop-store", default-features = fa
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSThread"] }
+
+# `tauri dev` ships this binary to 8 live agent panes; opt-level 0 made the
+# IPC/JSON path ~3x slower than needed (measured 2026-08-22).
+[profile.dev]
+opt-level = 1

@@ -30,6 +30,29 @@ export type { ResolvedSession } from "./0a_terminalSessionCandidates";
 // and carry the cwd that resolved, because the ledger read needs it. The launch
 // command, when it names an agent, just orders the probe so the declared agent
 // wins ties.
+// harness_session stats every transcript under the cwd's project dir (1232
+// files for sprefa, measured 2026-08-22) and ran on every turn-visibility scan
+// with no cache. Hold each (editor, cwd) answer briefly; in-flight reads dedupe.
+const RESOLVE_TTL_MS = 5_000;
+const resolveCache = new Map<string, { readAt: number; sid: string | null }>();
+const resolveReads = new Map<string, Promise<string | null>>();
+async function resolveCached(editor: HarnessId, cwd: string): Promise<string | null> {
+  const key = `${editor}:${cwd}`;
+  const hit = resolveCache.get(key);
+  if (hit && performance.now() - hit.readAt < RESOLVE_TTL_MS) return hit.sid;
+  const active = resolveReads.get(key);
+  if (active) return active;
+  const read = harnessAdapter(editor).resolve(cwd)
+    .catch(() => null)
+    .then((sid) => {
+      resolveCache.set(key, { readAt: performance.now(), sid });
+      return sid;
+    })
+    .finally(() => resolveReads.delete(key));
+  resolveReads.set(key, read);
+  return read;
+}
+
 export async function tabSessions(
   cwds: string[],
   command: string | null,
@@ -43,7 +66,7 @@ export async function tabSessions(
   const seen = new Set<string>();
   for (const cwd of cwds) {
     for (const editor of order) {
-      const sid = await harnessAdapter(editor).resolve(cwd).catch(() => null);
+      const sid = await resolveCached(editor, cwd);
       const key = sid ? `${editor}:${sid}` : "";
       if (sid && !seen.has(key)) {
         seen.add(key);
