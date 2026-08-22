@@ -65,9 +65,9 @@ export function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) 
             setOpen(true);
           }
         }}
-        dangerouslySetInnerHTML={{ __html: diagramSvgMarkup(svg) }}
+        dangerouslySetInnerHTML={{ __html: diagramSvgMarkup(svg, "mermaid", code) }}
       />
-      {open && <DiagramLightbox svg={svg} label="Mermaid diagram" language="mermaid" dark={dark} onClose={() => setOpen(false)} />}
+      {open && <DiagramLightbox svg={svg} code={code} label="Mermaid diagram" language="mermaid" dark={dark} onClose={() => setOpen(false)} />}
     </>
   );
 }

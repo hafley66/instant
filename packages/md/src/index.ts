@@ -17,6 +17,8 @@ export { DiagramLightbox, diagramSvgMarkup } from "./0_DiagramLightbox";
 export type { DiagramLightboxEntry } from "./0_DiagramLightbox";
 export { d2ThemeId, diagramPalette, mermaidTheme } from "./0_diagramTheme";
 export { preloadD2, renderD2 } from "./d2";
+export { decorateSequenceSvg, isSequenceDiagramSource, parseSequenceSource, sequenceFocusFromElement, sequenceMarkup } from "./1_sequence";
+export type { SequenceActivation, SequenceActor, SequenceGroup, SequenceMessage, SequenceModel } from "./1_sequence";
 export { parseMdSections } from "./model";
 
 function MdInstance(props: IDockviewPanelProps) {

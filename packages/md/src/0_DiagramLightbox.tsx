@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "./0_copyText";
+import { isSequenceDiagramSource, parseSequenceSource, sequenceFocusFromElement, sequenceMarkup } from "./1_sequence";
 import "./0_diagramLightbox.css";
 
 type SvgBox = { x: number; y: number; width: number; height: number };
@@ -13,12 +14,28 @@ function sourceBox(svg: SVGSVGElement): SvgBox {
   return { x: 0, y: 0, width: svg.width.baseVal.value || 1, height: svg.height.baseVal.value || 1 };
 }
 
-function VectorDiagramViewport({ svg, toolbarStart }: { svg: string; toolbarStart: ReactNode }) {
+function VectorDiagramViewport({
+  svg,
+  language,
+  code,
+  toolbarStart,
+}: {
+  svg: string;
+  language: "mermaid" | "d2";
+  code: string;
+  toolbarStart: ReactNode;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const original = useRef<SvgBox>({ x: 0, y: 0, width: 1, height: 1 });
   const current = useRef<SvgBox>(original.current);
   const drag = useRef<{ pointerId: number; x: number; y: number; box: SvgBox } | null>(null);
   const zoomLabel = useRef<HTMLSpanElement>(null);
+  const sequence = useMemo(() => parseSequenceSource(language, code), [code, language]);
+  const sequenceEnabled = isSequenceDiagramSource(language, code) && sequence.actors.length > 0;
+  const decoratedSvg = useMemo(() => sequenceEnabled ? sequenceMarkup(svg, language, code) : svg, [code, language, sequenceEnabled, svg]);
+  const [stickyActors, setStickyActors] = useState(true);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>([]);
+  const [focus, setFocus] = useState<{ entityId?: string; actorIds: string[] } | null>(null);
 
   const write = (box: SvgBox) => {
     current.current = box;
@@ -54,7 +71,23 @@ function VectorDiagramViewport({ svg, toolbarStart }: { svg: string; toolbarStar
     };
     root.addEventListener("wheel", wheel, { passive: false });
     return () => root.removeEventListener("wheel", wheel);
-  }, [svg]);
+  }, [decoratedSvg]);
+
+  useEffect(() => {
+    const root = host.current;
+    if (!root) return;
+    const activeActorIds = new Set(focus?.actorIds ?? []);
+    for (const element of root.querySelectorAll<SVGElement>("[data-sequence-entity]")) {
+      const entityId = element.getAttribute("data-sequence-entity");
+      const actorIds = (element.getAttribute("data-sequence-actors") ?? "").split(",").filter(Boolean);
+      const active = entityId === focus?.entityId || actorIds.some((actorId) => activeActorIds.has(actorId));
+      if (active) element.setAttribute("data-sequence-active", "true");
+      else element.removeAttribute("data-sequence-active");
+      const groups = (element.getAttribute("data-sequence-groups") ?? "").split(" ").filter(Boolean);
+      if (groups.some((groupId) => collapsedGroupIds.includes(groupId))) element.setAttribute("data-sequence-collapsed", "true");
+      else element.removeAttribute("data-sequence-collapsed");
+    }
+  }, [collapsedGroupIds, decoratedSvg, focus]);
 
   const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -77,22 +110,101 @@ function VectorDiagramViewport({ svg, toolbarStart }: { svg: string; toolbarStar
     event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const pointerOver = (event: PointerEvent<HTMLDivElement>) => {
+    if (!sequenceEnabled || !(event.target instanceof Element)) return;
+    const element = event.target.closest("[data-sequence-entity]");
+    if (!element || !event.currentTarget.contains(element)) return;
+    setFocus(sequenceFocusFromElement(element));
+  };
+
+  const actorFocus = (actorId: string) => setFocus({ entityId: actorId, actorIds: [actorId] });
+
   return (
-    <div className="diagram-vector-viewport">
+    <div
+      className={`diagram-vector-viewport${sequenceEnabled ? " diagram-vector-sequence" : ""}`}
+      data-sequence-diagram={sequenceEnabled ? "true" : "false"}
+      data-sequence-sticky-actors={stickyActors ? "true" : "false"}
+      data-sequence-collapsed-groups={collapsedGroupIds.join(" ")}
+    >
       <div className="file-image-tools">
         {toolbarStart}
+        {sequenceEnabled && (
+          <>
+            <button
+              type="button"
+              title="Toggle sticky sequence actor names"
+              aria-pressed={stickyActors}
+              data-sequence-sticky-toggle="true"
+              onClick={() => setStickyActors((value) => !value)}
+            >
+              Actors
+            </button>
+            {sequence.groups.map((group) => {
+              const collapsed = collapsedGroupIds.includes(group.id);
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  title={`${collapsed ? "Expand" : "Collapse"} ${group.label}`}
+                  aria-pressed={collapsed}
+                  data-sequence-group-toggle={group.id}
+                  onClick={() => setCollapsedGroupIds((currentGroups) => collapsed ? currentGroups.filter((id) => id !== group.id) : [...currentGroups, group.id])}
+                >
+                  {collapsed ? "＋" : "－"} {group.label}
+                </button>
+              );
+            })}
+          </>
+        )}
         <button type="button" title="zoom out" onClick={() => setZoom(original.current.width / current.current.width / 1.2)}>−</button>
         <button type="button" title="fit the complete SVG" onClick={() => write(original.current)}>Fit</button>
         <span ref={zoomLabel}>100%</span>
         <button type="button" title="zoom in" onClick={() => setZoom(original.current.width / current.current.width * 1.2)}>+</button>
       </div>
-      <div ref={host} className="diagram-vector-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd} dangerouslySetInnerHTML={{ __html: svg }} />
+      {sequenceEnabled && stickyActors && (
+        <div className="diagram-sequence-actors" data-sequence-actors-sticky="true" aria-label="Sequence actors">
+          {sequence.actors.map((actor) => {
+            const active = focus?.actorIds.includes(actor.id) ?? false;
+            return (
+              <button
+                key={actor.id}
+                type="button"
+                className="diagram-sequence-actor"
+                data-sequence-actor-id={actor.id}
+                data-sequence-active={active ? "true" : "false"}
+                aria-pressed={active}
+                onPointerEnter={() => actorFocus(actor.id)}
+                onFocus={() => actorFocus(actor.id)}
+              >
+                {actor.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div
+        ref={host}
+        className="diagram-vector-stage"
+        onPointerDown={pointerDown}
+        onPointerMove={pointerMove}
+        onPointerOver={pointerOver}
+        onPointerLeave={() => setFocus(null)}
+        onPointerUp={pointerEnd}
+        onPointerCancel={pointerEnd}
+        dangerouslySetInnerHTML={{ __html: decoratedSvg }}
+      />
+      {sequenceEnabled && (
+        <div className="diagram-sequence-focus" data-sequence-focus={focus ? "active" : "idle"} aria-live="polite">
+          {focus?.actorIds.map((actorId) => sequence.actors.find((actor) => actor.id === actorId)?.label).filter(Boolean).join(" · ")}
+        </div>
+      )}
     </div>
   );
 }
 
-export function diagramSvgMarkup(svg: string): string {
-  return svg;
+export function diagramSvgMarkup(svg: string, language?: "mermaid" | "d2", code?: string): string {
+  if (!language || code === undefined) return svg;
+  return sequenceMarkup(svg, language, code);
 }
 
 export type DiagramLightboxEntry = {
@@ -120,6 +232,7 @@ type DiagramLightboxSingleProps = {
   label: string;
   language: "mermaid" | "d2";
   dark: boolean;
+  code?: string;
   onClose: () => void;
 };
 
@@ -129,7 +242,7 @@ export function DiagramLightbox(props: DiagramLightboxHistoryProps | DiagramLigh
     svg: props.svg,
     language: props.language,
     dark: props.dark,
-    code: "",
+    code: props.code ?? "",
     locator: "markdown preview",
     bufferStart: 0,
     bufferEnd: 0,
@@ -169,6 +282,8 @@ export function DiagramLightbox(props: DiagramLightboxHistoryProps | DiagramLigh
         <VectorDiagramViewport
           key={active.id}
           svg={active.svg}
+          language={active.language}
+          code={active.code}
           toolbarStart={(
             <>
               <button type="button" title="Previous clicked diagram" disabled={activeIndex === 0} onClick={() => select(activeIndex - 1)}>←</button>

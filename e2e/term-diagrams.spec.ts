@@ -477,6 +477,130 @@ test("opens a viewport-tall D2 target and retains clicked source entries", async
   });
 });
 
+test("keeps sequence actors visible and binds hover focus for Mermaid and D2", async ({ page }, testInfo) => {
+  await openTerminal(page, "e2e=1&noHarness=1");
+  await writeFixture(page, [
+    "```d2",
+    "shape: sequence_diagram",
+    "api -> db: query",
+    "db -> worker: persist",
+    "worker -> api: result",
+    "```",
+    "```mermaid",
+    "sequenceDiagram",
+    "participant UI as User Interface",
+    "participant API",
+    "participant DB as Database",
+    "loop retry",
+    "  activate API",
+    "  UI->>API: request",
+    "  API->>DB: query",
+    "  alt hit",
+    "    DB-->>API: row",
+    "  else miss",
+    "    DB-->>API: empty",
+    "  end",
+    "  deactivate API",
+    "end",
+    "```",
+  ].join("\r\n"));
+
+  const d2Inline = page.locator('.term-diagram[data-language="d2"]');
+  const mermaidInline = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(d2Inline.locator('svg[data-sequence-diagram="true"]')).toBeVisible();
+  await expect(mermaidInline.locator('svg[data-sequence-diagram="true"]')).toBeVisible();
+
+  await rightClickVisibleDiagram(page, d2Inline);
+  await page.locator(".ctx-item", { hasText: "Expand D2 diagram" }).click();
+  const d2Lightbox = page.locator('.diagram-lightbox[data-language="d2"]');
+  const d2Viewport = d2Lightbox.locator(".diagram-vector-viewport");
+  await expect(d2Viewport).toHaveAttribute("data-sequence-diagram", "true");
+  await expect(d2Viewport.locator(".diagram-sequence-actor")).toHaveCount(3);
+  await expect(d2Viewport.locator(".diagram-sequence-actor")).toContainText(["api", "db", "worker"]);
+  const d2Message = d2Viewport.locator('[data-sequence-role="message"]').first();
+  await expect(d2Viewport.locator('[data-sequence-role="message"]')).toHaveCount(3);
+  await d2Message.evaluate((element) => element.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, composed: true })));
+  await expect(d2Viewport.locator('.diagram-sequence-actor[data-sequence-active="true"]')).toHaveCount(2);
+  await expect(d2Viewport.locator('.diagram-sequence-focus[data-sequence-focus="active"]')).toContainText("api");
+
+  await d2Lightbox.getByTitle("Toggle sticky sequence actor names").click();
+  await expect(d2Viewport).toHaveAttribute("data-sequence-sticky-actors", "false");
+  await expect(d2Viewport.locator(".diagram-sequence-actors")).toHaveCount(0);
+  await d2Lightbox.getByTitle("Toggle sticky sequence actor names").click();
+  await expect(d2Viewport).toHaveAttribute("data-sequence-sticky-actors", "true");
+  await d2Message.evaluate((element) => element.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, composed: true })));
+  await expect(d2Viewport.locator('.diagram-sequence-actor[data-sequence-active="true"]')).toHaveCount(2);
+
+  const d2Receipt = await d2Viewport.evaluate((root) => ({
+    protocol: "grapht-model/0",
+    language: root.closest<HTMLElement>(".diagram-lightbox")?.dataset.language,
+    stickyActors: root.getAttribute("data-sequence-sticky-actors"),
+    actorLabels: Array.from(root.querySelectorAll<HTMLButtonElement>(".diagram-sequence-actor")).map((button) => button.textContent),
+    messageBindings: root.querySelectorAll('[data-sequence-role="message"]').length,
+    activeActorLabels: Array.from(root.querySelectorAll<HTMLButtonElement>('.diagram-sequence-actor[data-sequence-active="true"]')).map((button) => button.textContent),
+  }));
+  expect(d2Receipt).toMatchObject({
+    protocol: "grapht-model/0",
+    language: "d2",
+    stickyActors: "true",
+    actorLabels: ["api", "db", "worker"],
+    messageBindings: expect.any(Number),
+    activeActorLabels: ["api", "db"],
+  });
+  await testInfo.attach("sequence-d2-receipt.json", { body: JSON.stringify(d2Receipt, null, 2), contentType: "application/json" });
+  await page.keyboard.press("Escape");
+
+  await rightClickVisibleDiagram(page, mermaidInline);
+  await page.locator(".ctx-item", { hasText: "Expand Mermaid diagram" }).click();
+  const mermaidLightbox = page.locator('.diagram-lightbox[data-language="mermaid"]');
+  const mermaidViewport = mermaidLightbox.locator(".diagram-vector-viewport");
+  await expect(mermaidViewport.locator(".diagram-sequence-actor")).toHaveCount(3);
+  const mermaidMessage = mermaidViewport.locator('[data-sequence-role="message"]').first();
+  await expect(mermaidViewport.locator('[data-sequence-role="message"]')).toHaveCount(4);
+  await mermaidMessage.evaluate((element) => element.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, composed: true })));
+  await expect(mermaidViewport.locator('.diagram-sequence-actor[data-sequence-active="true"]')).toHaveCount(2);
+  await expect(mermaidViewport.locator(".diagram-sequence-focus")).toContainText("User Interface");
+  await expect(mermaidViewport.locator(".diagram-sequence-focus")).toContainText("API");
+  await expect(mermaidViewport.locator(".diagram-vector-stage")).toHaveCount(1);
+  const activation = mermaidViewport.locator('[data-sequence-role="activation"]').first();
+  await expect(mermaidViewport.locator('[data-sequence-role="activation"]')).toHaveCount(1);
+  await activation.evaluate((element) => element.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, composed: true })));
+  await expect(mermaidViewport.locator('.diagram-sequence-actor[data-sequence-active="true"]')).toHaveCount(1);
+  await expect(mermaidViewport.locator('.diagram-sequence-actor[data-sequence-active="true"]')).toContainText("API");
+
+  const collapse = mermaidLightbox.locator('[data-sequence-group-toggle="group/loop/0"]');
+  await expect(collapse).toHaveAttribute("aria-pressed", "false");
+  await collapse.click();
+  await expect(collapse).toHaveAttribute("aria-pressed", "true");
+  await expect(mermaidViewport.locator('[data-sequence-collapsed="true"]')).toHaveCount(8);
+  await mermaidMessage.evaluate((element) => element.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, composed: true })));
+  await expect(mermaidViewport.locator('.diagram-sequence-actor[data-sequence-active="true"]')).toHaveCount(2);
+  const mermaidReceipt = await mermaidViewport.evaluate((root) => ({
+    protocol: "grapht-model/0",
+    language: root.closest<HTMLElement>(".diagram-lightbox")?.dataset.language,
+    groupButtons: Array.from(root.querySelectorAll<HTMLButtonElement>("[data-sequence-group-toggle]")).map((button) => ({
+      id: button.dataset.sequenceGroupToggle,
+      pressed: button.getAttribute("aria-pressed"),
+    })),
+    collapsedElements: root.querySelectorAll('[data-sequence-collapsed="true"]').length,
+    activationBindings: root.querySelectorAll('[data-sequence-role="activation"]').length,
+    cssHasFocus: root.matches(':has([data-sequence-active="true"])'),
+  }));
+  expect(mermaidReceipt).toMatchObject({
+    protocol: "grapht-model/0",
+    language: "mermaid",
+    groupButtons: [
+      { id: "group/loop/0", pressed: "true" },
+      { id: "group/alt/1", pressed: "false" },
+    ],
+    collapsedElements: 8,
+    activationBindings: 1,
+    cssHasFocus: true,
+  });
+  await testInfo.attach("sequence-mermaid-receipt.json", { body: JSON.stringify(mermaidReceipt, null, 2), contentType: "application/json" });
+  await testInfo.attach("sequence-mermaid-lightbox", { body: await mermaidLightbox.screenshot(), contentType: "image/png" });
+});
+
 test("does not infer D2 from Rust return types and arrow comments", async ({ page }) => {
   await openTerminal(page);
   await writeFixture(page, [

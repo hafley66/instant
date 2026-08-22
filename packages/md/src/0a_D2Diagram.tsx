@@ -50,9 +50,9 @@ export function D2Diagram({ code, dark }: { code: string; dark: boolean }) {
             setOpen(true);
           }
         }}
-        dangerouslySetInnerHTML={{ __html: diagramSvgMarkup(svg) }}
+        dangerouslySetInnerHTML={{ __html: diagramSvgMarkup(svg, "d2", code) }}
       />
-      {open && <DiagramLightbox svg={svg} label="d2 diagram" language="d2" dark={dark} onClose={() => setOpen(false)} />}
+      {open && <DiagramLightbox svg={svg} code={code} label="d2 diagram" language="d2" dark={dark} onClose={() => setOpen(false)} />}
     </>
   );
 }
