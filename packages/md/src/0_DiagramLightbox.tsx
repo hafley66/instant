@@ -30,7 +30,8 @@ function VectorDiagramViewport({
   const current = useRef<SvgBox>(original.current);
   const drag = useRef<{ pointerId: number; x: number; y: number; box: SvgBox } | null>(null);
   const zoomLabel = useRef<HTMLSpanElement>(null);
-  const syncPinnedLayer = useRef<() => void>(() => {});
+  const actorLane = useRef<HTMLDivElement>(null);
+  const syncActorLane = useRef<() => void>(() => {});
   const sequence = useMemo(() => parseSequenceSource(language, code), [code, language]);
   const sequenceEnabled = isSequenceDiagramSource(language, code) && sequence.actors.length > 0;
   const decoratedSvg = useMemo(() => sequenceEnabled ? sequenceMarkup(svg, language, code) : svg, [code, language, sequenceEnabled, svg]);
@@ -40,10 +41,9 @@ function VectorDiagramViewport({
 
   const write = (box: SvgBox) => {
     current.current = box;
-    const svg = host.current?.querySelector("svg");
-    svg?.setAttribute("viewBox", `${box.x} ${box.y} ${box.width} ${box.height}`);
+    host.current?.querySelector("svg")?.setAttribute("viewBox", `${box.x} ${box.y} ${box.width} ${box.height}`);
     if (zoomLabel.current) zoomLabel.current.textContent = `${Math.round(original.current.width / box.width * 100)}%`;
-    syncPinnedLayer.current();
+    requestAnimationFrame(syncActorLane.current);
   };
   const setZoom = (next: number) => {
     const value = Math.min(64, Math.max(0.1, next));
@@ -78,81 +78,79 @@ function VectorDiagramViewport({
 
   useEffect(() => {
     const stage = host.current;
+    const lane = actorLane.current;
     const svg = stage?.querySelector<SVGSVGElement>("svg");
-    if (!stage || !svg || !sequenceEnabled) return;
+    if (!stage || !lane || !svg || !sequenceEnabled) return;
 
-    const namespace = "http://www.w3.org/2000/svg";
-    const layer = document.createElementNS(namespace, "g");
-    layer.setAttribute("data-sequence-pinned-layer", "true");
-    layer.setAttribute("aria-label", "Pinned sequence actors");
-    const sourceActors = Array.from(svg.querySelectorAll<SVGElement>('[data-sequence-role="actor"][data-sequence-source-node-id]'));
-    const sourceByActor = new Map<string, SVGElement>();
-    for (const source of sourceActors) {
-      const actorId = source.getAttribute("data-sequence-actor-id") ?? "";
-      if (actorId && !sourceByActor.has(actorId)) sourceByActor.set(actorId, source);
-    }
+    lane.replaceChildren();
+    const entries = sequence.actors.flatMap((actor) => {
+      const label = Array.from(svg.querySelectorAll<SVGGraphicsElement>('[data-sequence-role="actor-label"]'))
+        .find((candidate) => candidate.getAttribute("data-sequence-actors") === actor.id);
+      if (!label) return [];
 
-    const uses = new Map<string, SVGUseElement>();
-    for (const actor of sequence.actors) {
-      const source = sourceByActor.get(actor.id);
-      const sourceNodeId = source?.getAttribute("data-sequence-source-node-id");
-      if (!source || !sourceNodeId) continue;
-      const use = document.createElementNS(namespace, "use");
-      use.setAttribute("href", `#${sourceNodeId}`);
-      use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", `#${sourceNodeId}`);
-      use.setAttribute("data-sequence-entity", actor.id);
-      use.setAttribute("data-sequence-role", "actor-pinned");
-      use.setAttribute("data-sequence-actor-id", actor.id);
-      use.setAttribute("data-sequence-source-entity", actor.id);
-      use.setAttribute("data-sequence-actors", actor.id);
-      use.setAttribute("data-sequence-pinned-visible", "false");
-      layer.append(use);
-      uses.set(actor.id, use);
-    }
-    svg.append(layer);
+      const labelBox = label.getBBox();
+      const labelArea = Math.max(1, labelBox.width * labelBox.height);
+      const ancestors: SVGGraphicsElement[] = [];
+      let candidate: Element | null = label.parentNode instanceof Element ? label.parentNode : null;
+      while (candidate && candidate !== svg) {
+        if (candidate instanceof SVGGraphicsElement) ancestors.push(candidate);
+        candidate = candidate.parentNode instanceof Element ? candidate.parentNode : null;
+      }
+      const source = ancestors
+        .map((element) => ({ element, box: element.getBBox() }))
+        .filter(({ box }) => box.width * box.height >= labelArea)
+        .sort((left, right) => left.box.width * left.box.height - right.box.width * right.box.height)[0];
+      if (!source) return [];
+
+      source.element.setAttribute("data-sequence-role", "actor-source");
+      source.element.setAttribute("data-sequence-actor-id", actor.id);
+      source.element.setAttribute("data-sequence-actors", actor.id);
+
+      const item = document.createElement("div");
+      item.className = "diagram-sequence-actor";
+      item.dataset.sequenceActorId = actor.id;
+      item.dataset.sequenceVisible = "false";
+      const localSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      localSvg.setAttribute("viewBox", `${source.box.x} ${source.box.y} ${Math.max(1, source.box.width)} ${Math.max(1, source.box.height)}`);
+      localSvg.setAttribute("aria-label", actor.label);
+      localSvg.append(source.element.cloneNode(true));
+      item.append(localSvg);
+      lane.append(item);
+      return [{ actorId: actor.id, source: source.element, item }];
+    });
 
     const sync = () => {
-      const box = sourceBox(svg);
-      const svgRect = svg.getBoundingClientRect();
-      const ctm = svg.getScreenCTM();
-      if (!ctm || !svgRect.width || !svgRect.height) return;
-      const inverse = ctm.inverse();
-      const toUserDelta = (fromX: number, fromY: number, toX: number, toY: number) => {
-        const from = new DOMPoint(fromX, fromY).matrixTransform(inverse);
-        const to = new DOMPoint(toX, toY).matrixTransform(inverse);
-        return { x: to.x - from.x, y: to.y - from.y };
-      };
-
-      for (const actor of sequence.actors) {
-        const source = sourceByActor.get(actor.id);
-        const use = uses.get(actor.id);
-        if (!source || !use) continue;
-        const sourceRect = source.getBoundingClientRect();
-        const horizontalVisible = sourceRect.right > svgRect.left && sourceRect.left < svgRect.right;
-        const verticalVisible = sourceRect.bottom > svgRect.top && sourceRect.top < svgRect.bottom;
-        const active = focus?.actorIds.includes(actor.id) ?? false;
-        const shouldPin = stickyActors && (!horizontalVisible || !verticalVisible);
-        const targetLeft = horizontalVisible
-          ? sourceRect.left
-          : Math.min(Math.max(sourceRect.left, svgRect.left + 4), Math.max(svgRect.left + 4, svgRect.right - sourceRect.width - 4));
-        const targetTop = svgRect.top + 4;
-        const delta = shouldPin ? toUserDelta(sourceRect.left, sourceRect.top, targetLeft, targetTop) : { x: 0, y: 0 };
-        use.setAttribute("transform", `translate(${delta.x} ${delta.y})`);
-        use.setAttribute("data-sequence-pinned-visible", shouldPin ? "true" : "false");
-        source.setAttribute("data-sequence-source-visible", shouldPin ? "false" : "true");
-        use.setAttribute("data-sequence-focus-visible", active && (!horizontalVisible || !verticalVisible) ? "true" : "false");
+      const viewportRect = stage.getBoundingClientRect();
+      const laneRect = lane.getBoundingClientRect();
+      for (const entry of entries) {
+        const sourceRect = entry.source.getBoundingClientRect();
+        const active = focus?.actorIds.includes(entry.actorId) ?? false;
+        const aboveLane = sourceRect.bottom <= laneRect.bottom;
+        const belowViewport = sourceRect.top >= viewportRect.bottom;
+        const outsideX = sourceRect.right <= viewportRect.left || sourceRect.left >= viewportRect.right;
+        const visible = stickyActors && (aboveLane || belowViewport || (active && outsideX));
+        const width = Math.min(Math.max(1, sourceRect.width), Math.max(1, viewportRect.width - 8));
+        const sourceLeft = sourceRect.left - viewportRect.left;
+        const clampedLeft = Math.min(Math.max(4, sourceLeft), Math.max(4, viewportRect.width - width - 4));
+        entry.item.style.setProperty("--sequence-actor-left", `${clampedLeft}px`);
+        entry.item.style.setProperty("--sequence-actor-width", `${width}px`);
+        entry.item.dataset.sequenceVisible = visible ? "true" : "false";
+        entry.item.dataset.sequenceActive = active ? "true" : "false";
+        entry.source.dataset.sequenceSourceVisible = visible ? "false" : "true";
       }
-      svg.setAttribute("data-sequence-pinned-camera", `${box.x} ${box.y} ${box.width} ${box.height}`);
     };
 
-    syncPinnedLayer.current = sync;
-    const cameraObserver = new MutationObserver(sync);
-    cameraObserver.observe(svg, { attributes: true, attributeFilter: ["viewBox"] });
+    syncActorLane.current = sync;
+    const observer = new MutationObserver(sync);
+    observer.observe(svg, { attributes: true, attributeFilter: ["viewBox"] });
+    const resizeObserver = new ResizeObserver(sync);
+    resizeObserver.observe(stage);
     sync();
     return () => {
-      cameraObserver.disconnect();
-      if (layer.isConnected) layer.remove();
-      syncPinnedLayer.current = () => {};
+      observer.disconnect();
+      resizeObserver.disconnect();
+      syncActorLane.current = () => {};
+      lane.replaceChildren();
     };
   }, [decoratedSvg, focus, sequence, sequenceEnabled, stickyActors]);
 
@@ -170,7 +168,6 @@ function VectorDiagramViewport({
       if (groups.some((groupId) => collapsedGroupIds.includes(groupId))) element.setAttribute("data-sequence-collapsed", "true");
       else element.removeAttribute("data-sequence-collapsed");
     }
-    syncPinnedLayer.current();
   }, [collapsedGroupIds, decoratedSvg, focus]);
 
   const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -243,6 +240,7 @@ function VectorDiagramViewport({
         <span ref={zoomLabel}>100%</span>
         <button type="button" title="zoom in" onClick={() => setZoom(original.current.width / current.current.width * 1.2)}>+</button>
       </div>
+      {sequenceEnabled && <div ref={actorLane} className="diagram-sequence-actors" data-sequence-actors-sticky={stickyActors ? "true" : "false"} aria-label="Sequence actors" />}
       <div
         ref={host}
         className="diagram-vector-stage"

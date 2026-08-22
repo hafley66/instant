@@ -37,18 +37,38 @@
   display: none;
 }
 
-.diagram-vector-stage [data-sequence-role="actor-pinned"] {
-  visibility: hidden;
+.diagram-sequence-actors {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: 100%;
+  height: 0;
   pointer-events: none;
 }
 
-.diagram-vector-stage [data-sequence-role="actor-pinned"][data-sequence-pinned-visible="true"] {
-  visibility: visible;
-  pointer-events: auto;
+.diagram-sequence-actor {
+  position: absolute;
+  top: 4px;
+  left: var(--sequence-actor-left);
+  width: var(--sequence-actor-width);
+  visibility: hidden;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 35%));
 }
 
-.diagram-vector-stage [data-sequence-role="actor-pinned"][data-sequence-focus-visible="true"] {
-  filter: drop-shadow(0 0 3px var(--accent, #2563eb));
+.diagram-sequence-actor[data-sequence-visible="true"] {
+  visibility: visible;
+}
+
+.diagram-sequence-actor svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 72px;
+  overflow: visible;
+}
+
+.diagram-sequence-actor[data-sequence-active="true"] {
+  filter: drop-shadow(0 0 4px var(--accent, #2563eb));
 }
 
 .diagram-vector-stage:has([data-sequence-active="true"]) [data-sequence-entity] {
