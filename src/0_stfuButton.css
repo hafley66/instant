@@ -104,6 +104,21 @@
 }
 
 .stfu-cap:focus-visible { outline: 3px solid #ffd9d4; outline-offset: 8px; }
+/* Skins style every <button> in the app, and body[data-skin="ac3"] in
+   styles.css:3280 clips them with a notched polygon. clip-path flattens a 3D
+   rendering context exactly like filter does, so the skin dropped all 40 discs
+   onto one plane as soon as syncSkin wrote data-skin on the body. The id in the
+   selector outranks anything a skin rule can spell. */
+#stfu-host .stfu-cap,
+.stfu-stage .stfu-cap {
+  clip-path: none;
+  filter: none;
+  mask: none;
+  backdrop-filter: none;
+  mix-blend-mode: normal;
+  isolation: auto;
+}
+
 .stfu-cap:disabled { cursor: progress; }
 /* The greyed-out look during a send rides the leaves. A filter on .stfu-cap
    itself forces transform-style: flat, which drops all 40 discs onto one
