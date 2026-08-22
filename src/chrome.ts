@@ -10,6 +10,7 @@ import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
+import { panic } from "./0_panicSettings";
 import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays, syncInlineStructuredSelectors } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
@@ -121,17 +122,20 @@ export function syncInlineDiagrams(s: AppState) {
   syncInlineDiagramOverlays();
 }
 
-export function syncPanicButton(s: AppState) {
-  const button = $("#panic-toggle") as HTMLButtonElement;
-  button.classList.toggle("active", s.panicButton);
-  button.setAttribute("aria-pressed", String(s.panicButton));
-  const host = document.getElementById("stfu-host");
-  if (host) host.hidden = !s.panicButton;
-}
-
-export function syncPanicSub(s: AppState) {
-  const stage = document.querySelector(".stfu-stage") as HTMLElement | null;
-  if (stage) stage.dataset.subMode = s.panicSub;
+/** Subscribes the panic settings to their DOM. Each fires once on subscribe, so
+ *  this replaces both the store subscriptions and their initial sync calls. */
+export function bindPanicChrome() {
+  panic.on.$.subscribe((on) => {
+    const button = $("#panic-toggle") as HTMLButtonElement;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+    const host = document.getElementById("stfu-host");
+    if (host) host.hidden = !on;
+  });
+  panic.sub.$.subscribe((mode) => {
+    const stage = document.querySelector(".stfu-stage") as HTMLElement | null;
+    if (stage) stage.dataset.subMode = mode;
+  });
 }
 
 export function syncInlineStructured(s: AppState) {
@@ -431,8 +435,7 @@ export function wireChrome() {
   $("#diagram-toggle").onclick = () =>
     store.set({ inlineDiagrams: !store.get().inlineDiagrams });
 
-  $("#panic-toggle").onclick = () =>
-    store.set({ panicButton: !store.get().panicButton });
+  $("#panic-toggle").onclick = () => panic.on.$(!panic.on.$());
 
   $("#structured-overlay-toggle").onclick = () =>
     store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors });

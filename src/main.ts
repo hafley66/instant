@@ -27,6 +27,7 @@ import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
 import { mountStfuButton } from "./0_stfuButton";
+import { panic, cyclePanic, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
@@ -107,8 +108,7 @@ import {
   syncXpPixel,
   syncMode,
   syncInlineDiagrams,
-  syncPanicButton,
-  syncPanicSub,
+  bindPanicChrome,
   syncInlineStructured,
   applyToolbar,
   syncSidebar,
@@ -153,20 +153,12 @@ const TAB_COMMANDS: Command[] = [
   // The top toolbar is opt-in; these keep its actions reachable when it's hidden.
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
-  { id: "view.panicButton", keys: [], title: "Toggle Panic Button", group: "View", run: () => store.set({ panicButton: !store.get().panicButton }) },
-  { id: "view.panicMode", keys: [], title: "Cycle Panic Button Mode", group: "View", run: () => {
-    const order = ["clear", "paste", "escape"] as const;
-    const next = order[(order.indexOf(store.get().panicMode) + 1) % order.length];
-    store.set({ panicMode: next });
-  } },
-  { id: "view.panicSub", keys: [], title: "Cycle Panic Button Subtext", group: "View", run: () => {
-    const order = ["below", "cap", "both", "off"] as const;
-    const next = order[(order.indexOf(store.get().panicSub) + 1) % order.length];
-    store.set({ panicSub: next });
-  } },
+  { id: "view.panicButton", keys: [], title: "Toggle Panic Button", group: "View", run: () => panic.on.$(!panic.on.$()) },
+  { id: "view.panicMode", keys: [], title: "Cycle Panic Button Mode", group: "View", run: () => cyclePanic(panic.mode, PANIC_MODES) },
+  { id: "view.panicSub", keys: [], title: "Cycle Panic Button Subtext", group: "View", run: () => cyclePanic(panic.sub, PANIC_SUBS) },
   { id: "view.panicBody", keys: [], title: "Set Panic Button Text", group: "View", run: async () => {
-    const next = await askText("what the panic button sends", store.get().panicBody);
-    if (next !== null) store.set({ panicBody: next });
+    const next = await askText("what the panic button sends", panic.body.$());
+    if (next !== null) panic.body.$(next);
   } },
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
   { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors }) },
@@ -219,11 +211,11 @@ async function main() {
   const stfuHost = document.getElementById("stfu-host");
   if (stfuHost) {
     mountStfuButton(stfuHost, {
-      body: () => store.get().panicBody,
-      mode: () => store.get().panicMode,
-      position: store.get().panicPos,
-      subMode: store.get().panicSub,
-      onMoveEnd: (panicPos) => store.set({ panicPos }),
+      body: () => panic.body.$(),
+      mode: () => panic.mode.$(),
+      position: panic.pos.$(),
+      subMode: panic.sub.$(),
+      onMoveEnd: (next) => panic.pos.$(next),
     });
   }
   // Resolve the home dir once so tildify() can stay synchronous during render.
@@ -242,8 +234,6 @@ async function main() {
   store.subscribe(syncXpPixel, ["xpPixel", "config"]);
   store.subscribe(syncMode, ["mode"]);
   store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
-  store.subscribe(syncPanicButton, ["panicButton"]);
-  store.subscribe(syncPanicSub, ["panicSub"]);
   store.subscribe(syncInlineStructured, ["inlineStructuredSelectors"]);
   store.subscribe(applyToolbar, ["showToolbar"]);
   store.subscribe(syncSidebar, ["sidebar"]);
@@ -271,7 +261,7 @@ async function main() {
   syncXpPixel(store.get());
   syncMode(store.get());
   syncInlineDiagrams(store.get());
-  syncPanicButton(store.get());
+  bindPanicChrome();
   syncInlineStructured(store.get());
   applyToolbar(store.get());
   syncSidebar(store.get());

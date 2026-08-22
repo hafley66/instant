@@ -6,6 +6,7 @@ import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { store } from "./state";
+import { panic } from "./0_panicSettings";
 import { cdpPerf } from "./cdp";
 import { setBrowserPerf } from "./browser";
 import { refreshSessions, scanWorktreesIfNeeded } from "./worktrees";
@@ -37,8 +38,8 @@ export function registerBuiltin() {
         id: "panicButton",
         label: "Panic button",
         hint: "red STFU button, bottom right; pastes into the visible tmux pane",
-        get: () => store.get().panicButton,
-        set: (on) => store.set({ panicButton: on }),
+        get: () => panic.on.$(),
+        set: (on) => panic.on.$(on),
       },
       {
         id: "inlineStructuredSelectors",

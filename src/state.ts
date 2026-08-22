@@ -1,4 +1,3 @@
-import { PANIC_BODY_DEFAULT } from "./0_stfuButton";
 // The single app store. UI/persisted state lives here; runtime resources (live
 // xterm Terminals) stay in their own registry in main.ts. New durable fields
 // (sessions, panels, layout) get added to AppState and listed in PERSIST.
@@ -208,11 +207,6 @@ export interface AppState {
   showToolbar: boolean; // top toolbar (Shot/dark/skin); hidden by default, opt in via Config
   inlineDiagrams: boolean; // terminal Mermaid/D2 overlays; source text remains when disabled
   inlineStructuredSelectors: boolean; // gutter checkboxes for terminal table rows and list items
-  panicButton: boolean; // the red desk button overlay
-  panicBody: string; // literal text the panic button pastes into the visible tmux pane
-  panicPos: { x: number; y: number }; // px offset from the default bottom-right corner
-  panicMode: "clear" | "paste" | "escape"; // what the panic button does to the pane
-  panicSub: "below" | "cap" | "both" | "off"; // where the panic button subtext sits
   sidebar: Sidebar; // activity rail compact/big (persisted)
   active: string | null; // active tab id (persisted; replayed against reattached tabs)
   openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
@@ -320,11 +314,6 @@ const PERSIST: (keyof AppState)[] = [
   "showToolbar",
   "inlineDiagrams",
   "inlineStructuredSelectors",
-  "panicButton",
-  "panicBody",
-  "panicPos",
-  "panicMode",
-  "panicSub",
   "sidebar",
   "active",
   "openTabs",
@@ -444,11 +433,6 @@ function load(): AppState {
     showToolbar: loadKey<boolean>("showToolbar", false),
     inlineDiagrams: loadKey<boolean>("inlineDiagrams", true),
     inlineStructuredSelectors: loadKey<boolean>("inlineStructuredSelectors", true),
-    panicButton: loadKey<boolean>("panicButton", true),
-    panicBody: loadKey<string>("panicBody", PANIC_BODY_DEFAULT),
-    panicPos: loadKey<{ x: number; y: number }>("panicPos", { x: 0, y: 0 }),
-    panicMode: loadKey<"clear" | "paste" | "escape">("panicMode", "clear"),
-    panicSub: loadKey<"below" | "cap" | "both" | "off">("panicSub", "below"),
     sidebar: loadKey<Sidebar>("sidebar", "big"),
     active: loadKey<string | null>("active", null),
     openTabs: loadKey<OpenTab[]>("openTabs", []),
