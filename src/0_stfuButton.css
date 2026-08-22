@@ -56,23 +56,32 @@
   text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.65), 0 1px 0 rgba(255, 150, 140, 0.55);
 }
 
-/* overlay placement inside the instant window */
+/* Overlay placement inside the instant window.
+   The drag offset rides the inset and the shrink rides this host, so that
+   .stfu-stage carries `perspective` and no transform of its own. WKWebView
+   flattens a 3D rendering context whose element also has a transform, which
+   renders the cylinder as a plain circle even though --stfu-unit resolves. */
 #stfu-host {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  right: calc(18px - var(--stfu-x, 0px));
+  bottom: calc(18px - var(--stfu-y, 0px));
   z-index: 9999;
   pointer-events: none;
-  transform: translate(var(--stfu-x, 0px), var(--stfu-y, 0px));
+  transform: scale(0.42);
+  transform-origin: 100% 100%;
 }
-#stfu-host .stfu-stage { pointer-events: auto; padding: 0; transform: scale(0.42); transform-origin: 100% 100%; }
+#stfu-host .stfu-stage { pointer-events: auto; padding: 0; }
 #stfu-host .stfu-status { position: absolute; bottom: -4px; right: 0; font-size: 26px; white-space: nowrap; }
 
-/* animatable extrusion unit; each disc sits at index * unit along Z */
+/* Animatable extrusion unit; each disc sits at index * unit along Z.
+   initial-value is the RESTING height, never 0px: a registered property falls
+   back to its initial-value on a style recalc, and main.ts forces two on the
+   tick after mount (the #stfu-host hidden toggle, then applyZoom). With 0px
+   there, both recalcs collapsed the cylinder flat and it never came back. */
 @property --stfu-unit {
   syntax: "<length>";
   inherits: true;
-  initial-value: 0px;
+  initial-value: 1.55px;
 }
 
 /* the cap is a real stack of discs, so the side wall is geometry rather than a shadow */
@@ -87,6 +96,10 @@
   background: none;
   border-radius: 50%;
   cursor: pointer;
+  /* A button left at its native appearance gets a platform control renderer in
+     WKWebView, and that renderer flattens preserve-3d children. */
+  appearance: none;
+  -webkit-appearance: none;
   transform-style: preserve-3d;
   transition: --stfu-unit 90ms cubic-bezier(0.25, 0.9, 0.35, 1);
 }
@@ -115,11 +128,14 @@
   box-shadow: inset 0 0 0 2px rgba(255, 160, 150, 0.25);
 }
 
-.stfu-stage.is-pressed .stfu-cap { --stfu-unit: 0.22px; }
+/* data-cap on the stage names the single current cap state, written by
+   0_stfuButton.ts. The selectors are mutually exclusive at equal specificity,
+   so no unit value can beat another by specificity or source order. */
+.stfu-stage[data-cap="hover"] .stfu-cap { --stfu-unit: 1.95px; }
+.stfu-stage[data-cap="pressed"] .stfu-cap { --stfu-unit: 0.22px; }
+.stfu-stage[data-cap="drag"] .stfu-cap { --stfu-unit: 2.4px; }
 
-/* hover: the column extends, the cap brightens, the plate throws red light */
-.stfu-cap:hover { --stfu-unit: 1.95px; }
-
+/* hover: the cap brightens, the plate throws red light */
 .stfu-cap:hover .stfu-top {
   background: radial-gradient(circle at 38% 30%, #ff8377, #f52a2a 46%, #b81111 80%, #9c0f0f);
   box-shadow: inset 0 0 0 2px rgba(255, 190, 180, 0.4), 0 0 34px rgba(255, 60, 50, 0.45);
@@ -133,12 +149,8 @@
 /* the label lifts a hair so it reads as catching the light */
 .stfu-cap:hover .stfu-face { text-shadow: 0 2px 0 #7c0808, 0 0 26px rgba(255, 120, 110, 0.8); }
 
-/* pressed beats hover: same property, higher specificity */
-.stfu-stage.is-pressed .stfu-cap:hover { --stfu-unit: 0.22px; }
-
 /* long-press armed: the button detaches and follows the pointer */
 .stfu-stage.is-dragging { cursor: grabbing; }
-.stfu-stage.is-dragging .stfu-cap { --stfu-unit: 2.4px; }
 .stfu-stage.is-dragging .stfu-plate {
   box-shadow: 0 60px 80px rgba(0, 0, 0, 0.65), inset 0 0 0 6px #3a3f47,
     0 0 0 3px rgba(255, 255, 255, 0.12);

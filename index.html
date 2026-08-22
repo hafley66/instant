@@ -95,9 +95,6 @@
            panel is a React `component` now; nothing is injected here. -->
       <div id="panel-pool" hidden></div>
 
-      <!-- panic button overlay, mounted by src/0_stfuButton.ts from main.ts -->
-      <div id="stfu-host"></div>
-
       <div class="rz" data-dir="North"></div>
       <div class="rz" data-dir="South"></div>
       <div class="rz" data-dir="West"></div>
@@ -107,5 +104,11 @@
       <div class="rz" data-dir="SouthWest"></div>
       <div class="rz" data-dir="SouthEast"></div>
     </div>
+
+    <!-- Panic button overlay. Deliberately a sibling of #app, never a child:
+         #app carries the summon-in animation and the overlay-faded opacity, and
+         a composited or transformed ancestor flattens the button's preserve-3d
+         cylinder into a single plane, which reads as permanently pressed. -->
+    <div id="stfu-host"></div>
   </body>
 </html>

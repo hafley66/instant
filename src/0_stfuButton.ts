@@ -1,4 +1,4 @@
-import { EMPTY, from, fromEvent, merge, race, Subscription, timer } from "rxjs"
+import { EMPTY, from, fromEvent, merge, Observable, race, Subscription, timer } from "rxjs"
 import {
   catchError,
   filter,
@@ -92,16 +92,40 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
   }
   writeOffset(offset)
 
+  // A hot reload re-runs the mount without tearing the old one down, which
+  // would stack stages and leave a stale pressed cap on top.
+  for (const stale of Array.from(host.querySelectorAll(".stfu-stage"))) stale.remove()
   host.appendChild(stage)
 
-  const press = () => stage.classList.add("is-pressed")
-  const release = () => stage.classList.remove("is-pressed")
+  // data-cap names the one current cap state; hover lives in JS so every unit
+  // rule shares this writer. is-dragging stays for the cursor and plate shadow.
+  let hovering = false
+  let hold: "pressed" | "drag" | null = null
+  const applyCap = () => {
+    const state = hold ?? (hovering ? "hover" : null)
+    if (state) stage.dataset.cap = state
+    else delete stage.dataset.cap
+  }
+  const press = () => {
+    hold = "pressed"
+    applyCap()
+  }
+  const release = () => {
+    hold = null
+    applyCap()
+  }
 
   const down$ = fromEvent<PointerEvent>(cap, "pointerdown").pipe(filter(event => event.button === 0))
   const move$ = fromEvent<PointerEvent>(cap, "pointermove")
-  const up$ = merge(
+  // Listening only on `cap` orphans the gesture when capture is lost (window
+  // blur, webview steals pointer, focus jump) and the cap stays pressed for good.
+  const up$: Observable<unknown> = merge(
     fromEvent<PointerEvent>(cap, "pointerup"),
     fromEvent<PointerEvent>(cap, "pointercancel"),
+    fromEvent<PointerEvent>(cap, "lostpointercapture"),
+    fromEvent<PointerEvent>(window, "pointerup"),
+    fromEvent<PointerEvent>(window, "pointercancel"),
+    fromEvent<Event>(window, "blur"),
   )
 
   // The browser fires click after the pointerup that ended a drag. One flag,
@@ -134,6 +158,8 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
             }
             release()
             stage.classList.add("is-dragging")
+            hold = "drag"
+            applyCap()
             draggedThisGesture = true
             const origin = { ...offset }
             return move$.pipe(
@@ -145,6 +171,8 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
               takeUntil(up$),
               finalize(() => {
                 stage.classList.remove("is-dragging")
+                hold = null
+                applyCap()
                 opts.onMoveEnd?.({ ...offset })
               }),
             )
@@ -190,9 +218,24 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
     )
     .subscribe()
 
+  // Replaces the old :hover unit rule. Pointer capture during a drag retargets
+  // boundary events to the cap, so the enter/leave pair stays balanced.
+  const hovers = merge(
+    fromEvent<PointerEvent>(cap, "pointerenter").pipe(map(() => true)),
+    fromEvent<PointerEvent>(cap, "pointerleave").pipe(map(() => false)),
+  )
+    .pipe(
+      tap(over => {
+        hovering = over
+        applyCap()
+      }),
+    )
+    .subscribe()
+
   const teardown = new Subscription()
   teardown.add(gestures)
   teardown.add(sends)
+  teardown.add(hovers)
 
   return () => {
     teardown.unsubscribe()
