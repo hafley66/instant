@@ -30,66 +30,25 @@
 }
 
 .diagram-vector-sequence .diagram-vector-stage {
-  box-sizing: border-box;
-  padding-top: 52px;
+  position: relative;
 }
 
-.diagram-sequence-actors {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  width: calc(100% - 32px);
-  min-height: 36px;
-  margin: 0 16px;
-  padding: 4px;
-  border: 1px solid var(--frame, #d4d0c8);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--panel-bg, #fff) 94%, transparent);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+.diagram-vector-stage [data-sequence-mirrored="true"] {
+  display: none;
 }
 
-.diagram-sequence-actor {
-  min-width: 0;
-  max-width: 220px;
-  padding: 4px 8px;
-  overflow: hidden;
-  border: 1px solid var(--frame, #d4d0c8);
-  border-radius: 3px;
-  background: var(--panel-bg, #fff);
-  color: var(--panel-fg, #222);
-  cursor: pointer;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.diagram-sequence-actor[data-sequence-active="true"] {
-  border-color: var(--accent, #2563eb);
-  background: var(--accent, #2563eb);
-  color: #fff;
-  font-weight: 700;
-}
-
-.diagram-sequence-focus {
-  position: absolute;
-  top: 60px;
-  left: 16px;
-  z-index: 2;
-  max-width: min(50vw, 560px);
-  padding: 4px 8px;
-  border: 1px solid var(--accent, #2563eb);
-  border-radius: 3px;
-  background: var(--panel-bg, #fff);
-  color: var(--panel-fg, #222);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
-  font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+.diagram-vector-stage [data-sequence-role="actor-pinned"] {
+  visibility: hidden;
   pointer-events: none;
 }
 
-.diagram-sequence-focus[data-sequence-focus="idle"] {
-  display: none;
+.diagram-vector-stage [data-sequence-role="actor-pinned"][data-sequence-pinned-visible="true"] {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.diagram-vector-stage [data-sequence-role="actor-pinned"][data-sequence-focus-visible="true"] {
+  filter: drop-shadow(0 0 3px var(--accent, #2563eb));
 }
 
 .diagram-vector-stage:has([data-sequence-active="true"]) [data-sequence-entity] {

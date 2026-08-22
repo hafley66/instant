@@ -159,6 +159,40 @@ function normalText(value: string | null): string {
   return cleanLabel(value ?? "").toLowerCase();
 }
 
+function actorSourceNode(label: Element, root: Element): Element {
+  let candidate = label.parentElement;
+  while (candidate && candidate !== root) {
+    if (candidate.tagName.toLowerCase() === "g" && candidate.querySelector("rect, circle, ellipse, line, path, polygon, polyline")) return candidate;
+    candidate = candidate.parentElement;
+  }
+  return label;
+}
+
+function mermaidActorNodes(root: Element, actor: SequenceActor): SVGGElement[] {
+  const token = actor.id.slice("actor/".length);
+  return Array.from(root.querySelectorAll<SVGGElement>('g[data-et="participant"][data-type][data-id]'))
+    .filter((candidate) => cleanToken(candidate.getAttribute("data-id") ?? "") === token);
+}
+
+function mermaidActorSourceNode(root: Element, actor: SequenceActor): Element | undefined {
+  return mermaidActorNodes(root, actor)[0];
+}
+
+function markMermaidFooterNodes(root: Element, actor: SequenceActor): void {
+  const token = actor.id.slice("actor/".length);
+  for (const group of Array.from(root.querySelectorAll<SVGGElement>("g"))) {
+    const isFooterActor = group.matches("g.actor-bottom[name]")
+      && cleanToken(group.getAttribute("name") ?? "") === token;
+    const containsFooterActor = Array.from(group.children).some((child) =>
+      child.matches(".actor-bottom[name]") && cleanToken(child.getAttribute("name") ?? "") === token);
+    if (isFooterActor || containsFooterActor) group.setAttribute("data-sequence-mirrored", "true");
+  }
+}
+
+function sourceNodeId(actor: SequenceActor): string {
+  return `sequence-source-${actor.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 function markElement(element: Element, message: SequenceMessage, role: string): void {
   element.setAttribute("data-sequence-entity", message.id);
   element.setAttribute("data-sequence-role", role);
@@ -185,12 +219,29 @@ function decorateSequenceRoot(root: Element, model: SequenceModel): void {
   const textNodes = Array.from(root.querySelectorAll("text"));
   const unusedTextNodes = new Set(textNodes);
   for (const actor of model.actors) {
-    const textNode = textNodes.find((node) => unusedTextNodes.has(node) && normalText(node.textContent) === normalText(actor.label));
+    const sourceNode = model.language === "mermaid"
+      ? mermaidActorSourceNode(root, actor)
+      : (() => {
+        const textNode = textNodes.find((node) => unusedTextNodes.has(node) && normalText(node.textContent) === normalText(actor.label));
+        if (textNode) unusedTextNodes.delete(textNode);
+        return textNode ? actorSourceNode(textNode, root) : undefined;
+      })();
+    if (!sourceNode) continue;
+    const textNode = Array.from(sourceNode.querySelectorAll("text"))
+      .find((node) => normalText(node.textContent) === normalText(actor.label));
     if (!textNode) continue;
-    unusedTextNodes.delete(textNode);
+    if (model.language === "mermaid") markMermaidFooterNodes(root, actor);
+    sourceNode.setAttribute("id", sourceNodeId(actor));
+    sourceNode.setAttribute("data-sequence-entity", actor.id);
+    sourceNode.setAttribute("data-sequence-role", "actor");
+    sourceNode.setAttribute("data-sequence-actor-id", actor.id);
+    sourceNode.setAttribute("data-sequence-actors", actor.id);
+    sourceNode.setAttribute("data-sequence-source-entity", actor.id);
+    sourceNode.setAttribute("data-sequence-source-node-id", sourceNode.id);
     textNode.setAttribute("data-sequence-entity", actor.id);
     textNode.setAttribute("data-sequence-role", "actor-label");
     textNode.setAttribute("data-sequence-actors", actor.id);
+    textNode.setAttribute("data-sequence-source-entity", actor.id);
   }
 
   const candidates = Array.from(root.querySelectorAll("[class*='messageLine'], [class~='connection']"));
