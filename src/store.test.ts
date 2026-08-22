@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { createStore } from "./store";
 
-interface TestState {
+// A type alias, not an interface: the signal's nested field access is typed via
+// an implicit index signature, which interfaces do not get.
+type TestState = {
   a: number;
   b: string;
   c: boolean;
-}
+};
 
 describe("createStore", () => {
   it("get() returns the initial state", () => {
@@ -72,5 +74,31 @@ describe("createStore", () => {
     store.set({ b: "y" });
     expect(all).toHaveBeenCalledTimes(1);
     expect(aOnly).not.toHaveBeenCalled();
+  });
+});
+
+describe("createStore signal access", () => {
+  it("$ exposes each field as its own signal", () => {
+    const store = createStore<TestState>({ a: 1, b: "x", c: false });
+    expect(store.$.a.$()).toBe(1);
+    store.set({ a: 7 });
+    expect(store.$.a.$()).toBe(7);
+  });
+
+  it("changed$ emits only the keys whose value actually changed", () => {
+    const store = createStore<TestState>({ a: 1, b: "x", c: false });
+    const seen: (keyof TestState)[][] = [];
+    store.changed$.subscribe((keys) => seen.push(keys));
+    store.set({ a: 2, b: "x" }); // b is identical, so only a is dirty
+    store.set({ b: "z", c: true });
+    expect(seen).toEqual([["a"], ["b", "c"]]);
+  });
+
+  it("changed$ stays silent when nothing changed", () => {
+    const store = createStore<TestState>({ a: 1, b: "x", c: false });
+    const fn = vi.fn();
+    store.changed$.subscribe(fn);
+    store.set({ a: 1 });
+    expect(fn).not.toHaveBeenCalled();
   });
 });

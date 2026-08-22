@@ -477,8 +477,14 @@ function load(): AppState {
 
 export const store = createStore<AppState>(load());
 
-store.subscribe((s) => {
-  for (const k of PERSIST) localStorage.setItem(k, JSON.stringify(s[k]));
-}, PERSIST);
+// Write only what changed. The previous form re-serialised and rewrote every
+// PERSIST key on every set(), so flipping one boolean cost a write per key.
+const PERSISTED = new Set<keyof AppState>(PERSIST);
+store.changed$.subscribe((keys) => {
+  const s = store.get();
+  for (const k of keys) {
+    if (PERSISTED.has(k)) localStorage.setItem(k, JSON.stringify(s[k]));
+  }
+});
 // todo(state): split durable settings from runtime mirrors and ephemeral UI state
 // todo(migration): version persisted state migrations explicitly before adding more fields
