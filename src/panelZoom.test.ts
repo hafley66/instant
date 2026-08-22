@@ -136,8 +136,8 @@ describe("zoom target resolution", () => {
 describe("tabZoom -> panelZoom migration", () => {
   it("converts px font sizes to term factors, once", async () => {
     const { localStore } = freshGlobals({ tabZoom: JSON.stringify({ "s:main": 26 }) });
-    const { store } = await import("./state");
-    expect(store.get().panelZoom["term:s:main"]).toBeCloseTo(26 / 13);
+    const { settings } = await import("./0_settings");
+    expect(settings.panelZoom.$()["term:s:main"]).toBeCloseTo(26 / 13);
     expect(localStore.getItem("panelZoomV1")).toBe("1");
     expect(localStore.getItem("tabZoom")).toBeNull();
   });
@@ -147,8 +147,8 @@ describe("tabZoom -> panelZoom migration", () => {
       tabZoom: JSON.stringify({ "s:main": 26 }),
       panelZoom: JSON.stringify({ "md:/x.md": 1.5 }),
     });
-    const { store } = await import("./state");
-    expect(store.get().panelZoom["md:/x.md"]).toBe(1.5);
-    expect(store.get().panelZoom["term:s:main"]).toBeCloseTo(2);
+    const { settings } = await import("./0_settings");
+    expect(settings.panelZoom.$()["md:/x.md"]).toBe(1.5);
+    expect(settings.panelZoom.$()["term:s:main"]).toBeCloseTo(2);
   });
 });

@@ -6,7 +6,6 @@ import { invoke } from "./generated/native";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { codeToHtml } from "shiki";
-import { store } from "./state";
 import { routePath } from "./plugin";
 import {
   addPreviewPanel,
@@ -33,6 +32,7 @@ import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
 import { shareReplay, type Subscription } from "rxjs";
 import { visibleFileWatch$ } from "./0_visibleFileWatch";
 import { liveProbe } from "./0_liveProbe";
+import { settings } from "./0_settings";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -272,7 +272,7 @@ function mountCodeViewer(node: HTMLElement, path: string, text: string, line?: n
     path,
     text,
     line,
-    dark: store.get().mode === "dark",
+    dark: settings.mode.$() === "dark",
     onText: (value: string) => previewTextByNode.set(node, value),
   }));
 }
@@ -336,7 +336,7 @@ async function renderPathInto(node: HTMLElement, path: string, line?: number) {
         (sibling) => invoke<string>("read_image", { path: sibling }),
         async (sourcePath) => {
           const source = await invoke<string>("read_text", { path: sourcePath });
-          const dark = store.get().mode === "dark";
+          const dark = settings.mode.$() === "dark";
           const svg = await renderD2(source, dark);
           liveProbe.record({ kind: "operation", name: "preview.renderD2", scope: sourcePath, detail: { dark, sourceBytes: source.length, svgBytes: svg.length } });
           return { source, svg };
@@ -425,7 +425,7 @@ async function renderDiffInto(node: HTMLElement, wtPath: string) {
     node.innerHTML = meta + empty("no changes — working tree clean");
     return;
   }
-  const theme = store.get().mode === "dark" ? "github-dark" : "github-light";
+  const theme = settings.mode.$() === "dark" ? "github-dark" : "github-light";
   try {
     const html = await codeToHtml(text, { lang: "diff", theme });
     // Band each row by its leading char (+/-/@) — shiki colors the text but
@@ -449,12 +449,12 @@ async function renderDiffInto(node: HTMLElement, wtPath: string) {
 // (the line-numbered source view is shiki-colored too now). Closed instances keep
 // their cached node; reopening re-renders. Diff panels are shiki-colored too.
 export function initPreviewThemeSync() {
-  store.subscribe(() => {
+  settings.mode.$.subscribe(() => {
     for (const [path, inst] of previewInsts) {
       if (isPreviewOpen(path)) renderPathInto(inst.el, path, inst.line);
     }
     for (const [key, inst] of diffInsts) {
       if (isPreviewOpen(key)) renderDiffInto(inst.el, key.slice("diff:".length));
     }
-  }, ["mode"]);
+  });
 }

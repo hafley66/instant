@@ -9,7 +9,7 @@
 // zoom to a new panel kind is a one-line registerZoomKind, not new plumbing.
 // ./state is the only import this module may take: every other app module
 // reaches reactdock/terminal, which import this one back.
-import { store } from "./state";
+import { settings } from "./0_settings";
 
 export interface ZoomKind {
   prefix: string; // dock panel id prefix ("term:", "md:")
@@ -26,7 +26,7 @@ export function registerZoomKind(k: ZoomKind): void {
 }
 
 export function zoomFactorFor(pid: string): number {
-  return store.get().panelZoom[pid] ?? 1;
+  return settings.panelZoom.$()[pid] ?? 1;
 }
 
 function kindFor(pid: string): ZoomKind | undefined {
@@ -39,14 +39,14 @@ const DEFAULT_MAX = 3;
 export function setPanelZoom(pid: string, factor: number): void {
   const k = kindFor(pid);
   const clamped = Math.min(k?.max ?? DEFAULT_MAX, Math.max(k?.min ?? DEFAULT_MIN, factor));
-  store.set({ panelZoom: { ...store.get().panelZoom, [pid]: clamped } });
+  settings.panelZoom.$({ ...settings.panelZoom.$(), [pid]: clamped });
   k?.onZoom?.(pid, clamped);
 }
 
 export function resetPanelZoom(pid: string): void {
-  const next = { ...store.get().panelZoom };
+  const next = { ...settings.panelZoom.$() };
   delete next[pid];
-  store.set({ panelZoom: next });
+  settings.panelZoom.$(next);
   kindFor(pid)?.onZoom?.(pid, 1);
 }
 

@@ -3,7 +3,7 @@
 // regex matches it. The token is shell-quoted into `$1`, the command runs in the
 // pane cwd via run_click, and any stdout opens a results panel on the right.
 import { invoke } from "./generated/native";
-import { store, DEFAULT_CLICK_RULES, type ClickRule } from "./state";
+import { DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { escapeHtml, shQuote } from "./core";
 import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
@@ -11,8 +11,9 @@ import { getFocusedTermId, tabMetaById } from "./terminal";
 import { splitLineRef, tokenAtColumn } from "./termTokens";
 import { looksLikePath, resolveRef } from "./refResolve";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
+import { settings } from "./0_settings";
 
-const clickRules = (): ClickRule[] => store.get().clickRules ?? DEFAULT_CLICK_RULES;
+const clickRules = (): ClickRule[] => settings.clickRules.$() ?? DEFAULT_CLICK_RULES;
 
 export function clickRuleFor(rawToken: string): ClickRule | null {
   const token = rawToken.trim();
@@ -305,7 +306,7 @@ function openClickConfigPanel() {
 }
 
 function renderClickConfig(el: HTMLElement) {
-  const rules = store.get().clickRules ?? DEFAULT_CLICK_RULES;
+  const rules = settings.clickRules.$() ?? DEFAULT_CLICK_RULES;
   el.innerHTML =
     `<div class="rg-head">click rules <span class="rg-count">⌘-click actions</span></div>` +
     `<div class="rg-body rg-cfg-body">` +
@@ -323,14 +324,14 @@ function renderClickConfig(el: HTMLElement) {
       const parsed = JSON.parse(ta.value) as ClickRule[];
       if (!Array.isArray(parsed) || !parsed.every((r) => typeof r?.pattern === "string" && typeof r?.command === "string"))
         throw new Error("expected [{pattern, command}, …]");
-      store.set({ clickRules: parsed });
+      settings.clickRules.$(parsed);
       msg.textContent = "saved";
     } catch (e) {
       msg.textContent = String(e);
     }
   });
   el.querySelector<HTMLElement>(".rg-cfg-reset")?.addEventListener("click", () => {
-    store.set({ clickRules: DEFAULT_CLICK_RULES });
+    settings.clickRules.$(DEFAULT_CLICK_RULES);
     ta.value = JSON.stringify(DEFAULT_CLICK_RULES, null, 2);
     msg.textContent = "reset";
   });

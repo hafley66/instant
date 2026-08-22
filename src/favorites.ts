@@ -15,6 +15,7 @@ import { harnessAdapter, harnessesForCommand, type HarnessId } from "./harness";
 import { boundSessionFirst, type ResolvedSession } from "./0a_terminalSessionCandidates";
 import type { BoopTurn } from "./0_terminalTurnVisibility";
 import type { BoopFavorite } from "./00a_terminalIntersection";
+import { settings } from "./0_settings";
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
@@ -59,7 +60,7 @@ async function sessionsForTab(id: string): Promise<ResolvedSession[]> {
   if (!meta || !tab) return [];
   const cwds = tabCwds(id);
   const sessions = await tabSessions(cwds, meta.command, meta.harness);
-  return boundSessionFirst(sessions, cwds, store.get().resumeTabs[tab.name]);
+  return boundSessionFirst(sessions, cwds, settings.resumeTabs.$()[tab.name]);
 }
 
 // Newest agent session in a cwd whose id is NOT already claimed by another tab's
@@ -284,7 +285,7 @@ export function openTurn(turn: AiMessage) {
 // cmd+shift+s: favorite the active tab's latest turn (no pointer needed). Probes
 // the cwd for a session, so it works even when the tab is a plain shell.
 export async function favoriteCurrentTurn() {
-  const id = store.get().active;
+  const id = settings.active.$();
   const meta = id ? tabMetaById(id) : null;
   if (!id || !meta) {
     flashStatus("no folder for this tab");
@@ -408,10 +409,10 @@ export function registerFavoritesPlugin() {
   setFavoritesPanel({
     rows: favTreeRows,
     onShow: () => refreshFavorites(),
-    expanded: () => Object.fromEntries(store.get().favExpanded.map((k) => [k, true])),
+    expanded: () => Object.fromEntries(settings.favExpanded.$().map((k) => [k, true])),
     setExpanded: (e) => {
       const keys = e === true ? [] : Object.keys(e).filter((k) => (e as Record<string, boolean>)[k]);
-      store.set({ favExpanded: keys });
+      settings.favExpanded.$(keys);
     },
     resume: (r) => resumeFavSession(r),
     copy: (f) => {

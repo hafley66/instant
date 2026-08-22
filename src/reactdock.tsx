@@ -18,7 +18,6 @@ import {
 } from "dockview";
 import "dockview/dist/styles/dockview.css";
 
-import { store } from "./state";
 import {
   dockComponents,
   getPanel,
@@ -32,6 +31,7 @@ import { SessionSidebar } from "./sessionSidebar";
 import { restoredTerminalSessionIds } from "./0_dockRestore";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { panelApiVisibility$ } from "./0_panelVisibility";
+import { settings } from "./0_settings";
 
 type SplitDir = "left" | "right" | "above" | "below";
 
@@ -252,9 +252,14 @@ function TerminalPanel(props: IDockviewPanelProps) {
   // Per-terminal filesystem sidebar. Open + width persist in the store keyed by
   // session id, so each panel remembers its own. sb is the reactive snapshot;
   // the store subscription updates it on any termSidebar change (toggle + drag).
-  const [sb, setSb] = useState(() => store.get().termSidebar[sid] ?? sbDefault());
+  const [sb, setSb] = useState(() => settings.termSidebar.$()[sid] ?? sbDefault());
   useEffect(
-    () => store.subscribe(() => setSb(store.get().termSidebar[sid] ?? sbDefault()), ["termSidebar"]),
+    () => {
+      const sub = settings.termSidebar.$.subscribe(() =>
+        setSb(settings.termSidebar.$()[sid] ?? sbDefault()),
+      );
+      return () => sub.unsubscribe();
+    },
     [sid],
   );
   const open = sb.open;
@@ -279,8 +284,8 @@ function TerminalPanel(props: IDockviewPanelProps) {
   useEffect(() => { hooks.onTermLayout(sid); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const patchSidebar = (patch: Partial<typeof sb>) => {
-    const cur = store.get().termSidebar[sid] ?? sbDefault();
-    store.set({ termSidebar: { ...store.get().termSidebar, [sid]: { ...cur, ...patch } } });
+    const cur = settings.termSidebar.$()[sid] ?? sbDefault();
+    settings.termSidebar.$({ ...settings.termSidebar.$(), [sid]: { ...cur, ...patch } });
   };
 
   // dv-host-term carries the frame border + 2px inset (see styles.css), NOT
@@ -338,7 +343,7 @@ function PreviewPanel(props: IDockviewPanelProps) {
 }
 
 function persist() {
-  if (api) store.set({ dockJSON: { v: LAYOUT_VERSION, layout: api.toJSON() } });
+  if (api) settings.dockJSON.$({ v: LAYOUT_VERSION, layout: api.toJSON() });
 }
 function applyLayout(fn: () => void) {
   saving = true;
@@ -365,7 +370,7 @@ function buildDefault() {
 // `restorable`, since their params carry everything needed to reload them.
 function stripDynamicHusks() {
   if (!api) return;
-  const openTerminalSessions = restoredTerminalSessionIds(store.get().openTabs);
+  const openTerminalSessions = restoredTerminalSessionIds(settings.openTabs.$());
   suppressClosedPanelCapture = true;
   try {
     for (const p of [...api.panels]) {
@@ -386,7 +391,7 @@ function stripDynamicHusks() {
 function onReady(e: DockviewReadyEvent) {
   try {
     api = e.api;
-    const saved = store.get().dockJSON as { v?: number; layout?: unknown } | null;
+    const saved = settings.dockJSON.$() as { v?: number; layout?: unknown } | null;
     if (saved && saved.v === LAYOUT_VERSION && saved.layout) {
       try {
         applyLayout(() => {
@@ -527,7 +532,7 @@ export function setTermTitle(sid: string, title: string) {
 // the dock JSON — they're replayed from here. Tool panels persist in dock JSON
 // too, but go through the same map so one path handles every tab.
 export function customTitle(pid: string): string | undefined {
-  return (store.get().tabTitles as Record<string, string>)[pid];
+  return (settings.tabTitles.$() as Record<string, string>)[pid];
 }
 // Override for a terminal by its session id (main.ts keys by sid, not panel id).
 export function customTermTitle(sid: string): string | undefined {
@@ -542,10 +547,10 @@ function withOverride(pid: string, base: string): string {
 // Terminals route through onTermRetitle so main.ts can re-add the pin prefix.
 export function renameTab(pid: string, title: string) {
   const t = title.trim();
-  const cur = { ...(store.get().tabTitles as Record<string, string>) };
+  const cur = { ...(settings.tabTitles.$() as Record<string, string>) };
   if (t) cur[pid] = t;
   else delete cur[pid];
-  store.set({ tabTitles: cur });
+  settings.tabTitles.$(cur);
   if (isTerm(pid)) hooks.onTermRetitle(termSid(pid));
   else api?.getPanel(pid)?.api.setTitle(t || getPanel(pid)?.title || pid);
 }

@@ -125,14 +125,16 @@ import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
 import { startReactiveRuntime } from "./reactive/runtime";
+import { settings } from "./0_settings";
+import { merge } from "rxjs";
 
 // Toggle the per-terminal right "session sidebar" (file explorer) on the
 // focused terminal. Each terminal remembers its own open state + width.
 function toggleTermSidebar() {
   const id = getFocusedTermId();
   if (!id) return;
-  const cur = store.get().termSidebar[id] ?? { open: false, width: 264 };
-  store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
+  const cur = settings.termSidebar.$()[id] ?? { open: false, width: 264 };
+  settings.termSidebar.$({ ...settings.termSidebar.$(), [id]: { ...cur, open: !cur.open } });
 }
 
 const TAB_COMMANDS: Command[] = [
@@ -148,11 +150,11 @@ const TAB_COMMANDS: Command[] = [
   { id: "browser.quality", keys: [], title: "Cycle Render Quality", group: "Browser", run: () => cycleBrowserQuality() },
   { id: "browser.perf", keys: [], title: "Toggle Performance Mode (1x)", group: "Browser", run: () => setBrowserPerf(!cdpPerf()) },
   // "Super XP": grainy pixel font everywhere (chrome + terminal). Persisted.
-  { id: "skin.xpPixel", keys: [], title: "Toggle Super XP (pixel font)", group: "Skin", run: () => store.set({ xpPixel: !store.get().xpPixel }) },
-  { id: "skin.cycle", keys: [], title: "Cycle Skin", group: "Skin", run: () => store.set({ skin: nextSkin(store.get().skin) }) },
+  { id: "skin.xpPixel", keys: [], title: "Toggle Super XP (pixel font)", group: "Skin", run: () => settings.xpPixel.$(!settings.xpPixel.$()) },
+  { id: "skin.cycle", keys: [], title: "Cycle Skin", group: "Skin", run: () => settings.skin.$(nextSkin(settings.skin.$())) },
   // The top toolbar is opt-in; these keep its actions reachable when it's hidden.
-  { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
-  { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
+  { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => settings.showToolbar.$(!settings.showToolbar.$()) },
+  { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => settings.mode.$(settings.mode.$() === "dark" ? "light" : "dark") },
   { id: "view.panicButton", keys: [], title: "Toggle Panic Button", group: "View", run: () => panic.on.$(!panic.on.$()) },
   { id: "view.panicMode", keys: [], title: "Cycle Panic Button Mode", group: "View", run: () => cycleSetting(panic.mode, PANIC_MODES) },
   { id: "view.panicSub", keys: [], title: "Cycle Panic Button Subtext", group: "View", run: () => cycleSetting(panic.sub, PANIC_SUBS) },
@@ -160,8 +162,8 @@ const TAB_COMMANDS: Command[] = [
     const next = await askText("what the panic button sends", panic.body.$());
     if (next !== null) panic.body.$(next);
   } },
-  { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => store.set({ inlineDiagrams: !store.get().inlineDiagrams }) },
-  { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors }) },
+  { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => settings.inlineDiagrams.$(!settings.inlineDiagrams.$()) },
+  { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$()) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
   // Favorite the active tab's latest AI turn (claude/opencode) into favorites.db.
@@ -228,15 +230,17 @@ async function main() {
   // Teach the dock how to rebuild a file preview from the saved layout. Must be
   // set before mountReactDock, since the restore runs in dockview's onReady.
   initPreviewRestore();
-  // Skin/mode are store-driven: subscribe for changes, then apply once for the
-  // persisted initial state.
-  store.subscribe(syncSkin, ["skin"]);
-  store.subscribe(syncXpPixel, ["xpPixel", "config"]);
-  store.subscribe(syncMode, ["mode"]);
-  store.subscribe(syncInlineDiagrams, ["inlineDiagrams"]);
-  store.subscribe(syncInlineStructured, ["inlineStructuredSelectors"]);
-  store.subscribe(applyToolbar, ["showToolbar"]);
-  store.subscribe(syncSidebar, ["sidebar"]);
+  // Each setting replays its current value on subscribe, so these also perform
+  // the initial apply that used to be a second call per sync function. config is
+  // runtime state, so xpPixel merges its signal with a store subscription.
+  settings.skin.$.subscribe(syncSkin);
+  settings.mode.$.subscribe(syncMode);
+  settings.inlineDiagrams.$.subscribe(syncInlineDiagrams);
+  settings.inlineStructuredSelectors.$.subscribe(syncInlineStructured);
+  settings.showToolbar.$.subscribe(applyToolbar);
+  settings.sidebar.$.subscribe(syncSidebar);
+  settings.xpPixel.$.subscribe(syncXpPixel);
+  store.subscribe(() => syncXpPixel(), ["config"]);
   // dockview owns the layout; we only react: refit the active terminal
   // whenever dockview re-lays-out a group. Panel lazy-load is handled per-panel
   // via PanelDef.onShow in the plugin registry.
@@ -249,25 +253,18 @@ async function main() {
     toggleTermPin: (sid) => togglePinTab(sid.slice(sessionId("").length)),
     onTermCwd: (sid) => tabMetaById(sid)?.cwd ?? null,
   });
-  store.subscribe(renderWorktreesPanel, [
-    "worktrees",
-    "wtView",
-    "wtExpanded",
-    "wtFocus",
-    "wtFavorites",
-    "wtAgents",
-  ]);
-  syncSkin(store.get());
-  syncXpPixel(store.get());
-  syncMode(store.get());
-  syncInlineDiagrams(store.get());
+  // worktrees is runtime; the rest are settings, so the panel listens to both.
+  store.subscribe(renderWorktreesPanel, ["worktrees"]);
+  merge(
+    settings.wtView.$,
+    settings.wtExpanded.$,
+    settings.wtFocus.$,
+    settings.wtFavorites.$,
+    settings.wtAgents.$,
+  ).subscribe(() => renderWorktreesPanel());
   bindPanicChrome();
-  syncInlineStructured(store.get());
-  applyToolbar(store.get());
-  syncSidebar(store.get());
-  renderWorktreesPanel();
   // Re-apply the persisted recording flag to the backend (default off there).
-  invoke("capture_set_enabled", { on: store.get().captureEnabled }).catch(
+  invoke("capture_set_enabled", { on: settings.captureEnabled.$() }).catch(
     console.error,
   );
 
@@ -299,8 +296,9 @@ async function main() {
     readPluginState,
     savePluginState,
     useAppState: () => {
-      const app = useApp();
-      return { dark: app.mode === "dark", panelZoom: app.panelZoom };
+      // useApp keeps this a hook call so the panel re-renders with the dock.
+      useApp();
+      return { dark: settings.mode.$() === "dark", panelZoom: settings.panelZoom.$() };
     },
     openMdPanel: addMdPanel,
     mdPanelId,
@@ -384,9 +382,9 @@ async function main() {
   // agents inside) are still alive in the Rust backend; `tmux new-session -A`
   // reattaches. Capture the wanted active id first — openTab() flips active as
   // it replays — then restore it once all tabs exist.
-  const wantActive = store.get().active;
+  const wantActive = settings.active.$();
   setReplaying(true); // don't log restored tabs as fresh visits
-  for (const t of store.get().openTabs) {
+  for (const t of settings.openTabs.$()) {
     if (t.browser && t.url) spawnBrowserTab(t.name, t.url);
     else openTab(t.name, { command: t.command, cwd: t.cwd, graphics: t.graphics, viewer: t.viewer, tmuxTarget: t.tmuxTarget });
   }
@@ -485,8 +483,8 @@ async function main() {
   // Tray menu "AI Integrations" master switch: off hides agents from the launch
   // pickers (shell only). Persisted via the store.
   await listen("toggle-ai", () => {
-    const on = !store.get().aiEnabled;
-    store.set({ aiEnabled: on });
+    const on = !settings.aiEnabled.$();
+    settings.aiEnabled.$(on);
     flashStatus(`AI integrations ${on ? "on" : "off"}`);
   });
 

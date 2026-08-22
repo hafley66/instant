@@ -73,6 +73,7 @@ import {
   looksLikeAgentProc,
   KNOWN_RESUME,
 } from "./worktrees";
+import { settings } from "./0_settings";
 
 export type Tab = {
   id: string;
@@ -239,12 +240,12 @@ export function recordTab(
   viewer = false,
   tmuxTarget?: string,
 ) {
-  const cur = store.get().openTabs;
+  const cur = settings.openTabs.$();
   if (cur.some((t) => t.name === name)) return;
-  store.set({ openTabs: [...cur, { name, command, cwd, graphics, viewer, tmuxTarget }] });
+  settings.openTabs.$([...cur, { name, command, cwd, graphics, viewer, tmuxTarget }]);
 }
 export function forgetTab(id: string) {
-  store.set({ openTabs: store.get().openTabs.filter((t) => sessionId(t.name) !== id) });
+  settings.openTabs.$(settings.openTabs.$().filter((t) => sessionId(t.name) !== id));
 }
 
 // Browser-like history of which session you went to and when. Logged into the
@@ -279,7 +280,7 @@ const QUICK_CMD: Record<string, string> = {
 export function tabMetaById(id: string): { cwd: string; command: string | null; harness: HarnessObservation["id"] } | null {
   const t = tabs.get(id);
   if (!t) return null;
-  const rec = store.get().openTabs.find((o) => o.name === t.name);
+  const rec = settings.openTabs.$().find((o) => o.name === t.name);
   const live = store.get().sessions.find((s) => s.name === t.name);
   const cwd = live?.paths?.[0] || rec?.cwd || null;
   return cwd ? { cwd, command: rec?.command ?? null, harness: t.harness.id } : null;
@@ -290,7 +291,7 @@ export function tabMetaById(id: string): { cwd: string; command: string | null; 
 export function tabCwds(id: string): string[] {
   const t = tabs.get(id);
   if (!t) return [];
-  const rec = store.get().openTabs.find((o) => o.name === t.name);
+  const rec = settings.openTabs.$().find((o) => o.name === t.name);
   const live = store.get().sessions.find((s) => s.name === t.name);
   const cands = [...(live?.paths ?? []), rec?.cwd].filter(Boolean) as string[];
   return [...new Set(cands)];
@@ -592,7 +593,7 @@ export function openTab(
     // makes a plain drag go to tmux copy-mode and fight native selection. Hold
     // Option to force xterm's own selection instead, iTerm-style.
     macOptionClickForcesSelection: true,
-    theme: THEMES[store.get().skin],
+    theme: THEMES[settings.skin.$()],
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -631,7 +632,7 @@ export function openTab(
     el,
     undefined,
     turnVisibility,
-    () => store.get().inlineDiagrams,
+    () => settings.inlineDiagrams.$(),
   );
   const structured = graphics || !turnVisibility || !structuredOverlaysEnabled
     ? undefined
@@ -642,7 +643,7 @@ export function openTab(
     turnVisibility,
     lineAnchors,
     (text) => { void invoke(commands.pty.writePty, { id, data: text }).catch(() => {}); term.focus(); },
-    () => store.get().inlineStructuredSelectors,
+    () => settings.inlineStructuredSelectors.$(),
   );
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
@@ -787,7 +788,7 @@ export function openTab(
             });
         return read.then((text) => {
           if (request !== inspectorRequest) return;
-          return inlineSnippetHtml(ref.path, text, store.get().mode === "dark").then((html) => {
+          return inlineSnippetHtml(ref.path, text, settings.mode.$() === "dark").then((html) => {
             if (request !== inspectorRequest) return;
             inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button></div>`;
           });
@@ -954,7 +955,7 @@ export function openTab(
   // Adding it makes it active, which fires onTermActivate -> onTermShown.
   addTermPanel(id, tabTitle(name), el);
   activate(id);
-  if (store.get().pinnedTabs.length) reflowPinnedTabs();
+  if (settings.pinnedTabs.$().length) reflowPinnedTabs();
 }
 
 // Make a terminal the active dockview panel. The store/active-sync + focus is
@@ -1050,7 +1051,7 @@ export function onTermClosed(id: string) {
   const isGraphics = t.graphics ?? false;
   // Read before forgetTab drops the row: the close decision runs async (below)
   // and would find the record already gone.
-  const isViewer = store.get().openTabs.find((o) => o.name === name)?.viewer ?? false;
+  const isViewer = settings.openTabs.$().find((o) => o.name === name)?.viewer ?? false;
   t.overlay?.dispose();
   t.diagrams?.dispose();
   t.structured?.dispose();
@@ -1064,7 +1065,7 @@ export function onTermClosed(id: string) {
   t.el.remove();
   tabs.delete(id);
   // Remember it for reopen (⌘⇧T), carrying the original command/cwd.
-  const meta = store.get().openTabs.find((o) => o.name === name);
+  const meta = settings.openTabs.$().find((o) => o.name === name);
   closedTabs.push({
     tab: { name, command: meta?.command ?? null, cwd: meta?.cwd ?? null },
     ts: Date.now(),
@@ -1133,15 +1134,16 @@ async function exitOrDetachTab(
   // probe, which only resolves "latest jsonl in this cwd" and would grab a sibling
   // when several sessions share the cwd. The probe is a fallback for agents we
   // didn't launch with a chosen id (e.g. opencode, or a reattached external one).
-  if (!store.get().resumeTabs[name]) {
+  if (!settings.resumeTabs.$()[name]) {
     // Skip ids already claimed by another tab's record so same-cwd siblings each
     // resume a DISTINCT session (the "rando old session" fix). Serialized teardown
     // (closeChain) guarantees prior closes have recorded before we read here.
-    const claimed = new Set(Object.values(store.get().resumeTabs).map((r) => r.sessionId));
+    const claimed = new Set(Object.values(settings.resumeTabs.$()).map((r) => r.sessionId));
     const s = meta ? await unclaimedSession(meta, claimed) : null;
     if (s) {
-      store.set({
-        resumeTabs: { ...store.get().resumeTabs, [name]: { editor: s.editor, sessionId: s.sessionId } },
+      settings.resumeTabs.$({
+        ...settings.resumeTabs.$(),
+        [name]: { editor: s.editor, sessionId: s.sessionId },
       });
       console.log("[resume] recorded (probe)", name, "->", s.editor, s.sessionId.slice(0, 8));
     } else {

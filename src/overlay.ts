@@ -10,21 +10,22 @@ import { flashStatus } from "./core";
 import { overlaySizeTransition } from "./0_overlaySize";
 import { overlay } from "./0_overlaySettings";
 import { merge } from "rxjs";
+import { settings } from "./0_settings";
 
 // ---- webview zoom (chrome: rail + toolbars + non-terminal panels) ----
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
 export const ZOOM_STEP = 0.1;
 export function applyZoom() {
-  getCurrentWebview().setZoom(store.get().zoom).catch(console.error);
+  getCurrentWebview().setZoom(settings.zoom.$()).catch(console.error);
 }
 export function nudgeZoom(delta: number) {
-  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(store.get().zoom + delta).toFixed(2)));
-  store.set({ zoom: z });
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(settings.zoom.$() + delta).toFixed(2)));
+  settings.zoom.$(z);
   applyZoom();
 }
 export function resetZoom() {
-  store.set({ zoom: 1 });
+  settings.zoom.$(1);
   applyZoom();
 }
 

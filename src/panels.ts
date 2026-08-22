@@ -5,13 +5,13 @@
 import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
-import { store } from "./state";
 import { panic } from "./0_panicSettings";
 import { cdpPerf } from "./cdp";
 import { setBrowserPerf } from "./browser";
 import { refreshSessions, scanWorktreesIfNeeded } from "./worktrees";
 import { ConfigPanelV2 } from "./activity";
 import { registerFavoritesPlugin } from "./favorites";
+import { settings } from "./0_settings";
 
 export function registerBuiltin() {
   registerPlugin({
@@ -24,15 +24,15 @@ export function registerBuiltin() {
         id: "showToolbar",
         label: "Show top toolbar",
         hint: "Shot / dark-mode / skin buttons (hidden by default)",
-        get: () => store.get().showToolbar,
-        set: (on) => store.set({ showToolbar: on }),
+        get: () => settings.showToolbar.$(),
+        set: (on) => settings.showToolbar.$(on),
       },
       {
         id: "inlineDiagrams",
         label: "Inline Mermaid/D2",
         hint: "render diagram draw-overs in terminal messages",
-        get: () => store.get().inlineDiagrams,
-        set: (on) => store.set({ inlineDiagrams: on }),
+        get: () => settings.inlineDiagrams.$(),
+        set: (on) => settings.inlineDiagrams.$(on),
       },
       {
         id: "panicButton",
@@ -45,15 +45,15 @@ export function registerBuiltin() {
         id: "inlineStructuredSelectors",
         label: "Table/list selection checkboxes",
         hint: "show one gutter checkbox per table row and list item",
-        get: () => store.get().inlineStructuredSelectors,
-        set: (on) => store.set({ inlineStructuredSelectors: on }),
+        get: () => settings.inlineStructuredSelectors.$(),
+        set: (on) => settings.inlineStructuredSelectors.$(on),
       },
       {
         id: "xpPixel",
         label: "Super XP (pixel font)",
         hint: "grainy bitmap font everywhere, incl. the terminal",
-        get: () => store.get().xpPixel,
-        set: (on) => store.set({ xpPixel: on }),
+        get: () => settings.xpPixel.$(),
+        set: (on) => settings.xpPixel.$(on),
       },
       {
         id: "cdpPerf",

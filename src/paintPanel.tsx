@@ -22,7 +22,7 @@ import { openPanelInstance } from "./reactdock";
 import { baseName } from "./core";
 import { PaintMemeControls } from "./paintMemeControls";
 import { FileSearchTree } from "./plugins/files";
-import { store } from "./state";
+import { settings } from "./0_settings";
 
 const PANEL_ID = "paint";
 
@@ -42,7 +42,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
   const quicksaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bridgeRevision, setBridgeRevision] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [fileRoot, setFileRoot] = useState(() => store.get().scanRoot);
+  const [fileRoot, setFileRoot] = useState(() => settings.scanRoot.$());
   const state = stateRef.current ?? paintPanelState(panelId);
   stateRef.current = state;
   const current = state.current.$();

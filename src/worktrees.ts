@@ -45,6 +45,7 @@ import {
 } from "./ghcacheSnapshot";
 import { paths as apiPaths } from "./generated/api";
 import { harnessAdapter, harnessForCommand, harnessIds, isHarnessProcess, type HarnessId } from "./harness";
+import { settings } from "./0_settings";
 
 export type Session = {
   name: string;
@@ -86,7 +87,7 @@ function worktreesForPaths(paths: string[], rows: WorktreeRow[]): string[] {
 function allWorktreeRows(): WorktreeRow[] {
   const scanned = store.get().worktrees;
   const known = new Set(scanned.map((w) => w.worktree));
-  return [...scanned, ...store.get().autoWorktrees.filter((w) => !known.has(w.worktree))];
+  return [...scanned, ...settings.autoWorktrees.$().filter((w) => !known.has(w.worktree))];
 }
 
 // cwds already probed via worktree_at this run (hit or miss) — git calls are
@@ -107,7 +108,7 @@ async function autoTrackSessionPaths(paths: string[]) {
     wtProbed.add(cwd);
     const found = await invoke<WorktreeRow | null>("worktree_at", { path: cwd }).catch(() => null);
     if (found && !allWorktreeRows().some((w) => w.worktree === found.worktree)) {
-      store.set({ autoWorktrees: [...store.get().autoWorktrees, found] });
+      settings.autoWorktrees.$([...settings.autoWorktrees.$(), found]);
     }
   }
 }
@@ -117,9 +118,9 @@ async function autoTrackSessionPaths(paths: string[]) {
 // scanned (its branch/dirty would also go stale without this).
 function pruneAutoWorktrees(scanned: WorktreeRow[]) {
   const found = new Set(scanned.map((w) => w.worktree));
-  const cur = store.get().autoWorktrees;
+  const cur = settings.autoWorktrees.$();
   if (cur.some((w) => found.has(w.worktree))) {
-    store.set({ autoWorktrees: cur.filter((w) => !found.has(w.worktree)) });
+    settings.autoWorktrees.$(cur.filter((w) => !found.has(w.worktree)));
   }
 }
 
@@ -127,8 +128,8 @@ function pruneAutoWorktrees(scanned: WorktreeRow[]) {
 // shells/agents), not a creator. Order the launcher rows per store.sessionSort.
 // Name is the stable tiebreak.
 function sortSessions(live: Session[]): Session[] {
-  const { key, dir } = store.get().sessionSort;
-  const pinned = new Set(store.get().pinnedSessions);
+  const { key, dir } = settings.sessionSort.$();
+  const pinned = new Set(settings.pinnedSessions.$());
   const sign = dir === "asc" ? 1 : -1;
   return [...live].sort((a, b) => {
     // Pinned sessions always float to the top, regardless of the sort key.
@@ -143,8 +144,8 @@ function sortSessions(live: Session[]): Session[] {
     else if (key === "pwd") c = (a.paths?.[0] ?? "").localeCompare(b.paths?.[0] ?? "");
     else if (key === "chips")
       c =
-        (store.get().sessionWorktrees[a.name]?.length ?? 0) -
-        (store.get().sessionWorktrees[b.name]?.length ?? 0);
+        (settings.sessionWorktrees.$()[a.name]?.length ?? 0) -
+        (settings.sessionWorktrees.$()[b.name]?.length ?? 0);
     else c = a.activity - b.activity;
     return c !== 0 ? c * sign : a.name.localeCompare(b.name, undefined, { numeric: true });
   });
@@ -165,12 +166,10 @@ export function foregroundProc(commands: string[]): string {
 // (leaving claude alive) instead of killing it.
 export const looksLikeAgentProc = (p: string) =>
   isHarnessProcess(p);
-const isPinnedSession = (name: string) => store.get().pinnedSessions.includes(name);
+const isPinnedSession = (name: string) => settings.pinnedSessions.$().includes(name);
 function togglePinSession(name: string) {
-  const cur = store.get().pinnedSessions;
-  store.set({
-    pinnedSessions: cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name],
-  });
+  const cur = settings.pinnedSessions.$();
+  settings.pinnedSessions.$(cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]);
   refreshSessions();
 }
 
@@ -185,13 +184,14 @@ export async function refreshSessions() {
   // Relate sessions to worktrees and accumulate the touched set (persisted).
   // Pure data; runs even when the panel is closed.
   const rows = allWorktreeRows();
-  const sw = { ...store.get().sessionWorktrees };
+  const sw = { ...settings.sessionWorktrees.$() };
   for (const s of live) {
     const matched = worktreesForPaths(s.paths ?? [], rows);
     if (matched.length) sw[s.name] = [...new Set([...(sw[s.name] ?? []), ...matched])];
     else autoTrackSessionPaths(s.paths ?? []); // fire-and-forget; store update re-renders when it lands
   }
-  store.set({ sessions: live, sessionWorktrees: sw });
+  store.set({ sessions: live });
+  settings.sessionWorktrees.$(sw);
 
   const countEl = document.querySelector("#session-count");
   // Query the list element fresh each call: it's created by injectPanelHtml
@@ -204,7 +204,7 @@ export async function refreshSessions() {
   // Reflect the persisted sort in the control, then render in that order.
   const sortSel = document.querySelector<HTMLSelectElement>("#session-sort");
   if (sortSel) {
-    const { key, dir } = store.get().sessionSort;
+    const { key, dir } = settings.sessionSort.$();
     sortSel.value = `${key}:${dir}`;
   }
 
@@ -379,7 +379,7 @@ export async function openWorktree(clone: string, branch: string, wtPath: string
   // conversation, the previous one lost outright — on a close/reopen fast
   // enough to race it. Not needed for a fresh name (no prior session to race).
   if (!fresh) await settleClosures();
-  const known = store.get().resumeTabs[name];
+  const known = settings.resumeTabs.$()[name];
   const live = !fresh && !!known && (await resumeIdIsLive(known!.editor, wtPath, known!.sessionId));
   if (known && !fresh && !live) {
     console.warn("[resume]", name, "dead id", known.sessionId.slice(0, 8), "— dropping");
@@ -402,7 +402,7 @@ function newAgentLaunch(name: string, command: string | undefined): string | und
   const adapter = harnessForCommand(command);
   if (adapter?.stableSessionIdFlag && !adapter.hasExplicitSession(command)) {
     const id = crypto.randomUUID();
-    store.set({ resumeTabs: { ...store.get().resumeTabs, [name]: { editor: adapter.id, sessionId: id } } });
+    settings.resumeTabs.$({ ...settings.resumeTabs.$(), [name]: { editor: adapter.id, sessionId: id } });
     console.log("[resume] launch", name, "->", adapter.id, adapter.stableSessionIdFlag, id.slice(0, 8));
     return `${command} ${adapter.stableSessionIdFlag} ${id}`;
   }
@@ -445,9 +445,9 @@ export async function resumeIdIsLive(
 
 // Drop a dead resumeTabs record so future opens stop retrying it.
 export function dropResumeTab(name: string) {
-  const rest = { ...store.get().resumeTabs };
+  const rest = { ...settings.resumeTabs.$() };
   delete rest[name];
-  store.set({ resumeTabs: rest });
+  settings.resumeTabs.$(rest);
 }
 
 // Parse the inline agent-list editor: "claude:claude, vim:nvim ." -> WtAgent[].
@@ -483,8 +483,8 @@ function agentMenuItems(clone: string, branch: string, wtPath: string, dirty: bo
     });
   }
   if (live.length) items.push({ sep: true });
-  if (store.get().aiEnabled)
-    for (const a of store.get().wtAgents) {
+  if (settings.aiEnabled.$())
+    for (const a of settings.wtAgents.$()) {
       items.push({
         label: `new · ${a.label}`,
         action: () => openWorktree(clone, branch, wtPath, a.command, true),
@@ -575,7 +575,7 @@ function showCloneMenu(r: WtTreeRow, x: number, y: number) {
 // "new · X" in the menu is the path that forces a brand-new conversation.
 function openWorktreeDefault(clone: string, branch: string, wtPath: string) {
   // AI off: double-click opens a plain shell instead of the default agent.
-  const agent = store.get().aiEnabled ? store.get().wtAgents[0] : undefined;
+  const agent = settings.aiEnabled.$() ? settings.wtAgents.$()[0] : undefined;
   openWorktree(clone, branch, wtPath, agent?.command, false);
 }
 
@@ -583,22 +583,18 @@ function openWorktreeDefault(clone: string, branch: string, wtPath: string) {
 // Favorites are keyed by an absolute fs path, so ANY path-bearing row is
 // favoritable: a git worktree leaf, a clone (main checkout), or a non-git space.
 // (wtFavorites is the persisted path list; the name is historical.)
-const isFavWorktree = (path: string) => store.get().wtFavorites.includes(path);
+const isFavWorktree = (path: string) => settings.wtFavorites.$().includes(path);
 function toggleFavWorktree(path: string) {
   if (!path) return;
-  const cur = store.get().wtFavorites;
-  store.set({
-    wtFavorites: cur.includes(path)
-      ? cur.filter((p) => p !== path)
-      : [...cur, path],
-  });
+  const cur = settings.wtFavorites.$();
+  settings.wtFavorites.$(cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]);
   renderWorktreesPanel();
 }
 // When focus is on, keep only starred worktrees (and any whose row is needed to
 // reach them). buildTree/renderFlatTable both consume the filtered rows.
 function focusRows(rows: WorktreeRow[]): WorktreeRow[] {
-  if (!store.get().wtFocus) return rows;
-  const favs = new Set(store.get().wtFavorites);
+  if (!settings.wtFocus.$()) return rows;
+  const favs = new Set(settings.wtFavorites.$());
   return rows.filter((r) => favs.has(r.worktree));
 }
 
@@ -609,8 +605,8 @@ function focusRows(rows: WorktreeRow[]): WorktreeRow[] {
 // nest underneath, same as the tree.
 function favRows(): WtTreeRow[] {
   const wts = allWorktreeRows();
-  const spaces = new Set(store.get().spaces);
-  return store.get().wtFavorites.map((path) => {
+  const spaces = new Set(settings.spaces.$());
+  return settings.wtFavorites.$().map((path) => {
     const wt = wts.find((w) => w.worktree === path || w.clone === path);
     const known = !!wt || spaces.has(path);
     // A starred plain file (not a known worktree/space) renders as a file row so
@@ -679,7 +675,7 @@ function leafGestures(clone: string, branch: string, wtPath: string, dirty: bool
 // the React panels (tablepanels.tsx) are presentational and pull rows() lazily.
 function tmuxRows(): TmuxRow[] {
   const rows = allWorktreeRows();
-  const sw = store.get().sessionWorktrees;
+  const sw = settings.sessionWorktrees.$();
   return sortSessions(store.get().sessions).map((s) => {
     const current = new Set(worktreesForPaths(s.paths ?? [], rows));
     const chips = (sw[s.name] ?? []).map((p) => {
@@ -794,7 +790,7 @@ function showPathMenu(r: WtTreeRow, x: number, y: number) {
 // Synthetic top-level "Spaces" org: user-added non-git folders, each a leaf that
 // opens an AI session in that folder (clone/branch empty → name = folder base).
 function spaceTreeRows(): WtTreeRow[] {
-  const spaces = store.get().spaces;
+  const spaces = settings.spaces.$();
   if (!spaces.length) return [];
   return [
     {
@@ -822,7 +818,7 @@ function spaceTreeRows(): WtTreeRow[] {
 
 function wtTreeRows(): WtTreeRow[] {
   // Focus mode flattens to the favorites list (full paths), bypassing the tree.
-  if (store.get().wtFocus) return favRows();
+  if (settings.wtFocus.$()) return favRows();
   const rows = allWorktreeRows();
   const adding = store.get().wtAddingClone;
   return spaceTreeRows().concat(buildTree(rows).map((org) => ({
@@ -870,8 +866,8 @@ export function registerV2Bridges() {
     onOpen: (name) => openTab(name),
     onPin: (name) => togglePinSession(name),
     onShow: () => refreshSessions(),
-    sort: () => store.get().sessionSort,
-    setSort: (s) => store.set({ sessionSort: s }),
+    sort: () => settings.sessionSort.$(),
+    setSort: (s) => settings.sessionSort.$(s),
     launch: (command) => {
       openTab(command, { command });
       refreshSessions();
@@ -889,25 +885,26 @@ export function registerV2Bridges() {
   setWorktreesPanel({
     treeRows: wtTreeRows,
     onShow: () => scanWorktreesIfNeeded(),
-    scanRoot: () => store.get().scanRoot,
+    scanRoot: () => settings.scanRoot.$(),
     scan: (root) => {
-      store.set({ scanRoot: root });
+      settings.scanRoot.$(root);
       scanWorktrees();
     },
-    focus: () => store.get().wtFocus,
-    toggleFocus: () => store.set({ wtFocus: !store.get().wtFocus }),
+    focus: () => settings.wtFocus.$(),
+    toggleFocus: () => settings.wtFocus.$(!settings.wtFocus.$()),
     counts: () => {
-      const { worktrees, wtFavorites } = store.get();
+      const { worktrees } = store.get();
+  const wtFavorites = settings.wtFavorites.$();
       // shown = every starred path (worktrees, clones, spaces, files, dirs), not
       // just scanned worktree leaves, so the focus count matches what focus shows.
       return { shown: wtFavorites.length, total: worktrees.length };
     },
     // Persisted expand state: store.wtExpanded is a flat list of expanded node
     // ids; convert to/from react-table's ExpandedState record on the boundary.
-    expanded: () => Object.fromEntries(store.get().wtExpanded.map((k) => [k, true])),
+    expanded: () => Object.fromEntries(settings.wtExpanded.$().map((k) => [k, true])),
     setExpanded: (e) => {
       const keys = e === true ? [] : Object.keys(e).filter((k) => (e as Record<string, boolean>)[k]);
-      store.set({ wtExpanded: keys });
+      settings.wtExpanded.$(keys);
     },
     // leaf gestures (single/dbl/right-click → chooser) + the open ▾ anchored menu.
     onLeafSingle: (r, x, y) => wtLeafGestures(r).onSingle(x, y),
@@ -956,11 +953,11 @@ export function registerV2Bridges() {
 function addSpace(path: string) {
   const p = path.trim();
   if (!p) return;
-  const cur = store.get().spaces;
-  if (!cur.includes(p)) store.set({ spaces: [...cur, p] });
+  const cur = settings.spaces.$();
+  if (!cur.includes(p)) settings.spaces.$([...cur, p]);
 }
 function removeSpace(path: string) {
-  store.set({ spaces: store.get().spaces.filter((p) => p !== path) });
+  settings.spaces.$(settings.spaces.$().filter((p) => p !== path));
 }
 // Right-click chooser for a space leaf: same agent options as a worktree, plus
 // "remove space" (clone=branch empty so the session name is the folder base).
@@ -976,8 +973,8 @@ function showSpaceMenu(r: WtTreeRow, x: number, y: number) {
     });
   }
   if (live.length) items.push({ sep: true });
-  if (store.get().aiEnabled)
-    for (const a of store.get().wtAgents) {
+  if (settings.aiEnabled.$())
+    for (const a of settings.wtAgents.$()) {
       items.push({
         label: `new · ${a.label}`,
         action: () => openWorktree(path, "", path, a.command, true),
@@ -1018,17 +1015,17 @@ function renderWtAgentsEditor() {
   toggle.className = "wt-ai-toggle";
   const cb = document.createElement("input");
   cb.type = "checkbox";
-  cb.checked = store.get().aiEnabled;
-  cb.onchange = () => store.set({ aiEnabled: cb.checked });
+  cb.checked = settings.aiEnabled.$();
+  cb.onchange = () => settings.aiEnabled.$(cb.checked);
   toggle.append(cb, document.createTextNode(" AI integrations"));
   host.appendChild(toggle);
   const inp = document.createElement("input");
   inp.className = "wt-add-input";
   inp.placeholder = "label:command, … (e.g. claude, sonnet:claude --model sonnet)";
-  inp.value = wtAgentsToText(store.get().wtAgents);
+  inp.value = wtAgentsToText(settings.wtAgents.$());
   const commit = () => {
     const parsed = parseWtAgents(inp.value);
-    if (parsed.length) store.set({ wtAgents: parsed });
+    if (parsed.length) settings.wtAgents.$(parsed);
     wtAgentsEditing = false;
     renderWorktreesPanel();
   };
@@ -1191,11 +1188,11 @@ function treeNode(opts: {
 function renderTree(rows: WorktreeRow[]) {
   const host = $("#wt-table");
   host.innerHTML = "";
-  const wtExpanded = new Set(store.get().wtExpanded);
+  const wtExpanded = new Set(settings.wtExpanded.$());
   const toggle = (key: string) => {
     const next = new Set(wtExpanded);
     next.has(key) ? next.delete(key) : next.add(key);
-    store.set({ wtExpanded: [...next] }); // persists + re-renders via subscription
+    settings.wtExpanded.$([...next]); // persists + re-renders via subscription
   };
 
   const wrap = document.createElement("div");
@@ -1302,10 +1299,10 @@ function renderTree(rows: WorktreeRow[]) {
 // Per-dtable sort state lives in store.tableSort keyed by a table id, so it
 // survives the panel re-renders that selection/refresh trigger.
 function tableSortFor(id: string, fallback: SortState): SortState {
-  return store.get().tableSort[id] ?? fallback;
+  return settings.tableSort.$()[id] ?? fallback;
 }
 function onTableSort(id: string, s: SortState, rerender: () => void) {
-  store.set({ tableSort: { ...store.get().tableSort, [id]: s } });
+  settings.tableSort.$({ ...settings.tableSort.$(), [id]: s });
   rerender();
 }
 
@@ -1357,7 +1354,10 @@ export function renderWorktreesPanel() {
   // Panel may be closed / mid-remount when a store change fires this; bail.
   const count = document.querySelector<HTMLElement>("#wt-count");
   if (!count) return;
-  const { worktrees, wtView, wtFocus, wtFavorites } = store.get();
+  const { worktrees } = store.get();
+  const wtView = settings.wtView.$();
+  const wtFocus = settings.wtFocus.$();
+  const wtFavorites = settings.wtFavorites.$();
   const shown = wtFocus ? worktrees.filter((r) => wtFavorites.includes(r.worktree)).length : worktrees.length;
   count.textContent = worktrees.length
     ? wtFocus
@@ -1424,7 +1424,7 @@ export async function scanWorktrees() {
   if (wtScanning) return; // never stack scans (the old volley)
   wtScanning = true;
   try {
-    const root = store.get().scanRoot.trim();
+    const root = settings.scanRoot.$().trim();
     const snapshot = await queryWorktreeSnapshot(() =>
         invoke<WorktreeRow[]>("scan_worktrees", {
           roots: root ? [root] : [],

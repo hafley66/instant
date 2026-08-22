@@ -1,6 +1,8 @@
-// The single app store. UI/persisted state lives here; runtime resources (live
-// xterm Terminals) stay in their own registry in main.ts. New durable fields
-// (sessions, panels, layout) get added to AppState and listed in PERSIST.
+// Runtime state only: live sessions, scan results, the activity timeline, and
+// the transient UI flags that should not survive a reload. Everything durable is
+// a StorageSignal in src/0_settings.ts, so a new setting is one line there and
+// never touches this file. Runtime resources (live xterm Terminals) stay in
+// their own registry in main.ts.
 import { createStore } from "./store";
 import type { SortState } from "./table";
 import type { HarnessId } from "./harnessTypes";
@@ -202,77 +204,19 @@ export interface WorktreeRow {
 }
 
 export interface AppState {
-  skin: Skin;
-  mode: Mode;
-  showToolbar: boolean; // top toolbar (Shot/dark/skin); hidden by default, opt in via Config
-  inlineDiagrams: boolean; // terminal Mermaid/D2 overlays; source text remains when disabled
-  inlineStructuredSelectors: boolean; // gutter checkboxes for terminal table rows and list items
-  sidebar: Sidebar; // activity rail compact/big (persisted)
-  active: string | null; // active tab id (persisted; replayed against reattached tabs)
-  openTabs: OpenTab[]; // tabs to reattach after reload (tmux sessions outlive the webview)
-  tabTitles: Record<string, string>; // durable per-panel title overrides, keyed by full panel id (persisted)
-  dockJSON: unknown; // serialized dockview layout (persisted); null until first save
   sessions: Session[]; // live tmux sessions (runtime)
   rogueSessions: RogueSession[]; // claude/opencode running outside any tmux session (runtime, polled)
-  sessionWorktrees: Record<string, string[]>; // session name -> worktree paths it has touched (persisted, accumulated)
   terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
-  // Worktrees resolved on demand for a live session's cwd that the scan walk
-  // never reached (outside scanRoot, or created after the last scan) — see
-  // autoTrackSessionPaths. Persisted so a manually-started agent session stays
-  // tracked across reloads; pruned once a real scan covers the same path.
-  autoWorktrees: WorktreeRow[];
   activity: Event[]; // unified activity timeline (runtime)
   aiFavs: Fav[]; // favorited AI turns, mirrored from favorites.db (runtime)
   frontmostApp: string; // owner name of the current frontmost app (runtime; drives overlay focus behavior)
-  // ---- overlay (coexist with another app, e.g. VSCode) ----
-  xpPixel: boolean; // "Super XP": force the grainy pixel font everywhere incl. terminal (persisted)
-  activitySource: ActivitySource; // source filter chip (persisted)
-  activityType: ActivityType; // event-type sub-filter chip (persisted)
   activityQuery: string; // fuzzy search box (runtime)
-  captureEnabled: boolean; // screen-capture recording on/off (persisted, mirrors backend)
   capturePerms: CapturePerms | null; // TCC + tap state for the activity capture diagnostics (runtime)
   captureStatus: CaptureStatus | null; // last per-gesture capture outcome, from the capture-status event (runtime)
   config: ConfigView | null; // resolved observation config (runtime)
   fsChildren: Record<string, FsEntry[]>; // per-folder listings for the unified tree, loaded on expand (runtime)
-  sessionSort: SessionSort; // sessions launcher ordering (persisted)
-  tableSort: Record<string, SortState>; // per-dtable sort, keyed by table id (persisted)
-  wtView: WtView; // tree vs flat table
-  scanRoot: string; // worktrees scan path
-  sidebarWidth: number; // px
-  // Per-terminal right "session sidebar": open + px width, keyed by session id.
-  // v1 hosts a file explorer; later panes (touched files, agent turns + a
-  // scroll-spy over live xterm/tmux output) stack in the same column.
-  // sizes = react-resizable-panels layout for the [files | touched] vertical
-  // stack (percent units, sums to 100); touched = MRU list of paths opened from
-  // this session's sidebar (most-recent first). Both persist per session id.
-  termSidebar: Record<string, TermSidebarState>;
-  zoom: number; // webview zoom factor for chrome/rail/toolbars (persisted; applied via getCurrentWebview().setZoom)
-  // Per-tab zoom FACTOR, keyed by full dock panel id ("term:<sid>", "md:<path>",
-  // …). Generic successor of tabZoom — see src/panelZoom.ts (persisted).
-  panelZoom: Record<string, number>;
-  // Agent sessions killed on tab close (to free RAM); reopen relaunches with
-  // --resume <id>. Keyed by CWD — the stable identity for "the agent in this
-  // worktree" (a reopen mints a fresh tmux name, so name keys don't recur).
-  resumeTabs: Record<string, { editor: HarnessId; sessionId: string }>;
-  wtExpanded: string[]; // expanded tree node keys
-  favExpanded: string[]; // expanded favorite-session node keys (persisted)
-  wtFavorites: string[]; // starred worktree paths (persisted)
-  spaces: string[]; // user-designated non-git folders to run AI sessions in (persisted); shown atop the Worktrees panel
-  wtFocus: boolean; // when on, the worktree view shows only starred rows
   wtAddingClone: string | null; // clone path whose inline "+ worktree" branch input is open (runtime)
-  wtAgents: WtAgent[]; // configurable agent picker for "open session here" (persisted)
-  aiEnabled: boolean; // master switch for AI integrations; off hides wtAgents from the launch pickers (persisted, default true)
-  clickRules: ClickRule[]; // ⌘-click token -> shell command table (persisted)
-  autoResume: boolean; // when on, launching an agent resumes its latest session in that cwd (persisted, default true)
-  pinnedSessions: string[]; // tmux session names pinned to the top of the list (persisted)
-  pinnedTabs: string[]; // terminal tab session names pinned (persisted)
-  sprefaScope: SprefaScopeItem[]; // selected files/repos/revs (persisted)
-  sprefaScopeActive: boolean; // when on, scope contributes sel_* facts to queries
-  // Namespaced plugin UI/persistence surface, keyed by plugin id (e.g. "meme").
-  // Plugins should read/write their slice here instead of touching localStorage
-  // directly — see src/pluginState.ts (persisted).
-  pluginState: Record<string, unknown>;
 }
 
 // Seeded into wtAgents on first run; thereafter the user's edited list wins.
@@ -302,52 +246,6 @@ export const DEFAULT_CLICK_RULES: ClickRule[] = [
   { pattern: ".", command: 'f=$1; if [ -e "${f%%:*}" ]; then code -g $1; else rg -nF -e $1; fi' },
 ];
 
-// Durable slice, mirrored to localStorage. Runtime fields (active, sessions,
-// worktrees) are excluded.
-const PERSIST: (keyof AppState)[] = [
-  "skin",
-  "mode",
-  "showToolbar",
-  "inlineDiagrams",
-  "inlineStructuredSelectors",
-  "sidebar",
-  "active",
-  "openTabs",
-  "tabTitles",
-  "dockJSON",
-  "sessionWorktrees",
-  "autoWorktrees",
-  "activitySource",
-  "activityType",
-  "captureEnabled",
-  "sessionSort",
-  "tableSort",
-  "wtView",
-  "scanRoot",
-  "sidebarWidth",
-  "termSidebar",
-  "zoom",
-  "panelZoom",
-  "resumeTabs",
-  "wtExpanded",
-  "favExpanded",
-  "xpPixel",
-  "wtFavorites",
-  "spaces",
-  "wtFocus",
-  "wtAgents",
-  "aiEnabled",
-  "clickRules",
-  "autoResume",
-  "pinnedSessions",
-  "pinnedTabs",
-  "sprefaScope",
-  "sprefaScopeActive",
-  "pluginState",
-];
-
-// JSON so arrays/numbers round-trip. Falls back to the raw string for values
-// written by the old plain-string persistence (migrates skin/mode in place).
 // Safe boot: skip reading persisted state so a corrupt value (e.g. a dock layout
 // that throws "resource already disposed") can't jam startup. One-shot via a
 // sessionStorage flag (survives reload, cleared on app restart) set by ⌘⇧R or the
@@ -365,126 +263,24 @@ export const SAFE_BOOT: boolean = (() => {
   return /[?#&](safe|reset)\b/.test(location.search + location.hash);
 })();
 
-function loadKey<T>(k: string, fallback: T): T {
-  if (SAFE_BOOT) return fallback;
-  const raw = localStorage.getItem(k);
-  if (raw === null) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return typeof fallback === "string" ? (raw as unknown as T) : fallback;
-  }
-}
-
-function load(): AppState {
-  // One-time reset: resumeTabs changed from cwd-probe keys (which collided across
-  // sessions sharing a cwd, resuming a random sibling) to session-name keys whose
-  // ids we own via `claude --session-id`. Drop the old poisoned entries once.
-  if (localStorage.getItem("resumeTabsV2") !== "1") {
-    localStorage.removeItem("resumeTabs");
-    localStorage.setItem("resumeTabsV2", "1");
-  }
-  // clickRules defaults changed twice during bring-up (existence-checked file
-  // rule, then -F literal grep so punctuation doesn't break the regex). Drop the
-  // old persisted copy once per bump so the new default takes over. Bump the
-  // suffix when the default changes; a user's edits between bumps survive.
-  if (localStorage.getItem("clickRulesV3") !== "1") {
-    localStorage.removeItem("clickRules");
-    localStorage.setItem("clickRulesV3", "1");
-  }
-  const pluginState = loadKey<Record<string, unknown>>("pluginState", {});
-  // One-time migration: per-terminal tabZoom (px font size keyed by session
-  // id) folds into the generic panelZoom factor map (keyed by full panel id;
-  // factor = px / the 13px terminal default). See src/panelZoom.ts.
-  if (localStorage.getItem("panelZoomV1") !== "1") {
-    const old = loadKey<Record<string, number>>("tabZoom", {});
-    if (Object.keys(old).length) {
-      const cur = loadKey<Record<string, number>>("panelZoom", {});
-      for (const [sid, px] of Object.entries(old)) cur[`term:${sid}`] = px / 13;
-      localStorage.setItem("panelZoom", JSON.stringify(cur));
-    }
-    localStorage.removeItem("tabZoom");
-    localStorage.setItem("panelZoomV1", "1");
-  }
-  // One-time migration: the meme plugin used to persist its UI state (sidebar
-  // width, layers panel height) directly under "meme:ui". Seed pluginState.meme
-  // from it once; the old key is left in place (no destructive delete).
-  if (!SAFE_BOOT && pluginState.meme === undefined) {
-    const oldMemeUi = localStorage.getItem("meme:ui");
-    if (oldMemeUi !== null) {
-      try {
-        pluginState.meme = JSON.parse(oldMemeUi);
-      } catch {
-        // ignore malformed old value
-      }
-    }
-  }
+// Runtime state only. Everything durable lives in src/0_settings.ts as its own
+// StorageSignal, which is also where the one-time key migrations run.
+function initial(): AppState {
   return {
-    skin: loadKey<Skin>("skin", "xp"),
-    mode: loadKey<Mode>("mode", "light"),
-    showToolbar: loadKey<boolean>("showToolbar", false),
-    inlineDiagrams: loadKey<boolean>("inlineDiagrams", true),
-    inlineStructuredSelectors: loadKey<boolean>("inlineStructuredSelectors", true),
-    sidebar: loadKey<Sidebar>("sidebar", "big"),
-    active: loadKey<string | null>("active", null),
-    openTabs: loadKey<OpenTab[]>("openTabs", []),
-    tabTitles: loadKey<Record<string, string>>("tabTitles", {}),
-    dockJSON: loadKey<unknown>("dockJSON", null),
     sessions: [],
     rogueSessions: [],
-    sessionWorktrees: loadKey<Record<string, string[]>>("sessionWorktrees", {}),
     terminalTabs: [],
     worktrees: [],
-    autoWorktrees: loadKey<WorktreeRow[]>("autoWorktrees", []),
     activity: [],
     aiFavs: [],
     frontmostApp: "",
-    xpPixel: loadKey<boolean>("xpPixel", false),
-    activitySource: loadKey<ActivitySource>("activitySource", "all"),
-    activityType: loadKey<ActivityType>("activityType", "all"),
     activityQuery: "",
-    captureEnabled: loadKey<boolean>("captureEnabled", false),
     capturePerms: null,
     captureStatus: null,
-    sessionSort: loadKey<SessionSort>("sessionSort", { key: "activity", dir: "desc" }),
-    tableSort: loadKey<Record<string, SortState>>("tableSort", {}),
     config: null,
     fsChildren: {},
-    wtView: loadKey<WtView>("wtView", "tree"),
-    scanRoot: loadKey<string>("scanRoot", "~/projects"),
-    sidebarWidth: loadKey<number>("sidebarWidth", 150),
-    termSidebar: loadKey<Record<string, TermSidebarState>>("termSidebar", {}),
-    zoom: loadKey<number>("zoom", 1),
-    panelZoom: loadKey<Record<string, number>>("panelZoom", {}),
-    resumeTabs: loadKey<AppState["resumeTabs"]>("resumeTabs", {}),
-    wtExpanded: loadKey<string[]>("wtExpanded", []),
-    favExpanded: loadKey<string[]>("favExpanded", []),
-    wtFavorites: loadKey<string[]>("wtFavorites", []),
-    spaces: loadKey<string[]>("spaces", []),
-    wtFocus: loadKey<boolean>("wtFocus", false),
     wtAddingClone: null,
-    wtAgents: loadKey<WtAgent[]>("wtAgents", DEFAULT_WT_AGENTS),
-    aiEnabled: loadKey<boolean>("aiEnabled", true),
-    clickRules: loadKey<ClickRule[]>("clickRules", DEFAULT_CLICK_RULES),
-    autoResume: loadKey<boolean>("autoResume", true),
-    pinnedSessions: loadKey<string[]>("pinnedSessions", []),
-    pinnedTabs: loadKey<string[]>("pinnedTabs", []),
-    sprefaScope: loadKey<SprefaScopeItem[]>("sprefaScope", []),
-    sprefaScopeActive: loadKey<boolean>("sprefaScopeActive", false),
-    pluginState,
   };
 }
 
-export const store = createStore<AppState>(load());
-
-// Write only what changed. The previous form re-serialised and rewrote every
-// PERSIST key on every set(), so flipping one boolean cost a write per key.
-const PERSISTED = new Set<keyof AppState>(PERSIST);
-store.changed$.subscribe((keys) => {
-  const s = store.get();
-  for (const k of keys) {
-    if (PERSISTED.has(k)) localStorage.setItem(k, JSON.stringify(s[k]));
-  }
-});
-// todo(state): split durable settings from runtime mirrors and ephemeral UI state
-// todo(migration): version persisted state migrations explicitly before adding more fields
+export const store = createStore<AppState>(initial());

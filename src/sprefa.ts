@@ -2,12 +2,14 @@
 // daemon socket, plus the "scope tray" (a selection of file/repo/rev entities
 // that gets prepended to scratch queries as sel_* facts).
 import { invoke } from "./generated/native";
-import { store, type SprefaScopeItem, type SprefaScopeKind } from "./state";
+import { type SprefaScopeItem, type SprefaScopeKind } from "./state";
 import { registerPlugin, type RailChild } from "./plugin";
 import { openPreviewPanel } from "./preview";
 import { showContextMenu } from "./ctxmenu";
 import { baseName, getHomeDir } from "./core";
 import { SprefaPanelV2 } from "./sprefaPanel";
+import { settings } from "./0_settings";
+import { merge } from "rxjs";
 
 type SprefaCol = { name: string; ty: string };
 type SprefaRel = { name: string; columns: SprefaCol[]; builtin?: boolean };
@@ -228,18 +230,18 @@ function cell(text: string, tag: "td" | "th" = "td", kind: SprefaScopeKind | nul
 // ---- sprefa scope tray --------------------------------------------------
 
 export function inScope(kind: SprefaScopeKind, value: string): boolean {
-  return store.get().sprefaScope.some((s) => s.kind === kind && s.value === value);
+  return settings.sprefaScope.$().some((s) => s.kind === kind && s.value === value);
 }
 
 export function addScope(item: SprefaScopeItem) {
   if (inScope(item.kind, item.value)) return;
-  store.set({ sprefaScope: [...store.get().sprefaScope, item] });
+  settings.sprefaScope.$([...settings.sprefaScope.$(), item]);
 }
 
 function removeScope(kind: SprefaScopeKind, value: string) {
-  store.set({
-    sprefaScope: store.get().sprefaScope.filter((s) => !(s.kind === kind && s.value === value)),
-  });
+  settings.sprefaScope.$(
+    settings.sprefaScope.$().filter((s) => !(s.kind === kind && s.value === value)),
+  );
 }
 
 export function toggleScope(kind: SprefaScopeKind, value: string) {
@@ -250,7 +252,8 @@ export function toggleScope(kind: SprefaScopeKind, value: string) {
 // Datalog facts for the active selection, prepended to a scratch query so it can
 // join: e.g. `scan(R, "WORK", g, _), sel_repo(R)`. Empty when scope is off/empty.
 function scopePrelude(): string {
-  const { sprefaScope, sprefaScopeActive } = store.get();
+  const sprefaScope = settings.sprefaScope.$();
+  const sprefaScopeActive = settings.sprefaScopeActive.$();
   if (!sprefaScopeActive || sprefaScope.length === 0) return "";
   const rels: Record<SprefaScopeKind, { rel: string; col: string }> = {
     repo: { rel: "sel_repo", col: "repo" },
@@ -271,7 +274,8 @@ function scopePrelude(): string {
 function renderSprefaScope() {
   const host = document.querySelector<HTMLElement>("#sprefa-scope");
   if (!host) return;
-  const { sprefaScope, sprefaScopeActive } = store.get();
+  const sprefaScope = settings.sprefaScope.$();
+  const sprefaScopeActive = settings.sprefaScopeActive.$();
   host.replaceChildren();
   host.classList.toggle("active", sprefaScopeActive);
 
@@ -282,7 +286,7 @@ function renderSprefaScope() {
     ? "scope ON — sel_repo/sel_file/sel_rev facts prepended to queries"
     : "scope OFF — selection is a collection only";
   toggle.textContent = sprefaScopeActive ? "scope ●" : "scope ○";
-  toggle.onclick = () => store.set({ sprefaScopeActive: !store.get().sprefaScopeActive });
+  toggle.onclick = () => settings.sprefaScopeActive.$(!settings.sprefaScopeActive.$());
   host.appendChild(toggle);
 
   if (sprefaScope.length === 0) {
@@ -304,7 +308,7 @@ function renderSprefaScope() {
   clear.type = "button";
   clear.className = "sprefa-scope-clear";
   clear.textContent = "clear";
-  clear.onclick = () => store.set({ sprefaScope: [] });
+  clear.onclick = () => settings.sprefaScope.$([]);
   host.appendChild(clear);
 }
 
@@ -444,7 +448,9 @@ export function wireSprefa() {
     toggleScope(el.dataset.entityKind as SprefaScopeKind, el.dataset.entityValue ?? "");
   });
 
-  store.subscribe(() => refreshSprefaScopeUI(), ["sprefaScope", "sprefaScopeActive"]);
+  merge(settings.sprefaScope.$, settings.sprefaScopeActive.$).subscribe(() =>
+    refreshSprefaScopeUI(),
+  );
   const form = document.querySelector<HTMLFormElement>("#sprefa-bar");
   form?.addEventListener("submit", (e) => {
     e.preventDefault();

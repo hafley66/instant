@@ -5,7 +5,7 @@
 import { invoke } from "./generated/native";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
-import { store, type AppState, type SprefaScopeKind } from "./state";
+import { type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
@@ -19,6 +19,7 @@ import {
 } from "./favorites";
 import { inScope, toggleScope } from "./sprefa";
 import { openTabAtPwd } from "./tabs";
+import { settings } from "./0_settings";
 
 // syncToggles now reads from the plugin registry instead of a hardcoded list.
 export function syncToggles() {
@@ -29,8 +30,8 @@ export function syncToggles() {
 }
 
 // Activity rail compact (icons) vs big (icons + labels).
-export function syncSidebar(s: AppState) {
-  $("#actbar").dataset.mode = s.sidebar;
+export function syncSidebar() {
+  $("#actbar").dataset.mode = settings.sidebar.$();
   applyRailWidth();
 }
 
@@ -38,7 +39,7 @@ export function syncSidebar(s: AppState) {
 // 44px CSS rule (clear the inline width so it isn't pinned wide).
 function applyRailWidth() {
   const bar = $("#actbar");
-  if (store.get().sidebar === "big") bar.style.width = `${store.get().sidebarWidth}px`;
+  if (settings.sidebar.$() === "big") bar.style.width = `${settings.sidebarWidth.$()}px`;
   else bar.style.removeProperty("width");
 }
 
@@ -47,14 +48,14 @@ function applyRailWidth() {
 export function wireRailResize() {
   const grip = $("#actbar-resize");
   grip.addEventListener("pointerdown", (e) => {
-    if (store.get().sidebar !== "big") return;
+    if (settings.sidebar.$() !== "big") return;
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
     const startX = e.clientX;
-    const startW = store.get().sidebarWidth;
+    const startW = settings.sidebarWidth.$();
     const onMove = (ev: PointerEvent) => {
       const w = Math.max(96, Math.min(360, startW + (ev.clientX - startX)));
-      store.set({ sidebarWidth: w });
+      settings.sidebarWidth.$(w);
       applyRailWidth();
     };
     const onUp = (ev: PointerEvent) => {
@@ -68,12 +69,12 @@ export function wireRailResize() {
 }
 
 // ---- store-driven view sync: skin and mode push to the DOM + controls ----
-export function syncSkin(s: AppState) {
-  document.body.dataset.skin = s.skin;
+export function syncSkin() {
+  document.body.dataset.skin = settings.skin.$();
   // Button shows the skin it switches TO.
-  ($("#skin-toggle") as HTMLButtonElement).textContent = nextSkin(s.skin).toUpperCase();
+  ($("#skin-toggle") as HTMLButtonElement).textContent = nextSkin(settings.skin.$()).toUpperCase();
   for (const t of tabs.values()) {
-    t.term.options.theme = THEMES[s.skin];
+    t.term.options.theme = THEMES[settings.skin.$()];
     t.fit.fit();
   }
 }
@@ -82,12 +83,12 @@ export function syncSkin(s: AppState) {
 // changes the cell box, so fit() reflows cols/rows and we push the new size +
 // pixel dims to the pty (mirrors the focus path; onResize also fires resize_pty
 // but cellDims can change without cols/rows, so we send it explicitly).
-export async function syncXpPixel(s: AppState) {
-  document.body.classList.toggle("xp-pixel", s.xpPixel);
+export async function syncXpPixel() {
+  document.body.classList.toggle("xp-pixel", settings.xpPixel.$());
   // xterm's canvas renderer measures the font synchronously; if the pixel
   // webfont isn't loaded yet it silently falls back to Menlo and the terminal
   // never changes. Load it first, then apply + reflow.
-  if (s.xpPixel) {
+  if (settings.xpPixel.$()) {
     try {
       await document.fonts.load('16px "Perfect DOS VGA 437 Win"');
     } catch {
@@ -106,19 +107,19 @@ export async function syncXpPixel(s: AppState) {
 }
 // Top toolbar (Shot / dark / skin) is opt-in: hidden unless showToolbar. Its
 // functions stay reachable from the palette, so hiding it strands nothing.
-export function applyToolbar(s: AppState) {
-  document.body.classList.toggle("show-toolbar", s.showToolbar);
+export function applyToolbar() {
+  document.body.classList.toggle("show-toolbar", settings.showToolbar.$());
 }
-export function syncMode(s: AppState) {
-  document.body.dataset.mode = s.mode;
+export function syncMode() {
+  document.body.dataset.mode = settings.mode.$();
   ($("#mode-toggle") as HTMLButtonElement).textContent =
-    s.mode === "dark" ? "☀" : "☾";
+    settings.mode.$() === "dark" ? "☀" : "☾";
 }
 
-export function syncInlineDiagrams(s: AppState) {
+export function syncInlineDiagrams() {
   const button = $("#diagram-toggle") as HTMLButtonElement;
-  button.classList.toggle("active", s.inlineDiagrams);
-  button.setAttribute("aria-pressed", String(s.inlineDiagrams));
+  button.classList.toggle("active", settings.inlineDiagrams.$());
+  button.setAttribute("aria-pressed", String(settings.inlineDiagrams.$()));
   syncInlineDiagramOverlays();
 }
 
@@ -138,10 +139,10 @@ export function bindPanicChrome() {
   });
 }
 
-export function syncInlineStructured(s: AppState) {
+export function syncInlineStructured() {
   const button = $("#structured-overlay-toggle") as HTMLButtonElement;
-  button.classList.toggle("active", s.inlineStructuredSelectors);
-  button.setAttribute("aria-pressed", String(s.inlineStructuredSelectors));
+  button.classList.toggle("active", settings.inlineStructuredSelectors.$());
+  button.setAttribute("aria-pressed", String(settings.inlineStructuredSelectors.$()));
   syncInlineStructuredSelectors();
 }
 
@@ -318,8 +319,8 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
       { sep: true },
       {
         label: "Clear selection",
-        action: () => store.set({ sprefaScope: [] }),
-        disabled: store.get().sprefaScope.length === 0,
+        action: () => settings.sprefaScope.$([]),
+        disabled: settings.sprefaScope.$().length === 0,
       },
     );
     return items;
@@ -412,33 +413,33 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
       action: openTabAtPwd,
     },
     { sep: true },
-    { label: "Cycle skin", action: () => store.set({ skin: nextSkin(store.get().skin) }) },
+    { label: "Cycle skin", action: () => settings.skin.$(nextSkin(settings.skin.$())) },
     {
-      label: store.get().xpPixel ? "Super XP: off" : "Super XP: on",
-      action: () => store.set({ xpPixel: !store.get().xpPixel }),
+      label: settings.xpPixel.$() ? "Super XP: off" : "Super XP: on",
+      action: () => settings.xpPixel.$(!settings.xpPixel.$()),
     },
     {
-      label: store.get().mode === "dark" ? "Light mode" : "Dark mode",
+      label: settings.mode.$() === "dark" ? "Light mode" : "Dark mode",
       action: () =>
-        store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }),
+        settings.mode.$(settings.mode.$() === "dark" ? "light" : "dark"),
     },
   ];
 }
 
 export function wireChrome() {
   $("#skin-toggle").onclick = () =>
-    store.set({ skin: nextSkin(store.get().skin) });
+    settings.skin.$(nextSkin(settings.skin.$()));
 
   $("#mode-toggle").onclick = () =>
-    store.set({ mode: store.get().mode === "dark" ? "light" : "dark" });
+    settings.mode.$(settings.mode.$() === "dark" ? "light" : "dark");
 
   $("#diagram-toggle").onclick = () =>
-    store.set({ inlineDiagrams: !store.get().inlineDiagrams });
+    settings.inlineDiagrams.$(!settings.inlineDiagrams.$());
 
   $("#panic-toggle").onclick = () => panic.on.$(!panic.on.$());
 
   $("#structured-overlay-toggle").onclick = () =>
-    store.set({ inlineStructuredSelectors: !store.get().inlineStructuredSelectors });
+    settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$());
 
   $("#shot-btn").onclick = captureToPrompt;
   $("#send-menu-btn").onclick = (e) => openSendPicker(e.currentTarget as HTMLElement);
@@ -448,7 +449,7 @@ export function wireChrome() {
     if (btn) btn.onclick = () => togglePanel(p.id);
   }
   $("#actbar-toggle").onclick = () =>
-    store.set({ sidebar: store.get().sidebar === "big" ? "compact" : "big" });
+    settings.sidebar.$(settings.sidebar.$() === "big" ? "compact" : "big");
 
   $("#min-btn").onclick = () => getCurrentWindow().minimize();
   $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();

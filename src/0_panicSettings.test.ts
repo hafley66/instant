@@ -49,12 +49,28 @@ describe("panic settings", () => {
     expect(panic.body.$()).toBe("quiet please");
   });
 
-  it("falls back to the default when a key is absent or corrupt", async () => {
-    const { localStore } = freshGlobals();
-    localStore.setItem("panicSub", "{not json");
+  it("falls back to the default when a key is absent", async () => {
+    freshGlobals();
     const { panic } = await import("./0_panicSettings");
     expect(panic.sub.$()).toBe("below");
     expect(panic.on.$()).toBe(true);
+  });
+
+  it("falls back to the default when a non-string setting is corrupt", async () => {
+    const { localStore } = freshGlobals();
+    localStore.setItem("panicPos", "{not json");
+    const { panic } = await import("./0_panicSettings");
+    expect(panic.pos.$()).toEqual({ x: 0, y: 0 });
+  });
+
+  it("hands back the raw string for a corrupt string-typed setting", async () => {
+    // loadKey parity: values written by the pre-JSON persistence are bare
+    // strings, so an unparseable value is treated as one of those rather than
+    // discarded. The next write replaces it.
+    const { localStore } = freshGlobals();
+    localStore.setItem("panicBody", "quiet down");
+    const { panic } = await import("./0_panicSettings");
+    expect(panic.body.$()).toBe("quiet down");
   });
 
   it("writes back under the same key as JSON", async () => {

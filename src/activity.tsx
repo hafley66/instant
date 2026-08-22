@@ -18,6 +18,7 @@ import { useApp } from "./useStore";
 import { openPreviewPanel } from "./preview";
 import { pasteToActive } from "./terminal";
 import { toggleRecording } from "./capture";
+import { settings } from "./0_settings";
 
 export const ACTIVITY_CAP = 2000;
 const prettyUrl = (u: string) =>
@@ -59,7 +60,8 @@ const actionVerb = (e: Event): string => ACTION_VERB[e.kind] ?? e.kind;
 
 // The visible rows: source chip, then fuzzy search box.
 function visibleActivity(): Event[] {
-  const { activity, activitySource, activityQuery } = store.get();
+  const { activity, activityQuery } = store.get();
+  const activitySource = settings.activitySource.$();
   const filtered = activity.filter(
     (e) => activitySource === "all" || e.source === activitySource,
   );
@@ -100,11 +102,11 @@ export function registerActivityBridge() {
       shown: visibleActivity().length,
       total: store.get().activity.length,
     }),
-    source: () => store.get().activitySource,
-    setSource: (s) => store.set({ activitySource: s as ActivitySource }),
+    source: () => settings.activitySource.$(),
+    setSource: (s) => settings.activitySource.$(s as ActivitySource),
     query: () => store.get().activityQuery,
     setQuery: (q) => store.set({ activityQuery: q }),
-    recording: () => store.get().captureEnabled,
+    recording: () => settings.captureEnabled.$(),
     toggleRecord: () => toggleRecording(),
     clear: () =>
       invoke("activity_clear")

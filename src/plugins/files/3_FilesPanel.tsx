@@ -1,15 +1,15 @@
 import type { IDockviewPanelProps } from "dockview";
 import { getHomeDir } from "../../core";
 import { readPluginState, savePluginState } from "../../pluginState";
-import { store } from "../../state";
 import { useApp } from "../../useStore";
 import type { FilesUi } from "./0_types";
 import { FileExplorer } from "./2_FileExplorer";
+import { settings } from "../../0_settings";
 
 const PLUGIN_ID = "files";
 
 function initialRoot(): string {
-  return readPluginState<FilesUi>(PLUGIN_ID, {}).root || store.get().scanRoot || getHomeDir() || "/";
+  return readPluginState<FilesUi>(PLUGIN_ID, {}).root || settings.scanRoot.$() || getHomeDir() || "/";
 }
 
 export function FilesPanel(_props: IDockviewPanelProps) {

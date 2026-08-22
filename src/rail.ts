@@ -11,7 +11,7 @@ import {
   type RailChild,
 } from "./plugin";
 import { readPluginState, savePluginState } from "./pluginState";
-import { store } from "./state";
+import { settings } from "./0_settings";
 import { togglePanel } from "./reactdock";
 import { syncToggles } from "./chrome";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
@@ -251,5 +251,5 @@ export function initRail(): void {
   if (!actbar) return;
   wireDragReorder(actbar);
   wireVisibilityMenu(actbar);
-  store.subscribe(onPluginStateChange, ["pluginState"]);
+  settings.pluginState.$.subscribe(() => onPluginStateChange());
 }

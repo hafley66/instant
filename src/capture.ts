@@ -3,9 +3,9 @@
 // with the OS-drop machinery, since showing a catcher/crosshair blurs us).
 import { invoke } from "./generated/native";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { store } from "./state";
 import { activeId } from "./core";
 import { tabs, sendTextToTab, recentTabs } from "./terminal";
+import { settings } from "./0_settings";
 
 // While true, the blur-to-hide handler stands down (the screenshot crosshair
 // steals focus, which would otherwise hide us mid-capture).
@@ -52,8 +52,8 @@ async function captureRegion(): Promise<string | null> {
 // backend mirrors it (and swaps the menu-bar icon) via capture_set_enabled.
 // Shared by the Activity panel button and the tray menu item.
 export function toggleRecording() {
-  const on = !store.get().captureEnabled;
-  store.set({ captureEnabled: on });
+  const on = !settings.captureEnabled.$();
+  settings.captureEnabled.$(on);
   invoke("capture_set_enabled", { on }).catch(console.error);
 }
 

@@ -6,12 +6,13 @@ import { store, type FsEntry, type Skin } from "./state";
 import { activeGroupEl } from "./reactdock";
 import { invoke } from "./generated/native";
 import { terminalFontCss } from "./0_terminalFonts";
+import { settings } from "./0_settings";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 
 export { sessionId } from "./0_ids";
-export const activeId = () => store.get().active;
-export const setActive = (id: string | null) => store.set({ active: id });
+export const activeId = () => settings.active.$();
+export const setActive = (id: string | null) => settings.active.$(id);
 
 export const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 export const tmuxName = (s: string) => s.replace(/[.:\s]/g, "-");
@@ -137,7 +138,7 @@ export const nextSkin = (s: Skin): Skin =>
 // Menlo stays as the fallback so missing glyphs still render monospaced.
 export const TERM_FONT_FAMILY_PIXEL = '"Perfect DOS VGA 437 Win", Menlo, monospace';
 export const termFontFamily = (): string =>
-  store.get().xpPixel
+  settings.xpPixel.$()
     ? TERM_FONT_FAMILY_PIXEL
     : terminalFontCss(store.get().config?.terminal_fonts ?? []);
 

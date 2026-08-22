@@ -18,6 +18,7 @@ import { sessionId, activeId, flashStatus, baseName, tmuxName, logLine } from ".
 import { tabs, openTab, closedTabs, settleClosures } from "./terminal";
 import { refreshSessions, resumeIdIsLive, resumeLaunch, dropResumeTab } from "./worktrees";
 import { reopenKind } from "./0_reopenOrder";
+import { settings } from "./0_settings";
 
 // ---- tab commands (driven by the central keymap) ----
 // Visual tab nav walks EVERY panel across ALL panes (dockview order), not just
@@ -65,7 +66,7 @@ function activeTabName(): string {
 // ---- pinned terminal tabs (persisted by session name) ----
 // Visual is a 📌 prefix on the dockview tab title, pushed via reactdock's
 // setTermTitle (a public API) so we don't have to touch reactdock's renderer.
-export const isPinnedTab = (name: string) => store.get().pinnedTabs.includes(name);
+export const isPinnedTab = (name: string) => settings.pinnedTabs.$().includes(name);
 // Base = the durable rename override (store.tabTitles) if set, else the session
 // name; the pin prefix rides on top so pin + rename compose.
 export const tabTitle = (name: string) => {
@@ -77,12 +78,8 @@ export function applyTabTitle(name: string) {
 }
 export function togglePinTab(name: string) {
   if (!name) return;
-  const cur = store.get().pinnedTabs;
-  store.set({
-    pinnedTabs: cur.includes(name)
-      ? cur.filter((n) => n !== name)
-      : [...cur, name],
-  });
+  const cur = settings.pinnedTabs.$();
+  settings.pinnedTabs.$(cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]);
   applyTabTitle(name);
   reflowPinnedTabs();
 }
@@ -92,7 +89,7 @@ export function togglePinTab(name: string) {
 // pins settle first so the final left-to-right matches the list.
 export function reflowPinnedTabs() {
   let i = 0;
-  for (const name of store.get().pinnedTabs) {
+  for (const name of settings.pinnedTabs.$()) {
     if (tabs.has(sessionId(name))) moveTermPanel(sessionId(name), i++);
   }
 }
@@ -140,7 +137,7 @@ export async function reopenLastTab() {
   // in this SESSION NAME, resume its conversation (name-keyed record) instead of
   // replaying the stale original command. The record is kept (not consumed) so the
   // name->id identity is stable across repeated reopens; "new · X" overwrites it.
-  const killed = store.get().resumeTabs[last.name];
+  const killed = settings.resumeTabs.$()[last.name];
   let command = last.command;
   if (killed && last.cwd && (await resumeIdIsLive(killed.editor, last.cwd, killed.sessionId))) {
     command = resumeLaunch(killed.editor, killed.sessionId);

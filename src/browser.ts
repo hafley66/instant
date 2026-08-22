@@ -4,13 +4,13 @@
 // dockview panel lifecycle (addTermPanel/onTermShown/onTermClosed) keyed by the
 // same id.
 import { invoke } from "./generated/native";
-import { store } from "./state";
 import { CdpView, cdpQuality, setCdpQuality, QUALITY_STEPS, setCdpPerf } from "./cdp";
 import { addTermPanel } from "./reactdock";
 import { sessionId, flashStatus } from "./core";
 import { activate, tabs } from "./terminal";
 import { tabTitle } from "./tabs";
 import { askText } from "./chrome";
+import { settings } from "./0_settings";
 
 export const browserTabs = new Map<
   string,
@@ -27,9 +27,9 @@ function normalizeUrl(s: string): string {
 // Persist a browser tab so a reload reopens it (the CDP target survives a
 // webview reload in the Rust CdpStore; a full restart re-creates it at the url).
 function recordBrowserTab(name: string, url: string) {
-  const cur = store.get().openTabs;
+  const cur = settings.openTabs.$();
   if (cur.some((t) => t.name === name)) return;
-  store.set({ openTabs: [...cur, { name, command: null, cwd: null, browser: true, url }] });
+  settings.openTabs.$([...cur, { name, command: null, cwd: null, browser: true, url }]);
 }
 
 // Create the panel + CdpView for a browser tab with an explicit name (so the id

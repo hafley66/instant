@@ -38,16 +38,15 @@ beforeEach(() => {
   vi.resetModules();
 });
 
-describe("state.ts boot / persistence", () => {
+describe("settings boot / persistence", () => {
   it("defaults every persisted field on empty storage", async () => {
     freshGlobals();
-    const { store } = await import("./state");
-    const s = store.get();
-    expect(s.skin).toBe("xp");
-    expect(s.mode).toBe("light");
-    expect(s.sidebar).toBe("big");
-    expect(s.scanRoot).toBe("~/projects");
-    expect(s.wtAgents).toEqual([
+    const { settings } = await import("./0_settings");
+    expect(settings.skin.$()).toBe("xp");
+    expect(settings.mode.$()).toBe("light");
+    expect(settings.sidebar.$()).toBe("big");
+    expect(settings.scanRoot.$()).toBe("~/projects");
+    expect(settings.wtAgents.$()).toEqual([
       { label: "claude", command: "claude", resume: "--resume" },
       { label: "opencode", command: "opencode", resume: "--session" },
       { label: "codex", command: "codex", resume: "resume" },
@@ -58,15 +57,15 @@ describe("state.ts boot / persistence", () => {
     const { localStore } = freshGlobals();
     // Old plain-string persistence: not JSON-encoded, so JSON.parse throws.
     localStore.setItem("scanRoot", "~/legacy-path");
-    const { store } = await import("./state");
-    expect(store.get().scanRoot).toBe("~/legacy-path");
+    const { settings } = await import("./0_settings");
+    expect(settings.scanRoot.$()).toBe("~/legacy-path");
   });
 
   it("reads a well-formed JSON-encoded persisted value", async () => {
     const { localStore } = freshGlobals();
     localStore.setItem("zoom", JSON.stringify(1.5));
-    const { store } = await import("./state");
-    expect(store.get().zoom).toBe(1.5);
+    const { settings } = await import("./0_settings");
+    expect(settings.zoom.$()).toBe(1.5);
   });
 
   it("migrates the old resumeTabs key once and sets the version flag", async () => {
@@ -75,9 +74,11 @@ describe("state.ts boot / persistence", () => {
       "resumeTabs",
       JSON.stringify({ "/old/cwd": { editor: "claude", sessionId: "stale" } }),
     );
-    await import("./state");
+    await import("./0_settings");
     expect(localStore.getItem("resumeTabsV2")).toBe("1");
-    expect(localStore.getItem("resumeTabs")).toBeNull();
+    // The migration removes the key; the signal then seeds it with its empty
+    // default, so the poisoned entries are gone either way.
+    expect(JSON.parse(localStore.getItem("resumeTabs")!)).toEqual({});
   });
 
   it("leaves resumeTabs alone once the version flag is already set", async () => {
@@ -87,18 +88,18 @@ describe("state.ts boot / persistence", () => {
       "resumeTabs",
       JSON.stringify({ "/keep/cwd": { editor: "opencode", sessionId: "keep" } }),
     );
-    const { store } = await import("./state");
-    expect(store.get().resumeTabs).toEqual({
+    const { settings } = await import("./0_settings");
+    expect(settings.resumeTabs.$()).toEqual({
       "/keep/cwd": { editor: "opencode", sessionId: "keep" },
     });
   });
 
-  it("store.set() persists only the changed PERSIST-listed keys", async () => {
+  it("writing a setting persists that key alone", async () => {
     const { localStore } = freshGlobals();
-    const { store } = await import("./state");
-    store.set({ zoom: 2 });
+    const { settings } = await import("./0_settings");
+    settings.zoom.$(2);
     expect(localStore.getItem("zoom")).toBe(JSON.stringify(2));
-    // Runtime-only fields (not in PERSIST) are never written to localStorage.
+    // Runtime-only fields live in the store and are never written to localStorage.
     expect(localStore.getItem("activity")).toBeNull();
   });
 
@@ -107,29 +108,31 @@ describe("state.ts boot / persistence", () => {
     localStore.setItem("skin", JSON.stringify("p5"));
     sessionStore.setItem("SAFE_BOOT", "1");
     const mod = await import("./state");
+    const { settings } = await import("./0_settings");
     expect(mod.SAFE_BOOT).toBe(true);
-    expect(mod.store.get().skin).toBe("xp"); // fallback, ignoring the persisted "p5"
+    expect(settings.skin.$()).toBe("xp"); // fallback, ignoring the persisted "p5"
   });
 
   it("SAFE_BOOT is false and persisted values load normally on a plain boot", async () => {
     const { localStore } = freshGlobals();
     localStore.setItem("skin", JSON.stringify("p5"));
     const mod = await import("./state");
+    const { settings } = await import("./0_settings");
     expect(mod.SAFE_BOOT).toBe(false);
-    expect(mod.store.get().skin).toBe("p5");
+    expect(settings.skin.$()).toBe("p5");
   });
 
   it("defaults pluginState to {} on empty storage", async () => {
     freshGlobals();
-    const { store } = await import("./state");
-    expect(store.get().pluginState).toEqual({});
+    const { settings } = await import("./0_settings");
+    expect(settings.pluginState.$()).toEqual({});
   });
 
   it("migrates the legacy meme:ui key into pluginState.meme once", async () => {
     const { localStore } = freshGlobals();
     localStore.setItem("meme:ui", JSON.stringify({ sidebarWidth: 222, layersHeight: 99 }));
-    const { store } = await import("./state");
-    expect(store.get().pluginState.meme).toEqual({ sidebarWidth: 222, layersHeight: 99 });
+    const { settings } = await import("./0_settings");
+    expect(settings.pluginState.$().meme).toEqual({ sidebarWidth: 222, layersHeight: 99 });
     // Old key is left in place (no destructive delete).
     expect(localStore.getItem("meme:ui")).toBe(JSON.stringify({ sidebarWidth: 222, layersHeight: 99 }));
   });
@@ -138,29 +141,29 @@ describe("state.ts boot / persistence", () => {
     const { localStore } = freshGlobals();
     localStore.setItem("meme:ui", JSON.stringify({ sidebarWidth: 222 }));
     localStore.setItem("pluginState", JSON.stringify({ meme: { sidebarWidth: 10 } }));
-    const { store } = await import("./state");
-    expect(store.get().pluginState.meme).toEqual({ sidebarWidth: 10 });
+    const { settings } = await import("./0_settings");
+    expect(settings.pluginState.$().meme).toEqual({ sidebarWidth: 10 });
   });
 
   it("ignores a malformed legacy meme:ui value", async () => {
     const { localStore } = freshGlobals();
     localStore.setItem("meme:ui", "{not json");
-    const { store } = await import("./state");
-    expect(store.get().pluginState.meme).toBeUndefined();
+    const { settings } = await import("./0_settings");
+    expect(settings.pluginState.$().meme).toBeUndefined();
   });
 
   it("SAFE_BOOT skips the meme:ui migration too", async () => {
     const { localStore, sessionStore } = freshGlobals();
     localStore.setItem("meme:ui", JSON.stringify({ sidebarWidth: 222 }));
     sessionStore.setItem("SAFE_BOOT", "1");
-    const { store } = await import("./state");
-    expect(store.get().pluginState).toEqual({});
+    const { settings } = await import("./0_settings");
+    expect(settings.pluginState.$()).toEqual({});
   });
 
-  it("store.set() persists pluginState under its own key", async () => {
+  it("writing pluginState persists it under its own key", async () => {
     const { localStore } = freshGlobals();
-    const { store } = await import("./state");
-    store.set({ pluginState: { meme: { sidebarWidth: 5 } } });
+    const { settings } = await import("./0_settings");
+    settings.pluginState.$({ meme: { sidebarWidth: 5 } });
     expect(localStore.getItem("pluginState")).toBe(JSON.stringify({ meme: { sidebarWidth: 5 } }));
   });
 });
