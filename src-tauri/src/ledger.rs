@@ -895,13 +895,8 @@ fn read_ai_messages_blocking(
     cwd: String,
     after_seq: Option<u64>,
 ) -> Result<Vec<AiMessage>, String> {
-    let id = crate::harness_store::HarnessId::parse(&editor).ok_or("unknown editor")?;
-    Ok(crate::harness_store::messages(
-        id,
-        &session_id,
-        &cwd,
-        after_seq,
-    ))
+    let id = boop_harness::HarnessId::parse(&editor).ok_or("unknown editor")?;
+    Ok(crate::harness_store::messages(id, &session_id, &cwd, after_seq))
 }
 
 /// The newest turn in a session (drives "favorite current turn" + the watcher).
@@ -936,12 +931,9 @@ fn list_ai_sessions_blocking(
     cwd: Option<String>,
 ) -> Result<Vec<AiSession>, String> {
     let editor = Editor::parse(&editor).ok_or("unknown editor")?;
-    let harness = crate::harness_store::HarnessId::parse(editor.tag()).ok_or("unknown editor")?;
-    let Some(home) = home() else {
-        return Ok(Vec::new());
-    };
+    let harness = boop_harness::HarnessId::parse(editor.tag()).ok_or("unknown editor")?;
     Ok(
-        crate::harness_store::sessions(&home, harness, cwd.as_deref())
+        crate::harness_store::sessions(harness, cwd.as_deref())
             .into_iter()
             .map(|session| {
                 let title = session.title.clone().unwrap_or_else(|| {

@@ -14,6 +14,24 @@ fn fixture_home() -> PathBuf {
     path
 }
 
+/// A session boop-harness would hand instant, minted here so shaping is tested
+/// without a fixture HOME the registry cannot be pointed at.
+fn session_ref(harness: HarnessId, id: &str, path: PathBuf) -> SessionRef {
+    SessionRef {
+        harness,
+        session_id: id.to_string(),
+        nickname: id.to_string(),
+        cwd: Some("/fixture".to_string()),
+        git_branch: None,
+        modified_ms: mtime(&path),
+        size: 0,
+        tmux: None,
+        tmux_socket: None,
+        parent: None,
+        path,
+    }
+}
+
 #[test]
 fn claude_messages_resolve_one_exact_file_without_session_discovery() {
     let home = fixture_home();
@@ -67,14 +85,12 @@ fn claude_messages_resolve_one_exact_file_without_session_discovery() {
 }
 
 #[test]
-fn four_stores_lower_into_one_session_shape() {
+fn four_harnesses_lower_into_one_session_shape() {
     let home = fixture_home();
-    let cwd = "/fixture";
 
-    let claude_dir = home.join(".claude/projects/-fixture");
-    fs::create_dir_all(&claude_dir).unwrap();
+    let claude = home.join("claude-1.jsonl");
     fs::write(
-        claude_dir.join("claude-1.jsonl"),
+        &claude,
         concat!(
             r#"{"cwd":"/fixture","timestamp":"2026-01-02T03:04:05Z"}"#,
             "\n",
@@ -84,10 +100,9 @@ fn four_stores_lower_into_one_session_shape() {
     )
     .unwrap();
 
-    let codex_dir = home.join(".codex/sessions/2026/01/02");
-    fs::create_dir_all(&codex_dir).unwrap();
+    let codex = home.join("rollout.jsonl");
     fs::write(
-        codex_dir.join("rollout.jsonl"),
+        &codex,
         concat!(
             r#"{"timestamp":"2026-01-02T03:04:05Z","type":"session_meta","payload":{"id":"codex-1","cwd":"/fixture","parent_thread_id":"codex-parent"}}"#,
             "\n",
@@ -99,14 +114,14 @@ fn four_stores_lower_into_one_session_shape() {
     )
     .unwrap();
 
-    let kimi_dir = home.join(".kimi-code/sessions/work/session_kimi-1");
-    fs::create_dir_all(kimi_dir.join("agents/main")).unwrap();
-    fs::write(kimi_dir.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
-    fs::write(kimi_dir.join("agents/main/wire.jsonl"), "").unwrap();
+    let kimi_session = home.join("kimi/session_kimi-1");
+    fs::create_dir_all(kimi_session.join("agents/main")).unwrap();
+    fs::write(kimi_session.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
+    let kimi = kimi_session.join("agents/main/wire.jsonl");
+    fs::write(&kimi, "").unwrap();
 
-    let opencode_dir = home.join(".local/share/opencode");
-    fs::create_dir_all(&opencode_dir).unwrap();
-    let db = Connection::open(opencode_dir.join("opencode.db")).unwrap();
+    let opencode = home.join("opencode.db");
+    let db = Connection::open(&opencode).unwrap();
     db.execute_batch(
         "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
          CREATE TABLE message (session_id TEXT, time_created INTEGER, data TEXT);
@@ -116,10 +131,18 @@ fn four_stores_lower_into_one_session_shape() {
     .unwrap();
     drop(db);
 
-    let summary: Vec<Value> = [HarnessId::Claude, HarnessId::Opencode, HarnessId::Codex, HarnessId::Kimi]
-        .into_iter()
-        .map(|id| resolve(&home, id, cwd).unwrap())
-        .map(|session| json!({
+    let mut codex_ref = session_ref(HarnessId::Codex, "codex-1", codex);
+    codex_ref.parent = Some("codex-parent".to_string());
+    let summary: Vec<Value> = [
+        session_ref(HarnessId::Claude, "claude-1", claude),
+        session_ref(HarnessId::Opencode, "opencode-1", opencode),
+        codex_ref,
+        session_ref(HarnessId::Kimi, "kimi-1", kimi),
+    ]
+    .iter()
+    .map(|session| shape(session).unwrap())
+    .map(|session| {
+        json!({
             "cwd": session.cwd,
             "harness": session.harness,
             "id": session.id,
@@ -130,8 +153,9 @@ fn four_stores_lower_into_one_session_shape() {
             "provider": session.provider,
             "sourceFile": session.source_path.as_deref().and_then(|path| Path::new(path).file_name()).and_then(|name| name.to_str()),
             "title": session.title,
-        }))
-        .collect();
+        })
+    })
+    .collect();
 
     assert_eq!(
         serde_json::to_string_pretty(&summary).unwrap(),
@@ -193,10 +217,8 @@ fn opencode_tokens_take_max_not_latest() {
     // The newest assistant turn carries tokens.input 0; MAX across the session
     // is the live context reading, not the trailing zero.
     let home = fixture_home();
-    let cwd = "/fixture";
-    let dir = home.join(".local/share/opencode");
-    fs::create_dir_all(&dir).unwrap();
-    let db = Connection::open(dir.join("opencode.db")).unwrap();
+    let path = home.join("opencode.db");
+    let db = Connection::open(&path).unwrap();
     db.execute_batch(
         "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
          CREATE TABLE message (session_id TEXT, time_created INTEGER, data TEXT);
@@ -206,7 +228,7 @@ fn opencode_tokens_take_max_not_latest() {
     )
     .unwrap();
     drop(db);
-    let session = resolve(&home, HarnessId::Opencode, cwd).unwrap();
+    let session = shape(&session_ref(HarnessId::Opencode, "oc-1", path)).unwrap();
     assert_eq!(session.id, "oc-1");
     assert_eq!(session.input_tokens, Some(50));
     assert_eq!(session.model.as_deref(), Some("a-model"));
@@ -214,66 +236,18 @@ fn opencode_tokens_take_max_not_latest() {
 }
 
 #[test]
-fn claude_session_ids_use_metadata_without_parsing_transcripts() {
+fn an_archived_opencode_session_is_not_a_row() {
     let home = fixture_home();
-    let cwd = "/fixture";
-    let dir = home.join(".claude/projects/-fixture");
-    fs::create_dir_all(dir.join("parent/subagents")).unwrap();
-    fs::write(
-        dir.join("broken.jsonl"),
-        "{ this transcript is intentionally invalid",
-    )
-    .unwrap();
-    fs::write(
-        dir.join("parent/subagents/child.jsonl"),
-        "{ this transcript is intentionally invalid",
-    )
-    .unwrap();
-
-    let mut ids = session_ids(&home, HarnessId::Claude, cwd);
-    ids.sort();
-
-    assert_eq!(ids, vec!["broken", "child"]);
-}
-
-#[test]
-fn codex_session_ids_use_the_index_without_parsing_rollouts() {
-    let home = fixture_home();
-    let dir = home.join(".codex");
-    fs::create_dir_all(&dir).unwrap();
-    let db = Connection::open(dir.join("state_5.sqlite")).unwrap();
+    let path = home.join("opencode.db");
+    let db = Connection::open(&path).unwrap();
     db.execute_batch(
-        "CREATE TABLE threads (id TEXT, cwd TEXT, archived INTEGER, updated_at_ms INTEGER);
-         INSERT INTO threads VALUES ('older', '/fixture', 0, 100);
-         INSERT INTO threads VALUES ('newer', '/fixture', 0, 200);
-         INSERT INTO threads VALUES ('archived', '/fixture', 1, 300);
-         INSERT INTO threads VALUES ('elsewhere', '/other', 0, 400);",
+        "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+         CREATE TABLE message (session_id TEXT, time_created INTEGER, data TEXT);
+         INSERT INTO session VALUES ('oc-gone', '/fixture', NULL, 100, 300, 400);",
     )
     .unwrap();
     drop(db);
-
-    assert_eq!(
-        session_ids(&home, HarnessId::Codex, "/fixture"),
-        vec!["newer", "older"]
-    );
-}
-
-#[test]
-fn kimi_session_ids_do_not_parse_wire_history() {
-    let home = fixture_home();
-    let dir = home.join(".kimi-code/sessions/work/session_kimi-fast");
-    fs::create_dir_all(dir.join("agents/main")).unwrap();
-    fs::write(dir.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
-    fs::write(
-        dir.join("agents/main/wire.jsonl"),
-        "not JSON and deliberately irrelevant",
-    )
-    .unwrap();
-
-    assert_eq!(
-        session_ids(&home, HarnessId::Kimi, "/fixture"),
-        vec!["kimi-fast"]
-    );
+    assert!(shape(&session_ref(HarnessId::Opencode, "oc-gone", path)).is_none());
 }
 
 #[test]
@@ -281,12 +255,12 @@ fn kimi_wire_usage_sums_inputs() {
     // wire.jsonl carries per-turn usage; input = inputOther + cache read + cache
     // creation, taken from the last line that has it, with the model beside it.
     let home = fixture_home();
-    let cwd = "/fixture";
-    let dir = home.join(".kimi-code/sessions/work/session_kimi-2");
+    let dir = home.join("session_kimi-2");
     fs::create_dir_all(dir.join("agents/main")).unwrap();
     fs::write(dir.join("state.json"), r#"{"workDir":"/fixture"}"#).unwrap();
+    let wire = dir.join("agents/main/wire.jsonl");
     fs::write(
-        dir.join("agents/main/wire.jsonl"),
+        &wire,
         concat!(
             r#"{"type":"assistant","model":"kimi-code/k3","usage":{"inputOther":10,"output":1,"inputCacheRead":100,"inputCacheCreation":5},"usageScope":"turn"}"#,
             "\n",
@@ -295,8 +269,23 @@ fn kimi_wire_usage_sums_inputs() {
         ),
     )
     .unwrap();
-    let session = resolve(&home, HarnessId::Kimi, cwd).unwrap();
+    let session = shape(&session_ref(HarnessId::Kimi, "kimi-2", wire)).unwrap();
     assert_eq!(session.id, "kimi-2");
     assert_eq!(session.input_tokens, Some(215));
     assert_eq!(session.model.as_deref(), Some("kimi-code/k3"));
+}
+
+/// RECEIPT. A claude subagent transcript resumes on its file stem, while every
+/// other harness resumes on the id it published, so `--resume` gets the id the
+/// harness answers to.
+#[test]
+fn a_resume_id_is_the_stem_for_claude_and_the_session_id_elsewhere() {
+    let mut claude = session_ref(HarnessId::Claude, "parent/agent-9", PathBuf::new());
+    claude.nickname = "agent-9".to_string();
+    claude.parent = Some("parent".to_string());
+    assert_eq!(resume_id(&claude), "agent-9");
+
+    let mut codex = session_ref(HarnessId::Codex, "thread-9", PathBuf::new());
+    codex.nickname = "rollout-2026".to_string();
+    assert_eq!(resume_id(&codex), "thread-9");
 }
