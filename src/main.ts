@@ -27,7 +27,7 @@ import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
 import { mountStfuButton } from "./0_stfuButton";
-import { panic, cyclePanic, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
+import { panic, cycleSetting, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
@@ -96,7 +96,7 @@ import { isCapturing, cancelHide, scheduleHide, captureToPrompt, toggleRecording
 import {
   ZOOM_STEP,
   applyZoom,
-  applyOverlay,
+  bindOverlay,
   toggleMiniMode,
   toggleOverlayFade,
   cycleOverlayMode,
@@ -154,8 +154,8 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.toolbar", keys: [], title: "Toggle Top Toolbar", group: "View", run: () => store.set({ showToolbar: !store.get().showToolbar }) },
   { id: "view.mode", keys: [], title: "Toggle Dark Mode", group: "View", run: () => store.set({ mode: store.get().mode === "dark" ? "light" : "dark" }) },
   { id: "view.panicButton", keys: [], title: "Toggle Panic Button", group: "View", run: () => panic.on.$(!panic.on.$()) },
-  { id: "view.panicMode", keys: [], title: "Cycle Panic Button Mode", group: "View", run: () => cyclePanic(panic.mode, PANIC_MODES) },
-  { id: "view.panicSub", keys: [], title: "Cycle Panic Button Subtext", group: "View", run: () => cyclePanic(panic.sub, PANIC_SUBS) },
+  { id: "view.panicMode", keys: [], title: "Cycle Panic Button Mode", group: "View", run: () => cycleSetting(panic.mode, PANIC_MODES) },
+  { id: "view.panicSub", keys: [], title: "Cycle Panic Button Subtext", group: "View", run: () => cycleSetting(panic.sub, PANIC_SUBS) },
   { id: "view.panicBody", keys: [], title: "Set Panic Button Text", group: "View", run: async () => {
     const next = await askText("what the panic button sends", panic.body.$());
     if (next !== null) panic.body.$(next);
@@ -467,14 +467,7 @@ async function main() {
 
   // Overlay: re-apply on any change to its config or the frontmost app, then once
   // now so a persisted mini/fade/follow is restored on boot.
-  store.subscribe(applyOverlay, [
-    "overlayMode",
-    "overlayTarget",
-    "overlayFade",
-    "miniMode",
-    "frontmostApp",
-  ]);
-  applyOverlay();
+  bindOverlay();
 
   // Right-⌘ + Right-⇧ + V: the native tap (lib.rs) swallows the combo, copies
   // the focused app's selection, and emits the text here. Write it straight into

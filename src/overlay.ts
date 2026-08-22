@@ -8,6 +8,8 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { store } from "./state";
 import { flashStatus } from "./core";
 import { overlaySizeTransition } from "./0_overlaySize";
+import { overlay } from "./0_overlaySettings";
+import { merge } from "rxjs";
 
 // ---- webview zoom (chrome: rail + toolbars + non-terminal panels) ----
 const ZOOM_MIN = 0.5;
@@ -36,37 +38,50 @@ let overlayMiniApplied: boolean | null = null;
 let overlayClickThrough = false;
 
 export function applyOverlay() {
-  const s = store.get();
+  const mini = overlay.mini.$();
+  const mode = overlay.mode.$();
   const app = document.getElementById("app");
-  app?.classList.toggle("overlay-faded", s.overlayFade);
-  app?.classList.toggle("mini", s.miniMode);
+  app?.classList.toggle("overlay-faded", overlay.fade.$());
+  app?.classList.toggle("mini", mini);
   const win = getCurrentWindow();
   // A normal-mode boot keeps the native restored size. Persisted mini mode and
   // later user toggles still apply their authored sizes.
-  const sizeTransition = overlaySizeTransition(overlayMiniApplied, s.miniMode);
-  overlayMiniApplied = s.miniMode;
+  const sizeTransition = overlaySizeTransition(overlayMiniApplied, mini);
+  overlayMiniApplied = mini;
   if (sizeTransition)
     win.setSize(sizeTransition === "mini" ? OVERLAY_MINI : OVERLAY_NORMAL).catch(() => {});
   // Ride along over the target's desktop across Spaces while an overlay is active.
-  win.setVisibleOnAllWorkspaces(s.overlayMode !== "off").catch(() => {});
+  win.setVisibleOnAllWorkspaces(mode !== "off").catch(() => {});
   // Follow: mirror the target's focus (self-focus is filtered from frontmostApp).
-  if (s.overlayMode === "follow" && s.frontmostApp) {
-    if (s.frontmostApp === s.overlayTarget) win.show().catch(() => {});
+  const frontmost = store.get().frontmostApp;
+  if (mode === "follow" && frontmost) {
+    if (frontmost === overlay.target.$()) win.show().catch(() => {});
     else win.hide().catch(() => {});
   }
 }
 
+/** Re-applies on any settings change and on the frontmost app, which is runtime
+ *  state and stays in the store. Each signal replays on subscribe, so this also
+ *  covers the boot pass that restored a persisted mini/fade/follow. */
+export function bindOverlay() {
+  merge(overlay.mode.$, overlay.target.$, overlay.fade.$, overlay.mini.$).subscribe(
+    () => applyOverlay(),
+  );
+  store.subscribe(applyOverlay, ["frontmostApp"]);
+}
+
 export function toggleMiniMode() {
-  store.set({ miniMode: !store.get().miniMode });
-  flashStatus(store.get().miniMode ? "mini mode" : "full mode");
+  const next = !overlay.mini.$();
+  overlay.mini.$(next);
+  flashStatus(next ? "mini mode" : "full mode");
 }
 export function toggleOverlayFade() {
-  store.set({ overlayFade: !store.get().overlayFade });
+  overlay.fade.$(!overlay.fade.$());
 }
 export function cycleOverlayMode() {
-  const next = store.get().overlayMode === "off" ? ("follow" as const) : ("off" as const);
-  store.set({ overlayMode: next });
-  flashStatus(next === "follow" ? `overlay: follow ${store.get().overlayTarget}` : "overlay: off");
+  const next = overlay.mode.$() === "off" ? ("follow" as const) : ("off" as const);
+  overlay.mode.$(next);
+  flashStatus(next === "follow" ? `overlay: follow ${overlay.target.$()}` : "overlay: off");
 }
 // Click-through: the window stops receiving mouse events (they pass to the app
 // behind). Keyboard-only — while on you can't click the window to turn it back

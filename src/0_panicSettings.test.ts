@@ -72,12 +72,12 @@ describe("panic settings", () => {
     expect(panic.on.$()).toBe(true);
   });
 
-  it("cyclePanic advances through the list and wraps", async () => {
+  it("cycleSetting advances through the list and wraps", async () => {
     freshGlobals();
-    const { panic, cyclePanic, PANIC_SUBS } = await import("./0_panicSettings");
+    const { panic, cycleSetting, PANIC_SUBS } = await import("./0_panicSettings");
     const seen = PANIC_SUBS.map(() => {
       const at = panic.sub.$();
-      cyclePanic(panic.sub, PANIC_SUBS);
+      cycleSetting(panic.sub, PANIC_SUBS);
       return at;
     });
     expect(seen).toEqual(["below", "cap", "both", "off"]);
