@@ -32,7 +32,12 @@ export function normalizeTurnLine(line: string): string {
   return line
     .toLowerCase()
     .replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "")
-    .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬`_*~#|]/g, " ")
+    // Inline markdown markers vanish in the rendered pane: `x`, **x**, _x_,
+    // ~~x~~, # heading. Deleting (not spacing) them keeps "(`5a38640`)" equal
+    // to the on-screen "(5a38640)". Cell/border glyphs become spaces since the
+    // renderer pads them out.
+    .replace(/[`_*~#]/g, "")
+    .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

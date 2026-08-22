@@ -119,6 +119,37 @@ describe("terminal turn visibility v2", () => {
       `);
   });
 
+  // Defect receipt 2026-08-22: right-click inside a long assistant report
+  // resolved to the previous user turn. Every report line carried inline code
+  // beside punctuation ("(`5a38640`)"); spacing the backticks out produced
+  // "( 5a38640 )", which never matched the rendered "(5a38640)", so the turn
+  // had no anchor and the user turn's extended span swallowed it.
+  it("matches inline code and bold beside punctuation the way the pane renders them", () => {
+    const said = [
+      "**instant: turn-visibility scan cost** (instant `51c9a89` + hafley-rs `8bb7dc9`)",
+      "",
+      "Receipts: instant PID 80115 rebuilt by `tauri dev`, 6 one-second samples `0.0 3.1` %CPU.",
+    ].join("\n");
+    expect(normalizeTurnLine("instant: turn-visibility scan cost (instant 51c9a89 + hafley-rs 8bb7dc9)"))
+      .toBe(normalizeTurnLine(said.split("\n")[0]));
+    const rows = [
+      { text: "› yes get it fixed with receipts", start: 10, end: 10 },
+      { text: "", start: 11, end: 11 },
+      { text: "instant: turn-visibility scan cost (instant 51c9a89 + hafley-rs 8bb7dc9)", start: 12, end: 12 },
+      { text: "", start: 13, end: 13 },
+      { text: "Receipts: instant PID 80115 rebuilt by tauri dev, 6 one-second samples 0.0 3.1 %CPU.", start: 14, end: 14 },
+    ];
+    const turns = [
+      { ...turn(160, "yes get it fixed with receipts"), role: "user" },
+      turn(192, said),
+    ];
+    const visible = locateVisibleTurns(rows, turns);
+    const at = (row: number) => visible.find((v) => v.bufferStart <= row && row <= v.bufferEnd)?.turn;
+    expect(at(10)).toBe(160);
+    expect(at(12)).toBe(192);
+    expect(at(14)).toBe(192);
+  });
+
   it("normalizes unicode box-drawing characters in tables and borders to match markdown turns", () => {
     const tableScreen = [
       { text: "   Boop mechanism                       Common systems concept", start: 1, end: 1 },
