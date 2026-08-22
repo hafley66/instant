@@ -173,8 +173,46 @@
 
 /* long-press armed: the button detaches and follows the pointer */
 .stfu-stage.is-dragging { cursor: grabbing; }
-/* carried in hand: the plate swings face-on so you can see what you are placing */
-.stfu-stage[data-cap="drag"] .stfu-plate { transform: rotateX(0deg) rotateZ(0deg); }
+/* Radius of the hot core in the carried plate's gradient. Registering it as a
+   <percentage> is what lets a keyframe interpolate it; an unregistered custom
+   property is an unanimatable token string. */
+@property --stfu-halo {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+/* The plate holds preserve-3d, so the pulse rides background and box-shadow.
+   Animating filter or opacity here would flatten all 40 discs onto one plane. */
+@keyframes stfu-carry {
+  0% {
+    --stfu-halo: 12%;
+    box-shadow: 0 60px 80px rgba(0, 0, 0, 0.65), inset 0 0 0 6px #6b5a24,
+      0 0 0 0 rgba(255, 198, 46, 0.5), 0 0 40px rgba(255, 198, 46, 0.25);
+  }
+  70% {
+    box-shadow: 0 60px 80px rgba(0, 0, 0, 0.65), inset 0 0 0 6px #a98c2e,
+      0 0 0 22px rgba(255, 198, 46, 0), 0 0 70px rgba(255, 198, 46, 0.55);
+  }
+  100% {
+    --stfu-halo: 54%;
+    box-shadow: 0 60px 80px rgba(0, 0, 0, 0.65), inset 0 0 0 6px #6b5a24,
+      0 0 0 34px rgba(255, 198, 46, 0), 0 0 40px rgba(255, 198, 46, 0.25);
+  }
+}
+
+/* carried in hand: the plate swings face-on and glows so you can see what you
+   are placing and that the button is still in your grip */
+.stfu-stage[data-cap="drag"] .stfu-plate {
+  transform: rotateX(0deg) rotateZ(0deg);
+  background: radial-gradient(circle at 50% 50%,
+    #ffe27a 0%,
+    #f0b21f var(--stfu-halo),
+    #7a5a12 calc(var(--stfu-halo) + 16%),
+    #1a1710 calc(var(--stfu-halo) + 34%),
+    #0d0f12 100%);
+  animation: stfu-carry 1100ms ease-out infinite alternate;
+}
 
 .stfu-stage.is-dragging .stfu-plate {
   box-shadow: 0 60px 80px rgba(0, 0, 0, 0.65), inset 0 0 0 6px #3a3f47,
