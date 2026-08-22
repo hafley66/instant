@@ -79,6 +79,7 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
         <span class="stfu-top"><span class="stfu-face">${opts.label}</span></span>
       </button>
     </div>
+    <span class="stfu-sub" aria-hidden="true">(please)</span>
     <output class="stfu-status" aria-live="polite"></output>`
 
   const cap = stage.querySelector(".stfu-cap") as HTMLButtonElement

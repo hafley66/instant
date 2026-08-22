@@ -11,7 +11,27 @@
   gap: 14px;
   padding: 40px 0 24px;
   user-select: none;
+  /* containing block for the subtitle and the status readout */
+  position: relative;
 }
+
+/* subtext under the cap, kept out of the plate's 3D context so the tilt and the
+   carry animation never reach it */
+.stfu-sub {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font: 500 30px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 2px;
+  color: #8b939e;
+  pointer-events: none;
+  transition: opacity 140ms linear;
+}
+
+/* the send readout lands on the same bottom line, so the subtitle steps aside */
+.stfu-stage:has(.stfu-status:not(:empty)) .stfu-sub { opacity: 0; }
 
 /* the base the cap sits in, leaning away like it is bolted to the desk */
 .stfu-plate {
@@ -73,7 +93,7 @@
   transform-origin: 100% 100%;
 }
 #stfu-host .stfu-stage { pointer-events: auto; padding: 0; }
-#stfu-host .stfu-status { position: absolute; bottom: -4px; right: 0; font-size: 26px; white-space: nowrap; }
+#stfu-host .stfu-status { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 26px; white-space: nowrap; }
 
 /* Animatable extrusion unit; each disc sits at index * unit along Z.
    initial-value is the RESTING height, never 0px: a registered property falls
