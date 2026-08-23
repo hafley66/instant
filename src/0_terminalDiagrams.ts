@@ -589,7 +589,7 @@ export class TerminalDiagramOverlay {
       } else if (!error && (created || element.classList.contains("term-diagram-error"))) {
         element.className = "term-diagram";
         element.title = "Click to expand diagram";
-        element.innerHTML = diagramSvgMarkup(svg);
+        element.innerHTML = diagramSvgMarkup(svg, fence.language, fence.code);
       }
       return element;
     });
