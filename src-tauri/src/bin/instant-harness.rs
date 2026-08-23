@@ -1,5 +1,5 @@
-use instant_lib::harness_store::{messages, resolve, sessions, HarnessId};
-use std::path::PathBuf;
+use boop_harness::HarnessId;
+use instant_lib::harness_store::{messages, resolve, sessions};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -14,19 +14,15 @@ fn main() {
         eprintln!("--harness must be claude, opencode, codex, or kimi");
         std::process::exit(1)
     };
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        eprintln!("HOME is unset");
-        std::process::exit(1)
-    };
     let cwd = value("--cwd");
     let output = match command {
-        "sessions" => serde_json::to_value(sessions(&home, id, cwd)).unwrap(),
+        "sessions" => serde_json::to_value(sessions(id, cwd)).unwrap(),
         "resolve" => {
             let Some(cwd) = cwd else {
                 eprintln!("resolve requires --cwd");
                 std::process::exit(1)
             };
-            serde_json::to_value(resolve(&home, id, cwd)).unwrap()
+            serde_json::to_value(resolve(id, cwd)).unwrap()
         }
         "messages" => {
             let Some(cwd) = cwd else {
