@@ -1154,6 +1154,21 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   pointer-events: none;
   z-index: 5;
 }
+.term-turn-debug {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 8;
+}
+.term-turn-debug-row {
+  position: absolute;
+  box-sizing: border-box;
+  padding-left: 3px;
+  white-space: pre;
+  font: 10px Menlo, Monaco, monospace;
+  pointer-events: none;
+}
 .term-structured-overlay {
   position: absolute;
   border: 1px solid #5c9f72;
