@@ -11,7 +11,8 @@ import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
 import { panic } from "./0_panicSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays, syncInlineStructuredSelectors } from "./terminal";
+import { turnDebug } from "./0_turnDebugSettings";
+import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   favoriteBoopTurn,
@@ -136,6 +137,17 @@ export function bindPanicChrome() {
   panic.sub.$.subscribe((mode) => {
     const stage = document.querySelector(".stfu-stage") as HTMLElement | null;
     if (stage) stage.dataset.subMode = mode;
+  });
+}
+
+/** Subscribes the turn-attribution debug toggle to its button and to the
+ *  per-terminal overlays. The overlays only exist while the setting is true. */
+export function bindTurnDebugChrome() {
+  turnDebug.on.$.subscribe((on) => {
+    const button = $("#turn-debug-toggle") as HTMLButtonElement;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+    syncTurnDebugOverlays();
   });
 }
 
@@ -437,6 +449,8 @@ export function wireChrome() {
     settings.inlineDiagrams.$(!settings.inlineDiagrams.$());
 
   $("#panic-toggle").onclick = () => panic.on.$(!panic.on.$());
+
+  $("#turn-debug-toggle").onclick = () => turnDebug.on.$(!turnDebug.on.$());
 
   $("#structured-overlay-toggle").onclick = () =>
     settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$());

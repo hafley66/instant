@@ -28,6 +28,7 @@ import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
 import { mountStfuButton } from "./0_stfuButton";
 import { panic, cycleSetting, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
+import { turnDebug } from "./0_turnDebugSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
@@ -109,6 +110,7 @@ import {
   syncMode,
   syncInlineDiagrams,
   bindPanicChrome,
+  bindTurnDebugChrome,
   syncInlineStructured,
   applyToolbar,
   syncSidebar,
@@ -162,6 +164,7 @@ const TAB_COMMANDS: Command[] = [
     const next = await askText("what the panic button sends", panic.body.$());
     if (next !== null) panic.body.$(next);
   } },
+  { id: "view.turnDebug", keys: [], title: "Toggle Turn Attribution Debug Overlay", group: "View", run: () => turnDebug.on.$(!turnDebug.on.$()) },
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => settings.inlineDiagrams.$(!settings.inlineDiagrams.$()) },
   { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$()) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
@@ -263,6 +266,7 @@ async function main() {
     settings.wtAgents.$,
   ).subscribe(() => renderWorktreesPanel());
   bindPanicChrome();
+  bindTurnDebugChrome();
   // Re-apply the persisted recording flag to the backend (default off there).
   invoke("capture_set_enabled", { on: settings.captureEnabled.$() }).catch(
     console.error,

@@ -10,6 +10,8 @@ import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
 import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
+import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
+import { turnDebug } from "./0_turnDebugSettings";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { TerminalWheelRouter } from "./0_terminalWheel";
@@ -87,6 +89,7 @@ export type Tab = {
   diagrams?: TerminalDiagramOverlay;
   structured?: TerminalStructuredOverlay;
   turnVisibility?: TerminalTurnVisibilityV2;
+  turnDebugOverlay?: TerminalTurnDebugOverlay;
   viewport?: XtermViewportAdapter;
   lineAnchors?: TerminalLineAnchors;
   contextQueue?: TerminalContextQueue;
@@ -107,6 +110,21 @@ export function syncInlineDiagramOverlays() {
 }
 export function syncInlineStructuredSelectors() {
   for (const tab of tabs.values()) tab.contextQueue?.paintSelections();
+}
+
+// Construction IS the on-switch: while turnDebug.on reads false no overlay
+// exists, so nothing subscribes to turnVisibility.changes or the xterm events.
+function applyTurnDebugOverlay(tab: Tab) {
+  const wanted = turnDebug.on.$() && !tab.graphics && !!tab.turnVisibility;
+  if (wanted && !tab.turnDebugOverlay && tab.turnVisibility) {
+    tab.turnDebugOverlay = new TerminalTurnDebugOverlay(tab.term, tab.el, tab.turnVisibility);
+  } else if (!wanted && tab.turnDebugOverlay) {
+    tab.turnDebugOverlay.dispose();
+    tab.turnDebugOverlay = undefined;
+  }
+}
+export function syncTurnDebugOverlays() {
+  for (const tab of tabs.values()) applyTurnDebugOverlay(tab);
 }
 const inspectorTextCache = new Map<string, string>();
 
@@ -484,6 +502,7 @@ export function openTab(
     stale?.structured?.dispose();
     stale?.contextQueue?.dispose();
     stale?.lineAnchors?.dispose();
+    stale?.turnDebugOverlay?.dispose();
     stale?.turnVisibility?.dispose();
     stale?.viewport?.dispose();
     stale?.cmdClickGesture?.dispose();
@@ -654,6 +673,7 @@ export function openTab(
     () => diagrams?.viewportScrolled(),
   );
   tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, harness, outputTail: "" });
+  applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -995,6 +1015,7 @@ export function onTermShown(id: string) {
     t.fit.fit();
     t.diagrams?.activate();
     t.contextQueue?.activate();
+    t.turnDebugOverlay?.schedule();
     invoke("resize_pty", {
       id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
     }).catch(() => {});
@@ -1057,6 +1078,7 @@ export function onTermClosed(id: string) {
   t.structured?.dispose();
   t.contextQueue?.dispose();
   t.lineAnchors?.dispose();
+  t.turnDebugOverlay?.dispose();
   t.turnVisibility?.dispose();
   t.viewport?.dispose();
   t.cmdClickGesture?.dispose();
