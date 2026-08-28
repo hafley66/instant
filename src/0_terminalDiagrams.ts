@@ -231,6 +231,23 @@ export function mergeLocatedDiagrams(direct: DiagramFence[], ledger: DiagramFenc
   return fences;
 }
 
+export function projectedDiagramIsCurrent(
+  term: Pick<Terminal, "buffer">,
+  region: ProjectedTurnRegion,
+): boolean {
+  const sourceLines = region.text.split("\n");
+  const matchedRows = region.sourceBufferRows?.slice(1, -1) ?? [];
+  let currentMatches = 0;
+  for (let index = 0; index < matchedRows.length; index++) {
+    const row = matchedRows[index];
+    if (row === null || row === undefined) continue;
+    const source = normalizedDiagramLines(sourceLines[index] ?? "")[0];
+    const visible = normalizedDiagramLines(term.buffer.active.getLine(row)?.translateToString(true) ?? "")[0];
+    if (source && visible && (source === visible || source.includes(visible) || visible.includes(source))) currentMatches++;
+  }
+  return currentMatches >= Math.min(2, sourceLines.filter((line) => normalizedDiagramLines(line).length).length);
+}
+
 export function diagramElementKey(fence: DiagramFence, dark: boolean): string {
   return `${dark}:${fence.language}:${fence.start}:${normalizedDiagramLines(fence.code).join("\n")}`;
 }
@@ -267,7 +284,7 @@ function darkBackground(host: HTMLElement): boolean {
 
 type RenderedDiagram = { svg: string; code: string; lineCount: number };
 
-async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<RenderedDiagram> {
+export async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<RenderedDiagram> {
   if (fence.language === "d2") {
     const lines = fence.code.split("\n");
     let lastError: unknown;
@@ -299,17 +316,13 @@ async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<Render
   });
   const lines = fence.code.split("\n");
   let lastError: unknown;
-  for (let length = lines.length; length > 0; length--) {
+  for (let length = lines.length; length >= 2; length--) {
+    const code = lines.slice(0, length).join("\n");
     try {
-      const rendered = await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, lines.slice(0, length).join("\n"));
+      const rendered = await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, code);
       if (typeof rendered?.svg !== "string") throw new Error("Mermaid renderer returned no SVG markup");
-      const code = lines.slice(0, length).join("\n");
       liveProbe.record({ kind: "operation", name: "terminal.renderMermaid", detail: { dark, sourceBytes: code.length, svgBytes: rendered.svg.length } });
-      return {
-        svg: rendered.svg,
-        code,
-        lineCount: length,
-      };
+      return { svg: rendered.svg, code, lineCount: length };
     } catch (reason) {
       lastError = reason;
       if (!fence.inferred && !fence.stripped) throw reason;
@@ -506,7 +519,7 @@ export class TerminalDiagramOverlay {
     const direct = findDiagramFences(this.term).filter((fence) => !fence.inferred);
     const projected = this.projection?.visible.flatMap((turn) => turn.regions
       .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
-        region.kind === "mermaid" || region.kind === "d2")
+        (region.kind === "mermaid" || region.kind === "d2") && projectedDiagramIsCurrent(this.term, region))
       .map((region): DiagramFence => ({
         language: region.kind,
         code: region.text,

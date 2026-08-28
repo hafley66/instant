@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
-import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, projectedDiagramIsCurrent, renderDiagram, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
 
 function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): Terminal {
   const lines = rows.map((text) => ({
@@ -92,6 +93,65 @@ describe("stripped terminal diagrams", () => {
   });
 });
 
+describe("Mermaid rendering", () => {
+  it("keeps the full source when Mermaid accepts it", async () => {
+    const code = "flowchart LR\n  A --> B\n  B --> C";
+    const render = vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' });
+    const mermaid = { initialize: vi.fn(), render };
+    vi.stubGlobal("window", { mermaid });
+
+    const result = await renderDiagram({ language: "mermaid", code, start: 1, end: 3, inferred: false, stripped: true }, false);
+
+    expect({ calls: render.mock.calls.map(([, source]) => source), result }).toMatchInlineSnapshot(`
+      {
+        "calls": [
+          "flowchart LR
+        A --> B
+        B --> C",
+        ],
+        "result": {
+          "code": "flowchart LR
+        A --> B
+        B --> C",
+          "lineCount": 3,
+          "svg": "<svg viewBox=\"0 0 30 10\"></svg>",
+        },
+      }
+    `);
+    vi.unstubAllGlobals();
+  });
+
+  it("never accepts a diagram declaration without a body", async () => {
+    const code = "flowchart LR\n  A --> B\ntrailing prose";
+    const render = vi.fn(async (_id: string, source: string) => {
+      if (source.includes("trailing prose")) throw new Error("parse failure");
+      return { svg: '<svg viewBox="0 0 30 10"></svg>' };
+    });
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render } });
+
+    const result = await renderDiagram({ language: "mermaid", code, start: 1, end: 3, inferred: false, stripped: true }, false);
+
+    expect({ calls: render.mock.calls.map(([, source]) => source), result }).toMatchInlineSnapshot(`
+      {
+        "calls": [
+          "flowchart LR
+        A --> B
+      trailing prose",
+          "flowchart LR
+        A --> B",
+        ],
+        "result": {
+          "code": "flowchart LR
+        A --> B",
+          "lineCount": 2,
+          "svg": "<svg viewBox=\"0 0 30 10\"></svg>",
+        },
+      }
+    `);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("svgAspectRatio", () => {
   it("reads SVG dimensions and rejects missing renderer output", () => {
     expect([
@@ -129,6 +189,48 @@ describe("diagramElementAtPoint", () => {
 });
 
 describe("diagram location precedence", () => {
+  it("rejects a projected diagram after its buffer rows contain different source", () => {
+    const terminal = terminalWithRows([
+      "flowchart LR",
+      "CURRENT --> GRAPH",
+      "GRAPH --> OUTPUT",
+    ]);
+    const stale: ProjectedTurnRegion = {
+      id: "turn:mermaid:1",
+      turnId: "turn",
+      kind: "mermaid",
+      sourceStart: 1,
+      sourceEnd: 5,
+      text: "flowchart LR\nOLD --> PLAN\nPLAN --> MAIN",
+      bufferStart: 0,
+      bufferEnd: 2,
+      sourceBufferRows: [null, 0, 1, 2, null],
+    };
+
+    expect(projectedDiagramIsCurrent(terminal, stale)).toMatchInlineSnapshot(`false`);
+  });
+
+  it("accepts a projected diagram whose source still occupies its mapped rows", () => {
+    const terminal = terminalWithRows([
+      "flowchart LR",
+      "CURRENT --> GRAPH",
+      "GRAPH --> OUTPUT",
+    ]);
+    const current: ProjectedTurnRegion = {
+      id: "turn:mermaid:1",
+      turnId: "turn",
+      kind: "mermaid",
+      sourceStart: 1,
+      sourceEnd: 5,
+      text: "flowchart LR\nCURRENT --> GRAPH\nGRAPH --> OUTPUT",
+      bufferStart: 0,
+      bufferEnd: 2,
+      sourceBufferRows: [null, 0, 1, 2, null],
+    };
+
+    expect(projectedDiagramIsCurrent(terminal, current)).toMatchInlineSnapshot(`true`);
+  });
+
   it("retains an explicit terminal fence while the ledger has no located match", () => {
     const direct: DiagramFence = {
       language: "d2",
