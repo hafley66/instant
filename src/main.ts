@@ -18,6 +18,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 // menus can be authored in native CSS. No-ops where the browser supports it.
 import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import { store, type CaptureStatus, type Event, type Fav, type FsEntry } from "./state";
+import "@hafley66/md/style.css";
 import { allPanels, pluginCommands, registerPlugin } from "./plugin";
 import { initRail } from "./rail";
 import { recordVisit } from "./nav";
