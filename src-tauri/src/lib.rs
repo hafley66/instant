@@ -9,6 +9,7 @@ mod config;
 mod favorites;
 mod fs;
 mod fs_watch;
+mod refresolve;
 mod harness;
 #[path = "0_harness_store.rs"]
 pub mod harness_store;
@@ -1122,6 +1123,8 @@ pub fn run() {
             fs::save_text,
             fs::delete_file,
             fs::read_text,
+            refresolve::resolve_ref,
+            refresolve::clear_ref_index,
             fs_watch::fs_watch_claim,
             fs_watch::fs_watch_release,
             harness::harness_session,
