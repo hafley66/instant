@@ -120,7 +120,9 @@ fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     store
-        .favorite_add(&turn.said, "", &source, now)
+        // `BoopFavorite` reads `note` as a plain String, so `None` would write
+        // a NULL that fails to deserialize back.
+        .favorite_add(&turn.said, Some(""), &source, now)
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -171,9 +173,124 @@ pub async fn boop_favorite_toggle(turn: BoopTurn) -> Result<Vec<BoopFavorite>, S
     .map_err(|error| error.to_string())?
 }
 
+/// One rendered row range, already joined across wrapped screen lines by the
+/// frontend, since only xterm knows which rows continue which.
+#[derive(Clone, Debug, Deserialize)]
+pub struct LogicalLine {
+    pub text: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocatedTurn {
+    pub session: String,
+    pub harness: String,
+    pub turn: i64,
+    pub ts: i64,
+    pub role: String,
+    pub said: String,
+    pub id: String,
+    pub buffer_start: usize,
+    pub buffer_end: usize,
+    pub anchor_start: usize,
+    pub anchor_end: usize,
+    pub confidence: &'static str,
+}
+
+fn locate_turns(lines: Vec<LogicalLine>, turns: Vec<BoopTurn>) -> Vec<LocatedTurn> {
+    let lines: Vec<boop_turnvis::LogicalLine> = lines
+        .into_iter()
+        .map(|line| boop_turnvis::LogicalLine {
+            text: line.text,
+            start: line.start,
+            end: line.end,
+        })
+        .collect();
+    let turns: Vec<boop_turnvis::BoopTurn> = turns
+        .into_iter()
+        .map(|turn| boop_turnvis::BoopTurn {
+            session: turn.session,
+            harness: turn.harness,
+            turn: turn.turn,
+            ts: turn.ts,
+            role: turn.role,
+            said: turn.said,
+        })
+        .collect();
+    boop_turnvis::locate_visible_turns(&lines, &turns)
+        .into_iter()
+        .map(|found| LocatedTurn {
+            session: found.session,
+            harness: found.harness,
+            turn: found.turn,
+            ts: found.ts,
+            role: found.role,
+            said: found.said,
+            id: found.id,
+            buffer_start: found.buffer_start,
+            buffer_end: found.buffer_end,
+            anchor_start: found.anchor_start,
+            anchor_end: found.anchor_end,
+            confidence: match found.confidence {
+                boop_turnvis::Confidence::Anchored => "anchored",
+                boop_turnvis::Confidence::Extended => "extended",
+            },
+        })
+        .collect()
+}
+
+/// The match is a quadratic dynamic program per turn over a 300-turn window,
+/// so it runs off the IPC thread even though it touches no store and no IO.
+#[tauri::command]
+pub async fn boop_locate_turns(
+    lines: Vec<LogicalLine>,
+    turns: Vec<BoopTurn>,
+) -> Result<Vec<LocatedTurn>, String> {
+    tauri::async_runtime::spawn_blocking(move || locate_turns(lines, turns))
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The IPC boundary is where a correct matcher still ships wrong data: a
+    /// missed rename or a dropped field reads as an empty pane, never a crash.
+    #[test]
+    fn locate_turns_serializes_to_the_shape_the_frontend_golden_records() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../labs/turn-identity/fixtures");
+        let fixtures = [
+            ("claude", "claude"),
+            ("claude-wide", "claude"),
+            ("claude-narrow", "claude"),
+            ("codex", "codex"),
+            ("ccz", "ccz"),
+            ("opencode", "opencode"),
+            ("kimi", "kimi"),
+        ];
+        for (capture_name, turns_name) in fixtures {
+            let capture: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{capture_name}.json")).unwrap()).unwrap();
+            let lines: Vec<LogicalLine> = serde_json::from_value(capture["lines"].clone()).unwrap();
+            let turns: Vec<BoopTurn> =
+                serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{turns_name}.turns.json")).unwrap()).unwrap();
+            let golden: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{capture_name}.golden.json")).unwrap()).unwrap();
+
+            let located = serde_json::to_value(locate_turns(lines, turns)).unwrap();
+            let want = golden["turns"].as_array().unwrap();
+            let got = located.as_array().unwrap();
+            assert_eq!(got.len(), want.len(), "{capture_name}: turn count");
+            for (index, (got, want)) in got.iter().zip(want).enumerate() {
+                for field in ["id", "turn", "role", "confidence", "anchorStart", "anchorEnd", "bufferStart", "bufferEnd"] {
+                    assert_eq!(got[field], want[field], "{capture_name}[{index}] {field}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn boop_turn_shape_matches_cli_ndjson() {

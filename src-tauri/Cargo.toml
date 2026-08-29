@@ -41,6 +41,7 @@ ignore = "0.4"
 boop-mux = { path = "../../hafley-rs/crates/boop-mux" }
 boop-store = { path = "../../hafley-rs/crates/boop-store", default-features = false, features = ["agent-read"] }
 boop-harness = { path = "../../hafley-rs/crates/boop-harness" }
+boop-turnvis = { path = "../../hafley-rs/crates/boop-turnvis" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow"] }
