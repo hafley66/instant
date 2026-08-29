@@ -401,6 +401,8 @@ export class TerminalDiagramOverlay {
       debounceTime(80),
     ).subscribe(() => this.scheduleFrame());
     const onClick = (event: MouseEvent) => {
+      // ⌘-click routes the label as a token (clickrules.ts); plain click zooms.
+      if (event.metaKey) return;
       if (event.button !== 0 || !this.openAtClientPoint(event.clientX, event.clientY)) return;
       event.preventDefault();
       event.stopImmediatePropagation();

@@ -6,12 +6,13 @@
 // filename search under the repo root and offers the matches.
 import { invoke } from "./generated/native";
 import { splitLineRef } from "./termTokens";
+import { crawlCandidates, fuzzyPathHits, uniqueDirNamed, withDirectories } from "./0_pathLadder";
 
-export type RefSource = "absolute" | "cwd" | "repo" | "search";
+export type RefSource = "absolute" | "cwd" | "repo" | "ancestor" | "search" | "fuzzy";
 export type ResolvedRef = { path: string; line?: number; source: RefSource };
 export type ResolveResult =
   | { kind: "hit"; ref: ResolvedRef }
-  | { kind: "choices"; paths: string[]; line?: number }
+  | { kind: "choices"; paths: string[]; line?: number; via: "exact" | "fuzzy" }
   | { kind: "miss" };
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -111,33 +112,68 @@ function searchEntries(root: string): Promise<Entry[]> {
   return entries;
 }
 
-// Resolve a clicked token. `hit` is a file that exists; `choices` is a filename
-// that matched several files (the caller offers them); `miss` means nothing on
-// disk matched, so the token belongs to the search rule.
+// $HOME stops the ancestor crawl. Loaded lazily: core pulls the whole app state
+// graph, and this module is imported by node-env unit tests.
+async function crawlBoundary(): Promise<string> {
+  try {
+    return (await import("./core")).getHomeDir();
+  } catch {
+    return "";
+  }
+}
+
+// The index the fuzzy rung ranks: the gitignore-aware file list plus the
+// directories it implies. Shares searchEntries' cache window.
+const indexCache = new Map<string, { source: Promise<Entry[]>; built: Promise<Entry[]> }>();
+
+function searchIndex(root: string): Promise<Entry[]> {
+  const source = searchEntries(root);
+  const hit = indexCache.get(root);
+  if (hit && hit.source === source) return hit.built;
+  const built = source.then((rows) => withDirectories(rows, root));
+  indexCache.set(root, { source, built });
+  return built;
+}
+
+// Resolve a clicked token. `hit` is a path that exists; `choices` is a token that
+// matched several paths (the caller offers them); `miss` hands it to ripgrep.
 export async function resolveRef(token: string, cwd: string): Promise<ResolveResult> {
   const clean = token.trim().replace(/^['"`]|['"`]$/g, "");
-  if (!clean || !looksLikePath(clean)) return { kind: "miss" };
   const { path: rel, line } = splitLineRef(clean);
-  if (!rel) return { kind: "miss" };
+  if (!clean || !rel) return { kind: "miss" };
 
   if (rel.startsWith("/") || rel.startsWith("~/")) {
     return { kind: "hit", ref: { path: rel, line, source: "absolute" } };
   }
 
   const root = await repoRootFor(cwd);
-  const candidates = candidatePaths(rel, cwd, root);
-  for (const [i, candidate] of candidates.entries()) {
-    if (await exists(candidate)) {
-      return { kind: "hit", ref: { path: candidate, line, source: i === 0 ? "cwd" : "repo" } };
+  const searchRoot = root || cwd;
+  // The line suffix is off before the shape test, so `main.ts:214` is a path.
+  if (!looksLikePath(rel)) return resolveBareWord(rel, searchRoot);
+
+  for (const candidate of crawlCandidates(rel, cwd, root, await crawlBoundary())) {
+    if (await exists(candidate.path)) {
+      return { kind: "hit", ref: { path: candidate.path, line, source: candidate.step as RefSource } };
     }
   }
 
-  const searchRoot = root || cwd;
   if (!searchRoot) return { kind: "miss" };
-  const hits = rankSearchHits(rel, await searchEntries(searchRoot));
+  const entries = await searchEntries(searchRoot);
+  const hits = rankSearchHits(rel, entries);
   if (hits.length === 1) return { kind: "hit", ref: { path: hits[0], line, source: "search" } };
-  if (hits.length > 1) return { kind: "choices", paths: hits.slice(0, 50), line };
+  if (hits.length > 1) return { kind: "choices", paths: hits.slice(0, 50), line, via: "exact" };
+
+  const fuzzy = fuzzyPathHits(rel, await searchIndex(searchRoot), 20);
+  if (fuzzy.length) return { kind: "choices", paths: fuzzy.map((f) => f.path), line, via: "fuzzy" };
   return { kind: "miss" };
+}
+
+// A bare word (no separator, no extension) is a symbol nine times in ten, so it
+// only leaves ripgrep when it names exactly one directory in the index.
+async function resolveBareWord(token: string, searchRoot: string): Promise<ResolveResult> {
+  if (!searchRoot) return { kind: "miss" };
+  const dir = uniqueDirNamed(token, await searchIndex(searchRoot));
+  return dir ? { kind: "hit", ref: { path: dir, source: "fuzzy" } } : { kind: "miss" };
 }
 
 // Drop the caches. Called when a preview's watch reports a change, so a file
@@ -146,4 +182,5 @@ export function clearRefCaches() {
   dirCache.clear();
   searchCache.clear();
   rootCache.clear();
+  indexCache.clear();
 }

@@ -444,6 +444,12 @@ function softPathRows(id: string, bufferRow: number): { rows: WrapRow[]; index: 
   return { rows, index: bufferRow - start, start };
 }
 
+// A diagram label sits over terminal rows it does not belong to, so hover and
+// ⌘-click hand those points to the DOM router (clickrules.ts) instead.
+function overDiagram(e: { target: EventTarget | null }): boolean {
+  return !!(e.target as HTMLElement | null)?.closest?.(".term-diagrams");
+}
+
 // The word/path token under the pointer, for a ⌘-click miss (no link hit) and
 // for the hover card. Maps clientX/Y to a buffer cell through the screen-cell
 // geometry, then hands the row (joined across any wrap) to the same scanner the
@@ -760,6 +766,7 @@ export function openTab(
     "mousemove",
     (e) => {
       if (inspectorPinned) return;
+      if (overDiagram(e)) return;
       if (!e.metaKey) { inspectorRequest++; hideInspector(); return; }
       const token = wordAt(id, e.clientX, e.clientY);
       const cwd = tabMetaById(id)?.cwd ?? "";
@@ -828,7 +835,7 @@ export function openTab(
   el.addEventListener(
     "pointerdown",
     (e) => {
-      if (!e.metaKey || e.button !== 0) return;
+      if (!e.metaKey || e.button !== 0 || overDiagram(e)) return;
       const sel = term.getSelection().trim();
       const word = sel || wordAt(id, e.clientX, e.clientY);
       if (!word) return;

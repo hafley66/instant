@@ -1121,6 +1121,12 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   background: var(--term-bg);
   pointer-events: none;
 }
+/* Labels are the only clickable part of the click-through diagram layer: a
+   ⌘-click on one routes its text as a token (clickrules.ts). */
+.term-diagram svg text,
+.term-diagram svg tspan {
+  pointer-events: auto;
+}
 .term-diagram[data-diagram-theme="light"] {
   color: #111827;
   background: #f8fafc;

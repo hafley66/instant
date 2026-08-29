@@ -104,7 +104,10 @@ const DIRS: Record<string, string[]> = {
   [`${ROOT}/src/mdview`]: [`${ROOT}/src/mdview/MdPanel.tsx`],
   [`${ROOT}/e2e`]: [`${ROOT}/e2e/MdPanel.tsx`],
 };
-const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`]);
+// /tmp is the harness $HOME, so /tmp/notes is an ancestor rung of the cwd: a
+// token that misses under the repo is found by crawling up to it.
+DIRS["/tmp/notes"] = ["/tmp/notes/plan.md"];
+const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`, "/tmp/notes"]);
 const REPORT = `${ROOT}/.worktrees/terminal-inline-diagrams/playwright-report/index.html`;
 DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
 
@@ -200,6 +203,11 @@ const BOOP_TURNS = E2E_STRUCTURED ? [{
   // Two MdPanel.tsx copies make a bare filename ambiguous on purpose, which is
   // what puts the resolver into its picker branch.
   worktree_at: { worktree: ROOT, branch: "main", head: "e2e", is_main: true },
+  // The rule rung. Returns rg-shaped stdout so the results panel has rows.
+  run_click: (args: Record<string, unknown> | undefined) => {
+    (window as Window & { __runClickArgs?: unknown }).__runClickArgs = args;
+    return `src/preview.ts:12:const preview = 1\n`;
+  },
   search_files: [
     entry(`${ROOT}/src/main.ts`),
     entry(`${ROOT}/src/preview.ts`),

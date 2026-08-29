@@ -51,7 +51,7 @@ cmdClickRouter.register({
   // paths and bare filenames that do not exist under the shell's directory.
   const result = await resolveRef(token, cwd);
   if (result.kind === "choices") {
-    openRefChoices(token, result.paths, result.line, cwd);
+    openRefChoices(token, result.paths, result.line, cwd, result.via);
     return true;
   }
   // A file we located opens in Instant: markdown in the mdview tab, everything
@@ -68,7 +68,12 @@ cmdClickRouter.register({
 
 cmdClickRouter.register({
   id: "configured-rule",
-  async handle({ token, cwd }) {
+  handle: ({ token, cwd }) => runClickRule(token, cwd),
+});
+
+// The rule half of the ladder: whatever the token is, run its configured command
+// (the catch-all greps) and adopt the stdout into a results panel.
+export async function runClickRule(token: string, cwd: string): Promise<boolean> {
   const rule = clickRuleFor(token);
   if (!rule) return false;
   const command = rule.command.replace(/\$1/g, () => shQuote(token));
@@ -80,8 +85,7 @@ cmdClickRouter.register({
   }
   if (out.trim()) openClickPanel(token, out, cwd, rule);
   return true;
-  },
-});
+}
 
 export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown") {
   return cmdClickRouter.dispatch({ token: rawToken, cwd, source });
@@ -95,14 +99,50 @@ const activeCwd = (): string => {
   return id ? tabMetaById(id)?.cwd ?? "" : "";
 };
 
-// The word under a viewport point in DOM text (preview / rg panels). Uses the
-// terminal's scanner, so a token clicked in a panel and the same token clicked
-// in the terminal produce identical text.
+// The word under a viewport point in DOM text (preview / rg / markdown panels).
+// Uses the terminal's scanner, so the same token reads identically everywhere.
 function domWordAt(x: number, y: number): string {
   const range = document.caretRangeFromPoint?.(x, y);
   const node = range?.startContainer;
   if (!range || !node || node.nodeType !== Node.TEXT_NODE) return "";
   return tokenAtColumn(node.nodeValue ?? "", range.startOffset)?.text ?? "";
+}
+
+// SVG text (mermaid / d2 labels) has no caret range, so the character index comes
+// from the SVG text API after transforming the click into user space.
+export function svgWordAt(target: Element, x: number, y: number): string {
+  const text = target.closest?.("text") as SVGTextContentElement | null;
+  if (!text) return "";
+  const content = text.textContent ?? "";
+  if (!content.trim()) return "";
+  try {
+    const owner = (text as unknown as SVGGraphicsElement).ownerSVGElement;
+    const ctm = (text as unknown as SVGGraphicsElement).getScreenCTM?.();
+    if (owner && ctm) {
+      const point = owner.createSVGPoint();
+      point.x = x;
+      point.y = y;
+      const local = point.matrixTransform(ctm.inverse());
+      const index = text.getCharNumAtPosition(local);
+      if (index >= 0) return tokenAtColumn(content, index)?.text ?? "";
+    }
+  } catch {
+    /* older engines: fall through to the whole label */
+  }
+  const words = content.trim().split(/\s+/);
+  return words.length === 1 ? words[0] : "";
+}
+
+// Every non-terminal surface a ⌘-click routes from. Terminals self-handle (they
+// own cell-to-pixel mapping); diagrams and SVG documents come in through here.
+const CLICK_SURFACES = ".fs-preview, .rg-panel, .mdview-root, .md-body, .term-diagrams, .svg-document-viewer";
+const CLICK_SKIP = ".fs-back, .rg-cfg, .rg-grep, .rg-file, .rg-hit, a, button, input, textarea, select";
+
+function surfaceOf(el: HTMLElement): CmdClickSource {
+  if (el.closest(".rg-panel")) return "results";
+  if (el.closest(".term-diagrams, .svg-document-viewer")) return "diagram";
+  if (el.closest(".mdview-root, .md-body")) return "markdown";
+  return "preview";
 }
 
 // ⌘-click on free text inside a preview / rg panel runs the same clickRules
@@ -115,15 +155,17 @@ export function wireDomCmdClick() {
     (e) => {
       if (!e.metaKey || e.button !== 0) return;
       const t = e.target as HTMLElement;
-      if (t.closest(".term-host") || t.closest(".xterm")) return; // terminals self-handle
-      if (!t.closest(".fs-preview, .rg-panel")) return;
-      if (t.closest(".fs-back, .rg-cfg, .rg-file, .rg-hit, a, button")) return;
+      const surface = t.closest?.(CLICK_SURFACES);
+      if (!surface) return;
+      // A diagram rendered over a terminal is ours; the terminal grid is not.
+      if (!t.closest(".term-diagrams") && (t.closest(".term-host") || t.closest(".xterm"))) return;
+      if (t.closest(CLICK_SKIP)) return;
       const sel = window.getSelection()?.toString().trim() ?? "";
-      const word = sel || domWordAt(e.clientX, e.clientY);
+      const word = sel || svgWordAt(t, e.clientX, e.clientY) || domWordAt(e.clientX, e.clientY);
       if (!word) return;
       e.preventDefault();
       e.stopPropagation();
-      void dispatchClick(word, activeCwd(), t.closest(".rg-panel") ? "results" : "preview");
+      void dispatchClick(word, activeCwd(), surfaceOf(t));
     },
     { capture: true },
   );
@@ -133,12 +175,17 @@ export function wireDomCmdClick() {
 // across packages) opens the same results panel a search would, one row per
 // candidate, ranked closest first. Rows carry the token's line number so the
 // preview lands on the right row whichever file the user picks.
-function openRefChoices(token: string, paths: string[], line: number | undefined, cwd: string) {
+function openRefChoices(
+  token: string,
+  paths: string[],
+  line: number | undefined,
+  cwd: string,
+  via: "exact" | "fuzzy" = "exact",
+) {
   const output = paths.map((p) => `${p}:${line ?? 1}:${dirOf(p, cwd)}`).join("\n");
-  openClickPanel(token, output, cwd, {
-    pattern: "",
-    command: `resolve ${token} (${paths.length} candidates)`,
-  });
+  const verb = via === "fuzzy" ? "fzf" : "resolve";
+  const count = `${paths.length} candidate${paths.length === 1 ? "" : "s"}`;
+  openClickPanel(token, output, cwd, { pattern: "", command: `${verb} ${token} (${count})` });
 }
 
 // The directory a candidate lives in, relative to the terminal cwd when it sits
@@ -210,12 +257,19 @@ function renderClickOutput(el: HTMLElement, query: string, output: string, cwd: 
       : "") +
     `</div>` +
     `<div class="rg-sub">ran <code>${escapeHtml(rule.command)}</code> · ` +
+    `<a class="rg-grep" href="#">grep it</a> · ` +
     `<a class="rg-cfg" href="#">config</a></div>` +
     `<div class="rg-body">${body || '<div class="rg-plain">no matches</div>'}</div>`;
 
   el.querySelector<HTMLElement>(".rg-cfg")?.addEventListener("click", (e) => {
     e.preventDefault();
     openClickConfigPanel();
+  });
+  // The path rungs answered, and the answer was wrong: run the rule anyway.
+  el.querySelector<HTMLElement>(".rg-grep")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void runClickRule(query, cwd);
   });
   el.querySelectorAll<HTMLElement>(".rg-body [data-path]").forEach((node) =>
     node.addEventListener("click", () => {

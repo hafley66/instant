@@ -1,6 +1,6 @@
 import { Subject } from "rxjs";
 
-export type CmdClickSource = "terminal" | "preview" | "results" | "unknown";
+export type CmdClickSource = "terminal" | "preview" | "results" | "markdown" | "diagram" | "unknown";
 
 export type CmdClickRequest = {
   token: string;
