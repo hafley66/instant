@@ -40,7 +40,6 @@
     "dockview": "^6.6.1",
     "dockview-core": "^6.6.1",
     "dompurify": "^3.4.11",
-    "fzf": "^0.5.2",
     "json-logic-js": "^2.0.5",
     "jsonata": "^2.2.2",
     "lodash": "^4.17.21",

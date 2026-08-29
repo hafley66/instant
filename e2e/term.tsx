@@ -172,6 +172,38 @@ const BOOP_TURNS = E2E_STRUCTURED ? [{
   ].join("\n"),
 }];
 
+// Stands in for the Rust resolver (src-tauri/src/refresolve.rs), whose rungs are
+// tested there. Overrides name the rung each ⌘-click test wants to exercise.
+const RESOLVE_FILES = [
+  `${ROOT}/src/main.ts`,
+  `${ROOT}/src/preview.ts`,
+  `${ROOT}/src/mdview/MdPanel.tsx`,
+  `${ROOT}/e2e/MdPanel.tsx`,
+  REPORT,
+];
+const RESOLVE_OVERRIDES: Record<string, unknown> = {
+  "notes/plan.md": { kind: "hit", ref: { path: "/tmp/notes/plan.md", source: "ancestor" } },
+  "src/prevew.ts": { kind: "choices", paths: [`${ROOT}/src/preview.ts`], via: "fuzzy" },
+  mdview: { kind: "hit", ref: { path: `${ROOT}/src/mdview`, source: "fuzzy" } },
+};
+
+function resolveRefFixture(token: string, cwd: string) {
+  const match = token.match(/^(.*):(\d+)$/);
+  const rel = match ? match[1] : token;
+  const line = match ? Number(match[2]) : undefined;
+  const override = RESOLVE_OVERRIDES[rel];
+  if (override) return line ? { ...override, line } : override;
+  if (rel.startsWith("/") || rel.startsWith("~/")) {
+    return { kind: "hit", ref: { path: rel, line, source: "absolute" } };
+  }
+  const direct = `${cwd.replace(/\/$/, "")}/${rel}`;
+  if (RESOLVE_FILES.includes(direct)) return { kind: "hit", ref: { path: direct, line, source: "cwd" } };
+  const named = RESOLVE_FILES.filter((path) => path.endsWith(`/${rel}`));
+  if (named.length === 1) return { kind: "hit", ref: { path: named[0], line, source: "search" } };
+  if (named.length > 1) return { kind: "choices", paths: named, line, via: "exact" };
+  return { kind: "miss" };
+}
+
 (window as E2eWindow).__instantE2eNativeResults = {
   boop_mux_capture: "",
   boop_favorites: [],
@@ -199,21 +231,14 @@ const BOOP_TURNS = E2E_STRUCTURED ? [{
       entries: children.map((c) => entry(c, DIR_SET.has(c))),
     };
   },
-  // The repo root a cwd belongs to, and the gitignore-aware file list under it.
-  // Two MdPanel.tsx copies make a bare filename ambiguous on purpose, which is
-  // what puts the resolver into its picker branch.
   worktree_at: { worktree: ROOT, branch: "main", head: "e2e", is_main: true },
   // The rule rung. Returns rg-shaped stdout so the results panel has rows.
   run_click: (args: Record<string, unknown> | undefined) => {
     (window as Window & { __runClickArgs?: unknown }).__runClickArgs = args;
     return `src/preview.ts:12:const preview = 1\n`;
   },
-  search_files: [
-    entry(`${ROOT}/src/main.ts`),
-    entry(`${ROOT}/src/preview.ts`),
-    entry(`${ROOT}/src/mdview/MdPanel.tsx`),
-    entry(`${ROOT}/e2e/MdPanel.tsx`),
-  ],
+  resolve_ref: (args: Record<string, unknown> | undefined) =>
+    resolveRefFixture(String(args?.token ?? ""), String(args?.cwd ?? ROOT)),
   // harness_session resolves a session id for a (tool, cwd) probe. The Turns
   // pane resolver probes every editor; return one only for Codex so a single
   // transcript node renders. A function

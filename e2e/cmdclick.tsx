@@ -1,62 +1,23 @@
 // E2E bootstrap for ⌘-click routing: one static node per surface the router
-// listens to, plus resolveRef on window so the path ladder is drivable directly.
+// listens to. Path resolution is Rust, so the resolver is stubbed out here.
 import "../src/styles.css";
-import { setHomeDir } from "../src/core";
 import { cmdClickRouter, wireDomCmdClick } from "../src/clickrules";
-import { resolveRef, type ResolveResult } from "../src/refResolve";
 
 const HOME = "/tmp/ladder-home";
 const REPO = `${HOME}/projects/instant`;
-const SIBLING = `${HOME}/projects/instant-lanes`;
 const CWD = `${REPO}/src`;
 
 type E2eWindow = Window & {
   __instantE2eNativeResults?: Record<string, unknown>;
   __cmdClickEvents?: Array<{ token: string; cwd: string; source: string; routeId: string | null }>;
-  __resolveRef?: (token: string, cwd: string) => Promise<ResolveResult>;
   __runClickArgs?: Record<string, unknown>;
   __cwd?: string;
 };
 
-const entry = (path: string, is_dir = false) => ({
-  path,
-  name: path.slice(path.lastIndexOf("/") + 1),
-  is_dir,
-});
-
-// Files under the repo root, as search_files reports them (files only).
-const FILES = [
-  `${REPO}/src/main.ts`,
-  `${REPO}/src/preview.ts`,
-  `${REPO}/src/mdview/MdPanel.tsx`,
-  `${REPO}/e2e/MdPanel.tsx`,
-  `${REPO}/packages/patchset-diff/src/index.ts`,
-];
-
-// Directories list_dir can answer for, which is what the crawl rungs probe.
-const DIRS: Record<string, string[]> = {
-  [HOME]: [`${HOME}/projects`, `${HOME}/TODO.md`],
-  [`${HOME}/projects`]: [REPO, SIBLING],
-  [SIBLING]: [`${SIBLING}/README.md`],
-  [REPO]: [`${REPO}/src`, `${REPO}/e2e`, `${REPO}/packages`],
-  [`${REPO}/src`]: [`${REPO}/src/main.ts`, `${REPO}/src/preview.ts`, `${REPO}/src/mdview`],
-  [`${REPO}/src/mdview`]: [`${REPO}/src/mdview/MdPanel.tsx`],
-  [`${REPO}/e2e`]: [`${REPO}/e2e/MdPanel.tsx`],
-  [`${REPO}/packages`]: [`${REPO}/packages/patchset-diff`],
-  [`${REPO}/packages/patchset-diff`]: [`${REPO}/packages/patchset-diff/src`],
-};
-
-setHomeDir(HOME);
-
 (window as E2eWindow).__instantE2eNativeResults = {
-  worktree_at: { worktree: REPO, branch: "main", head: "e2e", is_main: true },
-  search_files: FILES.map((path) => entry(path)),
-  list_dir: (args: Record<string, unknown> | undefined) => {
-    const path = String(args?.path ?? HOME);
-    const children = DIRS[path];
-    if (!children) throw new Error(`ENOENT ${path}`);
-    return { path, parent: path.slice(0, path.lastIndexOf("/")) || "/", entries: children.map((c) => entry(c, !!DIRS[c])) };
-  },
+  // Resolution lives in Rust (src-tauri/src/refresolve.rs); these tests are about
+  // which surface a ⌘-click comes from, so the resolver never runs.
+  resolve_ref: { kind: "miss" },
   run_click: (args: Record<string, unknown> | undefined) => {
     (window as E2eWindow).__runClickArgs = args;
     return `src/preview.ts:12:const preview = 1\n`;
@@ -66,7 +27,6 @@ setHomeDir(HOME);
 
 const events: Array<{ token: string; cwd: string; source: string; routeId: string | null }> = [];
 (window as E2eWindow).__cmdClickEvents = events;
-(window as E2eWindow).__resolveRef = resolveRef;
 (window as E2eWindow).__cwd = CWD;
 
 // The app's routes open dock panels; this harness is a bare page, so the router

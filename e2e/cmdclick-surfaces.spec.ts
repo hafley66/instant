@@ -1,17 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Two contracts on one page (e2e/cmdclick.tsx): every surface routes a ⌘-click
-// to the same token scanner, and the path ladder answers before ripgrep does.
-
-type ResolveResult =
-  | { kind: "hit"; ref: { path: string; line?: number; source: string } }
-  | { kind: "choices"; paths: string[]; line?: number; via: "exact" | "fuzzy" }
-  | { kind: "miss" };
+// One contract per surface (e2e/cmdclick.tsx): a ⌘-click anywhere in the app
+// reaches the router with the token under the pointer. The ladder that resolves
+// that token is Rust, and is tested in src-tauri/src/refresolve.rs.
 
 declare global {
   interface Window {
     __cmdClickEvents?: Array<{ token: string; cwd: string; source: string; routeId: string | null }>;
-    __resolveRef?: (token: string, cwd: string) => Promise<ResolveResult>;
     __cwd?: string;
   }
 }
@@ -22,11 +17,7 @@ const REPO = `${HOME}/projects/instant`;
 async function open(page: Page) {
   await page.goto("/e2e-cmdclick.html?e2e=1");
   await expect(page.getByTestId("surface-preview")).toBeVisible();
-  await page.waitForFunction(() => !!window.__resolveRef);
 }
-
-const resolve = (page: Page, token: string) =>
-  page.evaluate(([t]) => window.__resolveRef!(t, window.__cwd!), [token] as const);
 
 // The viewport point of `needle` inside a surface, taken from a real Range so
 // SVG <text> and HTML text are addressed the same way.
@@ -104,79 +95,5 @@ test.describe("surfaces", () => {
     });
     await cmdClick(page, "surface-markdown", "src/preview.ts");
     await expect.poll(() => lastEvent(page)).toMatchObject({ token: "src/preview.ts", source: "markdown" });
-  });
-});
-
-test.describe("path ladder", () => {
-  test("a file under the cwd wins before anything else runs", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "main.ts")).toEqual({
-      kind: "hit",
-      ref: { path: `${REPO}/src/main.ts`, source: "cwd" },
-    });
-  });
-
-  test("a repo-relative path resolves from the repo root", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "e2e/MdPanel.tsx")).toMatchObject({
-      kind: "hit",
-      ref: { path: `${REPO}/e2e/MdPanel.tsx`, source: "repo" },
-    });
-  });
-
-  test("the crawl reaches a sibling repo above the root", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "instant-lanes/README.md")).toMatchObject({
-      kind: "hit",
-      ref: { path: `${HOME}/projects/instant-lanes/README.md`, source: "ancestor" },
-    });
-  });
-
-  test("the crawl stops at $HOME and finds a file sitting there", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "TODO.md")).toMatchObject({
-      kind: "hit",
-      ref: { path: `${HOME}/TODO.md`, source: "ancestor" },
-    });
-  });
-
-  test("a line suffix survives the crawl", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "main.ts:214")).toEqual({
-      kind: "hit",
-      ref: { path: `${REPO}/src/main.ts`, line: 214, source: "cwd" },
-    });
-  });
-
-  test("an ambiguous filename offers the exact matches", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "MdPanel.tsx")).toMatchObject({
-      kind: "choices",
-      via: "exact",
-      paths: [`${REPO}/e2e/MdPanel.tsx`, `${REPO}/src/mdview/MdPanel.tsx`],
-    });
-  });
-
-  test("a misspelled filename comes back from fzf instead of ripgrep", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "prevew.ts")).toMatchObject({
-      kind: "choices",
-      via: "fuzzy",
-      paths: [`${REPO}/src/preview.ts`],
-    });
-  });
-
-  test("a bare word naming exactly one folder opens the folder", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "patchset-diff")).toMatchObject({
-      kind: "hit",
-      ref: { path: `${REPO}/packages/patchset-diff`, source: "fuzzy" },
-    });
-  });
-
-  test("a token that names nothing is left to ripgrep", async ({ page }) => {
-    await open(page);
-    expect(await resolve(page, "qqqzzz.ts")).toEqual({ kind: "miss" });
-    expect(await resolve(page, "renderPathInto")).toEqual({ kind: "miss" });
   });
 });
