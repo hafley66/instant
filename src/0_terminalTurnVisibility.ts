@@ -15,6 +15,8 @@ export type VisibleTurn = BoopTurn & {
   id: string;
   bufferStart: number;
   bufferEnd: number;
+  anchorStart: number;
+  anchorEnd: number;
   regions: ProjectedTurnRegion[];
   confidence: "anchored" | "extended";
   provenance: "xterm+boop" | "xterm+tmux+boop";
@@ -31,13 +33,13 @@ const turnId = (turn: Pick<BoopTurn, "session" | "turn">) => `${turn.session}:${
 export function normalizeTurnLine(line: string): string {
   return line
     .toLowerCase()
-    .replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "")
+    .replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬✨✳✻⎿━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "")
     // Inline markdown markers vanish in the rendered pane: `x`, **x**, _x_,
     // ~~x~~, # heading. Deleting (not spacing) them keeps "(`5a38640`)" equal
     // to the on-screen "(5a38640)". Cell/border glyphs become spaces since the
     // renderer pads them out.
     .replace(/[`_*~#]/g, "")
-    .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬|]/g, " ")
+    .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬|│┃┆┊╎╏┌┐└┘├┤┬┴]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -48,9 +50,12 @@ type TurnMatch = {
   sourceSpan: number;
 };
 
+// A short source line found inside a long rendered row is a coincidence, so
+// containment either way must cover half the longer string.
 function lineMatches(screen: string, source: string): boolean {
   return screen === source || source.length >= 8 && (
-    screen.includes(source) || source.includes(screen) && screen.length >= 12
+    screen.includes(source) && source.length * 2 >= screen.length
+    || source.includes(screen) && screen.length >= 12
   );
 }
 
@@ -93,11 +98,55 @@ function monotonicTurnMatch(
   return { source, hits, sourceSpan };
 }
 
+// The monotonic match is 1:1, so a source line an app hard-wraps across
+// several screen rows anchors only one of them; walk the rest back in.
+function growAnchors(
+  visible: VisibleTurn[],
+  screen: Array<LogicalLine & { normalized: string }>,
+  sources: TurnMatch["source"][],
+) {
+  const rows = screen.filter((row) => row.normalized);
+  const anchored = new Map(visible.map((turn) => [turn.id, turn]));
+  const ownerAt = new Map<number, string>();
+  for (const turn of visible) {
+    for (const row of rows) {
+      if (row.start >= turn.anchorStart && row.end <= turn.anchorEnd) ownerAt.set(row.start, turn.id);
+    }
+  }
+  for (const [id, turn] of anchored) {
+    const source = sources.find((candidate) => candidate.id === id);
+    if (!source) continue;
+    const claims = (row: LogicalLine & { normalized: string }) =>
+      (ownerAt.get(row.start) ?? id) === id
+      && source.normalized.some((line) => lineMatches(row.normalized, line));
+    const first = rows.findIndex((row) => row.start >= turn.anchorStart);
+    if (first < 0) continue;
+    let low = first;
+    while (low > 0 && claims(rows[low - 1])) low -= 1;
+    let high = rows.findIndex((row) => row.end >= turn.anchorEnd);
+    if (high < 0) high = rows.length - 1;
+    while (high + 1 < rows.length && claims(rows[high + 1])) high += 1;
+    turn.anchorStart = Math.min(turn.anchorStart, rows[low].start);
+    turn.anchorEnd = Math.max(turn.anchorEnd, rows[high].end);
+    turn.bufferStart = turn.anchorStart;
+    turn.bufferEnd = turn.anchorEnd;
+    for (let index = low; index <= high; index += 1) ownerAt.set(rows[index].start, id);
+  }
+}
+
+// A pane tmux also sees is a pane whose rows two readers agree on.
+export function tmuxConfirms(lines: LogicalLine[], tmuxCapture: string): boolean {
+  const tmuxLines = new Set(tmuxCapture.split("\n").map(normalizeTurnLine).filter(Boolean));
+  return lines.some((line) => {
+    const normalized = normalizeTurnLine(line.text);
+    return normalized.length > 0 && tmuxLines.has(normalized);
+  });
+}
+
 export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmuxCapture = ""): VisibleTurn[] {
   if (typeof tmuxCapture !== "string") tmuxCapture = "";
   const screen = lines.map((line) => ({ ...line, normalized: normalizeTurnLine(line.text) }));
-  const tmuxLines = new Set(tmuxCapture.split("\n").map(normalizeTurnLine).filter(Boolean));
-  const tmuxBacked = screen.some((line) => line.normalized && tmuxLines.has(line.normalized));
+  const tmuxBacked = tmuxConfirms(lines, tmuxCapture);
   const sources = turns.map((turn) => {
     const id = turnId(turn);
     const normalized = turn.said
@@ -122,33 +171,55 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
     const unclaimed = hits.filter((hit) => !claimedRows.has(hit.start));
     if (unclaimed.length * 2 < hits.length) continue;
     for (const hit of hits) claimedRows.add(hit.start);
+    const anchorStart = Math.min(...hits.map((hit) => hit.start));
+    const anchorEnd = Math.max(...hits.map((hit) => hit.end));
     visible.push({
       ...source.turn,
       id: source.id,
-      bufferStart: Math.min(...hits.map((hit) => hit.start)),
-      bufferEnd: Math.max(...hits.map((hit) => hit.end)),
+      bufferStart: anchorStart,
+      bufferEnd: anchorEnd,
+      anchorStart,
+      anchorEnd,
       regions: [],
       confidence: "anchored",
       provenance: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
     });
   }
+  growAnchors(visible, screen, sources);
   const sorted = visible.sort((a, b) => a.bufferStart - b.bufferStart || a.turn - b.turn);
   if (!lines.length) return sorted;
   const viewportStart = lines[0].start;
   const viewportEnd = lines[lines.length - 1].end;
-  return sorted.map((turn, index) => {
-    const span = {
-      bufferStart: index === 0 ? viewportStart : turn.bufferStart,
-      bufferEnd: index + 1 < sorted.length ? sorted[index + 1].bufferStart - 1 : viewportEnd,
-    };
-    const extended = span.bufferStart !== turn.bufferStart || span.bufferEnd !== turn.bufferEnd;
-    return {
-      ...turn,
-      ...span,
-      confidence: extended ? "extended" : "anchored",
-      regions: projectTurnRegions(turn.id, turn.said, span, lines, normalizeTurnLine),
-    };
-  });
+  return attachTurnRegions(
+    sorted.map((turn, index) => {
+      const span = {
+        bufferStart: index === 0 ? viewportStart : turn.bufferStart,
+        bufferEnd: index + 1 < sorted.length ? sorted[index + 1].bufferStart - 1 : viewportEnd,
+      };
+      const extended = span.bufferStart !== turn.bufferStart || span.bufferEnd !== turn.bufferEnd;
+      return { ...turn, ...span, confidence: extended ? "extended" : "anchored" } satisfies TurnSpan;
+    }),
+    lines,
+    tmuxBacked,
+  );
+}
+
+// What `locateVisibleTurns` and the Rust port in boop-turnvis both produce.
+// Regions stay on this side, since only the frontend renders them.
+export type TurnSpan = Omit<VisibleTurn, "regions" | "provenance">;
+
+export type TurnLocator = (lines: LogicalLine[], turns: BoopTurn[]) => Promise<TurnSpan[]>;
+
+export function attachTurnRegions(
+  spans: TurnSpan[],
+  lines: LogicalLine[],
+  tmuxBacked = false,
+): VisibleTurn[] {
+  return spans.map((span) => ({
+    ...span,
+    regions: projectTurnRegions(span.id, span.said, span, lines, normalizeTurnLine),
+    provenance: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
+  }));
 }
 
 export class TerminalTurnVisibilityV2 {
@@ -166,6 +237,9 @@ export class TerminalTurnVisibilityV2 {
     readonly viewport: XtermViewport,
     readonly turns: () => Promise<BoopTurn[]>,
     readonly tmux?: TmuxPane,
+    // boop-turnvis runs the same algorithm off the render thread. Absent it,
+    // and whenever it errors, the TypeScript matcher answers instead.
+    readonly locate?: TurnLocator,
   ) {
     const changes = viewport.changes.pipe(share());
     this.subscription.add(changes.pipe(
@@ -211,7 +285,9 @@ export class TerminalTurnVisibilityV2 {
       this.tmux?.captureVisible().catch(() => "") ?? Promise.resolve(""),
     ]);
     if (this.disposed || generation !== this.generation) return;
-    const next = locateVisibleTurns(this.viewport.readVisibleLogicalLines(), turns, tmuxCapture);
+    const lines = this.viewport.readVisibleLogicalLines();
+    const next = await this.located(lines, turns, tmuxCapture);
+    if (this.disposed || generation !== this.generation) return;
     const before = new Map(this.visible.map((turn) => [turn.id, turn]));
     const after = new Map(next.map((turn) => [turn.id, turn]));
     const entered = next.filter((turn) => !before.has(turn.id));
@@ -224,12 +300,21 @@ export class TerminalTurnVisibilityV2 {
     if (entered.length || exited.length || moved) this.updates.next({ visible: next, entered, exited });
   }
 
+  async located(lines: LogicalLine[], turns: BoopTurn[], tmuxCapture: string): Promise<VisibleTurn[]> {
+    if (!this.locate) return locateVisibleTurns(lines, turns, tmuxCapture);
+    return this.locate(lines, turns)
+      .then((spans) => attachTurnRegions(spans, lines, tmuxConfirms(lines, tmuxCapture)))
+      .catch(() => locateVisibleTurns(lines, turns, tmuxCapture));
+  }
+
   bufferRowAtClientPoint(clientY: number): number | null {
     return this.viewport.bufferRowAtClientY(clientY);
   }
 
+  // Identity answers from the rows a turn's own text matched. The extended
+  // span exists to carry regions and would name a turn for terminal chrome.
   turnAtBufferRow(bufferRow: number): VisibleTurn | null {
-    return this.visible.find((turn) => turn.bufferStart <= bufferRow && bufferRow <= turn.bufferEnd) ?? null;
+    return this.visible.find((turn) => turn.anchorStart <= bufferRow && bufferRow <= turn.anchorEnd) ?? null;
   }
 
   turnAtClientPoint(_clientX: number, clientY: number): VisibleTurn | null {
