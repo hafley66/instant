@@ -2,7 +2,7 @@
 // (or free text inside a preview / rg panel) runs the first clickRules rule whose
 // regex matches it. The token is shell-quoted into `$1`, the command runs in the
 // pane cwd via run_click, and any stdout opens a results panel on the right.
-import { invoke } from "./generated/native";
+import { clickRpc } from "./ipc/contract";
 import { DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { escapeHtml, shQuote } from "./core";
@@ -79,7 +79,7 @@ export async function runClickRule(token: string, cwd: string): Promise<boolean>
   const command = rule.command.replace(/\$1/g, () => shQuote(token));
   let out = "";
   try {
-    out = await invoke<string>("run_click", { command, cwd });
+    out = await clickRpc.runClick({ command, cwd });
   } catch (e) {
     out = String(e);
   }
