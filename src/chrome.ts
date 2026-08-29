@@ -396,6 +396,20 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
         action: () => { if (id) tabs.get(id)?.diagrams?.openAtClientY(lastCtxY); },
       } satisfies CtxItem, { sep: true } satisfies CtxItem] : []),
       ...turnItems,
+      // Selection lands in the terminal's "next message" queue instead of the
+      // clipboard, so a range picked out of scrollback can be edited and pasted
+      // into the prompt rather than re-found later.
+      ...(id && tabs.get(id)?.term.hasSelection() ? [
+        {
+          label: "Add selection to next message",
+          action: () => tabs.get(id)?.contextQueue?.addSelection(),
+        } satisfies CtxItem,
+        {
+          label: "Copy selection",
+          action: () => copy(tabs.get(id)?.term.getSelection() ?? ""),
+        } satisfies CtxItem,
+        { sep: true } satisfies CtxItem,
+      ] : []),
       {
         label: "Paste",
         action: async () => {

@@ -612,6 +612,11 @@ export function openTab(
     // makes a plain drag go to tmux copy-mode and fight native selection. Hold
     // Option to force xterm's own selection instead, iTerm-style.
     macOptionClickForcesSelection: true,
+    // xterm defaults this to true on macOS: a right-click drops the selection
+    // you just made and re-selects the word under the pointer, so "select, then
+    // right-click to act on it" loses the text every time. We render our own
+    // context menu, so the right button must leave the selection alone.
+    rightClickSelectsWord: false,
     theme: THEMES[settings.skin.$()],
   });
   const fit = new FitAddon();

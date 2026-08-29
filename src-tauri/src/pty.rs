@@ -395,7 +395,50 @@ fn enable_mouse(name: &str) {
             .args(["set-option", "-g", "set-clipboard", "on"])
             .env("PATH", path_env())
             .status();
+        keep_mouse_selection();
     });
+}
+
+/// tmux ships `MouseDragEnd1Pane -> copy-pipe-and-cancel`: releasing the mouse
+/// after a drag copies to the clipboard AND cancels copy-mode, which wipes the
+/// highlight. Selecting text to look at it, quote it, or hand it to a prompt is
+/// the common case; copying is the rare one. Rebind drag-end and the
+/// double/triple-click word/line grabs to `stop-selection`, which freezes the
+/// highlight in copy-mode and copies nothing. Explicit copy stays on Enter and
+/// `y` (`copy-pipe-and-cancel`), plus our own right-click menu.
+///
+/// Key tables are server-global in tmux (unlike `mouse`, which is per-session),
+/// so this applies to every session on the server.
+fn keep_mouse_selection() {
+    let binds: [&[&str]; 6] = [
+        &["copy-mode", "MouseDragEnd1Pane", "send-keys", "-X", "stop-selection"],
+        &["copy-mode-vi", "MouseDragEnd1Pane", "send-keys", "-X", "stop-selection"],
+        &["copy-mode", "DoubleClick1Pane", "send-keys", "-X", "select-word"],
+        &["copy-mode-vi", "DoubleClick1Pane", "send-keys", "-X", "select-word"],
+        &["copy-mode", "TripleClick1Pane", "send-keys", "-X", "select-line"],
+        &["copy-mode-vi", "TripleClick1Pane", "send-keys", "-X", "select-line"],
+    ];
+    for bind in binds {
+        let mut args = vec!["bind-key", "-T"];
+        args.extend_from_slice(bind);
+        let _ = tmux_cmd().args(args).env("PATH", path_env()).status();
+    }
+    // The root-table double/triple click enter copy-mode and immediately
+    // copy-pipe-and-cancel. Re-enter copy-mode and select without the copy.
+    let root: [(&str, &str); 2] = [
+        ("DoubleClick1Pane", "select-word"),
+        ("TripleClick1Pane", "select-line"),
+    ];
+    for (key, motion) in root {
+        let script = format!(
+            "select-pane -t = ; if-shell -F \"#{{||:#{{pane_in_mode}},#{{mouse_any_flag}}}}\" \
+             {{ send-keys -M }} {{ copy-mode -H ; send-keys -X {motion} }}"
+        );
+        let _ = tmux_cmd()
+            .args(["bind-key", "-T", "root", key, &script])
+            .env("PATH", path_env())
+            .status();
+    }
 }
 
 /// Kill orphaned graphics children (awrit) left by a previous app crash/restart.

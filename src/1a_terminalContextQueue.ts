@@ -117,6 +117,7 @@ export class TerminalContextQueue {
   readonly changes: Observable<PromptContextItem[]> = this.state.$;
   projectionSubscription: Subscription;
   anchorSubscription: Subscription;
+  selectionListener: { dispose(): void } | null = null;
   lifetime = new Subscription();
 
   constructor(
@@ -135,8 +136,14 @@ export class TerminalContextQueue {
     this.selectionAction.hidden = true;
     this.queue.className = "term-context-queue";
     this.queue.hidden = true;
-    this.root.append(this.gutter, this.queue);
+    this.root.append(this.gutter, this.selectionAction, this.queue);
     host.appendChild(this.root);
+    // A drag-selection in the terminal offers "+ next" instead of vanishing into
+    // a clipboard. Clicking it parks the text in the queue below; the selection
+    // itself is only cleared once the text is safely in an item.
+    this.selectionAction.addEventListener("mousedown", (event) => event.stopPropagation());
+    this.selectionAction.addEventListener("click", () => this.addSelection());
+    this.selectionListener = term.onSelectionChange(() => this.captureSelection());
     this.projectionSubscription = projection.changes.pipe(debounceTime(100)).subscribe(() => {
       this.paintDirty = true;
       if (!this.gutter.hidden) this.paintSelections();
@@ -167,7 +174,11 @@ export class TerminalContextQueue {
   captureSelection() {
     const text = this.term.getSelection();
     const range = this.term.getSelectionPosition();
-    if (!text || !range) return;
+    if (!text || !range) {
+      this.selection = null;
+      this.selectionAction.hidden = true;
+      return;
+    }
     const start = Math.min(range.start.y, range.end.y);
     const end = Math.max(range.start.y, range.end.y);
     this.selection = {
@@ -209,6 +220,7 @@ export class TerminalContextQueue {
       turnIds: this.selection.turnIds,
       enabled: true,
     });
+    this.selection = null;
     this.selectionAction.hidden = true;
     this.term.clearSelection();
     this.renderQueue();
@@ -382,6 +394,8 @@ export class TerminalContextQueue {
   }
 
   dispose() {
+    this.selectionListener?.dispose();
+    this.selectionListener = null;
     this.projectionSubscription.unsubscribe();
     this.anchorSubscription.unsubscribe();
     this.lifetime.unsubscribe();
