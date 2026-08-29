@@ -28,9 +28,11 @@ export function formatQueuedContext(items: PromptContextItem[]): string {
   }).join("\n\n")}\n\n`;
 }
 
+// Tags a selection with the turns whose own text it overlaps, never with a
+// turn whose extended span merely reaches across it.
 function turnsAcrossRange(turns: VisibleTurn[], start: number, end: number): string[] {
   return turns
-    .filter((turn) => turn.bufferEnd >= start && turn.bufferStart <= end)
+    .filter((turn) => turn.anchorEnd >= start && turn.anchorStart <= end)
     .map((turn) => turn.id);
 }
 

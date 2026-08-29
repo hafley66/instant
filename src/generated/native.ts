@@ -56,6 +56,7 @@ export type CommandName =
   | "harness_sessions"
   | "boop_turns"
   | "boop_turns_recent"
+  | "boop_locate_turns"
   | "boop_favorite_add"
   | "boop_favorites"
   | "boop_favorite_toggle"
@@ -174,6 +175,7 @@ export namespace commands {
   export namespace boop {
     export const boopTurns = "boop_turns";
     export const boopTurnsRecent = "boop_turns_recent";
+    export const boopLocateTurns = "boop_locate_turns";
     export const boopFavoriteAdd = "boop_favorite_add";
     export const boopFavorites = "boop_favorites";
     export const boopFavoriteToggle = "boop_favorite_toggle";

@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { locateVisibleTurns, normalizeTurnLine, type BoopTurn } from "./0_terminalTurnVisibility";
+import { describe, expect, it, vi } from "vitest";
+import { EMPTY } from "rxjs";
+import {
+  locateVisibleTurns,
+  normalizeTurnLine,
+  TerminalTurnVisibilityV2,
+  type BoopTurn,
+} from "./0_terminalTurnVisibility";
+import type { LogicalLine, XtermViewport } from "./00a_terminalIntersection";
 
 const turn = (turn: number, said: string): BoopTurn => ({
   session: "session-a", harness: "codex", turn, ts: turn, role: "assistant", said,
@@ -19,6 +26,8 @@ describe("terminal turn visibility v2", () => {
     ])).toMatchInlineSnapshot(`
       [
         {
+          "anchorEnd": 41,
+          "anchorStart": 40,
           "bufferEnd": 41,
           "bufferStart": 40,
           "confidence": "anchored",
@@ -34,6 +43,8 @@ describe("terminal turn visibility v2", () => {
           "turn": 7,
         },
         {
+          "anchorEnd": 43,
+          "anchorStart": 42,
           "bufferEnd": 43,
           "bufferStart": 42,
           "confidence": "anchored",
@@ -64,6 +75,8 @@ describe("terminal turn visibility v2", () => {
     ].join("\n"))])).toMatchInlineSnapshot(`
       [
         {
+          "anchorEnd": 14,
+          "anchorStart": 10,
           "bufferEnd": 14,
           "bufferStart": 10,
           "confidence": "anchored",
@@ -148,6 +161,12 @@ describe("terminal turn visibility v2", () => {
     expect(at(10)).toBe(160);
     expect(at(12)).toBe(192);
     expect(at(14)).toBe(192);
+    const identity = (row: number) => visible.find((v) => v.anchorStart <= row && row <= v.anchorEnd)?.turn ?? null;
+    expect(identity(10)).toBe(160);
+    expect(identity(12)).toBe(192);
+    expect(identity(14)).toBe(192);
+    expect(identity(11)).toBeNull();
+    expect(identity(13)).toBe(192);
   });
 
   it("normalizes unicode box-drawing characters in tables and borders to match markdown turns", () => {
@@ -177,5 +196,143 @@ describe("terminal turn visibility v2", () => {
           },
         ]
       `);
+  });
+
+  // Defect receipt 2026-08-29 (lab-claude, lab-ccz): the separator class held
+  // the horizontal rules but never the vertical Claude Code puts between cells,
+  // so every table data row failed to match and the turn anchored on prose only.
+  it("matches a rendered table's data rows through the vertical cell separator", () => {
+    const screen = [
+      { text: "  ┌─────────┬────────────┐", start: 4, end: 4 },
+      { text: "  │ fixture │    tmux    │", start: 5, end: 5 },
+      { text: "  ├─────────┼────────────┤", start: 6, end: 6 },
+      { text: "  │ claude  │ lab-claude │", start: 7, end: 7 },
+      { text: "  └─────────┴────────────┘", start: 8, end: 8 },
+    ];
+    expect(normalizeTurnLine(screen[1].text)).toBe("fixture tmux");
+    expect(normalizeTurnLine(screen[0].text)).toBe("");
+    const source = turn(41, ["| fixture | tmux |", "| --- | --- |", "| claude | lab-claude |"].join("\n"));
+    const [located] = locateVisibleTurns(screen, [source]);
+    expect(located.anchorStart).toBe(5);
+    expect(located.anchorEnd).toBe(7);
+  });
+
+  // Defect receipt 2026-08-29 (lab-claude at 80 cols): the monotonic match is
+  // 1:1, so one source line an app hard-wraps across three rows anchored one.
+  it("anchors every row an app hard-wraps out of a single source line", () => {
+    const said = "markdown tables in claude code get responsive designed into a list mode "
+      + "so there are two renders for it, and code and tool calls";
+    const screen = [
+      { text: "  unrelated banner line", start: 20, end: 20 },
+      { text: "  markdown tables in claude code get responsive designed into", start: 21, end: 21 },
+      { text: "  a list mode so there are two renders for it, and code and", start: 22, end: 22 },
+      { text: "  tool calls", start: 23, end: 23 },
+    ];
+    const [located] = locateVisibleTurns(screen, [turn(58, said)]);
+    expect(located.anchorStart).toBe(21);
+    // Row 23 normalizes to "tool calls", under the 12-character floor a
+    // containment match needs, so a short trailing fragment stays unanchored.
+    expect(located.anchorEnd).toBe(22);
+    expect(normalizeTurnLine(screen[3].text).length).toBeLessThan(12);
+  });
+
+  // Defect receipt 2026-08-29 (lab-kimi): kimi prefixes a user message with ✨,
+  // and Claude Code uses ✻ and ⎿; none were in the leading-marker class, so an
+  // otherwise exact line missed by one glyph.
+  it("strips the per-harness message markers kimi and claude code print", () => {
+    const said = "i guess lab it out with joernn and then see if rust can go faster";
+    for (const marker of ["✨", "✻", "⎿", "⏺"]) {
+      expect(normalizeTurnLine(`${marker} ${said}`)).toBe(said);
+    }
+    const screen = [{ text: `✨ ${said}`, start: 8, end: 8 }];
+    const [located] = locateVisibleTurns(screen, [turn(507, said)]);
+    expect(located.turn).toBe(507);
+    expect(located.anchorStart).toBe(8);
+  });
+
+  // Defect receipt 2026-08-29 (lab-kimi): a skill-instruction turn claimed eight
+  // rows of an unrelated diff because one short line of its body appeared inside
+  // them, so containment now has to cover half the longer string.
+  it("refuses a short source line found inside a much longer rendered row", () => {
+    const screen = [
+      { text: "  3 + head-to-head framing from 2026-07-25: run joern first as the reference, then the rust lab as challenger", start: 19, end: 19 },
+      { text: "  4 + soufflé and kuzu become optional fillers only when the head-to-head stays inconclusive after both runs", start: 20, end: 20 },
+    ];
+    const skill = turn(481, ["Skill tool loaded instructions for this request.", "run joern", "## Naming"].join("\n"));
+    expect(locateVisibleTurns(screen, [skill])).toEqual([]);
+  });
+
+  // Defect receipt 2026-08-29: the right-click menu reads turnAtClientPoint,
+  // which reads turnAtBufferRow. Every other test asserts the located spans
+  // directly, so the accessor itself needs one that drives the real class.
+  it("answers turnAtBufferRow from the anchor and stays silent off it", async () => {
+    const lines: LogicalLine[] = [
+      { text: "terminal chrome above the turn", start: 40, end: 40 },
+      { text: "the assistant said something worth quoting", start: 41, end: 41 },
+      { text: "and then said a second line of it", start: 42, end: 42 },
+      { text: "ask codex to do anything", start: 43, end: 43 },
+    ];
+    const viewport: XtermViewport = {
+      changes: EMPTY,
+      readVisibleLogicalLines: () => lines,
+      bufferRowAtClientY: (clientY: number) => 40 + clientY,
+      dispose: () => {},
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const said = "the assistant said something worth quoting\nand then said a second line of it";
+    const visibility = new TerminalTurnVisibilityV2(viewport, async () => []);
+    await visibility.scan([turn(88, said)]);
+
+    expect(visibility.turnAtBufferRow(41)?.turn).toBe(88);
+    expect(visibility.turnAtBufferRow(42)?.turn).toBe(88);
+    expect(visibility.turnAtBufferRow(40)).toBeNull();
+    expect(visibility.turnAtBufferRow(43)).toBeNull();
+    expect(visibility.turnAtClientPoint(0, 1)?.turn).toBe(88);
+    expect(visibility.turnAtClientPoint(0, 3)).toBeNull();
+    visibility.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  // boop-turnvis answers over IPC in the app. Two things must hold: its spans
+  // are used verbatim, and a failed call still leaves the pane readable.
+  it("prefers the injected locator and falls back to the local matcher when it rejects", async () => {
+    const lines: LogicalLine[] = [
+      { text: "the assistant said something worth quoting", start: 41, end: 41 },
+      { text: "and then said a second line of it", start: 42, end: 42 },
+    ];
+    const viewport: XtermViewport = {
+      changes: EMPTY,
+      readVisibleLogicalLines: () => lines,
+      bufferRowAtClientY: () => null,
+      dispose: () => {},
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const said = "the assistant said something worth quoting\nand then said a second line of it";
+    const boopTurn = turn(88, said);
+    const span = {
+      ...boopTurn,
+      id: `${boopTurn.session}:88`,
+      bufferStart: 41,
+      bufferEnd: 42,
+      anchorStart: 41,
+      anchorEnd: 41,
+      confidence: "anchored" as const,
+    };
+
+    const native = new TerminalTurnVisibilityV2(viewport, async () => [], undefined, async () => [span]);
+    await native.scan([boopTurn]);
+    // anchorEnd 41 is the native answer; the local matcher would say 42.
+    expect(native.visible.map((found) => [found.turn, found.anchorStart, found.anchorEnd])).toEqual([[88, 41, 41]]);
+    expect(native.visible[0].regions).toBeDefined();
+    expect(native.turnAtBufferRow(42)).toBeNull();
+    native.dispose();
+
+    const failing = new TerminalTurnVisibilityV2(viewport, async () => [], undefined, () => Promise.reject(new Error("ipc down")));
+    await failing.scan([boopTurn]);
+    expect(failing.visible.map((found) => [found.turn, found.anchorStart, found.anchorEnd])).toEqual([[88, 41, 42]]);
+    failing.dispose();
+    vi.unstubAllGlobals();
   });
 });

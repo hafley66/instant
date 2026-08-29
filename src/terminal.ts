@@ -61,7 +61,7 @@ import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
 import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
-import { TerminalTurnVisibilityV2, type BoopTurn } from "./0_terminalTurnVisibility";
+import { TerminalTurnVisibilityV2, type BoopTurn, type TurnSpan } from "./0_terminalTurnVisibility";
 import { NativeTmuxPane, XtermViewportAdapter } from "./00a_terminalIntersection";
 import { CmdClickGestureTracker } from "./0_clickRouter";
 import { nextClosedOrder } from "./0_reopenOrder";
@@ -655,6 +655,7 @@ export function openTab(
       return [...unique.values()];
     },
     tmuxPane,
+    (lines, turns) => invoke<TurnSpan[]>(commands.boop.boopLocateTurns, { lines, turns }),
   );
   const lineAnchors = graphics || !viewport ? undefined : new TerminalLineAnchors(term, viewport);
   const diagrams = graphics ? undefined : new TerminalDiagramOverlay(

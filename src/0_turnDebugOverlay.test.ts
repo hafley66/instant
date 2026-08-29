@@ -17,6 +17,8 @@ const visibleTurn = (
   id: `session-a:${turn}`,
   bufferStart,
   bufferEnd,
+  anchorStart: bufferStart,
+  anchorEnd: bufferEnd,
   regions: [],
   confidence: "anchored",
   provenance: "xterm+boop",
