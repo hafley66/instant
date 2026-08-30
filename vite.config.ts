@@ -43,11 +43,24 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. keep backend sources and nested Git worktrees out of the frontend watcher
+      // 3. avoid FSEvents' volume-wide native stream and keep generated trees
+      // out of the frontend watcher
+      usePolling: true,
+      interval: 500,
       ignored: [
+        "**/.git/**",
+        "**/node_modules/**",
+        "**/.pnpm-store/**",
         "**/src-tauri/**",
+        "**/target/**",
         "**/.worktrees/**",
         "**/.claude/worktrees/**",
+        "**/dist/**",
+        "**/coverage/**",
+        "**/test-results/**",
+        "**/playwright-report/**",
+        "**/chat_log/**",
+        "**/.dl/**",
       ],
     },
   },
