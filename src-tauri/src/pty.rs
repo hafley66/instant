@@ -450,7 +450,34 @@ fn enable_mouse(name: &str) {
             .args(["set-environment", "-g", "NO_ALT_SCREEN", "1"])
             .env("PATH", path_env())
             .status();
+        keep_scroll_after_copy();
     });
+}
+
+/// tmux's stock mouse bindings end a drag with `copy-pipe-and-cancel`, and the
+/// cancel leaves copy-mode, which snaps the pane back to the live bottom.
+fn keep_scroll_after_copy() {
+    // Stock bindings otherwise, with the debounce that lets a double-click drag
+    // extend the word selection before the copy fires.
+    let bindings: [(&str, &str); 3] = [
+        ("MouseDragEnd1Pane", "send-keys -X copy-pipe-no-clear"),
+        (
+            "DoubleClick1Pane",
+            "select-pane ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-no-clear",
+        ),
+        (
+            "TripleClick1Pane",
+            "select-pane ; send-keys -X select-line ; run-shell -d 0.3 ; send-keys -X copy-pipe-no-clear",
+        ),
+    ];
+    for table in ["copy-mode", "copy-mode-vi"] {
+        for (event, command) in bindings {
+            let _ = tmux_cmd()
+                .args(["bind-key", "-T", table, event, command])
+                .env("PATH", path_env())
+                .status();
+        }
+    }
 }
 
 /// Kill orphaned graphics children (awrit) left by a previous app crash/restart.
