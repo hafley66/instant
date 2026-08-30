@@ -945,8 +945,18 @@ export function openTab(
       // so copy only when there IS a selection, else fall through. Paste is left
       // to xterm's native handler (its textarea paste event) — handling it here
       // too double-pastes.
-      if (e.key === "c" && term.hasSelection()) {
-        navigator.clipboard.writeText(term.getSelection()).catch(console.error);
+      // A tmux mouse drag leaves nothing in xterm's selection layer, and tmux
+      // no longer writes the clipboard itself, so ⌘C falls back to its buffer.
+      if (e.key === "c") {
+        if (term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection()).catch(console.error);
+          return false;
+        }
+        void invoke<string>(commands.pty.tmuxBuffer)
+          .then((text) => {
+            if (text) void navigator.clipboard.writeText(text);
+          })
+          .catch(() => {});
         return false;
       }
       if (e.key === "ArrowLeft") return send("\x01"); // line start (Ctrl-A)

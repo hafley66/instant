@@ -384,15 +384,23 @@ fn enable_mouse(name: &str) {
             }
             std::thread::sleep(std::time::Duration::from_millis(60));
         }
-        // With mouse on, a drag selects in tmux copy-mode and copies into tmux's
-        // OWN buffer — never the macOS clipboard — so ⌘C finds nothing ("can't
-        // copy after leaving opencode"). `set-clipboard on` makes tmux emit an
-        // OSC 52 with the selection to the outer terminal (our xterm), which
-        // bridges it to navigator.clipboard. `external` (the common default) only
-        // forwards apps' own OSC 52, not tmux's mouse copy, so bump to `on`.
-        // Server-wide (one tmux clipboard policy); harmless for other sessions.
+        // `on` would make tmux emit an OSC 52 for every mouse drag, so each
+        // selection overwrote the macOS clipboard. `external` forwards only an
+        // app's own copy request; ⌘C reads tmux's buffer (tmux_buffer).
         let _ = tmux_cmd()
-            .args(["set-option", "-g", "set-clipboard", "on"])
+            .args(["set-option", "-g", "set-clipboard", "external"])
+            .env("PATH", path_env())
+            .status();
+        // Panes boop spawns never get the per-session set-option above, and a
+        // pane tmux does not own the wheel for cannot reach its scrollback.
+        let _ = tmux_cmd()
+            .args(["set-option", "-g", "mouse", "on"])
+            .env("PATH", path_env())
+            .status();
+        // Codex on the alternate screen swallows the wheel and keeps its
+        // transcript out of scrollback; inline mode gives both back.
+        let _ = tmux_cmd()
+            .args(["set-environment", "-g", "NO_ALT_SCREEN", "1"])
             .env("PATH", path_env())
             .status();
     });
@@ -745,6 +753,22 @@ pub async fn scroll_session(name: String, up: bool, lines: u32) {
         .args(["send-keys", "-t", &name, "-X", "-N", &n, dir])
         .env("PATH", &path)
         .status();
+}
+
+/// tmux's own copy buffer. With `set-clipboard external` a mouse drag lands
+/// here and nowhere else, so ⌘C reads it when xterm holds no selection.
+#[tauri::command]
+pub async fn tmux_buffer() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let out = tmux_cmd()
+            .args(["show-buffer"])
+            .env("PATH", path_env())
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.

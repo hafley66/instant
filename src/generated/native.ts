@@ -10,6 +10,7 @@ export type CommandName =
   | "close_pty"
   | "kill_session"
   | "scroll_session"
+  | "tmux_buffer"
   | "rogue_agent_sessions"
   | "cdp_open"
   | "cdp_send"
@@ -102,6 +103,7 @@ export namespace commands {
     export const closePty = "close_pty";
     export const killSession = "kill_session";
     export const scrollSession = "scroll_session";
+    export const tmuxBuffer = "tmux_buffer";
     export const rogueAgentSessions = "rogue_agent_sessions";
   }
 

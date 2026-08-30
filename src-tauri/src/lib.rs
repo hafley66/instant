@@ -1084,6 +1084,7 @@ pub fn run() {
             pty::close_pty,
             pty::kill_session,
             pty::scroll_session,
+            pty::tmux_buffer,
             pty::rogue_agent_sessions,
             pty_events::pty_event_stats,
             cdp::cdp_open,
