@@ -60,7 +60,10 @@ test("Ask about this queues the selection instead of writing to the pty", async 
   // The queue panel is showing the line, with its textarea to annotate in.
   await expect(page.locator(".term-context-queue")).toBeVisible();
   await expect(page.locator(".term-context-queue header")).toContainText("NEXT MESSAGE · 1");
-  await expect(page.locator(".term-context-queue textarea")).toHaveValue(LINE);
+  await expect(page.locator(".term-context-queue-quote")).toHaveText(LINE);
+  await expect(page.locator(".term-context-queue textarea")).toHaveValue("");
+  // The slice says which turn it came out of, or that it came off the terminal.
+  await expect(page.locator(".term-context-queue-turn")).toHaveCount(1);
 
   // Only the forwarded mouse reports reached the pty; no prompt body yet.
   const writes = await page.evaluate(() =>

@@ -61,12 +61,16 @@ test("queues individual Boop table rows and list items for the next prompt", asy
   expect(box!.x).toBeLessThan(wall!.x);
   await tableCheck.nth(1).check();
   await tableCheck.nth(3).check();
+  // The slice is held as read in its own quote; the textarea beside it is the
+  // note the reader annotates it with.
+  await expect(page.locator('.term-context-queue-quote')).toHaveCount(2);
+  await expect(page.locator('.term-context-queue-quote').nth(0)).toHaveText("| alpha | visible |");
+  await expect(page.locator('.term-context-queue-quote').nth(1)).toHaveText("- first visible item");
   await expect(page.locator('.term-context-queue textarea')).toHaveCount(2);
-  await expect(page.locator('.term-context-queue textarea').nth(0)).toHaveValue("| alpha | visible |");
-  await expect(page.locator('.term-context-queue textarea').nth(1)).toHaveValue("- first visible item");
+  await expect(page.locator('.term-context-queue textarea').nth(0)).toHaveValue("");
   await page.screenshot({ path: resolve("artifacts/v2-terminal-context-queue.png"), fullPage: true });
 
-  await page.getByRole("button", { name: "Paste into prompt" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
   await expect.poll(() => page.evaluate(() => (window as Window & { __writes?: Array<{ data: string }> }).__writes?.at(-1)?.data))
     .toContain("[turn e2e-codex-1:301]");
   await expect(page.locator(".term-context-queue")).toBeHidden();

@@ -1096,35 +1096,108 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   right: 10px;
   bottom: 10px;
   width: min(420px, calc(100% - 20px));
-  max-height: 45%;
+  max-height: 52%;
   overflow: auto;
-  padding: 6px;
+  padding: 11px 12px 12px;
   border: 1px solid var(--frame-dark);
+  border-radius: 6px;
   background: var(--panel-bg);
   color: var(--panel-fg);
+  box-shadow: 0 6px 22px rgb(0 0 0 / .34);
 }
-.term-context-queue header,
-.term-context-queue label {
+.term-context-queue header {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--frame-dark) 70%, transparent);
 }
-.term-context-queue header { justify-content: space-between; margin-bottom: 5px; }
-.term-context-queue label + label { margin-top: 4px; }
+.term-context-queue-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  opacity: .72;
+}
+.term-context-queue header button {
+  padding: 4px 14px;
+  border: 1px solid var(--frame-dark);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  font: inherit;
+  cursor: pointer;
+}
+.term-context-queue header button:hover { background: color-mix(in srgb, var(--panel-fg) 12%, var(--panel-bg)); }
+
+/* One queued slice: which turn it came from, the quote as read, and the note
+   that says what to do with it. */
+.term-context-queue-item {
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--frame-dark) 80%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--term-bg) 55%, transparent);
+}
+.term-context-queue-item + .term-context-queue-item { margin-top: 8px; }
+.term-context-queue-item[data-disabled="true"] { opacity: .45; }
+.term-context-queue-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+.term-context-queue-turn {
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.term-context-queue-turn-none { color: color-mix(in srgb, var(--panel-fg) 55%, transparent); }
+.term-context-queue-remove {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: .5;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.term-context-queue-remove:hover { opacity: 1; background: color-mix(in srgb, var(--panel-fg) 15%, transparent); }
+.term-context-queue-quote {
+  max-height: 84px;
+  margin: 0 0 7px;
+  padding: 6px 8px;
+  overflow: auto;
+  border-left: 2px solid color-mix(in srgb, var(--panel-fg) 35%, transparent);
+  background: color-mix(in srgb, var(--term-bg) 85%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 85%, transparent);
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .term-context-queue textarea {
   box-sizing: border-box;
-  flex: 1;
-  min-width: 0;
-  min-height: 38px;
-  height: 38px;
-  max-height: 96px;
-  padding: 4px 6px;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  max-height: 110px;
+  padding: 6px 8px;
   resize: vertical;
   border: 1px solid var(--frame-dark);
+  border-radius: 4px;
   background: var(--term-bg);
   color: var(--term-fg);
   font: inherit;
 }
+.term-context-queue textarea::placeholder { opacity: .45; }
 .term-diagram {
   position: absolute;
   box-sizing: border-box;

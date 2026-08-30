@@ -3,11 +3,17 @@ import { Signal } from "@hafley66/signals";
 import { debounceTime, filter, merge, Observable, share, startWith, Subscription, switchMap, take, tap } from "rxjs";
 import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
+import { turnHue } from "./0_turnDebugOverlay";
 
 export type PromptContextItem = {
   id: string;
   kind: "selection" | "table" | "list";
+  /// The slice taken off the screen. Held as read, so the quote in the prompt
+  /// is what the turn actually said.
   text: string;
+  /// What the reader wants done with the slice. Kept apart from `text` so the
+  /// intent is never mistaken for the quote by whoever reads the prompt.
+  note?: string;
   turnIds: string[];
   enabled: boolean;
 };
@@ -24,7 +30,12 @@ export function formatQueuedContext(items: PromptContextItem[]): string {
   if (!selected.length) return "";
   return `Selected context:\n\n${selected.map((item) => {
     const source = item.turnIds.length ? `turn ${item.turnIds.join(", ")}` : "terminal selection";
-    return `[${source}]\n${item.text.trim()}`;
+    const note = item.note?.trim();
+    // The note is the reader's intent for the slice, so it goes under the quote
+    // and says which it is; a slice with no note reads exactly as it used to.
+    return note
+      ? `[${source}]\n${item.text.trim()}\n\nAbout that: ${note}`
+      : `[${source}]\n${item.text.trim()}`;
   }).join("\n\n")}\n\n`;
 }
 
@@ -375,6 +386,33 @@ export class TerminalContextQueue {
     });
   }
 
+  /// One chip per turn the slice came out of, coloured with the same hue the
+  /// debug overlay paints that turn with, so a queued slice reads back to the
+  /// message on screen it was taken from. A slice that overlaps no turn says so
+  /// rather than showing nothing.
+  turnBadges(item: PromptContextItem): HTMLElement[] {
+    if (!item.turnIds.length) {
+      const chip = document.createElement("span");
+      chip.className = "term-context-queue-turn term-context-queue-turn-none";
+      chip.textContent = "terminal";
+      return [chip];
+    }
+    return item.turnIds.map((id) => {
+      const turn = this.projection.visible.find((visible) => visible.id === id);
+      const chip = document.createElement("span");
+      chip.className = "term-context-queue-turn";
+      chip.dataset.turnId = id;
+      chip.textContent = turn
+        ? `t${turn.turn} ${turn.role}`
+        : `t${id.slice(id.lastIndexOf(":") + 1)}`;
+      chip.title = id;
+      const hue = turnHue(id);
+      chip.style.color = `hsl(${hue} 75% 72%)`;
+      chip.style.borderColor = `hsl(${hue} 70% 46%)`;
+      return chip;
+    });
+  }
+
   renderQueue() {
     this.queue.replaceChildren();
     if (!this.items.size) {
@@ -384,10 +422,13 @@ export class TerminalContextQueue {
     }
     this.queue.hidden = false;
     const header = document.createElement("header");
-    header.textContent = `NEXT MESSAGE · ${this.items.size}`;
+    const title = document.createElement("span");
+    title.className = "term-context-queue-title";
+    title.textContent = `NEXT MESSAGE · ${this.items.size}`;
+    header.appendChild(title);
     const pasteButton = document.createElement("button");
     pasteButton.type = "button";
-    pasteButton.textContent = "Paste into prompt";
+    pasteButton.textContent = "Send";
     pasteButton.addEventListener("click", () => {
       const text = formatQueuedContext([...this.items.values()]);
       if (text) this.paste(text);
@@ -398,31 +439,50 @@ export class TerminalContextQueue {
     header.appendChild(pasteButton);
     this.queue.appendChild(header);
     for (const item of this.items.values()) {
-      const row = document.createElement("label");
+      const row = document.createElement("div");
+      row.className = "term-context-queue-item";
       row.dataset.contextId = item.id;
+
+      const top = document.createElement("div");
+      top.className = "term-context-queue-meta";
       const enabled = document.createElement("input");
       enabled.type = "checkbox";
       enabled.checked = item.enabled;
       enabled.addEventListener("change", () => {
         item.enabled = enabled.checked;
+        row.dataset.disabled = String(!enabled.checked);
         this.state.$([...this.items.values()]);
       });
-      const textbox = document.createElement("textarea");
-      textbox.value = item.text;
-      textbox.rows = 2;
-      textbox.addEventListener("input", () => {
-        item.text = textbox.value;
-        this.state.$([...this.items.values()]);
-      });
+      row.dataset.disabled = String(!item.enabled);
+      top.appendChild(enabled);
+      for (const badge of this.turnBadges(item)) top.appendChild(badge);
       const remove = document.createElement("button");
       remove.type = "button";
+      remove.className = "term-context-queue-remove";
+      remove.title = "drop this slice";
       remove.textContent = "×";
       remove.addEventListener("click", () => {
         this.items.delete(item.id);
         this.renderQueue();
         this.paintSelections();
       });
-      row.append(enabled, textbox, remove);
+      top.appendChild(remove);
+
+      const quote = document.createElement("pre");
+      quote.className = "term-context-queue-quote";
+      quote.textContent = item.text;
+
+      const textbox = document.createElement("textarea");
+      textbox.className = "term-context-queue-note";
+      textbox.value = item.note ?? "";
+      textbox.rows = 2;
+      textbox.placeholder = "what you want done with this…";
+      textbox.addEventListener("input", () => {
+        item.note = textbox.value;
+        this.state.$([...this.items.values()]);
+      });
+
+      row.append(top, quote, textbox);
       this.queue.appendChild(row);
     }
     this.state.$([...this.items.values()]);
