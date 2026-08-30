@@ -714,10 +714,6 @@ export function openTab(
       if (!settings.clipboardFromTerminal.$()) return;
       void navigator.clipboard.writeText(text).catch(() => {});
     },
-    // contextQueue is built above but the tab is not in `tabs` yet, so read it
-    // from the closure. This is what puts the "+ next" button on a claude pane,
-    // where xterm owns no selection to fire onSelectionChange.
-    onSelect: (text, startRow, endRow) => contextQueue?.offerPinned(text, startRow, endRow),
   });
   tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
   applyTurnDebugOverlay(tabs.get(id)!);

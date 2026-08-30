@@ -1055,15 +1055,11 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   pointer-events: none;
   font: 11px/1.3 Menlo, Monaco, monospace;
 }
-.term-context-gutter,
-.term-context-selection-add {
-  position: absolute;
-}
 .term-context-gutter {
+  position: absolute;
   inset: 0;
 }
 .term-context-structured-check,
-.term-context-selection-add,
 .term-context-queue {
   pointer-events: auto;
 }

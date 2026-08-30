@@ -118,20 +118,16 @@ export function structuredSelectables(
 export class TerminalContextQueue {
   root = document.createElement("div");
   gutter = document.createElement("div");
-  selectionAction = document.createElement("button");
   queue = document.createElement("section");
   items = new Map<string, PromptContextItem>();
   checkboxes = new Map<string, HTMLInputElement>();
   paintedLineIds = new Set<string>();
   paintDirty = true;
   revealFrame = 0;
-  selection: TerminalSelectionSnapshot | null = null;
   readonly state = Signal<PromptContextItem[]>([]);
   readonly changes: Observable<PromptContextItem[]> = this.state.$;
   projectionSubscription: Subscription;
   anchorSubscription: Subscription;
-  selectionListener: { dispose(): void } | null = null;
-  lifetime = new Subscription();
 
   constructor(
     readonly term: Terminal,
@@ -143,20 +139,10 @@ export class TerminalContextQueue {
   ) {
     this.root.className = "term-context-root";
     this.gutter.className = "term-context-gutter";
-    this.selectionAction.className = "term-context-selection-add";
-    this.selectionAction.type = "button";
-    this.selectionAction.textContent = "+ next";
-    this.selectionAction.hidden = true;
     this.queue.className = "term-context-queue";
     this.queue.hidden = true;
-    this.root.append(this.gutter, this.selectionAction, this.queue);
+    this.root.append(this.gutter, this.queue);
     host.appendChild(this.root);
-    // A drag-selection in the terminal offers "+ next" instead of vanishing into
-    // a clipboard. Clicking it parks the text in the queue below; the selection
-    // itself is only cleared once the text is safely in an item.
-    this.selectionAction.addEventListener("mousedown", (event) => event.stopPropagation());
-    this.selectionAction.addEventListener("click", () => this.addSelection());
-    this.selectionListener = term.onSelectionChange(() => this.captureSelection());
     this.projectionSubscription = projection.changes.pipe(debounceTime(100)).subscribe(() => {
       this.paintDirty = true;
       if (!this.gutter.hidden) this.paintSelections();
@@ -168,9 +154,6 @@ export class TerminalContextQueue {
         event.kind === "exited" && this.paintedLineIds.has(event.id) ||
         "line" in event && this.paintedLineIds.has(event.line.id)),
     ));
-    this.lifetime.add(anchors.events.$.subscribe(() => {
-      this.positionSelectionAction();
-    }));
     const viewport_motion = viewport_changes.pipe(
       filter((event) => event.kind === "scroll" || event.kind === "resize"),
     );
@@ -184,73 +167,13 @@ export class TerminalContextQueue {
     this.paintSelections();
   }
 
-  captureSelection() {
-    const text = this.term.getSelection();
-    const range = this.term.getSelectionPosition();
-    if (!text || !range) {
-      this.selection = null;
-      this.selectionAction.hidden = true;
-      return;
-    }
-    const start = Math.min(range.start.y, range.end.y);
-    const end = Math.max(range.start.y, range.end.y);
-    this.selection = {
-      text,
-      bufferStart: { row: range.start.y, col: range.start.x },
-      bufferEnd: { row: range.end.y, col: range.end.x },
-      turnIds: turnsAcrossRange(this.projection.visible, start, end),
-    };
-    this.selectionAction.hidden = false;
-    this.positionSelectionAction();
-  }
-
-  /// Offer a selection xterm did not make. A pane whose app owns the mouse
-  /// (claude sets mouse_any_flag=1; codex does not) has xterm's own
-  /// SelectionService disabled, so onSelectionChange never fires and the
-  /// "+ next" button never appeared there at all. The pinned overlay holds the
-  /// selection on those panes and hands it over here.
-  offerPinned(text: string, startRow: number, endRow: number) {
-    if (!text.trim()) {
-      this.selection = null;
-      this.selectionAction.hidden = true;
-      return;
-    }
-    this.selection = {
-      text,
-      bufferStart: { row: startRow, col: 0 },
-      bufferEnd: { row: endRow, col: 0 },
-      turnIds: turnsAcrossRange(this.projection.visible, startRow, endRow),
-    };
-    this.selectionAction.hidden = false;
-    this.positionSelectionAction();
-  }
-
-  positionSelectionAction() {
-    if (!this.selection || this.selectionAction.hidden) return;
-    const row = Math.max(
-      this.term.buffer.active.viewportY,
-      Math.min(this.selection.bufferStart.row, this.term.buffer.active.viewportY + this.term.rows - 1),
-    );
-    const anchor = this.anchors.elementForBufferRow(row);
-    if (!anchor) {
-      this.selectionAction.hidden = true;
-      return;
-    }
-    const hostRect = this.host.getBoundingClientRect();
-    const rect = anchor.getBoundingClientRect();
-    Object.assign(this.selectionAction.style, {
-      left: `${Math.max(4, rect.left - hostRect.left + 8)}px`,
-      top: `${rect.top - hostRect.top}px`,
-    });
-  }
-
-  /// Queue a selection for the next message. `snapshot` names one outright,
-  /// which is how a pane whose app owns the mouse contributes: xterm's own
-  /// SelectionService is disabled there, so captureSelection never fires and
-  /// `this.selection` stays null (see 0_terminalPinnedSelection.ts).
-  addSelection(snapshot?: Pick<TerminalSelectionSnapshot, "text" | "turnIds">) {
-    const source = snapshot ?? this.selection;
-    if (!source?.text) return;
+  /// Queue a slice for the next message. The caller names it outright: the
+  /// right-click menu is the only way in, and it reads whichever selection is
+  /// live (xterm's own, or the pinned overlay's on a pane whose app owns the
+  /// mouse and where xterm therefore makes none).
+  addSelection(snapshot: Pick<TerminalSelectionSnapshot, "text" | "turnIds">) {
+    if (!snapshot.text) return;
+    const source = snapshot;
     const id = `selection:${Date.now()}:${this.items.size}`;
     this.items.set(id, {
       id,
@@ -259,8 +182,6 @@ export class TerminalContextQueue {
       turnIds: source.turnIds,
       enabled: true,
     });
-    this.selection = null;
-    this.selectionAction.hidden = true;
     this.term.clearSelection();
     this.renderQueue();
   }
@@ -489,11 +410,8 @@ export class TerminalContextQueue {
   }
 
   dispose() {
-    this.selectionListener?.dispose();
-    this.selectionListener = null;
     this.projectionSubscription.unsubscribe();
     this.anchorSubscription.unsubscribe();
-    this.lifetime.unsubscribe();
     if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
     this.checkboxes.clear();
     this.paintedLineIds.clear();
