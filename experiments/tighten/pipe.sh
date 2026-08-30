@@ -9,12 +9,14 @@
 # Env:
 #   CONCATMAP_MODEL   model id (default flash4 via deepinfra pin)
 #   CONCATMAP_CAP     max passes before the last pass wins (default 3)
+#   CONCATMAP_TIMEOUT seconds per pass (default 120); a hung pass is killed
 set -euo pipefail
 
 MSG="${1:?usage: pipe.sh <msg.txt> <out.md>}"
 OUT="${2:?usage: pipe.sh <msg.txt> <out.md>}"
 MODEL="${CONCATMAP_MODEL:-openrouter/deepseek/deepseek-v4-flash-0731}"
 CAP="${CONCATMAP_CAP:-3}"
+TMO="${CONCATMAP_TIMEOUT:-120}"
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT

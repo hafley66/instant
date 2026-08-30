@@ -69,6 +69,9 @@ where u.role_id = 1 and u.ts > $cursor
   -- this template rendered. Sync ingests it, so without this filter the loop
   -- maps its own prompts forever.
   and trim(u.said, char(34)) not like 'mode: %'
+  -- A user turn with no preceding ai turn (session's first turn) joins NULL;
+  -- there is nothing to rewrite, so never queue it.
+  and a.said is not null and length(trim(a.said)) > 0
 order by u.ts"
 }
 
@@ -85,7 +88,10 @@ process_pair() {
   local msgfile="$STATE/msg-$turn.txt"
   local outfile="$outdir/$turn.md"
   render_msg "$ai" "$user" > "$msgfile"
-  "$EXP/pipe.sh" "$msgfile" "$outfile"
+  # A failed pipe must not kill the resident; the pair is dropped and logged.
+  if ! "$EXP/pipe.sh" "$msgfile" "$outfile"; then
+    echo "concatmap: pipe failed for $session_id-$turn, dropping pair" >&2
+  fi
 }
 
 coalesce() {
