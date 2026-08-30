@@ -24,6 +24,7 @@ import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerHarnessTracePlugin } from "./plugins/harnessTrace";
 import { toggleNetworkFor, toggleTermStripFor } from "./plugins/harnessTrace/InTabStrip";
 import { registerFilesPlugin } from "./plugins/files";
+import { registerCanvasPlugin } from "./plugins/canvas";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { registerMdview } from "./mdview";
 import { installMdviewHost } from "./mdview/ports";
@@ -262,6 +263,7 @@ async function main() {
   registerMetricsPlugin();
   registerHarnessTracePlugin();
   registerFilesPlugin();
+  registerCanvasPlugin();
   // sprefa integration disabled for now (2026-07-18); see status.tsx note.
   void registerSprefa;
   // registerSprefa();

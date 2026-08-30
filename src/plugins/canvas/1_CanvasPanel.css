@@ -1,0 +1,73 @@
+.canvas-workspace {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: #0c111b;
+}
+
+.canvas-surface {
+  width: 240px;
+  height: 132px;
+  overflow: hidden;
+  border: 1px solid #79849a;
+  border-radius: 5px;
+  background: #111722;
+  color: #d6dce8;
+  box-shadow: 0 8px 24px #0008;
+}
+
+.canvas-surface > header {
+  height: 25px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border-bottom: 1px solid #3b4559;
+  background: #242d3d;
+  font: 600 11px system-ui;
+}
+
+.canvas-terminal-surface pre {
+  margin: 0;
+  padding: 9px;
+  color: #b9f6ca;
+  font: 12px/1.45 Menlo, Consolas, monospace;
+}
+
+.mini-canvas {
+  height: calc(100% - 25px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background-image: radial-gradient(#36435b 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+
+.mini-canvas-node {
+  min-width: 62px;
+  padding: 5px 8px;
+  border: 1px solid #7891c5;
+  border-radius: 3px;
+  background: #1d2940;
+  color: #dfe8ff;
+  font: 10px system-ui;
+}
+
+.mini-canvas-edge {
+  color: #8fa6d6;
+}
+
+.canvas-details {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  box-sizing: border-box;
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid #3b4559;
+  border-radius: 4px;
+  background: #151b26;
+  color: #d6dce8;
+  font: 12px/1.5 system-ui;
+}
