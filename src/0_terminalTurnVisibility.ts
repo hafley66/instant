@@ -188,13 +188,15 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
   growAnchors(visible, screen, sources);
   const sorted = visible.sort((a, b) => a.bufferStart - b.bufferStart || a.turn - b.turn);
   if (!lines.length) return sorted;
-  const viewportStart = lines[0].start;
-  const viewportEnd = lines[lines.length - 1].end;
   return attachTurnRegions(
     sorted.map((turn, index) => {
+      const ceiling = index === 0 ? lines[0].start : sorted[index - 1].bufferEnd + 1;
+      const floor = index + 1 < sorted.length
+        ? sorted[index + 1].bufferStart - 1
+        : lines[lines.length - 1].end;
       const span = {
-        bufferStart: index === 0 ? viewportStart : turn.bufferStart,
-        bufferEnd: index + 1 < sorted.length ? sorted[index + 1].bufferStart - 1 : viewportEnd,
+        bufferStart: extendTo(screen, turn.bufferStart, ceiling, -1),
+        bufferEnd: extendTo(screen, turn.bufferEnd, floor, 1),
       };
       const extended = span.bufferStart !== turn.bufferStart || span.bufferEnd !== turn.bufferEnd;
       return { ...turn, ...span, confidence: extended ? "extended" : "anchored" } satisfies TurnSpan;
@@ -202,6 +204,28 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
     lines,
     tmuxBacked,
   );
+}
+
+/// A blank row is where one message stops being the other. Extending a span
+/// across one merged two on-screen turns into a single attributed block.
+export function extendTo(
+  screen: { start: number; end: number; normalized: string }[],
+  anchor: number,
+  limit: number,
+  step: 1 | -1,
+): number {
+  let reached = anchor;
+  const inside = (row: number) => (step === 1 ? row <= limit : row >= limit);
+  for (let index = screen.findIndex((line) => line.start <= anchor && anchor <= line.end) + step;
+       index >= 0 && index < screen.length;
+       index += step) {
+    const line = screen[index];
+    const edge = step === 1 ? line.end : line.start;
+    if (!inside(edge)) break;
+    if (!line.normalized) break;
+    reached = edge;
+  }
+  return reached;
 }
 
 // What `locateVisibleTurns` and the Rust port in boop-turnvis both produce.
