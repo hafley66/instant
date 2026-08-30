@@ -102,12 +102,13 @@ const DIRS: Record<string, string[]> = {
   [ROOT]: [`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/README.md`, `${ROOT}/package.json`],
   [`${ROOT}/src`]: [`${ROOT}/src/main.ts`, `${ROOT}/src/preview.ts`, `${ROOT}/src/mdview`],
   [`${ROOT}/src/mdview`]: [`${ROOT}/src/mdview/MdPanel.tsx`],
-  [`${ROOT}/e2e`]: [`${ROOT}/e2e/MdPanel.tsx`],
+  [`${ROOT}/e2e`]: [`${ROOT}/e2e/MdPanel.tsx`, `${ROOT}/e2e/fixtures`],
+  [`${ROOT}/e2e/fixtures`]: [`${ROOT}/e2e/fixtures/tree.json`],
 };
 // /tmp is the harness $HOME, so /tmp/notes is an ancestor rung of the cwd: a
 // token that misses under the repo is found by crawling up to it.
 DIRS["/tmp/notes"] = ["/tmp/notes/plan.md"];
-const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`, "/tmp/notes"]);
+const DIR_SET = new Set([`${ROOT}/src`, `${ROOT}/e2e`, `${ROOT}/src/mdview`, `${ROOT}/e2e/fixtures`, "/tmp/notes"]);
 const REPORT = `${ROOT}/.worktrees/terminal-inline-diagrams/playwright-report/index.html`;
 DIRS[REPORT.slice(0, REPORT.lastIndexOf("/"))] = [REPORT];
 
@@ -374,13 +375,24 @@ type TermHooks = {
   dims: () => { cols: number; rows: number } | null;
   scroll: (lines: number) => void;
   selection: () => string;
+  mouseMode: () => string;
+  pinned: () => string;
+  pinnedRects: () => number;
 };
 (window as Window & { __term?: TermHooks }).__term = {
   write: (data) => writeTerm(sessionId("e2e"), data),
   point: (row, col) => termCellPoint(sessionId("e2e"), row, col),
   resize: (cols, rows) => resizeTerm(sessionId("e2e"), cols, rows),
   dims: () => termDims(sessionId("e2e")),
-  selection: () => tabs.get(sessionId("e2e"))?.term.getSelection() ?? "",
+  // A pane whose app owns the mouse never fills xterm's own selection layer, so
+  // the pinned overlay is the answer for it (see 0_terminalPinnedSelection.ts).
+  selection: () => {
+    const tab = tabs.get(sessionId("e2e"));
+    return tab?.term.getSelection() || tab?.pinnedSelection?.text() || "";
+  },
+  mouseMode: () => tabs.get(sessionId("e2e"))?.term.modes.mouseTrackingMode ?? "none",
+  pinned: () => tabs.get(sessionId("e2e"))?.pinnedSelection?.text() ?? "",
+  pinnedRects: () => tabs.get(sessionId("e2e"))?.el.querySelectorAll(".term-pinned-selection").length ?? 0,
   scroll: (lines) => {
     const tab = tabs.get(sessionId("e2e"));
     if (tab) tab.term.scrollToLine(Math.max(0, tab.term.buffer.active.viewportY + lines));

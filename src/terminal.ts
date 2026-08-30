@@ -15,6 +15,7 @@ import { turnDebug } from "./0_turnDebugSettings";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { TerminalWheelRouter } from "./0_terminalWheel";
+import { TerminalPinnedSelection } from "./0_terminalPinnedSelection";
 import { runMatchingCommand } from "./keymap";
 import {
   sessionId,
@@ -95,6 +96,7 @@ export type Tab = {
   contextQueue?: TerminalContextQueue;
   cmdClickGesture?: CmdClickGestureTracker;
   wheel?: TerminalWheelRouter;
+  pinnedSelection?: TerminalPinnedSelection;
   harness: HarnessObservation;
   outputTail: string;
 };
@@ -513,6 +515,7 @@ export function openTab(
     stale?.viewport?.dispose();
     stale?.cmdClickGesture?.dispose();
     stale?.wheel?.dispose();
+    stale?.pinnedSelection?.dispose();
     stale?.term.dispose();
     stale?.el.remove();
     tabs.delete(id);
@@ -684,7 +687,15 @@ export function openTab(
     (up, lines) => { void invoke(commands.pty.scrollSession, { name: tmuxTarget ?? name, up, lines }).catch(() => {}); },
     () => diagrams?.viewportScrolled(),
   );
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, harness, outputTail: "" });
+  // Autocopy at mouse-up plus a highlight that stays put, matching what a pane
+  // whose TUI paints its own selection (claude) already gives the reader.
+  const pinnedSelection = graphics ? undefined : new TerminalPinnedSelection(term, el, {
+    copy: (text) => {
+      if (!settings.clipboardFromTerminal.$()) return;
+      void navigator.clipboard.writeText(text).catch(() => {});
+    },
+  });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
   applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
@@ -952,6 +963,10 @@ export function openTab(
           navigator.clipboard.writeText(term.getSelection()).catch(console.error);
           return false;
         }
+        if (pinnedSelection?.hasSelection()) {
+          navigator.clipboard.writeText(pinnedSelection.text()).catch(console.error);
+          return false;
+        }
         void invoke<string>(commands.pty.tmuxBuffer)
           .then((text) => {
             if (text) void navigator.clipboard.writeText(text);
@@ -1106,6 +1121,7 @@ export function onTermClosed(id: string) {
   t.viewport?.dispose();
   t.cmdClickGesture?.dispose();
   t.wheel?.dispose();
+  t.pinnedSelection?.dispose();
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
