@@ -21,7 +21,7 @@ import {
   togglePanel,
 } from "./reactdock";
 import { savePluginState } from "./pluginState";
-import { claimFsWatch } from "./fsWatch";
+import { fsWatch$ } from "./fsWatch";
 import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS } from "./core";
 import { FileImageViewer } from "./1_FileImageViewer";
 import { renderD2 } from "./mdview/d2";
@@ -30,8 +30,7 @@ import { browserFileUrl } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
 import { openExternalUrl } from "./0_openExternal";
 import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
-import { shareReplay, type Subscription } from "rxjs";
-import { visibleFileWatch$ } from "./0_visibleFileWatch";
+import { debounceTime, EMPTY, switchMap, type Subscription } from "rxjs";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
 // Exported so favorites' locateFav can park a synthetic (`fav:…`) entry here and
@@ -138,10 +137,7 @@ function ensureInst(path: string, line?: number): PreviewInst {
 // change stream in initPreviewWatch, since dock panels can also be closed by
 // keybinding, layout restore, or the tab's own ✕).
 type PreviewWatch = {
-  timer?: ReturnType<typeof setTimeout>;
-  visibility?: Subscription;
   watcher?: Subscription;
-  visible?: boolean;
 };
 const previewWatches = new Map<string, PreviewWatch>();
 // Editors write in bursts (truncate + write, or rename-over); coalesce so one
@@ -152,31 +148,23 @@ function watchPreview(path: string) {
   if (previewWatches.has(path)) return;
   const w: PreviewWatch = {};
   previewWatches.set(path, w);
-  const visibility$ = panelVisibility$(previewPanelId(path)).pipe(
-    shareReplay({ bufferSize: 1, refCount: true }),
-  );
-  w.visibility = visibility$.subscribe((visible) => {
-    w.visible = visible;
-    if (!visible) clearTimeout(w.timer);
+  w.watcher = panelVisibility$(previewPanelId(path)).pipe(
+    switchMap((visible) => (visible ? fsWatch$(path) : EMPTY)),
+    debounceTime(WATCH_DEBOUNCE_MS),
+  ).subscribe({
+    next: () => {
+      const inst = previewInsts.get(path);
+      if (!inst || !isPreviewOpen(path)) return;
+      void renderPathInto(inst.el, path, inst.line);
+    },
+    error: console.error,
   });
-  w.watcher = visibleFileWatch$(visibility$, () =>
-    claimFsWatch(path, () => {
-      clearTimeout(w.timer);
-      w.timer = setTimeout(() => {
-        const inst = previewInsts.get(path);
-        if (!inst || !isPreviewOpen(path) || !w.visible) return;
-        void renderPathInto(inst.el, path, inst.line);
-      }, WATCH_DEBOUNCE_MS);
-    }),
-  ).subscribe({ error: console.error });
 }
 
 function releasePreviewWatch(path: string) {
   const w = previewWatches.get(path);
   if (!w) return;
   previewWatches.delete(path);
-  clearTimeout(w.timer);
-  w.visibility?.unsubscribe();
   w.watcher?.unsubscribe();
 }
 
