@@ -12,7 +12,7 @@ import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
+import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   favoriteBoopTurn,
@@ -399,14 +399,23 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
       // Selection lands in the terminal's "next message" queue instead of the
       // clipboard, so a range picked out of scrollback can be edited and pasted
       // into the prompt rather than re-found later.
-      ...(id && tabs.get(id)?.term.hasSelection() ? [
+      //
+      // A pane whose app owns the mouse (codex, claude) has xterm's own
+      // selection disabled, so gating these on term.hasSelection() hid them on
+      // exactly the panes that need them. The pinned overlay holds the text
+      // there; termSelectionText reads whichever one is live.
+      ...(id && termSelectionText(id) ? [
+        {
+          label: "Ask about this",
+          action: () => { if (id) askAboutSelection(id); },
+        } satisfies CtxItem,
         {
           label: "Add selection to next message",
           action: () => tabs.get(id)?.contextQueue?.addSelection(),
         } satisfies CtxItem,
         {
           label: "Copy selection",
-          action: () => copy(tabs.get(id)?.term.getSelection() ?? ""),
+          action: () => copy(termSelectionText(id)),
         } satisfies CtxItem,
         { sep: true } satisfies CtxItem,
       ] : []),

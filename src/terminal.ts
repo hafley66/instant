@@ -48,6 +48,7 @@ import {
   type WrapRow,
 } from "./termWrapJoin";
 import { resolveRef } from "./refResolve";
+import { bracketedPaste, quoteForPrompt } from "./promptQuote";
 import {
   registerZoomKind,
   setZoomTargetResolver,
@@ -1238,6 +1239,26 @@ export function pasteToActive(data: string) {
   const id = activeId();
   if (!id || !data) return;
   invoke("write_pty", { id, data: sanitizePaste(data) }).catch(console.error);
+  tabs.get(id)?.term.focus();
+}
+
+/// Whichever selection is live for a tab. A pane whose app owns the mouse has
+/// xterm's own selection disabled and the pinned overlay holds the text
+/// instead, so a caller that reads only one of the two is blind on half the
+/// panes (see 0_terminalPinnedSelection.ts).
+export function termSelectionText(id: string): string {
+  const tab = tabs.get(id);
+  return tab?.term.getSelection() || tab?.pinnedSelection?.text() || "";
+}
+
+/// Write the selection into the pane's own input bar as a quote, cursor left on
+/// a blank line under it so the reader types the question there. Nothing is
+/// submitted: bracketed paste makes the agent insert the newlines as literal
+/// text (promptQuote.ts), which is also what carries it through tmux.
+export function askAboutSelection(id: string) {
+  const text = termSelectionText(id);
+  if (!text) return;
+  void invoke("write_pty", { id, data: bracketedPaste(quoteForPrompt(text)) }).catch(console.error);
   tabs.get(id)?.term.focus();
 }
 

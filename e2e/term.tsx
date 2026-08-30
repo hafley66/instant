@@ -27,6 +27,7 @@ import {
   termCellPoint,
   termDims,
   tabs,
+  askAboutSelection,
 } from "../src/terminal";
 import { setHomeDir, sessionId } from "../src/core";
 import { store } from "../src/state";
@@ -377,6 +378,7 @@ type TermHooks = {
   selection: () => string;
   mouseMode: () => string;
   pinned: () => string;
+  ask: () => void;
   pinnedRects: () => number;
 };
 (window as Window & { __term?: TermHooks }).__term = {
@@ -392,6 +394,7 @@ type TermHooks = {
   },
   mouseMode: () => tabs.get(sessionId("e2e"))?.term.modes.mouseTrackingMode ?? "none",
   pinned: () => tabs.get(sessionId("e2e"))?.pinnedSelection?.text() ?? "",
+  ask: () => askAboutSelection(sessionId("e2e")),
   pinnedRects: () => tabs.get(sessionId("e2e"))?.el.querySelectorAll(".term-pinned-selection").length ?? 0,
   scroll: (lines) => {
     const tab = tabs.get(sessionId("e2e"));

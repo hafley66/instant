@@ -28,6 +28,28 @@ export function pinnedRowSpans(selection: PinnedSelection, cols: number): Pinned
   return spans;
 }
 
+// xterm's own default (ITerminalOptions.wordSeparator). Matching it keeps a
+// double-click on a codex pane picking the same word it would on a plain one.
+const WORD_SEPARATORS = " ()[]{}',\"`";
+
+/// The word under `col` as a half-open [startCol, endCol), or null when the
+/// cell itself is a separator so there is no word to take.
+export function wordSpanAt(text: string, col: number): { startCol: number; endCol: number } | null {
+  if (col < 0 || col >= text.length) return null;
+  if (WORD_SEPARATORS.includes(text[col])) return null;
+  let startCol = col;
+  let endCol = col + 1;
+  while (startCol > 0 && !WORD_SEPARATORS.includes(text[startCol - 1])) startCol--;
+  while (endCol < text.length && !WORD_SEPARATORS.includes(text[endCol])) endCol++;
+  return { startCol, endCol };
+}
+
+/// The row's text without its trailing blanks, or null for a blank row.
+export function lineSpanAt(text: string): { startCol: number; endCol: number } | null {
+  const endCol = text.replace(/\s+$/, "").length;
+  return endCol > 0 ? { startCol: 0, endCol } : null;
+}
+
 // A press with no travel is a click, so the caller can leave it to the pane.
 export function isEmptySelection(selection: PinnedSelection): boolean {
   const { anchor, focus } = selection;
@@ -120,10 +142,45 @@ export class TerminalPinnedSelection {
     if ((event.target as HTMLElement | null)?.closest?.(".term-diagrams")) return;
     this.clear();
     if (!this.appOwnsMouse()) return;
+    // A pane whose app owns the mouse has xterm's own selection disabled, so
+    // double- and triple-click reached neither xterm nor this overlay and
+    // picked nothing at all. `detail` counts the clicks in the streak.
+    if (event.detail >= 2) {
+      const cell = this.cellAt(event.clientX, event.clientY);
+      if (event.detail === 2) this.selectWordAt(cell);
+      else this.selectLineAt(cell);
+      return;
+    }
     this.anchor = this.cellAt(event.clientX, event.clientY);
     this.dragging = false;
     document.addEventListener("mousemove", this.onMouseMove, true);
     document.addEventListener("mouseup", this.onMouseUp, true);
+  }
+
+  /// Both cells name a character, so `focus.col` is the last column taken and a
+  /// half-open span ends one past it.
+  selectSpan(row: number, span: { startCol: number; endCol: number } | null) {
+    if (!span) return;
+    this.selection = {
+      anchor: { row, col: span.startCol },
+      focus: { row, col: span.endCol - 1 },
+    };
+    this.capture();
+    this.paint();
+    const text = this.text();
+    if (text) this.options.copy(text);
+  }
+
+  selectWordAt(cell: SelectionCell) {
+    const line = this.term.buffer.active.getLine(cell.row);
+    if (!line) return;
+    this.selectSpan(cell.row, wordSpanAt(line.translateToString(false), cell.col));
+  }
+
+  selectLineAt(cell: SelectionCell) {
+    const line = this.term.buffer.active.getLine(cell.row);
+    if (!line) return;
+    this.selectSpan(cell.row, lineSpanAt(line.translateToString(false)));
   }
 
   mouseMove(event: MouseEvent) {
