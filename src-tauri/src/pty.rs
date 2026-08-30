@@ -68,6 +68,9 @@ pub struct Session {
     /// (#{pane_current_command}): claude, opencode, nvim, zsh… The frontend
     /// shows these so you can see what bot/tool a session is actually running.
     commands: Vec<String>,
+    /// What tmux shows for the active pane (#{pane_title}, else a hand-renamed
+    /// #{window_name}). Empty when it only echoes the command, session or host.
+    title: String,
 }
 
 /// Emitted to the webview as `pty-graphics` (one resolved kitty frame). v1 ships
@@ -190,7 +193,7 @@ fn list_sessions_blocking() -> Vec<Session> {
         .env("PATH", path_env())
         .output();
 
-    let (mut paths, mut commands) = session_pane_info();
+    let (mut paths, mut commands, mut titles) = session_pane_info();
     let Ok(out) = out else { return Vec::new() };
     String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -205,6 +208,7 @@ fn list_sessions_blocking() -> Vec<Session> {
             let created = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let paths = paths.remove(&name).unwrap_or_default();
             let commands = commands.remove(&name).unwrap_or_default();
+            let title = titles.remove(&name).unwrap_or_default();
             Some(Session {
                 name,
                 windows,
@@ -213,28 +217,52 @@ fn list_sessions_blocking() -> Vec<Session> {
                 created,
                 paths,
                 commands,
+                title,
             })
         })
         .collect()
 }
 
-/// session_name -> (distinct pane cwds, distinct foreground commands), from one
-/// `tmux list-panes -a` call. Empty on any failure (the session list still
-/// renders, just without worktree links or process labels).
-fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
+/// #{pane_title} takes an agent's OSC 0/2 title even with allow-rename off,
+/// where automatic-rename pins #{window_name} to the foreground command.
+fn tmux_pane_label<'a>(
+    pane_title: &'a str,
+    window: &'a str,
+    foreground: &str,
+    session: &str,
+    host: &str,
+) -> Option<&'a str> {
+    let known = |v: &str| v.is_empty() || v == foreground || v == session || v == host;
+    [pane_title.trim(), window.trim()]
+        .into_iter()
+        .find(|candidate| !known(candidate))
+}
+
+/// session_name -> (distinct pane cwds, distinct foreground commands, the label
+/// tmux shows for the active pane).
+type SessionPaneInfo = (
+    HashMap<String, Vec<String>>,
+    HashMap<String, Vec<String>>,
+    HashMap<String, String>,
+);
+
+/// One `tmux list-panes -a` call. Empty on any failure, so the session list
+/// still renders without worktree links, process labels or titles.
+fn session_pane_info() -> SessionPaneInfo {
     let out = tmux_cmd()
         .args([
             "list-panes",
             "-a",
             "-F",
-            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}",
+            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{window_active}\t#{pane_active}\t#{window_name}\t#{pane_title}\t#{host_short}",
         ])
         .env("PATH", path_env())
         .output();
     let mut paths: HashMap<String, Vec<String>> = HashMap::new();
     let mut commands: HashMap<String, Vec<String>> = HashMap::new();
+    let mut titles: HashMap<String, String> = HashMap::new();
     let Ok(out) = out else {
-        return (paths, commands);
+        return (paths, commands, titles);
     };
     let push = |map: &mut HashMap<String, Vec<String>>, name: &str, val: &str| {
         if val.is_empty() {
@@ -253,22 +281,37 @@ fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<Str
         .then(process_snapshot)
         .unwrap_or_default();
     for line in &rows {
-        let mut it = line.split('\t');
-        let Some(name) = it.next() else { continue };
-        if let Some(path) = it.next() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let Some(name) = f.first().copied() else { continue };
+        if let Some(path) = f.get(1) {
             push(&mut paths, name, path);
         }
-        if let Some(cmd) = it.next() {
-            let pane_pid = it.next().and_then(|value| value.parse().ok());
+        let mut foreground = String::new();
+        if let Some(cmd) = f.get(2).copied() {
+            let pane_pid = f.get(3).and_then(|value| value.parse().ok());
             let resolved = if cmd == "boop" {
                 pane_pid.and_then(|pid| inner_agent_command(pid, &process_rows))
             } else {
                 None
             };
-            push(&mut commands, name, resolved.as_deref().unwrap_or(cmd));
+            foreground = resolved.unwrap_or_else(|| cmd.to_string());
+            push(&mut commands, name, foreground.as_str());
+        }
+        if (f.get(4), f.get(5)) != (Some(&"1"), Some(&"1")) {
+            continue;
+        }
+        let label = tmux_pane_label(
+            f.get(7).copied().unwrap_or_default(),
+            f.get(6).copied().unwrap_or_default(),
+            &foreground,
+            name,
+            f.get(8).copied().unwrap_or_default(),
+        );
+        if let Some(label) = label {
+            titles.insert(name.to_string(), label.to_string());
         }
     }
-    (paths, commands)
+    (paths, commands, titles)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1055,6 +1098,30 @@ mod tests {
         let mut pending = vec![b'a', 0xFF, b'b'];
         assert_eq!(drain_utf8(&mut pending), "a\u{FFFD}b");
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn an_agents_osc_title_wins_over_the_pinned_window_name() {
+        assert_eq!(
+            tmux_pane_label("\u{2733} Chat log scrollback", "boop", "boop", "projects-3", "mac"),
+            Some("\u{2733} Chat log scrollback"),
+        );
+    }
+
+    #[test]
+    fn a_hand_renamed_window_is_used_when_no_pane_title_carries_one() {
+        assert_eq!(
+            tmux_pane_label("mac", "release audit", "zsh", "instant", "mac"),
+            Some("release audit"),
+        );
+    }
+
+    #[test]
+    fn a_label_echoing_command_session_or_host_yields_nothing() {
+        assert_eq!(tmux_pane_label("zsh", "zsh", "zsh", "instant", "mac"), None);
+        assert_eq!(tmux_pane_label("mac", "boop", "boop", "projects", "mac"), None);
+        assert_eq!(tmux_pane_label("instant", "instant", "zsh", "instant", "mac"), None);
+        assert_eq!(tmux_pane_label("   ", "", "zsh", "instant", "mac"), None);
     }
 }
 // todo(split): separate tmux commands, PTY ownership, and rogue-process discovery

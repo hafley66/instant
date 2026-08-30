@@ -160,6 +160,7 @@ export interface Session {
   created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees it has touched
   commands: string[]; // distinct foreground process per pane (#{pane_current_command}): claude, nvim, zsh…
+  title: string; // what tmux shows for the active pane (#{pane_title}, else a renamed #{window_name}); "" when uninformative
 }
 
 // A claude/opencode process on a real terminal outside any tmux session (Rust

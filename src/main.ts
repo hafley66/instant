@@ -78,6 +78,7 @@ import {
   openTabAtPwd,
   reopenLastTab,
   applyTabTitle,
+  syncTabTitlesFromTmux,
   isPinnedTab,
   togglePinTab,
 } from "./tabs";
@@ -259,6 +260,8 @@ async function main() {
   });
   // worktrees is runtime; the rest are settings, so the panel listens to both.
   store.subscribe(renderWorktreesPanel, ["worktrees"]);
+  // A tmux rename lands in list_sessions, which repaints the tab bar from it.
+  store.subscribe(syncTabTitlesFromTmux, ["sessions"]);
   merge(
     settings.wtView.$,
     settings.wtExpanded.$,

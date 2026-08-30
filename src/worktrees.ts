@@ -55,6 +55,7 @@ export type Session = {
   created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees in refreshSessions
   commands: string[]; // distinct foreground process per pane (claude, nvim, zsh…)
+  title: string; // what tmux shows for the active pane (#{pane_title}, else a renamed #{window_name}); "" when uninformative
 };
 
 export function renderSessionActive() {

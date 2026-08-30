@@ -67,14 +67,39 @@ function activeTabName(): string {
 // Visual is a 📌 prefix on the dockview tab title, pushed via reactdock's
 // setTermTitle (a public API) so we don't have to touch reactdock's renderer.
 export const isPinnedTab = (name: string) => settings.pinnedTabs.$().includes(name);
-// Base = the durable rename override (store.tabTitles) if set, else the session
-// name; the pin prefix rides on top so pin + rename compose.
+// What tmux calls this session's active window, blank unless someone renamed
+// it: Rust drops #{window_name} that only echoes the command or session name.
+export const tmuxTitle = (name: string) =>
+  store.get().sessions.find((s) => s.name === name)?.title ?? "";
+
+// Base = the durable rename override (store.tabTitles), else tmux's own window
+// name, else the session name; the pin prefix rides on top so all three compose.
 export const tabTitle = (name: string) => {
-  const base = customTermTitle(sessionId(name)) ?? name;
+  const base = customTermTitle(sessionId(name)) ?? (tmuxTitle(name) || name);
   return isPinnedTab(name) ? `📌 ${base}` : base;
 };
+
+// Last title pushed per session, so a tmux poll that changed nothing does not
+// re-enter dockview once per tab per tick.
+const published = new Map<string, string>();
+
 export function applyTabTitle(name: string) {
-  setTermTitle(sessionId(name), tabTitle(name));
+  const next = tabTitle(name);
+  published.set(name, next);
+  setTermTitle(sessionId(name), next);
+}
+
+// tmux renames arrive on the next list_sessions poll, so republish every open
+// tab whose composed title moved. Wired to store.subscribe(["sessions"]).
+export function syncTabTitlesFromTmux() {
+  const prefix = sessionId("");
+  for (const id of tabs.keys()) {
+    const name = id.slice(prefix.length);
+    const next = tabTitle(name);
+    if (published.get(name) === next) continue;
+    published.set(name, next);
+    setTermTitle(id, next);
+  }
 }
 export function togglePinTab(name: string) {
   if (!name) return;
