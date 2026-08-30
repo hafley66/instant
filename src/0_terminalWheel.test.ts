@@ -46,3 +46,30 @@ describe("terminal wheel state", () => {
     `);
   });
 });
+
+describe("shift bypasses an app that owns the mouse", () => {
+  it("keeps the wheel native while the app tracks the mouse", () => {
+    const state = reduceTerminalWheel(initialTerminalWheelState, {
+      type: "wheel",
+      mouseMode: "any",
+    });
+    expect(state.native).toBe(true);
+  });
+
+  it("takes the wheel back when shift is held", () => {
+    const state = reduceTerminalWheel(initialTerminalWheelState, {
+      type: "wheel",
+      mouseMode: "any",
+      bypass: true,
+    });
+    expect(state.native).toBe(false);
+  });
+
+  it("leaves a pane with no mouse tracking on the scrollback path", () => {
+    const state = reduceTerminalWheel(initialTerminalWheelState, {
+      type: "wheel",
+      mouseMode: "none",
+    });
+    expect(state.native).toBe(false);
+  });
+});

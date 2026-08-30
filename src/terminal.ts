@@ -697,7 +697,7 @@ export function openTab(
   term.parser.registerOscHandler(52, (data) => {
     // data = "<targets>;<base64|?>" (targets e.g. "c"/"p"; "?" is a read query).
     const b64 = data.slice(data.indexOf(";") + 1);
-    if (!b64 || b64 === "?") return true;
+    if (!b64 || b64 === "?" || !settings.clipboardFromTerminal.$()) return true;
     try {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       void navigator.clipboard.writeText(new TextDecoder().decode(bytes));

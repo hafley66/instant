@@ -11,7 +11,7 @@ export type TerminalWheelState = {
 
 export type TerminalWheelEvent =
   | { type: "sync"; mouseMode: TerminalMouseMode }
-  | { type: "wheel"; mouseMode: TerminalMouseMode };
+  | { type: "wheel"; mouseMode: TerminalMouseMode; bypass?: boolean };
 
 export const initialTerminalWheelState: TerminalWheelState = {
   mouseMode: "none",
@@ -19,13 +19,16 @@ export const initialTerminalWheelState: TerminalWheelState = {
   wheels: 0,
 };
 
+// `native` means the app receives the wheel itself. Shift takes it back: an app
+// with mouse tracking on (codex) otherwise swallows every scroll, leaving the
+// pane with no way to reach its scrollback.
 export function reduceTerminalWheel(
   state: TerminalWheelState,
   event: TerminalWheelEvent,
 ): TerminalWheelState {
   return {
     mouseMode: event.mouseMode,
-    native: event.mouseMode !== "none",
+    native: event.mouseMode !== "none" && !(event.type === "wheel" && event.bypass),
     wheels: state.wheels + (event.type === "wheel" ? 1 : 0),
   };
 }
@@ -57,9 +60,10 @@ export class TerminalWheelRouter {
 
   wheel(event: WheelEvent): boolean {
     const mouseMode = this.term.modes.mouseTrackingMode;
-    this.events.next({ type: "wheel", mouseMode });
+    const bypass = event.shiftKey;
+    this.events.next({ type: "wheel", mouseMode, bypass });
     this.activity();
-    if (mouseMode !== "none") return true;
+    if (mouseMode !== "none" && !bypass) return true;
 
     event.preventDefault();
     const screen = this.term.element?.querySelector<HTMLElement>(".xterm-screen");

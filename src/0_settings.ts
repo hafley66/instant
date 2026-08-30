@@ -82,6 +82,9 @@ export const settings = {
   termSidebar: setting<Record<string, TermSidebarState>>("termSidebar", {}),
 
   // terminal overlays
+  // An app that owns the mouse (codex) emits OSC 52 on its own selection, which
+  // the bridge would push to the system clipboard on every drag.
+  clipboardFromTerminal: setting("clipboardFromTerminal", true),
   inlineDiagrams: setting("inlineDiagrams", true),
   inlineStructuredSelectors: setting("inlineStructuredSelectors", true),
 
