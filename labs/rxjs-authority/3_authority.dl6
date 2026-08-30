@@ -1,0 +1,55 @@
+sh extract(
+  path: text,
+  digest: text,
+  record: text,
+  query: text,
+  capture: text,
+  text: text,
+  start: int,
+  end: int,
+  match_start: int,
+  match_end: int
+) =
+  `"$DL_EXTRACT_BIN" --ast-pattern 'react=const [$VALUE, $WRITER] = useState($INIT)' --ast-capture react=VALUE --ast-capture react=WRITER --ast-capture react=INIT --ast-pattern 'react_generic=const [$VALUE, $WRITER] = useState<$TYPE>($INIT)' --ast-capture react_generic=VALUE --ast-capture react_generic=WRITER --ast-capture react_generic=INIT --ast-pattern 'signal=const $OWNER = Signal($INIT)' --ast-capture signal=OWNER --ast-capture signal=INIT --ast-pattern 'subject=const $OWNER = new BehaviorSubject($INIT)' --ast-capture subject=OWNER --ast-capture subject=INIT {path} | jq -c 'select(.record == "capture")'`.
+
+rel capture(
+  path: text,
+  query: text,
+  capture: text,
+  text: text,
+  start: int,
+  end: int,
+  match_start: int,
+  match_end: int
+).
+capture(path, query, capture, text, start, end, match_start, match_end) <-
+  file(path, digest),
+  extract?(path, digest, "capture", query, capture, text, start, end, match_start, match_end).
+
+rel authority(path: text, key: text, kind: text, writer: text, line_start: int).
+
+authority(path, key, "react", writer, line_start) <-
+  capture(path, "react", "VALUE", key, line_start, _, match_start, match_end),
+  capture(path, "react", "WRITER", writer, _, _, match_start, match_end).
+
+authority(path, key, "react", writer, line_start) <-
+  capture(path, "react_generic", "VALUE", key, line_start, _, match_start, match_end),
+  capture(path, "react_generic", "WRITER", writer, _, _, match_start, match_end).
+
+authority(path, key, "signal", writer, line_start) <-
+  capture(path, "signal", "INIT", key, _, _, match_start, match_end),
+  capture(path, "signal", "OWNER", writer, line_start, _, match_start, match_end).
+
+authority(path, key, "subject", writer, line_start) <-
+  capture(path, "subject", "INIT", key, _, _, match_start, match_end),
+  capture(path, "subject", "OWNER", writer, line_start, _, match_start, match_end).
+
+rel authority_count(path: text, key: text, writers: int).
+authority_count(path, key, count(kind)) <- authority(path, key, kind, _, _).
+
+rel duplicate_authority(path: text, key: text, writers: int).
+duplicate_authority(path, key, writers) <- authority_count(path, key, writers), writers > 1.
+
+diag(path, line, 0, line, 0, "error", "RX001", "multiple writable authorities for one value", null) <-
+  duplicate_authority(path, key, _),
+  authority(path, key, _, _, line).
