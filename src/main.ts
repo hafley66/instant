@@ -28,6 +28,7 @@ import { FileTree } from "./plugins/files/1_FileTree";
 import { registerMdview } from "./mdview";
 import { installMdviewHost } from "./mdview/ports";
 import { registerPaint } from "./paintPanel";
+import { registerRectangle } from "./plugins/rectangle";
 import { isFilePickerOpen } from "./overlayGuard";
 import { installKeymap, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
@@ -289,6 +290,7 @@ async function main() {
   });
   registerMdview(); // md panels open via routing (preview/clickrules), no rail button
   registerPaint();
+  registerRectangle(); // opt-in rectangle workspace tab, opened via openRectangleWorkspace
   registerV2Bridges();
   registerActivityBridge();
   refreshFavorites();
