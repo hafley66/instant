@@ -32,6 +32,7 @@
     "@terrastruct/d2": "^0.1.33",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "@xyflow/react": "^12.11.2",
     "d3-brush": "^3.0.0",
     "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",

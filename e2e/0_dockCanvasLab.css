@@ -1,0 +1,52 @@
+:root {
+  color: #d8dee9;
+  background: #11151c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, input { font: inherit; }
+
+.dock-canvas-lab { width: 100%; height: 100%; }
+.dock-canvas-lab .dv-dockview { height: 100%; }
+.dock-canvas-lab .dv-content-container { background: #11151c; }
+
+.lab-canvas { width: 100%; height: 100%; background: #0e1218; }
+.lab-toolbar {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid #3b4658;
+  border-radius: 6px;
+  background: #171d27ee;
+}
+.lab-toolbar button { color: #d8dee9; background: #252d3a; border: 1px solid #465268; padding: 4px 8px; }
+
+.react-flow__node-panelNode { border: 0; padding: 0; background: transparent; }
+.lab-node {
+  width: 240px;
+  height: 128px;
+  overflow: hidden;
+  border: 1px solid #4c5d75;
+  border-radius: 5px;
+  background: #18202b;
+  box-shadow: 0 4px 14px #0008;
+}
+.lab-node-header { padding: 6px 8px; color: #9ecbff; background: #222c3a; }
+.lab-node-body { padding: 8px; }
+.lab-node input { width: 100%; margin-top: 8px; color: #e5e9f0; background: #0e131b; border: 1px solid #465268; padding: 5px; }
+.lab-node small { color: #8895a7; }
+
+.lab-metrics { height: 100%; overflow: auto; padding: 14px; background: #151a23; }
+.lab-metrics dl { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; }
+.lab-metrics dt { color: #8f9caf; }
+.lab-metrics dd { margin: 0; color: #c5f3a3; }
+.lab-log { height: 100%; padding: 14px; white-space: pre-wrap; color: #9ecbff; background: #10151d; }
+.lab-workspace { width: 100%; height: 100%; }
+.lab-terminal, .lab-static { height: 100%; margin: 0; padding: 14px; color: #a8d8a8; background: #090d12; }
+.lab-static { color: #b5c3d8; background: #121823; line-height: 1.8; }
