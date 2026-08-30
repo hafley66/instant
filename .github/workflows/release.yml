@@ -42,6 +42,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # src-tauri/Cargo.toml:41-44 reach ../../hafley-rs/crates/* by path, and
+      # actions/checkout refuses any path outside the workspace, so clone it.
+      - name: Check out the hafley-rs sibling checkout
+        run: |
+          rev="$(tr -d '[:space:]' < hafley-rs.rev)"
+          dest="$(dirname "$GITHUB_WORKSPACE")/hafley-rs"
+          git clone --filter=blob:none https://github.com/hafley66/hafley-rs.git "$dest"
+          git -C "$dest" checkout --detach "$rev"
+          echo "hafley-rs pinned at $rev"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10.12.4
