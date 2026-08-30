@@ -451,7 +451,31 @@ fn enable_mouse(name: &str) {
             .env("PATH", path_env())
             .status();
         keep_scroll_after_copy();
+        pin_status_title(&name);
     });
+}
+
+/// The tmux user option holding Instant's composed tab title.
+const INSTANT_TITLE: &str = "@instant_title";
+
+/// Point the status line at the one title the tab bar shows.
+///
+/// Stock status-left is `[#{session_name}]` and status-right carries
+/// `#{=21:pane_title}`, so a single pane rendered three different names at
+/// once: the tab bar's rename, the session name, and whatever the agent last
+/// announced over OSC. status-left now reads @instant_title (one writer:
+/// rename_session_window) and falls back to the session name, and status-right
+/// drops pane_title so an agent's title churn stops redrawing the bar.
+/// Per-session, not `-g`, to leave the user's other tmux sessions alone.
+fn pin_status_title(name: &str) {
+    const LEFT: &str = "#{?#{!=:#{@instant_title},},#{@instant_title},#{session_name}} ";
+    for args in [
+        ["set-option", "-t", name, "status-left", LEFT],
+        ["set-option", "-t", name, "status-left-length", "40"],
+        ["set-option", "-t", name, "status-right", "%H:%M"],
+    ] {
+        let _ = tmux_cmd().args(args).env("PATH", path_env()).status();
+    }
 }
 
 /// tmux's stock mouse bindings end a drag with `copy-pipe-and-cancel`, and the
@@ -905,6 +929,15 @@ pub async fn rename_session_window(name: String, title: String) -> Result<(), St
         }
         // list_sessions reads #{pane_title} first, so it moves too.
         run(&["select-pane", "-t", &name, "-T", &title])?;
+        // ...but an agent re-announces its OSC title every turn and takes
+        // #{pane_title} straight back, so the status line could never hold a
+        // rename. @instant_title has exactly one writer (this function), which
+        // is what makes the tab bar and the status line agree on one string.
+        if title.is_empty() {
+            run(&["set-option", "-t", &name, "-u", INSTANT_TITLE])?;
+        } else {
+            run(&["set-option", "-t", &name, INSTANT_TITLE, &title])?;
+        }
         Ok(())
     })
     .await
