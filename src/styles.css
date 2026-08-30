@@ -2760,6 +2760,14 @@ td.wt-star {
   color: var(--row-active-bg);
   flex: none;
 }
+/* What tmux itself displays for the session's active pane (#{pane_title}). */
+.s-title {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .s-pwd {
   font-size: 10px;
   opacity: 0.5;

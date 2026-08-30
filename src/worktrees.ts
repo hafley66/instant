@@ -686,6 +686,7 @@ function tmuxRows(): TmuxRow[] {
     const pwd = (s.paths ?? [])[0];
     return {
       name: s.name,
+      title: s.title ?? "",
       attached: s.attached,
       proc: foregroundProc(s.commands ?? []),
       windows: s.windows,

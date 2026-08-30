@@ -15,6 +15,7 @@ import type { BoopFavorite } from "./00a_terminalIntersection";
 // ---- tmux v2 ----
 export interface TmuxRow {
   name: string;
+  title: string; // what tmux shows for the active pane; "" when it adds nothing
   attached: boolean;
   proc: string;
   windows: number;
@@ -65,6 +66,17 @@ const TMUX_COLUMNS: TreeColumn<TmuxRow>[] = [
     header: "session",
     cell: (r) => <span className="s-name">{r.name}</span>,
     sortValue: (r) => r.name,
+  },
+  {
+    id: "title",
+    header: "title",
+    cell: (r) =>
+      r.title ? (
+        <span className="s-title" title={r.title}>
+          {r.title}
+        </span>
+      ) : null,
+    sortValue: (r) => r.title,
   },
   {
     id: "proc",
