@@ -1,4 +1,4 @@
-import type { IDisposable, Terminal } from "@xterm/xterm";
+import type { IDisposable, IMarker, Terminal } from "@xterm/xterm";
 import type { Subscription } from "rxjs";
 import { regionAtBufferRow, type TurnRegionKind } from "./00_terminalTurnRegions";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
@@ -68,6 +68,25 @@ export function rowTags(
   return tags;
 }
 
+/// A span holds absolute buffer rows from the scan that produced it. Once
+/// scrollback is full xterm trims one line per line written, sliding every row
+/// under a projection that has not rescanned yet.
+export function shiftSpans(visible: VisibleTurn[], shift: number): VisibleTurn[] {
+  if (!shift) return visible;
+  return visible.map((turn) => ({
+    ...turn,
+    bufferStart: turn.bufferStart - shift,
+    bufferEnd: turn.bufferEnd - shift,
+    anchorStart: turn.anchorStart - shift,
+    anchorEnd: turn.anchorEnd - shift,
+    regions: turn.regions.map((region) => ({
+      ...region,
+      bufferStart: region.bufferStart - shift,
+      bufferEnd: region.bufferEnd - shift,
+    })),
+  }));
+}
+
 export class TerminalTurnDebugOverlay {
   root = document.createElement("div");
   nodes: HTMLDivElement[] = [];
@@ -75,6 +94,8 @@ export class TerminalTurnDebugOverlay {
   subscription: Subscription;
   frame = 0;
   pointerRow: number | null = null;
+  scanMarker: IMarker | undefined;
+  scanLine = 0;
 
   constructor(
     readonly term: Terminal,
@@ -83,7 +104,10 @@ export class TerminalTurnDebugOverlay {
   ) {
     this.root.className = "term-turn-debug";
     host.appendChild(this.root);
-    this.subscription = projection.changes.subscribe(() => this.schedule());
+    this.subscription = projection.changes.subscribe(() => {
+      this.markScan();
+      this.schedule();
+    });
     const onPointerMove = (event: PointerEvent) => {
       const row = this.bufferRowAtClientY(event.clientY);
       if (row === this.pointerRow) return;
@@ -103,8 +127,25 @@ export class TerminalTurnDebugOverlay {
       term.onScroll(() => this.schedule()),
       term.onResize(() => this.schedule()),
       term.onWriteParsed(() => this.schedule()),
+      { dispose: () => this.scanMarker?.dispose() },
     ];
+    this.markScan();
     this.schedule();
+  }
+
+  /// Pin the row the newest projection was measured against. xterm keeps a
+  /// marker's `line` correct as scrollback trims, so the gap between the two
+  /// is how far every span has slid.
+  markScan() {
+    this.scanMarker?.dispose();
+    this.scanMarker = this.term.registerMarker(0);
+    this.scanLine = this.scanMarker?.line ?? 0;
+  }
+
+  bufferShift(): number {
+    const marker = this.scanMarker;
+    if (!marker || marker.line < 0) return 0;
+    return this.scanLine - marker.line;
   }
 
   screen(): HTMLElement | null {
@@ -140,7 +181,7 @@ export class TerminalTurnDebugOverlay {
     const left = screenRect.left - hostRect.left;
     const top = screenRect.top - hostRect.top;
     const tags = rowTags(
-      this.projection.visible,
+      shiftSpans(this.projection.visible, this.bufferShift()),
       this.term.buffer.active.viewportY,
       this.term.rows,
       this.pointerRow,
