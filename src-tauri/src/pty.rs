@@ -460,6 +460,7 @@ fn keep_scroll_after_copy() {
     // copy-pipe-no-clear leaves selection_active=1, so the highlight keeps
     // tracking the pointer; stop-selection freezes it without leaving the mode.
     const END: &str = "send-keys -X copy-pipe-no-clear ; send-keys -X stop-selection";
+    const CLICK: &str = "select-pane ; if-shell -F \"#{==:#{scroll_position},0}\" { send-keys -X cancel } { send-keys -X clear-selection }";
     let bindings: [(&str, String); 4] = [
         ("MouseDragEnd1Pane", END.to_string()),
         (
@@ -470,11 +471,16 @@ fn keep_scroll_after_copy() {
             "TripleClick1Pane",
             format!("select-pane ; send-keys -X select-line ; run-shell -d 0.3 ; {END}"),
         ),
-        // A plain click drops the highlight and holds the scroll position, which
-        // leaving copy-mode (the stock way out) would reset to the live bottom.
+        // A plain click drops the highlight. Holding the scroll position only
+        // matters when the pane IS scrolled; parking a bottomed-out pane in
+        // copy-mode forever meant every window resize reflowed the copy-mode
+        // screen and teleported scroll_position (measured 20 -> 3 -> 9 across
+        // two resizes on tmux 3.7b), which slides the content under the status
+        // line. At scroll_position 0 there is nothing to hold, so cancel back to
+        // the live screen; only a genuinely scrolled pane stays in copy-mode.
         (
             "MouseDown1Pane",
-            "select-pane ; send-keys -X clear-selection".to_string(),
+            CLICK.to_string(),
         ),
     ];
     for table in ["copy-mode", "copy-mode-vi"] {
