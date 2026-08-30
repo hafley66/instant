@@ -18,6 +18,7 @@ import { sessionId, activeId, flashStatus, baseName, tmuxName, logLine } from ".
 import { tabs, openTab, closedTabs, settleClosures } from "./terminal";
 import { refreshSessions, resumeIdIsLive, resumeLaunch, dropResumeTab } from "./worktrees";
 import { reopenKind } from "./0_reopenOrder";
+import { invoke } from "./generated/native";
 import { settings } from "./0_settings";
 
 // ---- tab commands (driven by the central keymap) ----
@@ -83,10 +84,28 @@ export const tabTitle = (name: string) => {
 // re-enter dockview once per tab per tick.
 const published = new Map<string, string>();
 
+// Last override handed to tmux per session, so a pin toggle or a re-render
+// does not re-enter tmux with a value it already holds.
+const pushedToTmux = new Map<string, string>();
+
+// A rename is Instant's opinion about the session, so tmux takes it as well and
+// every other client agrees with the tab bar. Blank restores automatic-rename.
+function pushRenameToTmux(name: string) {
+  const override = customTermTitle(sessionId(name)) ?? "";
+  const previous = pushedToTmux.get(name);
+  pushedToTmux.set(name, override);
+  // A first sighting with no override is boot state; pushing "" there would
+  // wipe a name set inside tmux itself.
+  if (previous === undefined && !override) return;
+  if (previous === override) return;
+  void invoke("rename_session_window", { name, title: override }).catch(() => {});
+}
+
 export function applyTabTitle(name: string) {
   const next = tabTitle(name);
   published.set(name, next);
   setTermTitle(sessionId(name), next);
+  pushRenameToTmux(name);
 }
 
 // tmux renames arrive on the next list_sessions poll, so republish every open

@@ -12,6 +12,7 @@ export type CommandName =
   | "scroll_session"
   | "tmux_buffer"
   | "rogue_agent_sessions"
+  | "rename_session_window"
   | "cdp_open"
   | "cdp_send"
   | "cdp_resize"
@@ -106,6 +107,7 @@ export namespace commands {
     export const scrollSession = "scroll_session";
     export const tmuxBuffer = "tmux_buffer";
     export const rogueAgentSessions = "rogue_agent_sessions";
+    export const renameSessionWindow = "rename_session_window";
   }
 
   export namespace cdp {

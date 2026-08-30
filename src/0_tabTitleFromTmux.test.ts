@@ -31,6 +31,14 @@ vi.mock("./worktrees", () => ({
 vi.mock("./0_settings", () => ({
   settings: { pinnedTabs: { $: () => pinned } },
 }));
+vi.mock("./generated/native", () => ({
+  invoke: (command: string, args: Record<string, unknown>) => {
+    renamed.push([command, args]);
+    return Promise.resolve();
+  },
+}));
+
+const renamed: [string, Record<string, unknown>][] = [];
 
 // Repo convention (vitest.config.ts): stub the few browser globals a module
 // reads at import time rather than pulling in jsdom.
@@ -61,6 +69,7 @@ beforeEach(() => {
   customTitle.mockReset().mockReturnValue(null);
   openTabs.clear();
   pinned = [];
+  renamed.length = 0;
   store.set({ sessions: [] });
 });
 
@@ -103,6 +112,33 @@ describe("tab titles follow tmux", () => {
     liveSessions([{ name: "projects", title: "second" }]);
     syncTabTitlesFromTmux();
     expect(setTitle.mock.calls).toEqual([[sessionId("projects"), "second"]]);
+  });
+
+  it("hands a rename to tmux and a clear back to automatic-rename", () => {
+    liveSessions([{ name: "projects", title: "agent set this" }]);
+    applyTabTitle("projects");
+    expect(renamed).toEqual([]); // boot with no override must not clear tmux
+
+    customTitle.mockReturnValue("my tab");
+    applyTabTitle("projects");
+    expect(renamed).toEqual([["rename_session_window", { name: "projects", title: "my tab" }]]);
+
+    applyTabTitle("projects");
+    expect(renamed).toHaveLength(1); // unchanged override stays off the wire
+
+    customTitle.mockReturnValue(null);
+    applyTabTitle("projects");
+    expect(renamed[1]).toEqual(["rename_session_window", { name: "projects", title: "" }]);
+  });
+
+  it("keeps a pin toggle off the tmux wire", () => {
+    liveSessions([{ name: "projects", title: "agent set this" }]);
+    customTitle.mockReturnValue("my tab");
+    applyTabTitle("projects");
+    renamed.length = 0;
+    pinned = ["projects"];
+    applyTabTitle("projects");
+    expect(renamed).toEqual([]);
   });
 
   it("does not re-publish a title applyTabTitle already pushed", () => {

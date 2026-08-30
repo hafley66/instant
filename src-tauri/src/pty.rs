@@ -230,9 +230,10 @@ fn tmux_pane_label<'a>(
     window: &'a str,
     foreground: &str,
     session: &str,
-    host: &str,
+    hosts: [&str; 2],
 ) -> Option<&'a str> {
-    let known = |v: &str| v.is_empty() || v == foreground || v == session || v == host;
+    let known =
+        |v: &str| v.is_empty() || v == foreground || v == session || hosts.contains(&v);
     [pane_title.trim(), window.trim()]
         .into_iter()
         .find(|candidate| !known(candidate))
@@ -254,7 +255,7 @@ fn session_pane_info() -> SessionPaneInfo {
             "list-panes",
             "-a",
             "-F",
-            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{window_active}\t#{pane_active}\t#{window_name}\t#{pane_title}\t#{host_short}",
+            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{window_active}\t#{pane_active}\t#{window_name}\t#{pane_title}\t#{host_short}\t#{host}",
         ])
         .env("PATH", path_env())
         .output();
@@ -305,7 +306,10 @@ fn session_pane_info() -> SessionPaneInfo {
             f.get(6).copied().unwrap_or_default(),
             &foreground,
             name,
-            f.get(8).copied().unwrap_or_default(),
+            [
+                f.get(8).copied().unwrap_or_default(),
+                f.get(9).copied().unwrap_or_default(),
+            ],
         );
         if let Some(label) = label {
             titles.insert(name.to_string(), label.to_string());
@@ -841,6 +845,32 @@ pub async fn kill_session(store: State<'_, PtyStore>, name: String) -> Result<()
     Ok(())
 }
 
+/// Push a tab rename into tmux so every other client agrees with the tab bar.
+/// Blank restores automatic-rename, the name's source before any rename.
+#[tauri::command]
+pub async fn rename_session_window(name: String, title: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let title = title.trim().to_string();
+        let run = |args: &[&str]| {
+            tmux_cmd()
+                .args(args)
+                .env("PATH", path_env())
+                .status()
+                .map_err(|e| e.to_string())
+        };
+        if title.is_empty() {
+            run(&["set-option", "-w", "-t", &name, "automatic-rename", "on"])?;
+        } else {
+            run(&["rename-window", "-t", &name, &title])?;
+        }
+        // list_sessions reads #{pane_title} first, so it moves too.
+        run(&["select-pane", "-t", &name, "-T", &title])?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// A claude/opencode process running directly on a real terminal, outside any
 /// tmux session — typed straight into Terminal.app/iTerm rather than opened
 /// through instant. The frontend flags these so an off-the-grid agent doesn't
@@ -1100,10 +1130,12 @@ mod tests {
         assert!(pending.is_empty());
     }
 
+    const HOSTS: [&str; 2] = ["mac", "mac.attlocal.net"];
+
     #[test]
     fn an_agents_osc_title_wins_over_the_pinned_window_name() {
         assert_eq!(
-            tmux_pane_label("\u{2733} Chat log scrollback", "boop", "boop", "projects-3", "mac"),
+            tmux_pane_label("\u{2733} Chat log scrollback", "boop", "boop", "projects-3", HOSTS),
             Some("\u{2733} Chat log scrollback"),
         );
     }
@@ -1111,17 +1143,26 @@ mod tests {
     #[test]
     fn a_hand_renamed_window_is_used_when_no_pane_title_carries_one() {
         assert_eq!(
-            tmux_pane_label("mac", "release audit", "zsh", "instant", "mac"),
+            tmux_pane_label("mac", "release audit", "zsh", "instant", HOSTS),
             Some("release audit"),
         );
     }
 
     #[test]
     fn a_label_echoing_command_session_or_host_yields_nothing() {
-        assert_eq!(tmux_pane_label("zsh", "zsh", "zsh", "instant", "mac"), None);
-        assert_eq!(tmux_pane_label("mac", "boop", "boop", "projects", "mac"), None);
-        assert_eq!(tmux_pane_label("instant", "instant", "zsh", "instant", "mac"), None);
-        assert_eq!(tmux_pane_label("   ", "", "zsh", "instant", "mac"), None);
+        let hosts = ["mac", "mac.attlocal.net"];
+        assert_eq!(tmux_pane_label("zsh", "zsh", "zsh", "instant", hosts), None);
+        assert_eq!(tmux_pane_label("mac", "boop", "boop", "projects", hosts), None);
+        assert_eq!(tmux_pane_label("instant", "instant", "zsh", "instant", hosts), None);
+        assert_eq!(tmux_pane_label("   ", "", "zsh", "instant", hosts), None);
+    }
+
+    #[test]
+    fn the_default_pane_title_is_the_fqdn_and_is_not_a_label() {
+        assert_eq!(
+            tmux_pane_label("mac.attlocal.net", "zsh", "zsh", "demo", ["mac", "mac.attlocal.net"]),
+            None,
+        );
     }
 }
 // todo(split): separate tmux commands, PTY ownership, and rogue-process discovery
