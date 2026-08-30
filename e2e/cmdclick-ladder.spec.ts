@@ -40,6 +40,8 @@ async function cmdClick(page: Page, row: number, col: number) {
 
 const lastEvent = (page: Page) => page.evaluate(() => window.__cmdClickEvents?.at(-1));
 const panel = (page: Page) => page.locator(".rg-panel");
+const row = (page: Page, text: string) =>
+  page.locator(".rg-panel .dtable-row").filter({ hasText: text });
 
 test("the crawl finds a file that lives above the repo root", async ({ page }) => {
   await openTerm(page);
@@ -60,7 +62,8 @@ test("a misspelled filename is answered by fzf, not ripgrep", async ({ page }) =
   await expect.poll(() => lastEvent(page)).toMatchObject({ token: "src/prevew.ts", routeId: "file" });
   await expect(panel(page).locator(".rg-head")).toContainText("src/prevew.ts");
   await expect(panel(page).locator(".rg-sub code")).toHaveText("fzf src/prevew.ts (1 candidate)");
-  await expect(panel(page).locator(".rg-file")).toHaveText("/tmp/term-e2e/src/preview.ts");
+  await expect(row(page, "src")).toBeVisible();
+  await expect(row(page, "preview.ts")).toBeVisible();
   expect(await page.evaluate(() => window.__runClickArgs)).toBeUndefined();
 });
 
@@ -69,8 +72,47 @@ test("a candidate row from the fzf picker opens the file", async ({ page }) => {
   await writeLines(page, ["  see src/prevew.ts for the fix"]);
   await cmdClick(page, 0, 10);
 
-  await panel(page).locator(".rg-hit").first().click();
+  await row(page, "preview.ts").click();
   await expect(page.locator(".dv-default-tab", { hasText: "preview.ts" })).toBeVisible();
+});
+
+test("a token naming several files opens a directory tree of the candidates", async ({ page }) => {
+  await openTerm(page);
+  await writeLines(page, ["  edited MdPanel.tsx just now"]);
+  await cmdClick(page, 0, 12);
+
+  await expect.poll(() => lastEvent(page)).toMatchObject({ token: "MdPanel.tsx", routeId: "file" });
+  await expect(panel(page).locator(".rg-sub code")).toHaveText("resolve MdPanel.tsx (2 candidates)");
+  // One row per candidate directory, relative to the deepest shared ancestor,
+  // each already holding its ranked hit.
+  await expect(row(page, "src/mdview")).toBeVisible();
+  await expect(row(page, "e2e")).toBeVisible();
+  await expect(panel(page).locator(".dtable-row.rc-hit")).toHaveCount(2);
+  await expect(panel(page).locator(".dtable-row.rc-hit").first().locator(".rc-rank")).toHaveText("#1");
+});
+
+test("a directory row in the picker expands to the rest of its listing", async ({ page }) => {
+  await openTerm(page);
+  await writeLines(page, ["  edited MdPanel.tsx just now"]);
+  await cmdClick(page, 0, 12);
+
+  // The candidate directory lists itself, so a folder holding no hit is still
+  // there to open: the picker browses rather than freezing into a list.
+  await row(page, "fixtures").locator(".tt-twisty").click();
+  await expect(row(page, "tree.json")).toBeVisible();
+});
+
+test("a file row in the candidate tree opens that file", async ({ page }) => {
+  await openTerm(page);
+  await writeLines(page, ["  edited MdPanel.tsx just now"]);
+  await cmdClick(page, 0, 12);
+
+  // The picker's own tab is titled with the token, so the preview is named by
+  // the path it loaded rather than by its tab.
+  await row(page, "MdPanel.tsx").first().click();
+  await expect(page.locator(".fs-preview .fs-preview-meta")).toContainText(
+    "/tmp/term-e2e/src/mdview/MdPanel.tsx",
+  );
 });
 
 test("`grep it` in the picker runs the configured rule for the same token", async ({ page }) => {

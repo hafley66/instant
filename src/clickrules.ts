@@ -2,6 +2,8 @@
 // (or free text inside a preview / rg panel) runs the first clickRules rule whose
 // regex matches it. The token is shell-quoted into `$1`, the command runs in the
 // pane cwd via run_click, and any stdout opens a results panel on the right.
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { clickRpc } from "./ipc/contract";
 import { DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
@@ -10,6 +12,7 @@ import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
 import { getFocusedTermId, tabMetaById } from "./terminal";
 import { splitLineRef, tokenAtColumn } from "./termTokens";
 import { looksLikePath, resolveRef } from "./refResolve";
+import { RefChoicesPanel } from "./refChoicesPanel";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
 import { settings } from "./0_settings";
 
@@ -164,7 +167,7 @@ export function svgWordAt(target: Element, x: number, y: number): string {
 // Every non-terminal surface a ⌘-click routes from. Terminals self-handle (they
 // own cell-to-pixel mapping); diagrams and SVG documents come in through here.
 const CLICK_SURFACES = ".fs-preview, .rg-panel, .mdview-root, .md-body, .term-diagrams, .svg-document-viewer";
-const CLICK_SKIP = ".fs-back, .rg-cfg, .rg-grep, .rg-file, .rg-hit, a, button, input, textarea, select";
+const CLICK_SKIP = ".fs-back, .rg-cfg, .rg-grep, .rg-file, .rg-hit, .tt-wrap, .tt-controls, a, button, input, textarea, select";
 
 function surfaceOf(el: HTMLElement): CmdClickSource {
   if (el.closest(".rg-panel")) return "results";
@@ -200,9 +203,8 @@ export function wireDomCmdClick() {
 }
 
 // A token that named several files (a bare `MdPanel.tsx`, a tail that repeats
-// across packages) opens the same results panel a search would, one row per
-// candidate, ranked closest first. Rows carry the token's line number so the
-// preview lands on the right row whichever file the user picks.
+// across packages) opens the filesystem picker: candidate directories on top,
+// their hits underneath in the resolver's rank order, every directory browsable.
 function openRefChoices(
   token: string,
   paths: string[],
@@ -210,31 +212,55 @@ function openRefChoices(
   cwd: string,
   via: "exact" | "fuzzy" = "exact",
 ) {
-  const output = paths.map((p) => `${p}:${line ?? 1}:${dirOf(p, cwd)}`).join("\n");
-  const verb = via === "fuzzy" ? "fzf" : "resolve";
-  const count = `${paths.length} candidate${paths.length === 1 ? "" : "s"}`;
-  openClickPanel(token, output, cwd, { pattern: "", command: `${verb} ${token} (${count})` });
-}
-
-// The directory a candidate lives in, relative to the terminal cwd when it sits
-// underneath it, so the picker rows read as locations instead of full paths.
-function dirOf(path: string, cwd: string): string {
-  const dir = path.slice(0, path.lastIndexOf("/")) || "/";
-  const base = cwd.replace(/\/$/, "");
-  return base && dir.startsWith(`${base}/`) ? dir.slice(base.length + 1) : dir;
+  const key = `rg:${token}`;
+  const el = clickPanelNode(key);
+  let root = clickPanelRoots.get(key);
+  if (!root) {
+    el.innerHTML = "";
+    root = createRoot(el);
+    clickPanelRoots.set(key, root);
+  }
+  root.render(
+    createElement(RefChoicesPanel, {
+      token,
+      paths,
+      line,
+      via,
+      onOpen: (path: string, at?: number) => {
+        previewOrigin.set(path, key); // record before render so "← back" shows
+        void openPathInInstant(path, at);
+      },
+      onGrep: () => void runClickRule(token, cwd),
+      onConfig: openClickConfigPanel,
+    }),
+  );
+  addPreviewPanel(key, token, el, "right");
 }
 
 const clickPanelEls = new Map<string, HTMLElement>();
+const clickPanelRoots = new Map<string, Root>();
 
-// Adopt a per-query results node into a right-side panel (same plumbing as file
-// previews). Re-running the same query refreshes the existing panel.
-function openClickPanel(query: string, output: string, cwd: string, rule: ClickRule) {
-  const key = `rg:${query}`;
+function clickPanelNode(key: string): HTMLElement {
   let el = clickPanelEls.get(key);
   if (!el) {
     el = document.createElement("div");
     el.className = "rg-panel";
     clickPanelEls.set(key, el);
+  }
+  return el;
+}
+
+// Adopt a per-query results node into a right-side panel (same plumbing as file
+// previews). Re-running the same query refreshes the existing panel.
+function openClickPanel(query: string, output: string, cwd: string, rule: ClickRule) {
+  const key = `rg:${query}`;
+  const el = clickPanelNode(key);
+  // The same key may currently hold the React picker (`grep it` re-answers the
+  // token); hand the node back to innerHTML rendering before writing to it.
+  const root = clickPanelRoots.get(key);
+  if (root) {
+    clickPanelRoots.delete(key);
+    root.unmount();
   }
   renderClickOutput(el, query, output, cwd, rule);
   addPreviewPanel(key, query, el, "right");
