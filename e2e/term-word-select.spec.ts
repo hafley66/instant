@@ -39,10 +39,9 @@ test("triple-click takes the row without its trailing blanks", async ({ page }) 
   await expect.poll(() => page.evaluate(() => window.__term!.pinned())).toBe(LINE);
 });
 
-// The payload has to reach the input bar as one editable block. A bare \n is
-// Enter and tmux squashes \r/\n alike, so an unwrapped write would submit the
-// quote one line at a time instead of filling the prompt.
-test("Ask about this writes a bracketed-paste quote and submits nothing", async ({ page }) => {
+// Ask queues for the NEXT MESSAGE panel now; the panel's own button does the
+// send. Nothing is written to the pty at queue time.
+test("Ask about this queues the selection instead of writing to the pty", async ({ page }) => {
   await openPane(page);
   await page.evaluate(() => {
     const w = window as unknown as {
@@ -54,12 +53,41 @@ test("Ask about this writes a bracketed-paste quote and submits nothing", async 
       w.__ptyWrites.push(args.data);
     };
   });
-  await clickCell(page, 0, 8, 3); // whole line, so the quote has real content
+  await clickCell(page, 0, 8, 3); // whole line
   await expect.poll(() => page.evaluate(() => window.__term!.pinned())).toBe(LINE);
   await page.evaluate(() => window.__term!.ask());
 
-  // The clicks themselves are forwarded to the app as SGR mouse reports first,
-  // because this pane's app owns the mouse. The ask payload is the last write.
+  // The queue panel is showing the line, with its textarea to annotate in.
+  await expect(page.locator(".term-context-queue")).toBeVisible();
+  await expect(page.locator(".term-context-queue header")).toContainText("NEXT MESSAGE · 1");
+  await expect(page.locator(".term-context-queue textarea")).toHaveValue(LINE);
+
+  // Only the forwarded mouse reports reached the pty; no prompt body yet.
+  const writes = await page.evaluate(() =>
+    (window as unknown as { __ptyWrites: string[] }).__ptyWrites,
+  );
+  expect(writes.some((write) => write.includes("200~"))).toBe(false);
+});
+
+// A bare \n written to a pty is Enter and tmux squashes \r/\n alike, so the
+// panel's send has to bracket its multi-line body or it submits per line.
+test("the queue's own button sends one bracketed-paste body", async ({ page }) => {
+  await openPane(page);
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __ptyWrites: string[];
+      __instantE2eNativeResults: Record<string, unknown>;
+    };
+    w.__ptyWrites = [];
+    w.__instantE2eNativeResults.write_pty = (args: { data: string }) => {
+      w.__ptyWrites.push(args.data);
+    };
+  });
+  await clickCell(page, 0, 8, 3);
+  await page.evaluate(() => window.__term!.ask());
+  await expect(page.locator(".term-context-queue")).toBeVisible();
+  await page.locator(".term-context-queue header button").click();
+
   await expect.poll(() =>
     page.evaluate(() =>
       (window as unknown as { __ptyWrites: string[] }).__ptyWrites.some((w) => w.includes("200~")),
@@ -69,11 +97,9 @@ test("Ask about this writes a bracketed-paste quote and submits nothing", async 
     const writes = (window as unknown as { __ptyWrites: string[] }).__ptyWrites;
     return writes[writes.length - 1];
   });
-
   expect(written.startsWith("\x1b[200~"), "opens bracketed paste").toBe(true);
   expect(written.endsWith("\x1b[201~"), "closes bracketed paste").toBe(true);
   const body = written.slice("\x1b[200~".length, -"\x1b[201~".length);
-  expect(body).toBe(`> ${LINE}\n\n`);
-  // No bare \r anywhere: that is the byte that would submit the prompt.
-  expect(body.includes("\r")).toBe(false);
+  expect(body).toContain(LINE);
+  expect(body.includes("\r"), "a bare CR would submit the prompt").toBe(false);
 });

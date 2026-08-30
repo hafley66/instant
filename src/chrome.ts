@@ -405,6 +405,9 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
       // exactly the panes that need them. The pinned overlay holds the text
       // there; termSelectionText reads whichever one is live.
       ...(id && termSelectionText(id) ? [
+        // Queues for the NEXT MESSAGE panel rather than writing its own body:
+        // that panel already accumulates several selections, gives each an
+        // editable textarea, and sends the lot with its own button.
         {
           label: "Ask about this",
           action: () => { if (id) askAboutSelection(id); },
@@ -413,13 +416,6 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
           label: "Copy selection",
           action: () => copy(termSelectionText(id)),
         } satisfies CtxItem,
-        // The queue reads xterm's own selection (term.onSelectionChange), which
-        // a pane whose app owns the mouse never produces, so offering it there
-        // shows an item that does nothing. Ask and Copy read either selection.
-        ...(tabs.get(id)?.term.hasSelection() ? [{
-          label: "Queue selection for a later paste",
-          action: () => tabs.get(id)?.contextQueue?.addSelection(),
-        } satisfies CtxItem] : []),
         { sep: true } satisfies CtxItem,
       ] : []),
       {

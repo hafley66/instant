@@ -193,6 +193,27 @@ export class TerminalContextQueue {
     this.positionSelectionAction();
   }
 
+  /// Offer a selection xterm did not make. A pane whose app owns the mouse
+  /// (claude sets mouse_any_flag=1; codex does not) has xterm's own
+  /// SelectionService disabled, so onSelectionChange never fires and the
+  /// "+ next" button never appeared there at all. The pinned overlay holds the
+  /// selection on those panes and hands it over here.
+  offerPinned(text: string, startRow: number, endRow: number) {
+    if (!text.trim()) {
+      this.selection = null;
+      this.selectionAction.hidden = true;
+      return;
+    }
+    this.selection = {
+      text,
+      bufferStart: { row: startRow, col: 0 },
+      bufferEnd: { row: endRow, col: 0 },
+      turnIds: turnsAcrossRange(this.projection.visible, startRow, endRow),
+    };
+    this.selectionAction.hidden = false;
+    this.positionSelectionAction();
+  }
+
   positionSelectionAction() {
     if (!this.selection || this.selectionAction.hidden) return;
     const row = Math.max(
@@ -212,20 +233,32 @@ export class TerminalContextQueue {
     });
   }
 
-  addSelection() {
-    if (!this.selection) return;
+  /// Queue a selection for the next message. `snapshot` names one outright,
+  /// which is how a pane whose app owns the mouse contributes: xterm's own
+  /// SelectionService is disabled there, so captureSelection never fires and
+  /// `this.selection` stays null (see 0_terminalPinnedSelection.ts).
+  addSelection(snapshot?: Pick<TerminalSelectionSnapshot, "text" | "turnIds">) {
+    const source = snapshot ?? this.selection;
+    if (!source?.text) return;
     const id = `selection:${Date.now()}:${this.items.size}`;
     this.items.set(id, {
       id,
       kind: "selection",
-      text: this.selection.text,
-      turnIds: this.selection.turnIds,
+      text: source.text,
+      turnIds: source.turnIds,
       enabled: true,
     });
     this.selection = null;
     this.selectionAction.hidden = true;
     this.term.clearSelection();
     this.renderQueue();
+  }
+
+  /// The buffer rows a pinned selection covers, tagged with the turns whose own
+  /// text it overlaps, so a queued pinned selection reads the same as one xterm
+  /// made.
+  snapshotFor(text: string, startRow: number, endRow: number): Pick<TerminalSelectionSnapshot, "text" | "turnIds"> {
+    return { text, turnIds: turnsAcrossRange(this.projection.visible, startRow, endRow) };
   }
 
   toggleStructured(selectable: StructuredSelectable, checked: boolean) {

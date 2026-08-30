@@ -48,7 +48,7 @@ import {
   type WrapRow,
 } from "./termWrapJoin";
 import { resolveRef } from "./refResolve";
-import { bracketedPaste, quoteForPrompt } from "./promptQuote";
+import { bracketedPaste } from "./promptQuote";
 import {
   registerZoomKind,
   setZoomTargetResolver,
@@ -677,7 +677,14 @@ export function openTab(
     el,
     turnVisibility,
     lineAnchors,
-    (text) => { void invoke(commands.pty.writePty, { id, data: text }).catch(() => {}); term.focus(); },
+    // formatQueuedContext composes a multi-line body, and a bare \n written to
+    // a pty is Enter (tmux squashes \r/\n alike), so this used to submit the
+    // prompt once per line instead of filling it. Bracketed paste inserts the
+    // newlines as editable text; see promptQuote.ts.
+    (text) => {
+      void invoke(commands.pty.writePty, { id, data: bracketedPaste(text) }).catch(() => {});
+      term.focus();
+    },
     () => settings.inlineStructuredSelectors.$(),
   );
   const cmdClickGesture = new CmdClickGestureTracker();
@@ -695,6 +702,10 @@ export function openTab(
       if (!settings.clipboardFromTerminal.$()) return;
       void navigator.clipboard.writeText(text).catch(() => {});
     },
+    // contextQueue is built above but the tab is not in `tabs` yet, so read it
+    // from the closure. This is what puts the "+ next" button on a claude pane,
+    // where xterm owns no selection to fire onSelectionChange.
+    onSelect: (text, startRow, endRow) => contextQueue?.offerPinned(text, startRow, endRow),
   });
   tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
   applyTurnDebugOverlay(tabs.get(id)!);
@@ -1251,15 +1262,23 @@ export function termSelectionText(id: string): string {
   return tab?.term.getSelection() || tab?.pinnedSelection?.text() || "";
 }
 
-/// Write the selection into the pane's own input bar as a quote, cursor left on
-/// a blank line under it so the reader types the question there. Nothing is
-/// submitted: bracketed paste makes the agent insert the newlines as literal
-/// text (promptQuote.ts), which is also what carries it through tmux.
+/// Queue the live selection for the next message and show the queue.
+///
+/// The context queue already owns this: it accumulates several selections,
+/// gives each an editable textarea to annotate, and sends the lot with its own
+/// button. Writing a second, one-shot body straight to the pty was a duplicate
+/// of that subsystem with no annotate step, so this feeds the queue instead.
 export function askAboutSelection(id: string) {
+  const tab = tabs.get(id);
   const text = termSelectionText(id);
-  if (!text) return;
-  void invoke("write_pty", { id, data: bracketedPaste(quoteForPrompt(text)) }).catch(console.error);
-  tabs.get(id)?.term.focus();
+  if (!tab?.contextQueue || !text) return;
+  const pinned = tab.pinnedSelection?.selection;
+  const rows = pinned
+    ? [Math.min(pinned.anchor.row, pinned.focus.row), Math.max(pinned.anchor.row, pinned.focus.row)] as const
+    : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
+  tab.contextQueue.addSelection(tab.contextQueue.snapshotFor(text, rows[0], rows[1]));
+  tab.pinnedSelection?.clear();
+  tab.term.focus();
 }
 
 // Write text into a terminal's pty (path or selection, space-terminated so the

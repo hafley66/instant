@@ -50,6 +50,10 @@ export function lineSpanAt(text: string): { startCol: number; endCol: number } |
   return endCol > 0 ? { startCol: 0, endCol } : null;
 }
 
+// Long enough to cover a double- or triple-click streak, which is what the
+// announcement has to outlast.
+const STREAK_MS = 400;
+
 // A press with no travel is a click, so the caller can leave it to the pane.
 export function isEmptySelection(selection: PinnedSelection): boolean {
   const { anchor, focus } = selection;
@@ -64,6 +68,10 @@ export function joinPinnedRows(rows: string[]): string {
 
 export type PinnedSelectionOptions = {
   copy: (text: string) => void;
+  /// Fired when a selection settles, with the buffer rows it covers. Lets the
+  /// context queue offer its "+ next" button on panes where xterm makes no
+  /// selection of its own to fire onSelectionChange.
+  onSelect?: (text: string, startRow: number, endRow: number) => void;
 };
 
 export class TerminalPinnedSelection {
@@ -73,6 +81,7 @@ export class TerminalPinnedSelection {
   anchor: SelectionCell | null = null;
   dragging = false;
   frame = 0;
+  announceTimer: ReturnType<typeof setTimeout> | undefined;
   render: IDisposable;
   resize: IDisposable;
   readonly onMouseDown = (event: MouseEvent) => this.mouseDown(event);
@@ -167,8 +176,7 @@ export class TerminalPinnedSelection {
     };
     this.capture();
     this.paint();
-    const text = this.text();
-    if (text) this.options.copy(text);
+    this.settle();
   }
 
   selectWordAt(cell: SelectionCell) {
@@ -199,8 +207,26 @@ export class TerminalPinnedSelection {
     this.anchor = null;
     if (!this.dragging) return;
     this.dragging = false;
+    this.settle();
+  }
+
+  /// One place a finished selection is announced, so a drag and a double-click
+  /// deliver the same thing to the same listeners.
+  ///
+  /// The announcement waits out the click streak. `onSelect` puts a floating
+  /// button on the selection's own row, and a triple-click's third press lands
+  /// exactly there: announcing on the second press let that third click hit the
+  /// button and queue the selection a second time.
+  settle() {
     const text = this.text();
-    if (text) this.options.copy(text);
+    if (!text || !this.selection) return;
+    this.options.copy(text);
+    const { anchor, focus } = orderedSelection(this.selection);
+    clearTimeout(this.announceTimer);
+    this.announceTimer = setTimeout(
+      () => this.options.onSelect?.(text, anchor.row, focus.row),
+      STREAK_MS,
+    );
   }
 
   capture() {
@@ -251,12 +277,15 @@ export class TerminalPinnedSelection {
   }
 
   clear() {
+    clearTimeout(this.announceTimer);
+    if (this.selection) this.options.onSelect?.("", 0, 0);
     this.selection = null;
     this.captured = [];
     this.root.replaceChildren();
   }
 
   dispose() {
+    clearTimeout(this.announceTimer);
     if (this.frame) cancelAnimationFrame(this.frame);
     this.host.removeEventListener("mousedown", this.onMouseDown, { capture: true });
     document.removeEventListener("mousemove", this.onMouseMove, true);
