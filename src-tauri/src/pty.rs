@@ -457,21 +457,28 @@ fn enable_mouse(name: &str) {
 /// tmux's stock mouse bindings end a drag with `copy-pipe-and-cancel`, and the
 /// cancel leaves copy-mode, which snaps the pane back to the live bottom.
 fn keep_scroll_after_copy() {
-    // Stock bindings otherwise, with the debounce that lets a double-click drag
-    // extend the word selection before the copy fires.
-    let bindings: [(&str, &str); 3] = [
-        ("MouseDragEnd1Pane", "send-keys -X copy-pipe-no-clear"),
+    // copy-pipe-no-clear leaves selection_active=1, so the highlight keeps
+    // tracking the pointer; stop-selection freezes it without leaving the mode.
+    const END: &str = "send-keys -X copy-pipe-no-clear ; send-keys -X stop-selection";
+    let bindings: [(&str, String); 4] = [
+        ("MouseDragEnd1Pane", END.to_string()),
         (
             "DoubleClick1Pane",
-            "select-pane ; send-keys -X select-word ; run-shell -d 0.3 ; send-keys -X copy-pipe-no-clear",
+            format!("select-pane ; send-keys -X select-word ; run-shell -d 0.3 ; {END}"),
         ),
         (
             "TripleClick1Pane",
-            "select-pane ; send-keys -X select-line ; run-shell -d 0.3 ; send-keys -X copy-pipe-no-clear",
+            format!("select-pane ; send-keys -X select-line ; run-shell -d 0.3 ; {END}"),
+        ),
+        // A plain click drops the highlight and holds the scroll position, which
+        // leaving copy-mode (the stock way out) would reset to the live bottom.
+        (
+            "MouseDown1Pane",
+            "select-pane ; send-keys -X clear-selection".to_string(),
         ),
     ];
     for table in ["copy-mode", "copy-mode-vi"] {
-        for (event, command) in bindings {
+        for (event, command) in &bindings {
             let _ = tmux_cmd()
                 .args(["bind-key", "-T", table, event, command])
                 .env("PATH", path_env())
