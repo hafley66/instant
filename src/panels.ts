@@ -5,6 +5,7 @@
 import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
 import { AgentsPanelV2 } from "./agentsPanelV2";
+import { ShellsPanelV2 } from "./1_shellsPanel";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { store } from "./state";
 import { cdpPerf } from "./cdp";
@@ -79,6 +80,14 @@ export function registerBuiltin() {
         iconLabel: "Agents",
         html: "",
         component: AgentsPanelV2,
+      },
+      {
+        id: "shells",
+        title: "Shells",
+        icon: "❯",
+        iconLabel: "Shells",
+        html: "",
+        component: ShellsPanelV2,
       },
     ],
   });
