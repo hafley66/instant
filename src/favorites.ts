@@ -145,16 +145,30 @@ export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
   return [...unique.values()].sort((left, right) => left.ts - right.ts || left.turn - right.turn);
 }
 
+// Boop ingests each harness's transcript on its own schedule, and codex trails
+// claude by tens of minutes, so a wall-clock floor silently empties this list.
+export const CANDIDATE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+// Sessions behind the newest assistant turns of one harness. The window is a
+// first pass; an empty answer retries unbounded, since boop_turns_recent caps
+// its own result at 100 rows and age alone never proves a pane is unrelated.
+export async function candidateSessions(
+  recent: (since: number) => Promise<BoopTurn[]>,
+  now = Date.now(),
+): Promise<string[]> {
+  let rows = await recent(now - CANDIDATE_WINDOW_MS);
+  if (!rows.length) rows = await recent(0);
+  return [...new Set(rows.map((turn) => turn.session))];
+}
+
 export async function boopCandidateTurns(harness: HarnessId): Promise<BoopTurn[]> {
   const cached = boopCandidateCache.get(harness);
   if (cached && performance.now() - cached.readAt < 10_000) return cached.turns;
   const active = boopCandidateReads.get(harness);
   if (active) return active;
-  const read = invoke<BoopTurn[]>("boop_turns_recent", {
-    since: Date.now() - 15 * 60 * 1000,
-    harness,
-  }).then(async (recent) => {
-    const sessions = [...new Set(recent.map((turn) => turn.session))];
+  const read = candidateSessions((since) =>
+    invoke<BoopTurn[]>("boop_turns_recent", { since, harness }),
+  ).then(async (sessions) => {
     const turns = (await Promise.all(sessions.map(boopTurnsForSession))).flat();
     boopCandidateCache.set(harness, { readAt: performance.now(), turns });
     return turns;
