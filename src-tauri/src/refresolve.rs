@@ -14,6 +14,9 @@ use serde::Serialize;
 const INDEX_TTL: Duration = Duration::from_secs(30);
 const INDEX_CAP: usize = 20_000;
 const MAX_RUNGS: usize = 8;
+const MAX_SIBLINGS: usize = 400;
+const MAX_GIT_REPOS: usize = 4;
+const MAX_GIT_REVS: usize = 20;
 const MAX_CHOICES: usize = 50;
 
 // nucleo pays 16 per matched char plus boundary bonuses; under 12 per char the
@@ -42,6 +45,12 @@ pub enum ResolveResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         line: Option<u32>,
         via: &'static str,
+    },
+    Absent {
+        repo: String,
+        rev: String,
+        path: String,
+        subject: String,
     },
     Miss,
 }
@@ -260,6 +269,89 @@ pub fn unique_dir_named(token: &str, entries: &[IndexEntry]) -> Option<String> {
     found.map(|e| e.path.clone())
 }
 
+/// Sibling checkouts: agent output prints a path relative to ITS repo root, so a
+/// token that misses every ancestor join is tried under the neighbouring repos.
+/// Only directories holding a `.git` count, and only at or above the repo root.
+pub fn sibling_candidates(
+    rel: &str,
+    cwd: &str,
+    repo_root: Option<&str>,
+    boundary: &str,
+    max: usize,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let start = repo_root.unwrap_or(cwd);
+    for ancestor in ancestors_of(start, boundary, max) {
+        let Ok(children) = std::fs::read_dir(&ancestor) else { continue };
+        let mut seen = 0;
+        for child in children.flatten() {
+            seen += 1;
+            if seen > MAX_SIBLINGS {
+                break;
+            }
+            if !child.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let path = child.path();
+            if child.file_name().to_string_lossy().starts_with('.') || !path.join(".git").exists() {
+                continue;
+            }
+            out.push(format!("{}/{}", path.to_string_lossy(), rel));
+        }
+    }
+    out
+}
+
+/// Repos worth asking git about: a checkout whose first path segment exists, so
+/// `plans/x.md` only questions repos that actually have a `plans` directory.
+fn git_probe_repos(rel: &str, cwd: &str, repo_root: Option<&str>, boundary: &str) -> Vec<String> {
+    let head = rel.split('/').next().unwrap_or(rel);
+    let mut repos: Vec<String> = repo_root.map(|r| vec![r.to_string()]).unwrap_or_default();
+    for ancestor in ancestors_of(cwd, boundary, MAX_RUNGS) {
+        let Ok(children) = std::fs::read_dir(&ancestor) else { continue };
+        for child in children.flatten().take(MAX_SIBLINGS) {
+            let path = child.path();
+            if !path.join(".git").exists() || !path.join(head).is_dir() {
+                continue;
+            }
+            let repo = path.to_string_lossy().into_owned();
+            if !repos.contains(&repo) {
+                repos.push(repo);
+            }
+            if repos.len() >= MAX_GIT_REPOS {
+                return repos;
+            }
+        }
+    }
+    repos
+}
+
+fn git_out(repo: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git").arg("-C").arg(repo).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// A path git knows and the working tree does not: deleted, on another branch,
+/// or fetched but never checked out. Answers with the newest commit holding it.
+pub fn git_absent(rel: &str, repos: &[String]) -> Option<(String, String, String)> {
+    for repo in repos {
+        let Some(revs) = git_out(repo, &["rev-list", "--all", "--", rel]) else { continue };
+        // The newest commit touching a path can be the one that deleted it, so
+        // walk back until a revision still holds the blob.
+        for rev in revs.lines().take(MAX_GIT_REVS) {
+            if git_out(repo, &["cat-file", "-e", &format!("{rev}:{rel}")]).is_none() {
+                continue;
+            }
+            let subject = git_out(repo, &["log", "-1", "--format=%h %s", rev]).unwrap_or_default();
+            return Some((repo.clone(), rev.to_string(), subject));
+        }
+    }
+    None
+}
+
 type IndexCache = Mutex<HashMap<PathBuf, (Instant, Arc<Vec<IndexEntry>>)>>;
 
 fn index_cache() -> &'static IndexCache {
@@ -380,8 +472,24 @@ fn resolve_ref_blocking(token: String, cwd: String, home: String) -> ResolveResu
         return ResolveResult::Choices { paths, line, via: "exact" };
     }
 
+    for candidate in sibling_candidates(&rel, &cwd, repo_root.as_deref(), &home, MAX_RUNGS) {
+        if std::fs::symlink_metadata(&candidate).is_ok() {
+            return ResolveResult::Hit {
+                reference: ResolvedRef { path: candidate, line, source: "sibling" },
+            };
+        }
+    }
+
     let fuzzy = rank_fuzzy(&rel, &entries, 20);
     if fuzzy.is_empty() {
+        // Nothing on disk anywhere. A path-shaped token may still be a file git
+        // holds and the working tree does not.
+        if rel.contains('/') {
+            let repos = git_probe_repos(&rel, &cwd, repo_root.as_deref(), &home);
+            if let Some((repo, rev, subject)) = git_absent(&rel, &repos) {
+                return ResolveResult::Absent { repo, rev, path: rel, subject };
+            }
+        }
         return ResolveResult::Miss;
     }
     ResolveResult::Choices {
@@ -397,6 +505,17 @@ pub async fn resolve_ref(token: String, cwd: String) -> Result<ResolveResult, St
     tauri::async_runtime::spawn_blocking(move || resolve_ref_blocking(token, cwd, home))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// The bytes of a path at a revision, for a file the working tree does not hold.
+#[tauri::command]
+pub async fn read_git_blob(repo: String, rev: String, path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_out(&repo, &["show", &format!("{rev}:{path}")])
+            .ok_or_else(|| format!("{path} is not in {rev}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -692,6 +811,72 @@ mod tests {
         assert_eq!(resolve(&tree, "renderPathInto", &cwd), ResolveResult::Miss);
     }
 
+    fn git(tree: &Tree, rel: &str, args: &[&str]) -> String {
+        let repo = tree.0.join(rel);
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn crawls_sideways_into_a_sibling_checkout() {
+        let tree = Tree::new("siblings");
+        tree.file("projects/instant/.git/HEAD");
+        tree.file("projects/instant/src/main.ts");
+        tree.file("projects/sprefa/.git/HEAD");
+        tree.file("projects/sprefa/plans/bench/STUDY.md");
+        let cwd = tree.path("projects/instant/src");
+
+        // The token is relative to sprefa's root, so no ancestor join reaches it.
+        let joins = crawl_candidates("plans/bench/STUDY.md", &cwd, None, &tree.0.to_string_lossy(), 8);
+        let _ = sibling_candidates("plans/bench/STUDY.md", &cwd, None, &tree.0.to_string_lossy(), 8);
+        assert!(joins.iter().all(|(path, _)| std::fs::symlink_metadata(path).is_err()));
+
+        assert_eq!(
+            resolve(&tree, "plans/bench/STUDY.md", &cwd),
+            ResolveResult::Hit {
+                reference: ResolvedRef {
+                    path: tree.path("projects/sprefa/plans/bench/STUDY.md"),
+                    line: None,
+                    source: "sibling",
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn reports_a_path_only_git_still_holds() {
+        let tree = Tree::new("gitabsent");
+        tree.file("projects/instant/.git/HEAD");
+        tree.file("projects/sprefa/plans/keep.md");
+        tree.file("projects/sprefa/plans/STUDY.md");
+        git(&tree, "projects/sprefa", &["init", "-q", "-b", "main"]);
+        git(&tree, "projects/sprefa", &["add", "-A"]);
+        git(&tree, "projects/sprefa", &["commit", "-qm", "study doc"]);
+        let rev = git(&tree, "projects/sprefa", &["rev-parse", "HEAD"]);
+        std::fs::remove_file(tree.0.join("projects/sprefa/plans/STUDY.md")).unwrap();
+        git(&tree, "projects/sprefa", &["commit", "-aqm", "drop it"]);
+        let cwd = tree.path("projects/instant");
+
+        match resolve(&tree, "plans/STUDY.md", &cwd) {
+            ResolveResult::Absent { repo, rev: found, path, subject } => {
+                assert_eq!(repo, tree.path("projects/sprefa"));
+                assert_eq!(found, rev);
+                assert_eq!(path, "plans/STUDY.md");
+                assert!(subject.ends_with("study doc"), "{subject}");
+            }
+            other => panic!("expected Absent, got {other:?}"),
+        }
+    }
+
     #[test]
     fn serializes_the_shape_the_renderer_expects() {
         let hit = ResolveResult::Hit {
@@ -708,5 +893,15 @@ mod tests {
             r#"{"kind":"choices","paths":["/a/b.ts"],"via":"fuzzy"}"#
         );
         assert_eq!(serde_json::to_string(&ResolveResult::Miss).unwrap(), r#"{"kind":"miss"}"#);
+        let absent = ResolveResult::Absent {
+            repo: "/r".into(),
+            rev: "abc".into(),
+            path: "plans/x.md".into(),
+            subject: "abc study".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&absent).unwrap(),
+            r#"{"kind":"absent","repo":"/r","rev":"abc","path":"plans/x.md","subject":"abc study"}"#
+        );
     }
 }

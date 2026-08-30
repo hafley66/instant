@@ -185,6 +185,13 @@ const RESOLVE_OVERRIDES: Record<string, unknown> = {
   "notes/plan.md": { kind: "hit", ref: { path: "/tmp/notes/plan.md", source: "ancestor" } },
   "src/prevew.ts": { kind: "choices", paths: [`${ROOT}/src/preview.ts`], via: "fuzzy" },
   mdview: { kind: "hit", ref: { path: `${ROOT}/src/mdview`, source: "fuzzy" } },
+  "plans/bench/STUDY.md": {
+    kind: "absent",
+    repo: "/tmp/sprefa",
+    rev: "aa95c0ef361e305f362005b09d0fbabaa75afca7",
+    path: "plans/bench/STUDY.md",
+    subject: "aa95c0ef3 bench: study doc",
+  },
 };
 
 function resolveRefFixture(token: string, cwd: string) {
@@ -235,8 +242,12 @@ function resolveRefFixture(token: string, cwd: string) {
   // The rule rung. Returns rg-shaped stdout so the results panel has rows.
   run_click: (args: Record<string, unknown> | undefined) => {
     (window as Window & { __runClickArgs?: unknown }).__runClickArgs = args;
+    // A token nothing matches: rg prints nothing, which used to open no panel.
+    if (String(args?.command ?? "").includes("qqqzzz")) return "";
     return `src/preview.ts:12:const preview = 1\n`;
   },
+  read_git_blob: (args: Record<string, unknown> | undefined) =>
+    `# ${String(args?.path ?? "")}\nwritten at ${String(args?.rev ?? "").slice(0, 7)}\n`,
   resolve_ref: (args: Record<string, unknown> | undefined) =>
     resolveRefFixture(String(args?.token ?? ""), String(args?.cwd ?? ROOT)),
   // harness_session resolves a session id for a (tool, cwd) probe. The Turns

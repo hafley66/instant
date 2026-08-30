@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { signalsJsx } from "@hafley66/signals/vite";
 import path from "node:path";
+import fs from "node:fs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -52,6 +53,14 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
+    // Worktrees symlink node_modules at the main checkout, which realpaths
+    // outside the project root; without this, package assets 403.
+    fs: {
+      allow: [
+        path.resolve("."),
+        fs.realpathSync(path.resolve("node_modules")),
+      ],
+    },
     host: host || false,
     hmr: host
       ? {

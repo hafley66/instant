@@ -96,7 +96,6 @@ test("a token that names no path falls through to ripgrep", async ({ page }) => 
     routeId: "configured-rule",
   });
   await expect.poll(() => page.evaluate(() => window.__runClickArgs?.command)).toContain("qqqzzz.ts");
-  await expect(panel(page).locator(".rg-hit")).toHaveCount(1);
 });
 
 test("a bare word that names exactly one folder resolves to it", async ({ page }) => {
@@ -105,4 +104,33 @@ test("a bare word that names exactly one folder resolves to it", async ({ page }
   await cmdClick(page, 0, 10);
 
   await expect.poll(() => lastEvent(page)).toMatchObject({ token: "mdview", routeId: "file" });
+});
+
+test("a path only git holds opens its blob, naming the revision", async ({ page }) => {
+  await openTerm(page);
+  await writeLines(page, ["  see plans/bench/STUDY.md on origin/main"]);
+  await cmdClick(page, 0, 12);
+
+  await expect.poll(() => lastEvent(page)).toMatchObject({
+    token: "plans/bench/STUDY.md",
+    routeId: "file",
+  });
+  await expect(panel(page).locator(".rg-sub code")).toContainText("git show aa95c0ef3:plans/bench/STUDY.md");
+  await expect(panel(page).locator(".rg-sub code")).toContainText("not in /tmp/sprefa");
+  await expect(panel(page).locator(".rg-hit").first()).toContainText("# plans/bench/STUDY.md");
+  expect(await page.evaluate(() => window.__runClickArgs)).toBeUndefined();
+});
+
+test("a token that matches nothing still opens a panel saying so", async ({ page }) => {
+  await openTerm(page);
+  await writeLines(page, ["  qqqzzz.ts never existed"]);
+  await cmdClick(page, 0, 4);
+
+  await expect.poll(() => lastEvent(page)).toMatchObject({
+    token: "qqqzzz.ts",
+    routeId: "configured-rule",
+  });
+  await expect(panel(page).locator(".rg-body")).toContainText(
+    "no match, and no file named qqqzzz.ts on disk or in git",
+  );
 });
