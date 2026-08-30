@@ -410,13 +410,16 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
           action: () => { if (id) askAboutSelection(id); },
         } satisfies CtxItem,
         {
-          label: "Add selection to next message",
-          action: () => tabs.get(id)?.contextQueue?.addSelection(),
-        } satisfies CtxItem,
-        {
           label: "Copy selection",
           action: () => copy(termSelectionText(id)),
         } satisfies CtxItem,
+        // The queue reads xterm's own selection (term.onSelectionChange), which
+        // a pane whose app owns the mouse never produces, so offering it there
+        // shows an item that does nothing. Ask and Copy read either selection.
+        ...(tabs.get(id)?.term.hasSelection() ? [{
+          label: "Queue selection for a later paste",
+          action: () => tabs.get(id)?.contextQueue?.addSelection(),
+        } satisfies CtxItem] : []),
         { sep: true } satisfies CtxItem,
       ] : []),
       {
