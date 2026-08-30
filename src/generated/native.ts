@@ -66,6 +66,7 @@ export type CommandName =
   | "boop_mux_capture"
   | "boop_mux_session"
   | "boop_mux_send_keys"
+  | "boop_mux_exit_copy_mode"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
@@ -191,6 +192,7 @@ export namespace commands {
     export const boopMuxCapture = "boop_mux_capture";
     export const boopMuxSession = "boop_mux_session";
     export const boopMuxSendKeys = "boop_mux_send_keys";
+    export const boopMuxExitCopyMode = "boop_mux_exit_copy_mode";
   }
 
   export namespace ledger {

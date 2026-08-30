@@ -1139,6 +1139,7 @@ pub fn run() {
             boop::boop_favorites,
             boop::boop_favorite_toggle,
             boop_tmux::boop_mux_capture,
+            boop_tmux::boop_mux_exit_copy_mode,
             harness_store::boop_mux_session,
             boop_tmux::boop_mux_send_keys,
             ledger::list_ai_sessions,

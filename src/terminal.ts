@@ -681,9 +681,21 @@ export function openTab(
     // a pty is Enter (tmux squashes \r/\n alike), so this used to submit the
     // prompt once per line instead of filling it. Bracketed paste inserts the
     // newlines as editable text; see promptQuote.ts.
+    //
+    // A pane parked in tmux copy-mode routes the paste to the scrollback viewer
+    // and it never reaches the input bar, so leave the mode first. The command
+    // is a no-op on a pane that is in no mode, and it resolves even when there
+    // is no tmux at all, so the write is not gated on it succeeding.
     (text) => {
-      void invoke(commands.pty.writePty, { id, data: bracketedPaste(text) }).catch(() => {});
-      term.focus();
+      const body = bracketedPaste(text);
+      const settled = graphics
+        ? Promise.resolve()
+        : invoke(commands.boop_mux.boopMuxExitCopyMode, {
+            target: tmuxTarget ?? name, socket: null,
+          }).catch(() => {});
+      void settled.then(() => invoke(commands.pty.writePty, { id, data: body }))
+        .catch(() => {})
+        .then(() => term.focus());
     },
     () => settings.inlineStructuredSelectors.$(),
   );

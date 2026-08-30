@@ -22,6 +22,43 @@ pub async fn boop_mux_capture(target: String, socket: Option<String>) -> Result<
     .map_err(|error| error.to_string())?
 }
 
+/// Return a pane to its live screen before anything is typed at it.
+///
+/// A pane parked in copy-mode routes every keystroke to copy-mode, so a paste
+/// lands in the scrollback viewer and never reaches the app's input bar. The
+/// pane also stays wherever it was scrolled to. `cancel` leaves the mode and
+/// snaps back to the live bottom; on a pane that is in no mode it does nothing,
+/// so this is safe to run before every send.
+#[tauri::command]
+pub async fn boop_mux_exit_copy_mode(
+    target: String,
+    socket: Option<String>,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let socket = socket
+            .or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        leave_copy_mode(socket.as_deref(), &target)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Whether the pane was in a mode and had to be brought back.
+fn leave_copy_mode(socket: Option<&str>, pane: &str) -> Result<bool, String> {
+    let out = tmux_command(socket)
+        .args(["display-message", "-p", "-t", pane, "#{pane_in_mode}"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    if String::from_utf8_lossy(&out.stdout).trim() != "1" {
+        return Ok(false);
+    }
+    run(tmux_command(socket).args(["send-keys", "-X", "-t", pane, "cancel"]))?;
+    Ok(true)
+}
+
 /// Sends a literal body plus Enter to a tmux pane. With no `target`, resolves the
 /// client's currently visible pane, so the keystrokes land wherever the user is looking.
 ///
@@ -46,6 +83,9 @@ pub async fn boop_mux_send_keys(
             _ => Tmux.current_pane(socket.as_deref()).ok_or("no visible tmux pane")?,
         };
         let mode = mode.unwrap_or_else(|| "clear".to_string());
+        // Every mode below types at the pane, and a pane in copy-mode consumes
+        // keystrokes itself.
+        leave_copy_mode(socket.as_deref(), &pane)?;
         if mode == "escape" {
             return send_key(socket.as_deref(), &pane, "Escape").map(|()| pane);
         }

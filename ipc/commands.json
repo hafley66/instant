@@ -9,7 +9,7 @@
   "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "search_files", "resolve_ref", "clear_ref_index", "read_git_blob", "read_image", "read_text", "save_text", "delete_file", "fs_watch_claim", "fs_watch_release"],
   "harness": ["harness_session", "harness_sessions"],
   "boop": ["boop_turns", "boop_turns_recent", "boop_locate_turns", "boop_favorite_add", "boop_favorites", "boop_favorite_toggle"],
-  "boop_mux": ["boop_mux_capture", "boop_mux_session", "boop_mux_send_keys"],
+  "boop_mux": ["boop_mux_capture", "boop_mux_session", "boop_mux_send_keys", "boop_mux_exit_copy_mode"],
   "ledger": ["list_ai_sessions", "read_ai_messages", "latest_ai_message"],
   "meme": ["make_slack_emoji", "magick_available", "install_imagemagick", "save_meme", "copy_meme_image"],
   "favorites": ["fav_add", "fav_remove", "fav_list"],
