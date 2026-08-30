@@ -1126,6 +1126,7 @@ pub fn run() {
             fs::read_text,
             refresolve::resolve_ref,
             refresolve::clear_ref_index,
+            refresolve::read_git_blob,
             fs_watch::fs_watch_claim,
             fs_watch::fs_watch_release,
             harness::harness_session,

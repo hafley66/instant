@@ -47,6 +47,7 @@ export type CommandName =
   | "search_files"
   | "resolve_ref"
   | "clear_ref_index"
+  | "read_git_blob"
   | "read_image"
   | "read_text"
   | "save_text"
@@ -161,6 +162,7 @@ export namespace commands {
     export const searchFiles = "search_files";
     export const resolveRef = "resolve_ref";
     export const clearRefIndex = "clear_ref_index";
+    export const readGitBlob = "read_git_blob";
     export const readImage = "read_image";
     export const readText = "read_text";
     export const saveText = "save_text";

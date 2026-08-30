@@ -62,6 +62,12 @@ cmdClickRouter.register({
     await openPathInInstant(path, line);
     return true;
   }
+  // Git knows the path, the working tree does not: show the blob at the newest
+  // revision that still holds it rather than sending the token to ripgrep.
+  if (result.kind === "absent") {
+    await openGitBlobPanel(token, result, cwd);
+    return true;
+  }
   return false;
   },
 });
@@ -83,8 +89,30 @@ export async function runClickRule(token: string, cwd: string): Promise<boolean>
   } catch (e) {
     out = String(e);
   }
-  if (out.trim()) openClickPanel(token, out, cwd, rule);
+  // Silence is the one answer a ⌘-click must never give: an empty result still
+  // opens the panel, naming the command that found nothing.
+  openClickPanel(token, out.trim() || `no match, and no file named ${token} on disk or in git`, cwd, rule);
   return true;
+}
+
+// A path git holds and the checkout does not. The panel names the revision and
+// shows the file, so a ⌘-click on an un-checked-out path answers something.
+async function openGitBlobPanel(
+  token: string,
+  found: { repo: string; rev: string; path: string; subject: string },
+  cwd: string,
+) {
+  let body = "";
+  try {
+    body = await clickRpc.readGitBlob({ repo: found.repo, rev: found.rev, path: found.path });
+  } catch (e) {
+    body = String(e);
+  }
+  const rows = body.split("\n").map((line, index) => `${found.path}:${index + 1}:${line}`);
+  openClickPanel(token, rows.join("\n"), cwd, {
+    pattern: "",
+    command: `git show ${found.rev.slice(0, 9)}:${found.path} · ${found.subject} · not in ${found.repo}`,
+  });
 }
 
 export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown") {
