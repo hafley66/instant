@@ -143,6 +143,28 @@ export function tmuxConfirms(lines: LogicalLine[], tmuxCapture: string): boolean
   });
 }
 
+/// tmux paints its status line on the last row of the client screen, so an
+/// xterm row exists that is not pane content. `capture-pane` returns the pane
+/// and never that row, which is what makes the two readers disagree by exactly
+/// one row at the bottom.
+///
+/// A locator handed the status row treats it as content. It is never blank, so
+/// `extendTo` walks the last turn's span one row down into it and every span
+/// boundary below the anchor names a row the reader sees one line lower.
+///
+/// Only the last row is a candidate, only when tmux gave us a capture to check
+/// against, and only when that capture does not contain it. With `status off`
+/// the last row is pane content, tmux captured it, and nothing is dropped.
+export function dropTmuxStatusRow(lines: LogicalLine[], tmuxCapture: string): LogicalLine[] {
+  if (!tmuxCapture || lines.length < 2) return lines;
+  const last = lines[lines.length - 1];
+  const normalized = normalizeTurnLine(last.text);
+  if (!normalized) return lines; // a blank row carries no text to disagree about
+  const captured = new Set(tmuxCapture.split("\n").map(normalizeTurnLine).filter(Boolean));
+  if (captured.has(normalized)) return lines;
+  return lines.slice(0, -1);
+}
+
 export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmuxCapture = ""): VisibleTurn[] {
   if (typeof tmuxCapture !== "string") tmuxCapture = "";
   const screen = lines.map((line) => ({ ...line, normalized: normalizeTurnLine(line.text) }));
@@ -309,7 +331,10 @@ export class TerminalTurnVisibilityV2 {
       this.tmux?.captureVisible().catch(() => "") ?? Promise.resolve(""),
     ]);
     if (this.disposed || generation !== this.generation) return;
-    const lines = this.viewport.readVisibleLogicalLines();
+    // Trim before either locator sees the rows: boop-turnvis answers over IPC
+    // and the local matcher is only the fallback, so a fix applied inside one
+    // of them is dead code in the other.
+    const lines = dropTmuxStatusRow(this.viewport.readVisibleLogicalLines(), tmuxCapture);
     const next = await this.located(lines, turns, tmuxCapture);
     if (this.disposed || generation !== this.generation) return;
     const before = new Map(this.visible.map((turn) => [turn.id, turn]));
