@@ -38,9 +38,10 @@ tungstenite = "0.29"
 arboard = "3"
 notify = "8.2"
 ignore = "0.4"
-boop-mux = { path = "../../hafley-rs/crates/boop-mux" }
-boop-store = { path = "../../hafley-rs/crates/boop-store", default-features = false, features = ["agent-read"] }
-boop-harness = { path = "../../hafley-rs/crates/boop-harness" }
+boop-mux = { path = "../../../hafley-rs-worktrees/session-location-observation/crates/boop-mux" }
+soopy = { path = "../../../hafley-rs-worktrees/session-location-observation/crates/soopy" }
+boop-store = { path = "../../../hafley-rs-worktrees/session-location-observation/crates/boop-store", default-features = false, features = ["agent-read"] }
+boop-harness = { path = "../../../hafley-rs-worktrees/session-location-observation/crates/boop-harness" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow"] }

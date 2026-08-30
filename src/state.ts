@@ -160,6 +160,16 @@ export interface Session {
   created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees it has touched
   commands: string[]; // distinct foreground process per pane (#{pane_current_command}): claude, nvim, zsh…
+  panes: PaneObservation[];
+}
+
+export interface PaneObservation {
+  id: string;
+  target: string;
+  cwd: string;
+  command: string;
+  agent_session: string | null;
+  agent_nickname: string | null;
 }
 
 // A claude/opencode process on a real terminal outside any tmux session (Rust
@@ -201,6 +211,8 @@ export interface WorktreeRow {
   head: string;
   is_main: boolean;
   dirty: boolean;
+  repository_id: string;
+  worktree_id: string;
 }
 
 export interface AppState {

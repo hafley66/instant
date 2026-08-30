@@ -15,6 +15,7 @@ import type { BoopFavorite } from "./00a_terminalIntersection";
 // ---- tmux v2 ----
 export interface TmuxRow {
   name: string;
+  sessionName: string;
   attached: boolean;
   proc: string;
   windows: number;
@@ -132,7 +133,7 @@ function PinCell({ row }: { row: TmuxRow }) {
       title={row.pinned ? "unpin" : "pin to top"}
       onClick={(e) => {
         e.stopPropagation();
-        tmuxBridge?.onPin(row.name);
+        tmuxBridge?.onPin(row.sessionName);
       }}
     >
       {row.pinned ? "📌" : "📍"}
@@ -249,7 +250,7 @@ export function TmuxPanelV2() {
           <TreeTable<TmuxRow>
             columns={TMUX_COLUMNS}
             data={rows}
-            getRowId={(r) => r.name}
+            getRowId={(r) => r.sessionName}
             serverSort
             sorting={sortFromStore(tmuxBridge?.sort() ?? { key: "activity", dir: "desc" })}
             onSortingChange={(s) => tmuxBridge?.setSort(sortToStore(s))}
@@ -264,7 +265,7 @@ export function TmuxPanelV2() {
               );
             }}
             searchPlaceholder="filter sessions…"
-            onRowClick={(r) => tmuxBridge?.onOpen(r.name)}
+            onRowClick={(r) => tmuxBridge?.onOpen(r.sessionName)}
             rowClass={(r) => (r.pinned ? "pinned" : undefined)}
           />
         )}

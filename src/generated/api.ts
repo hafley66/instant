@@ -20,6 +20,8 @@ export namespace components {
       head: string;
       is_main: boolean;
       dirty: boolean;
+      repository_id: string;
+      worktree_id: string;
     }
 
     export interface Rule {

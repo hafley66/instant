@@ -14,7 +14,11 @@ fn tmux_command(socket: Option<&str>) -> Command {
 #[tauri::command]
 pub async fn boop_mux_capture(target: String, socket: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let socket = socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        let socket = socket.or_else(|| {
+            std::env::var("INSTANT_TMUX_SOCKET")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
         Tmux.capture_pane(socket.as_deref(), &target, None)
             .map_err(|error| error.to_string())
     })
@@ -40,10 +44,16 @@ pub async fn boop_mux_send_keys(
     mode: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let socket = socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        let socket = socket.or_else(|| {
+            std::env::var("INSTANT_TMUX_SOCKET")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
         let pane = match target {
             Some(target) if !target.is_empty() => target,
-            _ => Tmux.current_pane(socket.as_deref()).ok_or("no visible tmux pane")?,
+            _ => Tmux
+                .current_pane(socket.as_deref())
+                .ok_or("no visible tmux pane")?,
         };
         let mode = mode.unwrap_or_else(|| "clear".to_string());
         if mode == "escape" {
@@ -92,21 +102,18 @@ fn paste_body(socket: Option<&str>, pane: &str, body: &str) -> Result<(), String
         .ok_or("tmux load-buffer stdin")?
         .write_all(body.as_bytes())
         .map_err(|error| error.to_string())?;
-    let loaded = child.wait_with_output().map_err(|error| error.to_string())?;
+    let loaded = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
     if !loaded.status.success() {
         return Err(String::from_utf8_lossy(&loaded.stderr).trim().to_string());
     }
-    let pasted = run(tmux_command(socket).args([
-        "paste-buffer",
-        "-d",
-        "-p",
-        "-b",
-        &buffer,
-        "-t",
-        pane,
-    ]));
+    let pasted =
+        run(tmux_command(socket).args(["paste-buffer", "-d", "-p", "-b", &buffer, "-t", pane]));
     if pasted.is_err() {
-        let _ = tmux_command(socket).args(["delete-buffer", "-b", &buffer]).output();
+        let _ = tmux_command(socket)
+            .args(["delete-buffer", "-b", &buffer])
+            .output();
     }
     pasted
 }

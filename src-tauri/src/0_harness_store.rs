@@ -251,10 +251,7 @@ fn wire_num(value: &Value, key: &str) -> u64 {
 
 /// `<session dir>/agents/<agent>/wire.jsonl` -> `<session dir>/state.json`.
 fn kimi_state_path(wire: &Path) -> PathBuf {
-    wire.ancestors()
-        .nth(3)
-        .unwrap_or(wire)
-        .join("state.json")
+    wire.ancestors().nth(3).unwrap_or(wire).join("state.json")
 }
 
 fn kimi_shape(session: &SessionRef) -> Option<HarnessSession> {

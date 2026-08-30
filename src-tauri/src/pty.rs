@@ -10,6 +10,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use boop_mux::{Multiplexer, Tmux};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -68,6 +69,19 @@ pub struct Session {
     /// (#{pane_current_command}): claude, opencode, nvim, zsh… The frontend
     /// shows these so you can see what bot/tool a session is actually running.
     commands: Vec<String>,
+    /// Each pane remains addressable so a consumer can resolve a click against
+    /// the pane that produced it instead of collapsing the session to paths[0].
+    panes: Vec<PaneObservation>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PaneObservation {
+    id: String,
+    target: String,
+    cwd: String,
+    command: String,
+    agent_session: Option<String>,
+    agent_nickname: Option<String>,
 }
 
 /// Emitted to the webview as `pty-graphics` (one resolved kitty frame). v1 ships
@@ -111,9 +125,11 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
     // cells with underscores before those bytes ever reach xterm. Force UTF-8
     // on every client, including clients attaching to an already-live server.
     c.arg("-u");
-    let configured_socket = socket
-        .map(str::to_owned)
-        .or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+    let configured_socket = socket.map(str::to_owned).or_else(|| {
+        std::env::var("INSTANT_TMUX_SOCKET")
+            .ok()
+            .filter(|value| !value.is_empty())
+    });
     if !cfg!(debug_assertions) && configured_socket.is_none() {
         c.args(["-L", "instant-prod"]);
     }
@@ -125,6 +141,13 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
 
 fn tmux_cmd() -> std::process::Command {
     tmux_cmd_for_socket(None)
+}
+
+pub(crate) fn prod_tmux_socket() -> Option<String> {
+    std::env::var("INSTANT_TMUX_SOCKET")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| (!cfg!(debug_assertions)).then(|| "instant-prod".to_owned()))
 }
 
 /// Resolve a tmux session or pane target without creating anything. Pane IDs
@@ -181,94 +204,74 @@ pub async fn list_sessions() -> Vec<Session> {
 }
 
 fn list_sessions_blocking() -> Vec<Session> {
-    let out = tmux_cmd()
-        .args([
-            "list-sessions",
-            "-F",
-            "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{session_created}",
-        ])
-        .env("PATH", path_env())
-        .output();
+    let socket = prod_tmux_socket();
+    let sessions = Tmux
+        .live_sessions_detailed(socket.as_deref())
+        .unwrap_or_default();
+    let needs_processes = sessions
+        .iter()
+        .flat_map(|session| &session.panes)
+        .any(|pane| pane.current_command == "boop");
+    let process_rows = needs_processes.then(process_snapshot).unwrap_or_default();
+    let agent_by_pane = crate::boop::pane_sessions(
+        sessions
+            .iter()
+            .flat_map(|session| session.panes.iter().map(|pane| pane.id.as_str())),
+    );
 
-    let (mut paths, mut commands) = session_pane_info();
-    let Ok(out) = out else { return Vec::new() };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut it = line.split('\t');
-            let name = it.next()?.to_string();
-            let windows = it.next()?.parse().unwrap_or(1);
-            let attached = it.next()? != "0";
-            // tmux activity/created are ms-since-epoch on newer builds, seconds
-            // on older; both fit i64 and the frontend only orders by them.
-            let activity = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-            let created = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-            let paths = paths.remove(&name).unwrap_or_default();
-            let commands = commands.remove(&name).unwrap_or_default();
-            Some(Session {
-                name,
-                windows,
-                attached,
-                activity,
-                created,
+    sessions
+        .into_iter()
+        .map(|session| {
+            let panes: Vec<PaneObservation> = session
+                .panes
+                .iter()
+                .map(|pane| {
+                    let command = if pane.current_command == "boop" {
+                        pane.pid
+                            .and_then(|pid| inner_agent_command(pid as i32, &process_rows))
+                            .unwrap_or_else(|| pane.current_command.clone())
+                    } else {
+                        pane.current_command.clone()
+                    };
+                    let agent = agent_by_pane.get(&pane.id);
+                    PaneObservation {
+                        id: pane.id.clone(),
+                        target: pane.target.clone(),
+                        cwd: pane.current_path.clone(),
+                        command,
+                        agent_session: agent.map(|row| row.session.clone()),
+                        agent_nickname: agent.map(|row| row.nickname.clone()),
+                    }
+                })
+                .collect();
+            let paths = distinct_pane_values(&panes, |pane| &pane.cwd);
+            let commands = distinct_pane_values(&panes, |pane| &pane.command);
+            Session {
+                name: session.name,
+                windows: session.windows,
+                attached: session.attached,
+                activity: session.activity,
+                created: session.created,
                 paths,
                 commands,
-            })
+                panes,
+            }
         })
         .collect()
 }
 
-/// session_name -> (distinct pane cwds, distinct foreground commands), from one
-/// `tmux list-panes -a` call. Empty on any failure (the session list still
-/// renders, just without worktree links or process labels).
-fn session_pane_info() -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
-    let out = tmux_cmd()
-        .args([
-            "list-panes",
-            "-a",
-            "-F",
-            "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}",
-        ])
-        .env("PATH", path_env())
-        .output();
-    let mut paths: HashMap<String, Vec<String>> = HashMap::new();
-    let mut commands: HashMap<String, Vec<String>> = HashMap::new();
-    let Ok(out) = out else {
-        return (paths, commands);
-    };
-    let push = |map: &mut HashMap<String, Vec<String>>, name: &str, val: &str| {
-        if val.is_empty() {
-            return;
-        }
-        let v = map.entry(name.to_string()).or_default();
-        if !v.iter().any(|p| p == val) {
-            v.push(val.to_string());
-        }
-    };
-    let rows: Vec<_> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(str::to_string)
-        .collect();
-    let process_rows = rows.iter().any(|line| line.split('\t').nth(2) == Some("boop"))
-        .then(process_snapshot)
-        .unwrap_or_default();
-    for line in &rows {
-        let mut it = line.split('\t');
-        let Some(name) = it.next() else { continue };
-        if let Some(path) = it.next() {
-            push(&mut paths, name, path);
-        }
-        if let Some(cmd) = it.next() {
-            let pane_pid = it.next().and_then(|value| value.parse().ok());
-            let resolved = if cmd == "boop" {
-                pane_pid.and_then(|pid| inner_agent_command(pid, &process_rows))
-            } else {
-                None
-            };
-            push(&mut commands, name, resolved.as_deref().unwrap_or(cmd));
+fn distinct_pane_values<'a>(
+    panes: &'a [PaneObservation],
+    value: impl Fn(&'a PaneObservation) -> &'a str,
+) -> Vec<String> {
+    let mut values = Vec::new();
+    for pane in panes {
+        let value = value(pane);
+        if !value.is_empty() && !values.iter().any(|existing| existing == value) {
+            values.push(value.to_owned());
         }
     }
-    (paths, commands)
+    values
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -530,7 +533,9 @@ pub async fn open_session(
         // Match tmux_cmd's socket so the pty's own server is the same one all the
         // management commands talk to (prod = private socket; dev = default).
         c.arg("-u");
-        let configured_socket = std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty());
+        let configured_socket = std::env::var("INSTANT_TMUX_SOCKET")
+            .ok()
+            .filter(|value| !value.is_empty());
         if !cfg!(debug_assertions) && configured_socket.is_none() {
             c.args(["-L", "instant-prod"]);
         }
@@ -913,9 +918,21 @@ mod tests {
     #[test]
     fn boop_wrapper_resolves_the_inner_agent_process() {
         let rows = vec![
-            ProcessRow { pid: 20, parent_pid: 10, command: "boop acp host".into() },
-            ProcessRow { pid: 30, parent_pid: 20, command: "/opt/homebrew/bin/node /opt/codex/bin/codex".into() },
-            ProcessRow { pid: 40, parent_pid: 10, command: "sleep 10".into() },
+            ProcessRow {
+                pid: 20,
+                parent_pid: 10,
+                command: "boop acp host".into(),
+            },
+            ProcessRow {
+                pid: 30,
+                parent_pid: 20,
+                command: "/opt/homebrew/bin/node /opt/codex/bin/codex".into(),
+            },
+            ProcessRow {
+                pid: 40,
+                parent_pid: 10,
+                command: "sleep 10".into(),
+            },
         ];
         assert_eq!(inner_agent_command(10, &rows).as_deref(), Some("codex"));
     }
@@ -923,8 +940,16 @@ mod tests {
     #[test]
     fn boop_wrapper_without_an_agent_has_no_synthetic_process() {
         let rows = vec![
-            ProcessRow { pid: 20, parent_pid: 10, command: "boop acp host".into() },
-            ProcessRow { pid: 30, parent_pid: 20, command: "sleep 10".into() },
+            ProcessRow {
+                pid: 20,
+                parent_pid: 10,
+                command: "boop acp host".into(),
+            },
+            ProcessRow {
+                pid: 30,
+                parent_pid: 20,
+                command: "sleep 10".into(),
+            },
         ];
         assert_eq!(inner_agent_command(10, &rows), None);
     }

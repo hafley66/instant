@@ -38,6 +38,7 @@ import {
 } from "./core";
 import { openDiffPanel, openPreviewPanel } from "./preview";
 import { tabs, openTab, closeTab, settleClosures, pasteToActive } from "./terminal";
+import { customTermTitle, setTermTitle } from "./reactdock";
 import {
   applyWorktreeDeltaRows,
   queryWorktreeSnapshot,
@@ -55,6 +56,14 @@ export type Session = {
   created: number; // unix seconds the session was created
   paths: string[]; // distinct pane cwds; mapped to worktrees in refreshSessions
   commands: string[]; // distinct foreground process per pane (claude, nvim, zsh…)
+  panes: {
+    id: string;
+    target: string;
+    cwd: string;
+    command: string;
+    agent_session: string | null;
+    agent_nickname: string | null;
+  }[];
 };
 
 export function renderSessionActive() {
@@ -157,6 +166,15 @@ const SHELLS = new Set(["zsh", "bash", "fish", "sh", "tmux", "-zsh", "-bash"]);
 export function foregroundProc(commands: string[]): string {
   return commands.find((c) => !SHELLS.has(c)) ?? "";
 }
+
+export function sessionDisplayName(session: Session): string {
+  const names = [...new Set(
+    session.panes
+      .map((pane) => pane.agent_nickname?.trim())
+      .filter((name): name is string => Boolean(name)),
+  )];
+  return names.length === 1 ? names[0] : session.name;
+}
 // Foreground procs that mean "an agent is running here" (vs an idle shell), so
 // closing the tab exits it instead of leaving it resident. node/bun cover
 // claude/opencode launched through their JS shim.
@@ -192,6 +210,20 @@ export async function refreshSessions() {
   }
   store.set({ sessions: live });
   settings.sessionWorktrees.$(sw);
+  for (const tab of tabs.values()) {
+    if (customTermTitle(sessionId(tab.name))) continue;
+    const session = live.find((candidate) => candidate.name === tab.name);
+    const pane = tab.tmuxTarget
+      ? session?.panes.find((candidate) =>
+          candidate.id === tab.tmuxTarget || candidate.target === tab.tmuxTarget)
+      : session?.panes[0];
+    if (pane?.agent_nickname) {
+      const title = isPinnedSession(tab.name)
+        ? `📌 ${pane.agent_nickname}`
+        : pane.agent_nickname;
+      setTermTitle(sessionId(tab.name), title);
+    }
+  }
 
   const countEl = document.querySelector("#session-count");
   // Query the list element fresh each call: it's created by injectPanelHtml
@@ -232,7 +264,7 @@ export async function refreshSessions() {
     li.dataset.id = sessionId(s.name);
     li.className = "session" + (pinned ? " pinned" : "");
     li.innerHTML = `<span class="dot ${s.attached ? "on" : ""}"></span>
-      <span class="s-name">${s.name}</span>
+      <span class="s-name">${sessionDisplayName(s)}</span>
       ${proc ? `<span class="s-proc" title="foreground process">${proc}</span>` : ""}
       <span class="s-meta">${s.windows}w${open ? " · open" : ""}</span>
       ${pwd ? `<span class="s-pwd" title="${pwd}">${tildify(pwd)}</span>` : ""}
@@ -684,7 +716,8 @@ function tmuxRows(): TmuxRow[] {
     });
     const pwd = (s.paths ?? [])[0];
     return {
-      name: s.name,
+      name: sessionDisplayName(s),
+      sessionName: s.name,
       attached: s.attached,
       proc: foregroundProc(s.commands ?? []),
       windows: s.windows,
@@ -711,7 +744,7 @@ function sessionChildRows(wtPath: string): WtTreeRow[] {
   return sessionsForWorktree(wtPath).map((s) => ({
     id: `${wtPath}::sess:${s.name}`,
     kind: "session" as const,
-    label: s.name,
+    label: sessionDisplayName(s),
     sessionName: s.name,
     attached: s.attached,
     proc: foregroundProc(s.commands ?? []),

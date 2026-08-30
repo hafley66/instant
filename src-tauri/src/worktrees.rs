@@ -39,6 +39,8 @@ pub struct WorktreeRow {
     pub head: String,     // short sha
     pub is_main: bool,    // primary worktree vs linked
     pub dirty: bool,      // has uncommitted changes
+    pub repository_id: String,
+    pub worktree_id: String,
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
@@ -293,6 +295,7 @@ fn worktree_rows_for_clone(probe: &Path) -> Vec<WorktreeRow> {
         let dirty = git(Path::new(&wt), &["status", "--porcelain"])
             .map(|s| !s.is_empty())
             .unwrap_or(false);
+        let coordinate = soopy::discover(&wt).ok();
         rows.push(WorktreeRow {
             origin: origin.clone(),
             clone: main_path.clone(),
@@ -301,6 +304,14 @@ fn worktree_rows_for_clone(probe: &Path) -> Vec<WorktreeRow> {
             head,
             is_main: wt == main_path,
             dirty,
+            repository_id: coordinate
+                .as_ref()
+                .map(|repository| repository.identity.0.to_string())
+                .unwrap_or_default(),
+            worktree_id: coordinate
+                .as_ref()
+                .map(|repository| repository.worktree.0.to_string())
+                .unwrap_or_default(),
         });
     }
     rows

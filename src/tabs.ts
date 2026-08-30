@@ -9,6 +9,7 @@ import {
   focusPanelById,
   closeActivePanel,
   customTermTitle,
+  clearCustomTermTitle,
   setTermTitle,
   moveTermPanel,
   reopenClosedPanel,
@@ -19,6 +20,7 @@ import { tabs, openTab, closedTabs, settleClosures } from "./terminal";
 import { refreshSessions, resumeIdIsLive, resumeLaunch, dropResumeTab } from "./worktrees";
 import { reopenKind } from "./0_reopenOrder";
 import { settings } from "./0_settings";
+import { invoke } from "./generated/native";
 
 // ---- tab commands (driven by the central keymap) ----
 // Visual tab nav walks EVERY panel across ALL panes (dockview order), not just
@@ -70,11 +72,28 @@ export const isPinnedTab = (name: string) => settings.pinnedTabs.$().includes(na
 // Base = the durable rename override (store.tabTitles) if set, else the session
 // name; the pin prefix rides on top so pin + rename compose.
 export const tabTitle = (name: string) => {
-  const base = customTermTitle(sessionId(name)) ?? name;
+  const tab = tabs.get(sessionId(name));
+  const live = store.get().sessions.find((session) => session.name === name);
+  const pane = tab?.tmuxTarget
+    ? live?.panes.find((candidate) =>
+        candidate.id === tab.tmuxTarget || candidate.target === tab.tmuxTarget)
+    : live?.panes[0];
+  const base = customTermTitle(sessionId(name)) ?? pane?.agent_nickname ?? name;
   return isPinnedTab(name) ? `📌 ${base}` : base;
 };
 export function applyTabTitle(name: string) {
   setTermTitle(sessionId(name), tabTitle(name));
+  const title = customTermTitle(sessionId(name));
+  const tab = tabs.get(sessionId(name));
+  if (title && tab) {
+    void invoke<boolean>("boop_rename_pane_session", {
+      target: tab.tmuxTarget ?? name,
+      nickname: title,
+    }).then((renamed) => {
+      if (renamed) clearCustomTermTitle(sessionId(name));
+      return refreshSessions();
+    }).catch(() => {});
+  }
 }
 export function togglePinTab(name: string) {
   if (!name) return;

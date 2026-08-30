@@ -1131,6 +1131,8 @@ pub fn run() {
             boop::boop_favorite_add,
             boop::boop_favorites,
             boop::boop_favorite_toggle,
+            boop::boop_pane_session,
+            boop::boop_rename_pane_session,
             boop_tmux::boop_mux_capture,
             harness_store::boop_mux_session,
             boop_tmux::boop_mux_send_keys,

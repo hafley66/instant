@@ -57,6 +57,8 @@ export type CommandName =
   | "boop_favorite_add"
   | "boop_favorites"
   | "boop_favorite_toggle"
+  | "boop_pane_session"
+  | "boop_rename_pane_session"
   | "boop_mux_capture"
   | "boop_mux_session"
   | "boop_mux_send_keys"
@@ -173,6 +175,8 @@ export namespace commands {
     export const boopFavoriteAdd = "boop_favorite_add";
     export const boopFavorites = "boop_favorites";
     export const boopFavoriteToggle = "boop_favorite_toggle";
+    export const boopPaneSession = "boop_pane_session";
+    export const boopRenamePaneSession = "boop_rename_pane_session";
   }
 
   export namespace boop_mux {

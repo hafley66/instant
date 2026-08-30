@@ -896,7 +896,12 @@ fn read_ai_messages_blocking(
     after_seq: Option<u64>,
 ) -> Result<Vec<AiMessage>, String> {
     let id = boop_harness::HarnessId::parse(&editor).ok_or("unknown editor")?;
-    Ok(crate::harness_store::messages(id, &session_id, &cwd, after_seq))
+    Ok(crate::harness_store::messages(
+        id,
+        &session_id,
+        &cwd,
+        after_seq,
+    ))
 }
 
 /// The newest turn in a session (drives "favorite current turn" + the watcher).
@@ -932,28 +937,26 @@ fn list_ai_sessions_blocking(
 ) -> Result<Vec<AiSession>, String> {
     let editor = Editor::parse(&editor).ok_or("unknown editor")?;
     let harness = boop_harness::HarnessId::parse(editor.tag()).ok_or("unknown editor")?;
-    Ok(
-        crate::harness_store::sessions(harness, cwd.as_deref())
-            .into_iter()
-            .map(|session| {
-                let title = session.title.clone().unwrap_or_else(|| {
-                    crate::harness_store::messages(harness, &session.id, &session.cwd, None)
-                        .into_iter()
-                        .find(|message| message.role == "user")
-                        .map(|message| message.preview)
-                        .unwrap_or_default()
-                });
-                AiSession {
-                    editor,
-                    id: session.id,
-                    cwd: session.cwd,
-                    title,
-                    updated: session.last_activity_ms,
-                    path: session.source_path,
-                }
-            })
-            .collect(),
-    )
+    Ok(crate::harness_store::sessions(harness, cwd.as_deref())
+        .into_iter()
+        .map(|session| {
+            let title = session.title.clone().unwrap_or_else(|| {
+                crate::harness_store::messages(harness, &session.id, &session.cwd, None)
+                    .into_iter()
+                    .find(|message| message.role == "user")
+                    .map(|message| message.preview)
+                    .unwrap_or_default()
+            });
+            AiSession {
+                editor,
+                id: session.id,
+                cwd: session.cwd,
+                title,
+                updated: session.last_activity_ms,
+                path: session.source_path,
+            }
+        })
+        .collect())
 }
 
 // Re-export the editor tag for the favorites module's identity strings.

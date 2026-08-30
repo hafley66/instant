@@ -1,6 +1,13 @@
+use boop_mux::{Multiplexer, Tmux};
 use boop_store::ident::{Store, TurnQuery};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BoopPaneSession {
+    pub session: String,
+    pub nickname: String,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct BoopTurn {
@@ -37,6 +44,72 @@ fn open_store_ro() -> Result<Store, String> {
 fn open_store_rw() -> Result<Store, String> {
     let path = boop_db_path()?;
     Store::open(path).map_err(|error| error.to_string())
+}
+
+pub(crate) fn pane_session(pane: &str) -> Option<BoopPaneSession> {
+    open_store_ro()
+        .ok()?
+        .session_in_pane(pane)
+        .ok()?
+        .map(|row| BoopPaneSession {
+            session: row.session,
+            nickname: row.nickname,
+        })
+}
+
+pub(crate) fn pane_sessions<'a>(
+    panes: impl Iterator<Item = &'a str>,
+) -> std::collections::BTreeMap<String, BoopPaneSession> {
+    let Ok(store) = open_store_ro() else {
+        return Default::default();
+    };
+    panes
+        .filter_map(|pane| {
+            store
+                .session_in_pane(pane)
+                .ok()
+                .flatten()
+                .map(|row| {
+                    (
+                        pane.to_owned(),
+                        BoopPaneSession {
+                            session: row.session,
+                            nickname: row.nickname,
+                        },
+                    )
+                })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn boop_pane_session(target: String) -> Result<Option<BoopPaneSession>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let socket = crate::pty::prod_tmux_socket();
+        let Some(pane) = Tmux.pane_id(socket.as_deref(), &target) else {
+            return Ok(None);
+        };
+        Ok(pane_session(&pane))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_rename_pane_session(target: String, nickname: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let socket = crate::pty::prod_tmux_socket();
+        let pane = Tmux
+            .pane_id(socket.as_deref(), &target)
+            .ok_or_else(|| format!("tmux target {target:?} has no live pane"))?;
+        let row = pane_session(&pane)
+            .ok_or_else(|| format!("pane {pane} has no live Boop agent session"))?;
+        open_store_rw()?
+            .set_session_nickname(&row.session, nickname.trim())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Turn visibility matches the visible pane against recent turns; a session's
@@ -79,7 +152,11 @@ fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String>
     let store = open_store_ro()?;
     let query = TurnQuery {
         since: if since > 0 { Some(since as u64) } else { None },
-        harness: if !harness.is_empty() { Some(harness.to_string()) } else { None },
+        harness: if !harness.is_empty() {
+            Some(harness.to_string())
+        } else {
+            None
+        },
         role: Some("assistant".to_string()),
         limit: Some(100),
         ..Default::default()
@@ -127,7 +204,9 @@ fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
 
 fn read_favorites() -> Result<Vec<BoopFavorite>, String> {
     let store = open_store_ro()?;
-    let rows = store.query_favorites(None).map_err(|error| error.to_string())?;
+    let rows = store
+        .query_favorites(None)
+        .map_err(|error| error.to_string())?;
     rows.into_iter()
         .map(|row| serde_json::from_value(row).map_err(|error| error.to_string()))
         .collect()
@@ -160,7 +239,10 @@ pub async fn boop_favorites() -> Result<Vec<BoopFavorite>, String> {
 pub async fn boop_favorite_toggle(turn: BoopTurn) -> Result<Vec<BoopFavorite>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let source = format!("turn:{}:{}", turn.session, turn.turn);
-        if read_favorites()?.iter().any(|favorite| favorite.source == source) {
+        if read_favorites()?
+            .iter()
+            .any(|favorite| favorite.source == source)
+        {
             remove_favorite_source(&source)?;
         } else {
             add_favorite(&turn)?;
@@ -189,12 +271,18 @@ mod tests {
     #[test]
     fn direct_store_reads_live_boop_database() {
         let store = open_store_ro();
-        assert!(store.is_ok(), "boop store opens read-only from default path");
+        assert!(
+            store.is_ok(),
+            "boop store opens read-only from default path"
+        );
         let store = store.unwrap();
         let turns = store.turn_rows(&TurnQuery {
             limit: Some(5),
             ..Default::default()
         });
-        assert!(turns.is_ok(), "turn_rows query succeeds directly against boop-store");
+        assert!(
+            turns.is_ok(),
+            "turn_rows query succeeds directly against boop-store"
+        );
     }
 }

@@ -300,7 +300,11 @@ export function tabMetaById(id: string): { cwd: string; command: string | null; 
   if (!t) return null;
   const rec = settings.openTabs.$().find((o) => o.name === t.name);
   const live = store.get().sessions.find((s) => s.name === t.name);
-  const cwd = live?.paths?.[0] || rec?.cwd || null;
+  const pane = t.tmuxTarget
+    ? live?.panes?.find((candidate) =>
+        candidate.id === t.tmuxTarget || candidate.target === t.tmuxTarget)
+    : live?.panes?.[0];
+  const cwd = pane?.cwd || live?.paths?.[0] || rec?.cwd || null;
   return cwd ? { cwd, command: rec?.command ?? null, harness: t.harness.id } : null;
 }
 // Every candidate cwd for a tab's session lookup: each live tmux pane cwd, then
@@ -311,7 +315,11 @@ export function tabCwds(id: string): string[] {
   if (!t) return [];
   const rec = settings.openTabs.$().find((o) => o.name === t.name);
   const live = store.get().sessions.find((s) => s.name === t.name);
-  const cands = [...(live?.paths ?? []), rec?.cwd].filter(Boolean) as string[];
+  const selected = t.tmuxTarget
+    ? live?.panes?.find((candidate) =>
+        candidate.id === t.tmuxTarget || candidate.target === t.tmuxTarget)?.cwd
+    : undefined;
+  const cands = [selected, ...(live?.paths ?? []), rec?.cwd].filter(Boolean) as string[];
   return [...new Set(cands)];
 }
 

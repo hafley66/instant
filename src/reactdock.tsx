@@ -538,6 +538,11 @@ export function customTitle(pid: string): string | undefined {
 export function customTermTitle(sid: string): string | undefined {
   return customTitle(TERM + sid);
 }
+export function clearCustomTermTitle(sid: string) {
+  const cur = { ...(settings.tabTitles.$() as Record<string, string>) };
+  delete cur[TERM + sid];
+  settings.tabTitles.$(cur);
+}
 // Apply `base` unless an override exists for this id. Used wherever a panel is
 // (re)created so a renamed tab comes back named.
 function withOverride(pid: string, base: string): string {
