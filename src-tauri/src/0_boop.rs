@@ -170,6 +170,139 @@ pub async fn boop_turns_recent(since: i64, harness: String) -> Result<Vec<BoopTu
         .map_err(|error| error.to_string())?
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopTurnCommentTarget {
+    pub session: String,
+    pub turn: i64,
+    #[serde(default)]
+    pub role: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopTurnComment {
+    pub client_id: String,
+    pub kind: String,
+    pub quote: String,
+    pub note: Option<String>,
+    pub enabled: bool,
+    pub tab_name: Option<String>,
+    pub targets: Vec<BoopTurnCommentTarget>,
+    #[serde(default)]
+    pub created_ts: i64,
+    #[serde(default)]
+    pub updated_ts: i64,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Pending comments whose tab or target session matches the caller; a comment
+/// with neither key is invisible everywhere, so it never strands.
+fn read_turn_comments(tab: &str, sessions: &[String]) -> Result<Vec<BoopTurnComment>, String> {
+    let store = open_store_ro()?;
+    let rows = store
+        .turn_comments_pending()
+        .map_err(|error| error.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| {
+            row.tab_name.as_deref() == Some(tab)
+                || row
+                    .targets
+                    .iter()
+                    .any(|target| sessions.iter().any(|session| *session == target.session))
+        })
+        .map(|row| BoopTurnComment {
+            client_id: row.client_id,
+            kind: row.kind,
+            quote: row.quote,
+            note: row.note,
+            enabled: row.enabled,
+            tab_name: row.tab_name,
+            targets: row
+                .targets
+                .into_iter()
+                .map(|target| BoopTurnCommentTarget {
+                    session: target.session,
+                    turn: target.turn,
+                    role: target.role,
+                })
+                .collect(),
+            created_ts: row.created_ts,
+            updated_ts: row.updated_ts,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn boop_turn_comments(
+    tab: String,
+    sessions: Vec<String>,
+) -> Result<Vec<BoopTurnComment>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_turn_comments(&tab, &sessions))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_turn_comment_upsert(comment: BoopTurnComment) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_rw()?;
+        let targets: Vec<(String, i64)> = comment
+            .targets
+            .iter()
+            .map(|target| (target.session.clone(), target.turn))
+            .collect();
+        store
+            .turn_comment_upsert(&boop_store::ident::TurnCommentUpsert {
+                client_id: &comment.client_id,
+                kind: &comment.kind,
+                quote: &comment.quote,
+                note: comment.note.as_deref(),
+                enabled: comment.enabled,
+                tab_name: comment.tab_name.as_deref(),
+                targets: &targets,
+                ts: now_ms(),
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_turn_comment_delete(client_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_rw()?;
+        store
+            .turn_comment_delete(&client_id)
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_turn_comments_sent(client_ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_rw()?;
+        store
+            .turn_comment_mark_sent(&client_ids, now_ms())
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
     let store = open_store_rw()?;
     let source = format!("turn:{}:{}", turn.session, turn.turn);

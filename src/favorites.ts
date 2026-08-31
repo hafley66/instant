@@ -77,7 +77,7 @@ export async function tabSessions(
   return out;
 }
 
-async function sessionsForTab(id: string): Promise<ResolvedSession[]> {
+export async function sessionsForTab(id: string): Promise<ResolvedSession[]> {
   const meta = tabMetaById(id);
   const tab = tabs.get(id);
   if (!meta || !tab) return [];

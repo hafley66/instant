@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { Signal } from "@hafley66/signals";
-import { debounceTime, filter, merge, Observable, share, startWith, Subscription, switchMap, take, tap } from "rxjs";
+import { debounceTime, filter, merge, Observable, share, startWith, Subject, Subscription, switchMap, take, tap } from "rxjs";
 import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
 import { turnHue } from "./0_turnDebugOverlay";
@@ -40,8 +40,9 @@ export function formatQueuedContext(items: PromptContextItem[]): string {
 }
 
 // Tags a selection with the turns whose own text it overlaps, never with a
-// turn whose extended span merely reaches across it.
-function turnsAcrossRange(turns: VisibleTurn[], start: number, end: number): string[] {
+// turn whose extended span merely reaches across it. Role-blind on purpose:
+// a user turn is as quotable as an assistant one.
+export function turnsAcrossRange(turns: VisibleTurn[], start: number, end: number): string[] {
   return turns
     .filter((turn) => turn.anchorEnd >= start && turn.anchorStart <= end)
     .map((turn) => turn.id);
@@ -126,6 +127,9 @@ export class TerminalContextQueue {
   revealFrame = 0;
   readonly state = Signal<PromptContextItem[]>([]);
   readonly changes: Observable<PromptContextItem[]> = this.state.$;
+  /// Item ids delivered into a prompt by Send, emitted before the queue
+  /// clears, so a sync layer marks them sent instead of deleted.
+  readonly sent = new Subject<string[]>();
   projectionSubscription: Subscription;
   anchorSubscription: Subscription;
 
@@ -185,6 +189,21 @@ export class TerminalContextQueue {
     this.term.clearSelection();
     this.renderQueue();
     return id;
+  }
+
+  /// Rows read back from the store. An id already present locally wins: under
+  /// write-through the local copy is at least as new as the stored one.
+  hydrate(items: PromptContextItem[]) {
+    let changed = false;
+    for (const item of items) {
+      if (this.items.has(item.id)) continue;
+      this.items.set(item.id, item);
+      changed = true;
+    }
+    if (changed) {
+      this.renderQueue();
+      this.paintSelections();
+    }
   }
 
   /// Put the caret in a queued slice's note, so "Ask about this" types straight
@@ -362,6 +381,7 @@ export class TerminalContextQueue {
     pasteButton.addEventListener("click", () => {
       const text = formatQueuedContext([...this.items.values()]);
       if (text) this.paste(text);
+      this.sent.next([...this.items.keys()]);
       this.items.clear();
       this.renderQueue();
       this.paintSelections();

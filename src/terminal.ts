@@ -14,6 +14,7 @@ import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
 import { turnDebug } from "./0_turnDebugSettings";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue } from "./1a_terminalContextQueue";
+import { TerminalContextSync } from "./1b_terminalContextSync";
 import { TerminalWheelRouter } from "./0_terminalWheel";
 import { TerminalPinnedSelection } from "./0_terminalPinnedSelection";
 import { runMatchingCommand } from "./keymap";
@@ -62,7 +63,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, sessionsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import {
   selectProjectionTurns,
   TerminalTurnVisibilityV2,
@@ -100,6 +101,7 @@ export type Tab = {
   viewport?: XtermViewportAdapter;
   lineAnchors?: TerminalLineAnchors;
   contextQueue?: TerminalContextQueue;
+  contextSync?: TerminalContextSync;
   cmdClickGesture?: CmdClickGestureTracker;
   wheel?: TerminalWheelRouter;
   pinnedSelection?: TerminalPinnedSelection;
@@ -514,6 +516,7 @@ export function openTab(
     stale?.overlay?.dispose();
     stale?.diagrams?.dispose();
     stale?.structured?.dispose();
+    stale?.contextSync?.dispose();
     stale?.contextQueue?.dispose();
     stale?.lineAnchors?.dispose();
     stale?.turnDebugOverlay?.dispose();
@@ -701,6 +704,11 @@ export function openTab(
     },
     () => settings.inlineStructuredSelectors.$(),
   );
+  const contextSync = !contextQueue ? undefined : new TerminalContextSync(
+    contextQueue,
+    name,
+    async () => (await sessionsForTab(id)).map((session) => session.sessionId),
+  );
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";
@@ -717,7 +725,7 @@ export function openTab(
       void navigator.clipboard.writeText(text).catch(() => {});
     },
   });
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, turnVisibility, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, turnVisibility, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
   applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
@@ -1079,6 +1087,7 @@ export function onTermShown(id: string) {
     t.fit.fit();
     t.diagrams?.activate();
     t.contextQueue?.activate();
+    t.contextSync?.activate();
     t.turnDebugOverlay?.schedule();
     invoke("resize_pty", {
       id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
@@ -1141,6 +1150,7 @@ export function onTermClosed(id: string) {
   t.overlay?.dispose();
   t.diagrams?.dispose();
   t.structured?.dispose();
+  t.contextSync?.dispose();
   t.contextQueue?.dispose();
   t.lineAnchors?.dispose();
   t.turnDebugOverlay?.dispose();
