@@ -69,6 +69,7 @@ import { CmdClickGestureTracker } from "./0_clickRouter";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
+import { closedTabFate } from "./0_closedTabFate";
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import {
   renderSessionActive,
@@ -1127,6 +1128,7 @@ export function onTermClosed(id: string) {
   const tabMeta = tabMetaById(id);
   const live = store.get().sessions.find((s) => s.name === name);
   const proc = foregroundProc(live?.commands ?? []);
+  const sessionListed = live != null;
   const isGraphics = t.graphics ?? false;
   // Read before forgetTab drops the row: the close decision runs async (below)
   // and would find the record already gone.
@@ -1162,7 +1164,7 @@ export function onTermClosed(id: string) {
   // and the 2nd reopen resumes the 1st's session ("rando old session"). Chaining
   // lets each close fully claim its id before the next one probes.
   closeChain = closeChain
-    .then(() => exitOrDetachTab(id, name, tabMeta, proc, isGraphics, isViewer))
+    .then(() => exitOrDetachTab(id, name, tabMeta, proc, sessionListed, isGraphics, isViewer))
     .catch(() => {});
   if (activeId() === id) {
     const next = tabs.keys().next();
@@ -1174,18 +1176,14 @@ export function onTermClosed(id: string) {
   refreshSessions();
 }
 
-// Decide a closed tab's fate: an agent tab is KILLED (frees the RAM claude/
-// opencode hold) after best-effort recording its session id for --resume;
-// anything else just detaches (tmux survives a reload). The kill fires whenever
-// we believe an agent is running — it is NOT gated on resolving the session id,
-// so a stale id lookup can't leave claude alive. The agent writes its jsonl
-// incrementally, so killing mid-run stays resumable. A viewer tab is exempt:
-// see ViewerTabPolicy.
+// closedTabFate decides: agent tab -> kill (after best-effort recording its id
+// for --resume; jsonl is incremental so mid-run kills stay resumable), else detach.
 async function exitOrDetachTab(
   id: string,
   name: string,
   meta: { cwd: string; command: string | null; harness: HarnessObservation["id"] } | null,
   proc: string,
+  sessionListed: boolean,
   isGraphics = false,
   isViewer = false,
 ) {
@@ -1197,15 +1195,15 @@ async function exitOrDetachTab(
   }
   const sessions = meta ? await tabSessions(tabCwds(id), meta.command, meta.harness) : [];
   const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
-  // Agent when: the live foreground proc looks like one (claude's version title,
-  // opencode.exe, node/bun), the launch command names one, or the proc was
-  // unknown (stale list) but the cwd has an on-disk agent session. A known
-// non-agent proc (vim, …) is never killed.
-  const isAgent =
-    looksLikeAgentProc(proc) ||
-    KNOWN_RESUME[bin] != null ||
-    (proc === "" && sessions.length > 0);
-  if (isViewer || !isAgent) {
+  const fate = closedTabFate({
+    isViewer,
+    isAgentProc: looksLikeAgentProc(proc),
+    launchNamesAgent: KNOWN_RESUME[bin] != null,
+    proc,
+    sessionListed,
+    onDiskSessions: sessions.length,
+  });
+  if (fate === "detach") {
     invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
     return;
   }
