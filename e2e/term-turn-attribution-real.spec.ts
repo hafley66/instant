@@ -127,7 +127,7 @@ test("a real message taller than the viewport retains attribution at its start a
   await testInfo.attach("real-claude-long-turn-middle", { path: middlePath, contentType: "image/png" });
 });
 
-test("a real Codex turn rescans on wheel activity and repaints after the TUI redraw settles", async ({ page }, testInfo) => {
+test("a Codex redraw clears stale attribution until the parent transcript projection advances", async ({ page }, testInfo) => {
   const beforeTurns = codexReplay.turns.filter((turn) => [4, 8, 9].includes(turn.sourceLine));
   const afterTurns = codexReplay.turns.filter((turn) => [14, 15, 16].includes(turn.sourceLine));
   expect(beforeTurns.map((turn) => [turn.turn, turn.role, turn.subtype])).toEqual([
@@ -141,7 +141,7 @@ test("a real Codex turn rescans on wheel activity and repaints after the TUI red
     [16, "assistant", "exec result"],
   ]);
   const beforeOutput = `\u001b[?1003h\u001b[?1006h${renderConversationTurns(beforeTurns)}`;
-  await openConversation(page, codexReplay.turns, 120, 18, beforeOutput);
+  await openConversation(page, beforeTurns, 120, 18, beforeOutput);
   await expect.poll(() => page.evaluate(() => window.__term!.mouseMode())).toBe("any");
 
   await expect.poll(() => visibleTurnIds(page)).toEqual([
@@ -152,8 +152,8 @@ test("a real Codex turn rescans on wheel activity and repaints after the TUI red
   await expect(page.locator('.term-turn-debug-row[data-turn="4"]').first()).toContainText("t4 user A");
   await expect(page.locator('.term-turn-debug-row[data-turn="8"]').first()).toContainText("t8 assistant A");
   await expect(page.locator('.term-turn-debug-row[data-turn="9"]').first()).toContainText("t9 assistant A");
-  const beforePath = await saveReceipt(page, "real-codex-scroll-before");
-  await testInfo.attach("real-codex-scroll-before", { path: beforePath, contentType: "image/png" });
+  const beforePath = await saveReceipt(page, "real-codex-before-projector");
+  await testInfo.attach("real-codex-before-projector", { path: beforePath, contentType: "image/png" });
 
   const afterOutput = renderConversationTurns(afterTurns);
   await page.evaluate((output) => {
@@ -173,6 +173,18 @@ test("a real Codex turn rescans on wheel activity and repaints after the TUI red
   await expect.poll(locateCalls, { timeout: 200, intervals: [20] }).toBeGreaterThan(0);
   await expect(page.locator(".xterm-rows")).toContainText("The plan requires one commit per implementation step");
   await expect.poll(locateCalls).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => visibleTurnIds(page)).toEqual([]);
+  const stalePath = await saveReceipt(page, "real-codex-stale-store-clears-labels");
+  await testInfo.attach("real-codex-stale-store-clears-labels", { path: stalePath, contentType: "image/png" });
+
+  await page.evaluate((turns) => {
+    window.__instantE2eNativeResults!.boop_turns = turns;
+  }, afterTurns);
+  // boopTurnsForSession retains a result for one second. Cross that exact
+  // boundary, then send the same tmux-owned wheel event that the live pane
+  // uses after the resident parent projector commits the appended records.
+  await page.waitForTimeout(1050);
+  await page.mouse.wheel(0, 120);
 
   await expect.poll(() => visibleTurnIds(page)).toEqual([
     "codex-real-session:14",
@@ -182,6 +194,6 @@ test("a real Codex turn rescans on wheel activity and repaints after the TUI red
   await expect(page.locator('.term-turn-debug-row[data-turn="14"]').first()).toContainText("t14 assistant A");
   await expect(page.locator('.term-turn-debug-row[data-turn="15"]').first()).toContainText("t15 assistant A");
   await expect(page.locator('.term-turn-debug-row[data-turn="16"]').first()).toContainText("t16 assistant A");
-  const afterPath = await saveReceipt(page, "real-codex-scroll-after");
-  await testInfo.attach("real-codex-scroll-after", { path: afterPath, contentType: "image/png" });
+  const afterPath = await saveReceipt(page, "real-codex-after-projector");
+  await testInfo.attach("real-codex-after-projector", { path: afterPath, contentType: "image/png" });
 });
