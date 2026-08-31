@@ -4,7 +4,8 @@
 // pointer + keyboard and drives the page; resize is real (Emulation override).
 
 import { invoke } from "./generated/native";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { nativeEvent$ } from "./reactive/nativeTransport";
+import type { Subscription } from "rxjs";
 import { runMatchingCommand } from "./keymap";
 import { history as navHistory } from "./nav";
 import { fuzzyFilter } from "./fuzzy";
@@ -77,10 +78,10 @@ export class CdpView {
   // Monotonic frame id so an out-of-order async decode never paints over a newer
   // frame (newest-wins): a decode only draws if it's still the latest issued.
   private drawSeq = 0;
-  private unlisten?: UnlistenFn;
-  private unlistenCursor?: UnlistenFn;
-  private unlistenUrl?: UnlistenFn;
-  private unlistenCopy?: UnlistenFn;
+  private frameEvents?: Subscription;
+  private cursorEvents?: Subscription;
+  private urlEvents?: Subscription;
+  private copyEvents?: Subscription;
   private ro: ResizeObserver;
   // Stream gating: stop the screencast while the tab is hidden (panel switched
   // away or the display/app is not visible) so a backgrounded page — especially
@@ -296,48 +297,36 @@ export class CdpView {
     this.io.observe(this.canvas);
     document.addEventListener("visibilitychange", this.onVisibility);
 
-    void listen<FrameEvent>("cdp-frame", (ev) => {
-      if (ev.payload.id !== this.id) return;
-      this.pendingData = ev.payload.data;
+    this.frameEvents = nativeEvent$<FrameEvent>("cdp-frame").subscribe((event) => {
+      if (event.id !== this.id) return;
+      this.pendingData = event.data;
       if (!this.raf) this.raf = requestAnimationFrame(() => this.flush());
-    }).then((u) => {
-      if (this.disposed) u();
-      else this.unlisten = u;
     });
 
     // Native cursor: the page reports the CSS cursor under the pointer; mirror it
     // onto the canvas so links show a hand, text a beam, etc. CSS keywords map
     // 1:1 to canvas style.cursor; custom url() cursors fall back to default.
-    void listen<{ id: string; cursor: string }>("cdp-cursor", (ev) => {
-      if (ev.payload.id !== this.id) return;
-      const c = ev.payload.cursor;
+    this.cursorEvents = nativeEvent$<{ id: string; cursor: string }>("cdp-cursor").subscribe((event) => {
+      if (event.id !== this.id) return;
+      const c = event.cursor;
       this.canvas.style.cursor = !c || c.startsWith("url(") ? "default" : c;
-    }).then((u) => {
-      if (this.disposed) u();
-      else this.unlistenCursor = u;
     });
 
     // Address-bar sync: the page reports its URL on navigation (link click,
     // redirect, SPA pushState). Reflect it unless the user is mid-edit in the bar.
-    void listen<{ id: string; url: string }>("cdp-url", (ev) => {
-      if (ev.payload.id !== this.id) return;
-      if (document.activeElement !== this.urlbar) this.urlbar.value = ev.payload.url;
-      this.onNavigated(ev.payload.url);
+    this.urlEvents = nativeEvent$<{ id: string; url: string }>("cdp-url").subscribe((event) => {
+      if (event.id !== this.id) return;
+      if (document.activeElement !== this.urlbar) this.urlbar.value = event.url;
+      this.onNavigated(event.url);
       // CSS zoom is per-document; re-apply after a navigation if it isn't 1.
       if (this.zoom !== 1) this.applyZoom();
-    }).then((u) => {
-      if (this.disposed) u();
-      else this.unlistenUrl = u;
     });
 
     // Copy bridge: the page pushes its selection over __cdpCopy on ⌘C; write it
     // to the OS clipboard so it pastes into other apps.
-    void listen<{ id: string; text: string }>("cdp-copy", (ev) => {
-      if (ev.payload.id !== this.id) return;
-      if (ev.payload.text) navigator.clipboard.writeText(ev.payload.text).catch(console.error);
-    }).then((u) => {
-      if (this.disposed) u();
-      else this.unlistenCopy = u;
+    this.copyEvents = nativeEvent$<{ id: string; text: string }>("cdp-copy").subscribe((event) => {
+      if (event.id !== this.id) return;
+      if (event.text) navigator.clipboard.writeText(event.text).catch(console.error);
     });
   }
 
@@ -847,10 +836,10 @@ export class CdpView {
     window.removeEventListener("pointerdown", this.onHistOutside, true);
     this.io?.disconnect();
     this.ro.disconnect();
-    this.unlisten?.();
-    this.unlistenCursor?.();
-    this.unlistenUrl?.();
-    this.unlistenCopy?.();
+    this.frameEvents?.unsubscribe();
+    this.cursorEvents?.unsubscribe();
+    this.urlEvents?.unsubscribe();
+    this.copyEvents?.unsubscribe();
     this.el.remove();
   }
 }

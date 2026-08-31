@@ -9,7 +9,7 @@ import "./0_sourceFonts.css";
 import "./0_stfuButton.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
-import { listen } from "@tauri-apps/api/event";
+import { listenNativeEvent } from "./reactive/nativeTransport";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -361,7 +361,7 @@ async function main() {
   refreshRogue();
   setInterval(refreshRogue, 8000);
 
-  await listen<{ chunks: { id: string; chunk: string }[] }>("pty-data-batch", (e) => {
+  await listenNativeEvent<{ chunks: { id: string; chunk: string }[] }>("pty-data-batch", (e) => {
     for (const chunk of e.payload.chunks) {
       observeTerminalOutput(chunk.id, chunk.chunk);
       tabs.get(chunk.id)?.term.write(chunk.chunk);
@@ -369,12 +369,12 @@ async function main() {
   });
 
   // Kitty graphics frames resolved by the Rust proxy (graphics sessions only).
-  await listen<GraphicsFrame>("pty-graphics", (e) => {
+  await listenNativeEvent<GraphicsFrame>("pty-graphics", (e) => {
     tabs.get(e.payload.id)?.overlay?.push(e.payload);
   });
 
   // CDP engine failed to launch/attach a browser tab.
-  await listen<{ id: string; error: string }>("cdp-error", (e) => {
+  await listenNativeEvent<{ id: string; error: string }>("cdp-error", (e) => {
     console.error("[cdp]", e.payload.error);
     flashStatus(`browser error: ${e.payload.error}`);
   });
@@ -382,7 +382,7 @@ async function main() {
   // Global navigation history: every browser tab's URL change (link, redirect,
   // SPA pushState) lands here regardless of which tab it came from. The per-tab
   // CdpView listens to the same event for its own address bar / back-forward.
-  await listen<{ id: string; url: string }>("cdp-url", (e) => {
+  await listenNativeEvent<{ id: string; url: string }>("cdp-url", (e) => {
     recordVisit(e.payload.url);
   });
 
@@ -401,7 +401,7 @@ async function main() {
 
   // Each new activity row (browser ingest, os capture, file open) arrives here;
   // prepend, newest-first, capped.
-  await listen<Event>("activity-added", (e) => {
+  await listenNativeEvent<Event>("activity-added", (e) => {
     store.set({
       activity: [e.payload, ...store.get().activity].slice(0, ACTIVITY_CAP),
     });
@@ -409,27 +409,27 @@ async function main() {
 
   // Per-gesture capture outcome (shot saved, or the reason it was skipped) —
   // drives the Activity panel's live status line + permission banner.
-  await listen<CaptureStatus>("capture-status", (e) => {
+  await listenNativeEvent<CaptureStatus>("capture-status", (e) => {
     store.set({ captureStatus: e.payload });
   });
 
   // favorites.db mutated (add/remove) — refresh the mirror so any open panel
   // re-renders. The emitting command also returns the list, but this keeps
   // multiple windows / out-of-band edits in sync.
-  await listen<Fav[]>("favorites-changed", (e) => {
+  await listenNativeEvent<Fav[]>("favorites-changed", (e) => {
     store.set({ aiFavs: e.payload });
   });
 
   // Frontmost-app stream (Rust polls every 400ms). Foundation for the overlay
   // state machine: stash who's in front so panels can react to focus (e.g. raise
   // / fade when VSCode comes forward). "instant" while we're focused; ignore self.
-  await listen<string>("frontmost-app", (e) => {
+  await listenNativeEvent<string>("frontmost-app", (e) => {
     const app = e.payload;
     if (app && app !== "instant") store.set({ frontmostApp: app });
   });
 
   // Summon: replay entrance animation + refocus active terminal.
-  await listen("summoned", () => {
+  await listenNativeEvent("summoned", () => {
     const app = document.getElementById("app")!;
     app.classList.remove("summon-in");
     void app.offsetWidth; // restart the CSS animation
@@ -478,7 +478,7 @@ async function main() {
   // Right-⌘ + Right-⇧ + V: the native tap (lib.rs) swallows the combo, copies
   // the focused app's selection, and emits the text here. Write it straight into
   // the active terminal (no picker).
-  await listen<string>("send-highlight-text", (e) => {
+  await listenNativeEvent<string>("send-highlight-text", (e) => {
     const id = activeId();
     const text = e.payload;
     if (!text || !text.trim()) return showError("highlight", "nothing selected to send");
@@ -486,11 +486,11 @@ async function main() {
   });
 
   // Tray menu "Recording" item toggles capture (same path as the panel button).
-  await listen("toggle-record", () => toggleRecording());
+  await listenNativeEvent("toggle-record", () => toggleRecording());
 
   // Tray menu "AI Integrations" master switch: off hides agents from the launch
   // pickers (shell only). Persisted via the store.
-  await listen("toggle-ai", () => {
+  await listenNativeEvent("toggle-ai", () => {
     const on = !settings.aiEnabled.$();
     settings.aiEnabled.$(on);
     flashStatus(`AI integrations ${on ? "on" : "off"}`);

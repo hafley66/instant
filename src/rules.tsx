@@ -7,7 +7,7 @@
 // bespoke row markup — reuse the grid stack).
 import { useEffect, useState } from "react";
 import { invoke } from "./generated/native";
-import { listen } from "@tauri-apps/api/event";
+import { nativeEvent$ } from "./reactive/nativeTransport";
 import { registerPlugin } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { flashStatus, showError } from "./core";
@@ -173,17 +173,17 @@ export function RulesPanelV2() {
   }, []);
 
   useEffect(() => {
-    const un = listen<RuleMatch>("rule-match", (e) => {
-      setFeed((f) => [e.payload, ...f].slice(0, FEED_CAP));
+    const matches = nativeEvent$<RuleMatch>("rule-match").subscribe((match) => {
+      setFeed((feed) => [match, ...feed].slice(0, FEED_CAP));
     });
-    const activityUn = listen<Event>("activity-added", (e) => {
-      if (e.payload.kind.startsWith("netcapture.") && isUsageNetworkUrl(e.payload.url)) {
-        setLastNetwork(e.payload);
+    const activity = nativeEvent$<Event>("activity-added").subscribe((event) => {
+      if (event.kind.startsWith("netcapture.") && isUsageNetworkUrl(event.url)) {
+        setLastNetwork(event);
       }
     });
     return () => {
-      un.then((f) => f());
-      activityUn.then((f) => f());
+      matches.unsubscribe();
+      activity.unsubscribe();
     };
   }, []);
 

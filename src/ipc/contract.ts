@@ -2,7 +2,7 @@
 // tauri-specta emits, so generated declarations can replace this file as-is.
 import type { Call, Client, Contract } from "./client";
 import { createClient } from "./client";
-import { nativeTransport } from "../reactive/nativeTransport";
+import { invoke } from "../generated/native";
 
 export type RefSource = "absolute" | "cwd" | "repo" | "ancestor" | "sibling" | "search" | "fuzzy";
 export type ResolvedRef = { path: string; line?: number; source: RefSource };
@@ -25,14 +25,14 @@ export const CLICK_METHODS = ["resolve_ref", "clear_ref_index", "read_git_blob",
 
 // The Tauri adapter. A different shell (http, ws, in-process) implements the same
 // two-method interface and every caller above is unchanged.
-export const tauriTransport = {
+export const nativeRequestClient = {
   request: <T>(method: string, params: Record<string, unknown>) =>
-    nativeTransport.invoke<T>(method as never, params),
+    invoke<T>(method as never, params),
 };
 
 export const clickRpc: Client<ClickContract> = createClient<ClickContract>(
   CLICK_METHODS as unknown as (keyof ClickContract & string)[],
-  tauriTransport,
+  nativeRequestClient,
 );
 
 export type { Call, Client, Contract };

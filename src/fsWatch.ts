@@ -1,5 +1,5 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "./generated/native";
+import { listenNativeEvent, type NativeUnlistenFn } from "./reactive/nativeTransport";
 
 export interface FsWatchEvent {
   claimId: string;
@@ -14,9 +14,9 @@ export async function claimFsWatch(
 ): Promise<() => void> {
   if (new URLSearchParams(window.location.search).has("e2e")) return () => {};
   const claimId = crypto.randomUUID();
-  let unlisten: UnlistenFn | undefined;
+  let unlisten: NativeUnlistenFn | undefined;
   try {
-    unlisten = await listen<FsWatchEvent>("fs-watch", ({ payload }) => {
+    unlisten = await listenNativeEvent<FsWatchEvent>("fs-watch", ({ payload }) => {
       if (payload.claimId === claimId) onChange(payload);
     });
     await invoke("fs_watch_claim", { claimId, path, recursive });

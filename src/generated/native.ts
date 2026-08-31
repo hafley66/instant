@@ -1,6 +1,13 @@
 // Generated from ipc/commands.json by scripts/generate-native.mjs.
 // Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
-import { nativeTransport } from "../reactive/nativeTransport";
+import { firstValueFrom } from "rxjs";
+import type { Serializable } from "@hafley66/signals";
+import { createRequestEndpoint } from "../reactive/0_requestTransport";
+import {
+  nativeCommandUrl,
+  nativeRequestTransport,
+  type NativeCommandInput,
+} from "../reactive/nativeTransport";
 
 export type CommandName =
   | "list_sessions"
@@ -90,11 +97,32 @@ export type CommandName =
   | "log_path"
   | "log_reveal";
 
+export function commandEndpoint<T = unknown>(
+  command: CommandName,
+) {
+  return createRequestEndpoint<NativeCommandInput, T>({
+    request: (args) => ({
+      url: nativeCommandUrl(command),
+      method: "POST",
+      body: args as unknown as Serializable,
+    }),
+    decode: (response) => {
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error("native command " + command + " returned HTTP " + response.status);
+      }
+      return response.body as T;
+    },
+  }, nativeRequestTransport);
+}
+
+// Compatibility boundary for existing async call sites. The request itself is
+// an Endpoint observable, so new resources can use commandEndpoint(...)
+// .createQuery(...) or .createMutation(...).
 export function invoke<T = unknown>(
   command: CommandName,
-  args?: Record<string, unknown>,
+  args?: NativeCommandInput,
 ): Promise<T> {
-  return nativeTransport.invoke<T>(command, args);
+  return firstValueFrom(commandEndpoint<T>(command).execute(args));
 }
 
 export namespace commands {
