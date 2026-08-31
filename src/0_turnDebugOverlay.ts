@@ -199,6 +199,9 @@ export class TerminalTurnDebugOverlay {
       if (node.textContent !== tag.label) node.textContent = tag.label;
       node.dataset.bufferRow = String(tag.bufferRow);
       node.dataset.turnId = tag.turnId ?? "";
+      node.dataset.turn = tag.turn === null ? "" : String(tag.turn);
+      node.dataset.role = tag.role;
+      node.dataset.confidence = tag.confidence ?? "";
       node.style.left = `${left}px`;
       node.style.top = `${top + index * cellHeight}px`;
       node.style.height = `${cellHeight}px`;

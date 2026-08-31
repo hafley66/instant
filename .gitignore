@@ -39,6 +39,7 @@ vscode-ext/out
 /playwright-report/
 /packages/*/test-results/
 /.native-e2e-results/
+/.replay-tools/
 
 # Local task branches managed as Git worktrees.
 /.worktrees/

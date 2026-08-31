@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Signal, SignalCreator } from "@hafley66/signals";
-import { SignalReact } from "@hafley66/signals/react";
+import { useSignal } from "@hafley66/signals/react";
 import { Observable, scan } from "rxjs";
 import { invoke } from "./generated/native";
 
@@ -116,13 +116,13 @@ function editorLifetime(host: HTMLElement, props: MonacoCodeViewerProps): Observ
   });
 }
 
-export const MonacoCodeViewer = SignalReact(function MonacoCodeViewer(props: MonacoCodeViewerProps) {
+export function MonacoCodeViewer(props: MonacoCodeViewerProps) {
   const host = useRef<HTMLDivElement>(null);
-  const state = editorState[props.id].$();
+  const state = useSignal(editorState[props.id].$);
   useEffect(() => {
     if (!host.current) return;
     const life = editorLifetime(host.current, props).subscribe();
     return () => life.unsubscribe();
   }, [props.id, props.path, props.text, props.dark, props.line]);
   return <div className="monaco-code-viewer" data-status={state?.status ?? "opening"} ref={host} />;
-});
+}

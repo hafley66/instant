@@ -14,9 +14,12 @@ export function PaintMemeControls({ bridge }: { bridge: PaintBridge | null }) {
   const [error, setError] = useState("");
   const [collapsed, setCollapsed] = useState(() => readPluginState<PaintCaptionUi>("paint", {}).captionsCollapsed ?? false);
   const syncVersion = useRef(0);
+  const syncQueue = useRef<Promise<void>>(Promise.resolve());
   const sync = (next: CaptionRow[]) => {
     const version = ++syncVersion.current;
-    void bridge?.syncMemeCaptions(next).then(() => {
+    const pending = syncQueue.current.catch(() => {}).then(() => bridge?.syncMemeCaptions(next));
+    syncQueue.current = pending.catch(() => {});
+    void pending.then(() => {
       if (version === syncVersion.current) setError("");
     }).catch((cause) => {
       if (version === syncVersion.current) setError(String(cause));

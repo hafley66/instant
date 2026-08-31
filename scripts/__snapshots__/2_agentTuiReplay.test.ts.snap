@@ -1,0 +1,156 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`live agent TUI launch contracts > isolates every harness behind the loopback provider without an env file 1`] = `
+[
+  {
+    "args": [
+      "--no-alt-screen",
+      "-C",
+      "$ROOT/workspace",
+      "render the terminal flow",
+    ],
+    "configs": [
+      {
+        "content": "model = "mock-model"
+model_provider = "llmock"
+approval_policy = "never"
+sandbox_mode = "read-only"
+disable_response_storage = true
+[projects."$ROOT/workspace"]
+trust_level = "trusted"
+[model_providers.llmock]
+name = "llmock"
+base_url = "http://127.0.0.1:43891/openai/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+requires_openai_auth = false
+request_max_retries = 0
+stream_max_retries = 0
+supports_websockets = false
+",
+        "path": "$ROOT/codex/.codex/config.toml",
+      },
+    ],
+    "executable": "/bin/codex",
+    "harness": "codex",
+    "providerVariables": [
+      "CODEX_HOME",
+      "OPENAI_API_KEY",
+    ],
+  },
+  {
+    "args": [
+      "--bare",
+      "--safe-mode",
+      "--model",
+      "claude-sonnet-4-5",
+      "--permission-mode",
+      "dontAsk",
+      "--tools",
+      "",
+    ],
+    "configs": [
+      {
+        "content": "{
+  "firstStartTime": "2026-01-01T00:00:00.000Z",
+  "firstStartVersion": "2",
+  "hasCompletedOnboarding": true,
+  "projects": {
+    "$ROOT/workspace": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}",
+        "path": "$ROOT/claude/.claude/.claude.json",
+      },
+      {
+        "content": "{
+  "theme": "dark"
+}",
+        "path": "$ROOT/claude/.claude/settings.json",
+      },
+    ],
+    "executable": "/bin/claude",
+    "harness": "claude",
+    "providerVariables": [
+      "ANTHROPIC_AUTH_TOKEN",
+      "ANTHROPIC_BASE_URL",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "CLAUDE_CONFIG_DIR",
+    ],
+  },
+  {
+    "args": [
+      "run",
+      "--pure",
+      "--interactive",
+      "--auto",
+      "--model",
+      "llmock/mock-model",
+      "render the terminal flow",
+    ],
+    "configs": [
+      {
+        "content": "{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "model": "llmock/mock-model",
+  "provider": {
+    "llmock": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llmock",
+      "options": {
+        "baseURL": "http://127.0.0.1:43891/openai/v1",
+        "apiKey": "test"
+      },
+      "models": {
+        "mock-model": {
+          "name": "Mock Model"
+        }
+      }
+    }
+  }
+}",
+        "path": "$ROOT/opencode/opencode.json",
+      },
+    ],
+    "executable": "/bin/opencode",
+    "harness": "opencode",
+    "providerVariables": [
+      "OPENCODE_CONFIG",
+      "OPENCODE_DISABLE_AUTOUPDATE",
+    ],
+  },
+  {
+    "args": [
+      "--model",
+      "llmock/mock-model",
+      "--prompt",
+      "render the terminal flow",
+      "--output-format",
+      "text",
+    ],
+    "configs": [
+      {
+        "content": "default_model = "llmock/mock-model"
+telemetry = false
+[providers.llmock]
+type = "openai"
+api_key = "test"
+base_url = "http://127.0.0.1:43891/openai/v1"
+[models."llmock/mock-model"]
+provider = "llmock"
+model = "mock-model"
+max_context_size = 100000
+capabilities = ["tool_call"]
+display_name = "Mock Model"
+",
+        "path": "$ROOT/kimi/.kimi-code/config.toml",
+      },
+    ],
+    "executable": "/bin/kimi",
+    "harness": "kimi",
+    "providerVariables": [],
+  },
+]
+`;

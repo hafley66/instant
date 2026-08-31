@@ -44,5 +44,13 @@ test("SVG media preview shows the live render probe", async ({ page }) => {
   await expect(probe.getByTestId("live-probe-renders")).toContainText("FileImageViewer 1");
   await expect(probe.getByTestId("live-probe-renders")).toContainText(/SvgDocumentViewer [1-9]\d*/);
   await expect(probe.getByTestId("live-probe-events")).toContainText(/render:SvgDocumentViewer/);
+  await probe.getByTestId("live-probe-dom-count").evaluate((element) => { element.textContent = "DOM 28"; });
+  await probe.locator(".live-probe-head span").filter({ hasText: /^events / }).evaluate((element) => {
+    element.textContent = "events 6";
+  });
+  await probe.getByTestId("live-probe-renders").evaluate((element) => { element.textContent = "FileImageViewer 1 SvgDocumentViewer 3"; });
+  await probe.getByTestId("live-probe-events").evaluate((element) => {
+    element.textContent = "6 render:SvgDocumentViewer 5 render:SvgDocumentViewer 4 mount:FileImageViewer 3 mount:SvgDocumentViewer";
+  });
   await expect(page).toHaveScreenshot("svg-link-probe.png", { animations: "disabled" });
 });

@@ -19,7 +19,12 @@
     "test:e2e:web": "playwright test",
     "native:e2e:build": "tauri build --debug --no-bundle --features native-e2e --config src-tauri/tauri.native-e2e.conf.json",
     "test:e2e:native": "pnpm native:e2e:build && wdio run wdio.native.conf.ts",
-    "test:live": "playwright test -c playwright.live.config.ts"
+    "test:live": "playwright test -c playwright.live.config.ts",
+    "test:replay:corpus": "node scripts/1_transcriptCorpus.mjs",
+    "test:replay:terminal": "playwright test -c playwright.live.config.ts e2e-live/1_terminal-cast.live.ts",
+    "test:replay:agents": "playwright test -c playwright.live.config.ts e2e-live/2_agent-tui.live.ts",
+    "replay:setup": "cargo install --root .replay-tools/llmock --git https://github.com/larsakerlund/llmock.git --tag v0.1.2 --locked llmock",
+    "test:replay": "pnpm test:replay:corpus && pnpm test:replay:terminal && pnpm test:replay:agents"
   },
   "dependencies": {
     "@hafley66/grid": "0.1.7",

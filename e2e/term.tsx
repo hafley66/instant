@@ -28,8 +28,11 @@ import {
   termDims,
   tabs,
   askAboutSelection,
+  syncTurnDebugOverlays,
 } from "../src/terminal";
+import { turnDebug } from "../src/0_turnDebugSettings";
 import { setHomeDir, sessionId } from "../src/core";
+import { settings } from "../src/0_settings";
 import { store } from "../src/state";
 import { installKeymap } from "../src/keymap";
 import { wireContextMenu } from "../src/ctxmenu";
@@ -85,6 +88,7 @@ const E2E_EDGE_TURNS = E2E_PARAMS.has("edgeTurns");
 const E2E_THREE_TURNS = E2E_PARAMS.get("edgeTurns") === "3";
 const E2E_STRUCTURED = E2E_PARAMS.has("structured");
 const E2E_VIEWER = E2E_PARAMS.has("viewer");
+const E2E_NO_SIDEBAR = E2E_PARAMS.has("noSidebar");
 const E2E_VIEWER_LANE = E2E_PARAMS.get("lane") ?? "e2e-viewer";
 const E2E_VIEWER_PANE = E2E_PARAMS.get("pane") ?? "%1";
 const E2E_VIEWER_CONTENT = E2E_PARAMS.get("contentB64")
@@ -364,8 +368,9 @@ installKeymap([
     run: () => {
       const id = getFocusedTermId();
       if (!id) return;
-      const cur = store.get().termSidebar[id] ?? { open: false, width: 264 };
-      store.set({ termSidebar: { ...store.get().termSidebar, [id]: { ...cur, open: !cur.open } } });
+      const current = settings.termSidebar.$();
+      const sidebar = current[id] ?? { open: false, width: 264 };
+      settings.termSidebar.$({ ...current, [id]: { ...sidebar, open: !sidebar.open } });
     },
   },
 ]);
@@ -407,15 +412,13 @@ type TermHooks = {
 };
 
 document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = () => {
-  openTab("e2e", { cwd: ROOT, command: E2E_WHEEL_HARNESS || undefined });
   // Reveal the sidebar immediately on open (the ⌘⇧\ hotkey toggles it too).
   const sid = sessionId("e2e");
-  store.set({
-    termSidebar: {
-      ...store.get().termSidebar,
-      [sid]: { open: true, width: 460 },
-    },
+  settings.termSidebar.$({
+    ...settings.termSidebar.$(),
+    [sid]: { open: !E2E_NO_SIDEBAR, width: 460 },
   });
+  openTab("e2e", { cwd: ROOT, command: E2E_WHEEL_HARNESS || undefined });
   const events: unknown[] = [];
   (window as Window & { __visibleTurnEvents?: unknown[] }).__visibleTurnEvents = events;
   const readout = document.createElement("pre");
@@ -465,6 +468,12 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-viewer]")!.onclick 
 };
 document.querySelector<HTMLButtonElement>("[data-testid=open-file]")!.onclick = () => {
   openPreviewPanel(`${ROOT}/README.md`);
+};
+document.querySelector<HTMLButtonElement>("#turn-debug-toggle")!.onclick = (event) => {
+  const on = !turnDebug.on.$();
+  turnDebug.on.$(on);
+  (event.currentTarget as HTMLButtonElement).setAttribute("aria-pressed", String(on));
+  syncTurnDebugOverlays();
 };
 
 mountReactDock(document.getElementById("dock")!);

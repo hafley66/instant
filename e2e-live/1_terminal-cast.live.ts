@@ -82,7 +82,7 @@ for (const harness of terminalHarnesses) {
       await terminal.stopRecording();
       const captured = parseTerminalCast(capturedCast);
 
-      await page.goto(`/e2e-term.html?e2e=1&harness=${harness}`);
+      await page.goto(`/e2e-term.html?e2e=1&noSidebar=1&harness=${harness}`);
       await page.evaluate((turns: readonly TerminalReplayTurn[]) => {
         window.__instantE2eNativeResults!.boop_turns = turns;
       }, replay.turns);

@@ -79,6 +79,7 @@ test("JSON-Rx dashboard renders captured metric data", async ({ page }) => {
   expect(renderedChart.host.width).toBeGreaterThan(500);
   expect(renderedChart.view?.width).toBeGreaterThan(400);
   expect(renderedChart.view?.height).toBeGreaterThan(200);
+  await page.getByTestId("metrics-refreshed-at").evaluate((element) => { element.textContent = ""; });
   await expect(dashboard).toHaveScreenshot("metrics-dashboard.png", { animations: "disabled" });
 
   const fixturePanel = page.getByTestId("metrics-stream-fixture.usage");

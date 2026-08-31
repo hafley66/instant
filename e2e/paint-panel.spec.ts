@@ -1,4 +1,17 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Frame, type Page } from "@playwright/test";
+
+async function waitForPaintFrame(page: Page): Promise<Frame> {
+  await expect.poll(() => page.frames().filter((frame) => frame.url().includes("/vendor/miniPaint/index.html")).length)
+    .toBeGreaterThan(0);
+  return page.frames().filter((frame) => frame.url().includes("/vendor/miniPaint/index.html")).at(-1)!;
+}
+
+async function waitForPaintLayers(frame: Frame): Promise<void> {
+  await expect.poll(() => frame.evaluate(() => {
+    const layers = (window as Window & { Layers?: { get_layers?: () => unknown[] } }).Layers;
+    return layers?.get_layers?.().length ?? -1;
+  })).toBeGreaterThan(0);
+}
 
 test("Paint layers revive after save, Cmd+W, and Cmd+Shift+T", async ({ page }) => {
   await page.goto("/e2e-paint.html?e2e=1");
@@ -8,29 +21,21 @@ test("Paint layers revive after save, Cmd+W, and Cmd+Shift+T", async ({ page }) 
   const firstTab = page.locator(".dv-default-tab").filter({ hasText: "paint-first.png" });
   await expect(firstTab).toHaveCount(1);
 
-  const paintFrame = page.frames().find((frame) => frame.url().includes("/vendor/miniPaint/index.html"));
-  expect(paintFrame).toBeTruthy();
-  await expect
-    .poll(() =>
-      paintFrame!.evaluate(() => {
-        const layers = (window as Window & { Layers?: { get_layers?: () => unknown[] } }).Layers;
-        return layers?.get_layers?.().length ?? -1;
-      }),
-    )
-    .toBeGreaterThan(0);
-  const layerCountBeforeClose = await paintFrame!.evaluate(() => {
+  const paintFrame = await waitForPaintFrame(page);
+  await waitForPaintLayers(paintFrame);
+  const layerCountBeforeClose = await paintFrame.evaluate(() => {
     const layers = (window as Window & { Layers?: { get_layers?: () => unknown[] } }).Layers;
     return layers?.get_layers?.().length ?? -1;
   });
   expect(layerCountBeforeClose).toBeGreaterThan(0);
 
-  const insertLayer = paintFrame!.locator("#insert_layer");
+  const insertLayer = paintFrame.locator("#insert_layer");
   await expect(insertLayer).toBeVisible();
   await insertLayer.click();
   await insertLayer.click();
   await expect
     .poll(() =>
-      paintFrame!.evaluate(() => {
+      paintFrame.evaluate(() => {
         const layers = (window as Window & { Layers?: { get_layers?: () => unknown[] } }).Layers;
         return layers?.get_layers?.().length ?? -1;
       }),
@@ -77,21 +82,21 @@ test("Paint layers revive after save, Cmd+W, and Cmd+Shift+T", async ({ page }) 
 test("Paint caption panel creates top and bottom meme text layers", async ({ page }) => {
   await page.goto("/e2e-paint.html?e2e=1");
   await page.getByTestId("open-first").click();
+  const paintFrame = await waitForPaintFrame(page);
+  await waitForPaintLayers(paintFrame);
   const panel = page.getByTestId("meme-captions");
   await expect(panel).toBeVisible();
   await panel.getByLabel("top text").fill("TOP TEXT");
   await panel.getByLabel("bottom text").fill("BOTTOM TEXT");
   await panel.getByLabel("top font size").fill("72");
   await panel.getByLabel("top fill color").fill("#ff0000");
-  await panel.locator("fieldset").nth(0).getByRole("checkbox", { name: "bold" }).check();
-  await panel.getByRole("button", { name: "add caption layers" }).click();
+  await panel.getByRole("button", { name: "top bold" }).click();
 
-  const paintFrame = page.frames().find((frame) => frame.url().includes("/vendor/miniPaint/index.html"));
-  await expect.poll(() => paintFrame!.evaluate(() => {
+  await expect.poll(() => paintFrame.evaluate(() => {
     const layers = (window as Window & { Layers?: { get_layers?: () => Array<{ name: string; data?: Array<Array<{ text: string }>> }> } }).Layers;
     return (layers?.get_layers?.() ?? []).map((layer) => [layer.name, layer.data?.[0]?.[0]?.text, layer.data?.[0]?.[0]?.meta]);
   })).toContainEqual(["Meme top caption", "TOP TEXT", expect.objectContaining({ size: 72, fill_color: "#ff0000", bold: true })]);
-  await expect.poll(() => paintFrame!.evaluate(() => {
+  await expect.poll(() => paintFrame.evaluate(() => {
     const layers = (window as Window & { Layers?: { get_layers?: () => Array<{ name: string; data?: Array<Array<{ text: string }>> }> } }).Layers;
     return (layers?.get_layers?.() ?? []).map((layer) => [layer.name, layer.data?.[0]?.[0]?.text]);
   })).toContainEqual(["Meme bottom caption", "BOTTOM TEXT"]);
