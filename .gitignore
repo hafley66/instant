@@ -38,6 +38,7 @@ vscode-ext/out
 /test-results/
 /playwright-report/
 /packages/*/test-results/
+/.native-e2e-results/
 
 # Local task branches managed as Git worktrees.
 /.worktrees/

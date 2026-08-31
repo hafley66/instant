@@ -844,7 +844,11 @@ pub fn run() {
     let no_globals = std::env::var("INSTANT_NO_GLOBALS").is_ok();
     let skip_shared_globals = no_globals || isolated;
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(all(debug_assertions, feature = "native-e2e"))]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .manage(pty::PtyStore::default())
         .manage(pty_events::PtyEvents::default())
         .manage(cdp::CdpStore::default())
