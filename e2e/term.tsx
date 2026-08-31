@@ -224,6 +224,10 @@ function resolveRefFixture(token: string, cwd: string) {
   boop_mux_capture: "",
   boop_favorites: [],
   boop_favorite_toggle: [],
+  boop_turn_comments: [],
+  boop_turn_comment_upsert: undefined,
+  boop_turn_comment_delete: undefined,
+  boop_turn_comments_sent: undefined,
   list_sessions: [],
   open_session: (args: Record<string, unknown> | undefined) => {
     if (args?.attachOnly === true) {

@@ -69,6 +69,11 @@ async function saveReceipt(page: Page, name: string) {
   return path;
 }
 
+async function visibleTurnIds(page: Page) {
+  return page.locator('.term-turn-debug-row[data-turn-id]:not([data-turn-id=""])')
+    .evaluateAll((rows) => [...new Set(rows.map((row) => (row as HTMLElement).dataset.turnId!))].sort());
+}
+
 test.beforeAll(() => mkdirSync(receipts, { recursive: true }));
 
 test("a sanitized real conversation shows every ledger message role and content type", async ({ page }, testInfo) => {
@@ -123,20 +128,34 @@ test("a real message taller than the viewport retains attribution at its start a
 });
 
 test("a real Codex turn rescans on wheel activity and repaints after the TUI redraw settles", async ({ page }, testInfo) => {
-  const turn = codexReplay.longTurn;
-  const sourceLines = turn.said.split("\n");
-  expect(sourceLines.length).toBeGreaterThan(8);
-  const beforeOutput = `\u001b[?1003h\u001b[?1006h${renderConversationWindow(turn, 0, 7)}`;
-  await openConversation(page, [turn], 120, 8, beforeOutput);
+  const beforeTurns = codexReplay.turns.filter((turn) => [4, 8, 9].includes(turn.sourceLine));
+  const afterTurns = codexReplay.turns.filter((turn) => [14, 15, 16].includes(turn.sourceLine));
+  expect(beforeTurns.map((turn) => [turn.turn, turn.role, turn.subtype])).toEqual([
+    [4, "user", null],
+    [8, "assistant", null],
+    [9, "assistant", "exec"],
+  ]);
+  expect(afterTurns.map((turn) => [turn.turn, turn.role, turn.subtype])).toEqual([
+    [14, "assistant", null],
+    [15, "assistant", "exec"],
+    [16, "assistant", "exec result"],
+  ]);
+  const beforeOutput = `\u001b[?1003h\u001b[?1006h${renderConversationTurns(beforeTurns)}`;
+  await openConversation(page, codexReplay.turns, 120, 18, beforeOutput);
   await expect.poll(() => page.evaluate(() => window.__term!.mouseMode())).toBe("any");
 
-  const beforeRows = page.locator('.term-turn-debug-row[data-turn="21"][data-role="assistant"]');
-  await expect(beforeRows.first()).toContainText("┌ t21 assistant A");
-  await expect(beforeRows.last()).toContainText("↓ t21 assistant A");
+  await expect.poll(() => visibleTurnIds(page)).toEqual([
+    "codex-real-session:4",
+    "codex-real-session:8",
+    "codex-real-session:9",
+  ]);
+  await expect(page.locator('.term-turn-debug-row[data-turn="4"]').first()).toContainText("t4 user A");
+  await expect(page.locator('.term-turn-debug-row[data-turn="8"]').first()).toContainText("t8 assistant A");
+  await expect(page.locator('.term-turn-debug-row[data-turn="9"]').first()).toContainText("t9 assistant A");
   const beforePath = await saveReceipt(page, "real-codex-scroll-before");
   await testInfo.attach("real-codex-scroll-before", { path: beforePath, contentType: "image/png" });
 
-  const afterOutput = renderConversationWindow(turn, 3, 9);
+  const afterOutput = renderConversationTurns(afterTurns);
   await page.evaluate((output) => {
     window.__instantE2eNativeCalls = [];
     window.__instantE2eNativeResults!.write_pty = () => {
@@ -152,12 +171,17 @@ test("a real Codex turn rescans on wheel activity and repaints after the TUI red
   const locateCalls = () => page.evaluate(() =>
     window.__instantE2eNativeCalls?.filter((command) => command === "boop_locate_turns").length ?? 0);
   await expect.poll(locateCalls, { timeout: 200, intervals: [20] }).toBeGreaterThan(0);
-  await expect(page.locator(".xterm-rows")).toContainText(sourceLines[7]);
+  await expect(page.locator(".xterm-rows")).toContainText("The plan requires one commit per implementation step");
   await expect.poll(locateCalls).toBeGreaterThanOrEqual(2);
 
-  const afterRows = page.locator('.term-turn-debug-row[data-turn="21"][data-role="assistant"]');
-  await expect(afterRows.first()).toContainText("↑ t21 assistant A");
-  await expect(afterRows.last()).toContainText("↓ t21 assistant A");
+  await expect.poll(() => visibleTurnIds(page)).toEqual([
+    "codex-real-session:14",
+    "codex-real-session:15",
+    "codex-real-session:16",
+  ]);
+  await expect(page.locator('.term-turn-debug-row[data-turn="14"]').first()).toContainText("t14 assistant A");
+  await expect(page.locator('.term-turn-debug-row[data-turn="15"]').first()).toContainText("t15 assistant A");
+  await expect(page.locator('.term-turn-debug-row[data-turn="16"]').first()).toContainText("t16 assistant A");
   const afterPath = await saveReceipt(page, "real-codex-scroll-after");
   await testInfo.attach("real-codex-scroll-after", { path: afterPath, contentType: "image/png" });
 });
