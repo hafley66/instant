@@ -54,7 +54,7 @@ describe("terminal turn visibility v2", () => {
     vi.useRealTimers();
   });
 
-  it("reconciles once after the native projector's thirty-second ingestion interval", async () => {
+  it("reconciles after the one-second projector and turn-cache bounds", async () => {
     vi.useFakeTimers();
     const changes = new Subject<{ kind: "write"; cols: number; rows: number; viewportY: number; bufferLength: number }>();
     const viewport: XtermViewport = {
@@ -69,10 +69,20 @@ describe("terminal turn visibility v2", () => {
     visibility.schedule = vi.fn();
 
     changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 0, bufferLength: 40 });
-    await vi.advanceTimersByTimeAsync(1_200);
-    expect(visibility.schedule).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(30_800);
-    expect(visibility.schedule).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(2_199);
+    const beforeReconcile = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(1);
+    const afterReconcile = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    const afterLegacyInterval = vi.mocked(visibility.schedule).mock.calls.length;
+
+    expect({ beforeReconcile, afterReconcile, afterLegacyInterval }).toMatchInlineSnapshot(`
+      {
+        "afterLegacyInterval": 2,
+        "afterReconcile": 2,
+        "beforeReconcile": 1,
+      }
+    `);
 
     visibility.dispose();
     changes.complete();

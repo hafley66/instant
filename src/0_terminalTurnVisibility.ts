@@ -396,20 +396,11 @@ export class TerminalTurnVisibilityV2 {
       debounceTime(120),
     ).subscribe(() => this.schedule()));
     // Transcript ingestion trails the terminal's final parsed write. The
-    // immediate scan can therefore observe the pane before Boop has committed
-    // the matching turn. Reconcile once after the one-second turn cache expires
-    // so a completed message gains its regions without requiring user scroll.
+    // resident parent projector and this client's turn cache each have a
+    // one-second bound, so reconcile beyond both without requiring user scroll.
     this.subscription.add(changes.pipe(
       filter((event) => event.kind === "write"),
-      debounceTime(1200),
-    ).subscribe(() => this.schedule()));
-    // `boop tui` projects native transcripts every 30 seconds by default. A
-    // turn completed just after one pass is absent from both scans above, and
-    // an idle pane emits no later viewport event to correct it. Reconcile once
-    // beyond that interval so the final rendered frame gains attribution.
-    this.subscription.add(changes.pipe(
-      filter((event) => event.kind === "write"),
-      debounceTime(32_000),
+      debounceTime(2200),
     ).subscribe(() => this.schedule()));
     this.schedule();
   }
