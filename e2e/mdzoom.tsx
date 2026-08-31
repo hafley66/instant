@@ -6,13 +6,15 @@
 import "xp.css";
 import "@xterm/xterm/css/xterm.css";
 import "../src/styles.css";
+import "@hafley66/md/style.css";
 import { createElement } from "react";
 import type { IDockviewPanelProps } from "dockview";
 import { invoke } from "../src/generated/native";
-import { store, type FsEntry } from "../src/state";
+import type { FsEntry } from "../src/state";
 import { registerPlugin } from "../src/plugin";
 import { initRail } from "../src/rail";
 import { FileTree } from "../src/plugins/files/1_FileTree";
+import { PanZoomViewport } from "../src/0_PanZoomViewport";
 import { registerMdview } from "../src/mdview";
 import { installMdviewHost } from "../src/mdview/ports";
 import { installKeymap, type Command } from "../src/keymap";
@@ -20,6 +22,7 @@ import { claimFsWatch } from "../src/fsWatch";
 import { registerZoomKind, resetPanelZoom } from "../src/panelZoom";
 import { readPluginState, savePluginState } from "../src/pluginState";
 import { useApp } from "../src/useStore";
+import { settings } from "../src/0_settings";
 import {
   mountReactDock,
   setDockHooks,
@@ -55,6 +58,13 @@ A paragraph with an [external link](https://example.com/research) under the head
 
 \`\`\`http
 POST /arrivals  { batch: [ add tree, add fruit, del leaf ] }
+\`\`\`
+
+\`\`\`mermaid
+flowchart LR
+  PTY --> tmux
+  tmux --> xterm
+  xterm --> Markdown
 \`\`\`
 `;
 const openedHrefs: { href: string; sourcePath: string }[] = [];
@@ -103,16 +113,20 @@ installMdviewHost({
   readImage: (path) => invoke<string>("read_image", { path }),
   listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
   openHref: async (href, sourcePath) => { openedHrefs.push({ href, sourcePath }); },
+  openPath: async () => {},
   watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
   useRenderProbe: () => {},
+  useLifecycleProbe: () => {},
+  recordOperation: () => {},
   FileTree,
+  PanZoomViewport,
   registerZoomKind,
   resetPanelZoom,
   readPluginState,
   savePluginState,
   useAppState: () => {
-    const app = useApp();
-    return { dark: app.mode === "dark", panelZoom: app.panelZoom };
+    useApp();
+    return { dark: settings.mode.$() === "dark", panelZoom: settings.panelZoom.$() };
   },
   openMdPanel: addMdPanel,
   mdPanelId,
@@ -149,7 +163,7 @@ type ZoomHooks = {
   doc: DOC,
   mdPid: mdPanelId(DOC),
   termPid: `term:${sessionId("e2e")}`,
-  factors: () => store.get().panelZoom,
+  factors: () => settings.panelZoom.$(),
   focusedTerm: getFocusedTermId,
   activePanel: activePanelId,
   openedHrefs: () => [...openedHrefs],

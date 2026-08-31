@@ -238,14 +238,17 @@ export function projectedDiagramIsCurrent(
   const sourceLines = region.text.split("\n");
   const matchedRows = region.sourceBufferRows?.slice(1, -1) ?? [];
   let currentMatches = 0;
+  let comparableRows = 0;
   for (let index = 0; index < matchedRows.length; index++) {
     const row = matchedRows[index];
     if (row === null || row === undefined) continue;
     const source = normalizedDiagramLines(sourceLines[index] ?? "")[0];
     const visible = normalizedDiagramLines(term.buffer.active.getLine(row)?.translateToString(true) ?? "")[0];
-    if (source && visible && (source === visible || source.includes(visible) || visible.includes(source))) currentMatches++;
+    if (!source || !visible) continue;
+    comparableRows++;
+    if (source === visible || source.includes(visible) || visible.includes(source)) currentMatches++;
   }
-  return currentMatches >= Math.min(2, sourceLines.filter((line) => normalizedDiagramLines(line).length).length);
+  return comparableRows > 0 && currentMatches >= Math.min(2, comparableRows);
 }
 
 export function diagramElementKey(fence: DiagramFence, dark: boolean): string {
@@ -383,7 +386,7 @@ export class TerminalDiagramOverlay {
     readonly term: Terminal,
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
-    readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
+    readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes" | "scanning">,
     readonly enabled: () => boolean = () => true,
   ) {
     this.root = document.createElement("div");
@@ -412,6 +415,8 @@ export class TerminalDiagramOverlay {
       { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.projection) {
+          this.root.hidden = true;
+          this.generation++;
           this.positionElements();
           if (!this.scrolling) this.recoveryEvents.next();
         }
@@ -437,6 +442,8 @@ export class TerminalDiagramOverlay {
     if (this.projection) {
       this.scrolling = true;
       this.lastScrollAt = performance.now();
+      this.root.hidden = true;
+      this.generation++;
       this.positionElements();
       this.scrollEvents.next();
     } else {
@@ -518,7 +525,8 @@ export class TerminalDiagramOverlay {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
-    const direct = findDiagramFences(this.term).filter((fence) => !fence.inferred);
+    const direct = findDiagramFences(this.term).filter((fence) =>
+      !fence.inferred && !(fence.stripped && this.projection?.scanning));
     const projected = this.projection?.visible.flatMap((turn) => turn.regions
       .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
         (region.kind === "mermaid" || region.kind === "d2") && projectedDiagramIsCurrent(this.term, region))

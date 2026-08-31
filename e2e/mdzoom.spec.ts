@@ -46,8 +46,9 @@ const state = (page: Page) =>
     };
   });
 
-// A real click inside the terminal: it takes DOM focus AND makes the terminal
-// dockview's active panel, which is the state a user types in.
+// A real click inside the terminal takes DOM focus and refreshes the terminal's
+// reach timestamp. Dockview can retain the markdown panel as its active panel;
+// the zoom resolver chooses whichever surface the user reached most recently.
 async function useTerminal(page: Page) {
   await page.locator(".xterm-screen").first().click();
   await expect.poll(async () => (await state(page)).focusedTerm).not.toBeNull();
@@ -74,6 +75,20 @@ test("YAML frontmatter stays out of the rendered document and cannot widen it", 
     scrollWidth: expect.any(Number),
   });
   expect(await content.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
+test("renderer tier lazily loads Markdown and renders a Mermaid fence", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.getByTestId("open-md").click();
+  await page.getByRole("button", { name: /Zoom target/ }).click();
+
+  const diagram = page.locator(".mdview-mermaid");
+  await expect(diagram.locator("svg")).toBeVisible();
+  await expect(diagram).toContainText("PTY");
+  await expect(diagram).toContainText("Markdown");
+  expect(pageErrors).toEqual([]);
 });
 
 test("cmd+/-/0 zoom the markdown preview opened from a focused terminal", async ({ page }) => {
@@ -117,8 +132,9 @@ test("a terminal the user is typing in still zooms its own font", async ({ page 
   await page.getByTestId("open-md").click();
   await expect(page.locator(".mdview-content")).toBeVisible();
   await useTerminal(page);
-  const termPid = await page.evaluate(() => (window as ZoomWindow).__mdzoom!.termPid);
-  await expect.poll(async () => (await state(page)).activePanel).toBe(termPid);
+  expect((await state(page)).activePanel).toBe(
+    await page.evaluate(() => (window as ZoomWindow).__mdzoom!.mdPid),
+  );
 
   await page.keyboard.press("Meta+Equal");
   await expect.poll(async () => (await state(page)).term).toBeGreaterThan(1);

@@ -1,0 +1,5 @@
+{"version":2,"width":100,"height":30,"title":"Instant Codex terminal transcript","env":{"TERM":"xterm-256color","SHELL":"/bin/sh","INSTANT_HARNESS":"codex"}}
+[0.0,"r","100x30"]
+[0.1,"i","render the terminal flow\r"]
+[0.2,"o","Codex ready\r\n› render the terminal flow\r\nCodex response:\r\n```mermaid\r\nflowchart LR\r\n  PTY --> tmux\r\n  tmux --> xterm\r\n  xterm --> Markdown\r\n```\r\n"]
+[0.3,"m","turns-complete"]

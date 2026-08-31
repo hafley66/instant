@@ -1,9 +1,10 @@
-# Live suite: real tmux, real Boop, no mocks
+# Native-adjacent live substrate suite
 
 Everything here runs against uniquely named sessions on the default tmux server,
 the real `boop beep` CLI, and a per-test temp mail dir. Browser legs render
-the real strip components; the only seam is the IPC transport, which
-`0_live.ts` serves from this process with real `tmux`/fs implementations.
+the real application components. Tauri IPC is absent: `0_live.ts` exposes the
+real `tmux`/fs calls to the renderer through a Playwright binding. This is
+native-adjacent/live-substrate coverage rather than compiled-app E2E.
 Test lane ids carry the `proof-` prefix; every test kills its sessions.
 
 ```bash
@@ -20,6 +21,12 @@ corepack pnpm@10.12.4 run test:live            # free legs (~15s)
 | lane death settles done + leaves the bar | strip-live: "…leaves the going-on bar with zero clicks" | browser+node |
 | done-lane double-click never mints | strip-live: "…double-click never mints a session" | browser+node |
 | waterfall bars + brush | strip-live: "history waterfall bars real lanes…" | browser+node |
+| synchronized Codex/Claude/OpenCode asciicast + Boop turns through tmux + `@microsoft/tui-test` PTY into Instant xterm | 1_terminal-cast | native-adjacent/live-substrate |
+
+`1_terminal-cast.live.ts` uses the pinned `@microsoft/tui-test` Node binding for a real PTY and
+terminal emulator. Each harness fixture supplies synchronized asciicast input/output events and
+Boop role/turn records. The captured tmux byte stream is then written through Instant's existing
+terminal hook, where the production turn matcher and Markdown diagram projection run unchanged.
 
 Two legs need the running Tauri app and live only in the recorded proof run
 (PROOF.md): the viewer tab showing live pty output after a row click, and the

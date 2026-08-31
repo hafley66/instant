@@ -75,7 +75,10 @@ const turnLabel = (index: number) => index < 26
   ? String.fromCharCode(65 + index)
   : `A${String.fromCharCode(65 + index - 26)}`;
 const E2E_PARAMS = new URLSearchParams(window.location.search);
-const E2E_HARNESS = E2E_PARAMS.get("harness") === "kimi" ? "kimi" : "codex";
+const requestedHarness = E2E_PARAMS.get("harness");
+const E2E_HARNESS = requestedHarness === "claude" || requestedHarness === "opencode" || requestedHarness === "kimi"
+  ? requestedHarness
+  : "codex";
 const E2E_WHEEL_HARNESS = E2E_PARAMS.get("wheelHarness");
 const E2E_NO_HARNESS = E2E_PARAMS.has("noHarness");
 const E2E_EDGE_TURNS = E2E_PARAMS.has("edgeTurns");

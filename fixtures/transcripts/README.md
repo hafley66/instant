@@ -59,3 +59,18 @@ feature groups they cover:
 
 Known gap: the kimi fixture has no `subagents` group. No kimi session on the capture machine
 dispatched a Task; rerun the capture on a machine that has one to fill it in.
+
+## Terminal replay artifacts
+
+`terminal/*.cast` uses the asciicast v2 NDJSON format. These fixtures are runner-neutral: a
+renderer test, native-adjacent test, or compiled-app driver can select a Codex, Claude Code, or
+OpenCode artifact with `terminalCastReplay` from `scripts/0_terminalCast.ts`, then run its returned
+`asciinema play` command inside the terminal substrate under test. Each replay also carries the
+matching Boop user and assistant records. Input events remain explicit in the cast, so the adapter
+can validate what the harness received separately from the terminal bytes Instant rendered.
+
+The adapter reports an explicit prerequisite result through `asciinemaAvailability()`. Missing
+`asciinema` is a skipped substrate prerequisite or a setup error at the caller's tier. It does not
+fall back to direct xterm writes because that would remove the PTY/tmux portion of the test path.
+The native-adjacent suite uses `@microsoft/tui-test` for PTY ownership, terminal emulation,
+readiness, and asciicast capture.

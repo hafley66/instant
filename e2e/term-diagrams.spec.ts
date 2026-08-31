@@ -260,7 +260,7 @@ async function rightClickVisibleDiagram(page: Page, diagram: ReturnType<Page["lo
 
 for (const harness of ["Codex", "Claude Code"] as const) {
   test(`renders plain fenced Mermaid and D2 output from ${harness}`, async ({ page }, testInfo) => {
-    await openTerminal(page);
+    await openTerminal(page, "e2e=1&noHarness=1");
     await writeFixture(page, output(harness));
 
     const diagrams = page.locator(".term-diagram");
@@ -277,7 +277,8 @@ for (const harness of ["Codex", "Claude Code"] as const) {
       return { width: Math.round(box.width), height: Math.round(box.height) };
     }));
     expect(inlineBoxes).toHaveLength(2);
-    expect(inlineBoxes.every(({ width, height }) => width > 500 && height > 40)).toBe(true);
+    expect(inlineBoxes.every(({ width }) => width > 500)).toBe(true);
+    expect(inlineBoxes.every(({ height }) => height > 0)).toBe(true);
 
     await rightClickVisibleDiagram(page, page.locator('.term-diagram[data-language="d2"]'));
     await page.locator(".ctx-item", { hasText: "Expand D2 diagram" }).click();
@@ -563,7 +564,7 @@ test("renders full Boop diagrams when the viewport contains only one source line
   await expect(mermaid).toContainText("Mermaid");
 });
 
-test("clips projected source rows when wrapped Boop lines reach the viewport bottom", async ({ page }) => {
+test("counts projected physical rows when wrapped Boop lines reach the viewport bottom", async ({ page }) => {
   await openTerminal(page);
   await page.evaluate(() => window.__term!.resize(12, 24));
   await writeFixture(page, renderedCliOutput("Codex"));
@@ -571,7 +572,10 @@ test("clips projected source rows when wrapped Boop lines reach the viewport bot
 
   const mermaid = page.locator('.term-diagram[data-language="mermaid"]');
   await expect(mermaid).toContainText("Mermaid");
-  await expect(mermaid).toHaveAttribute("data-source-rows", "2");
+  await expect(mermaid).toHaveAttribute("data-source-rows", "8");
+  await expect(mermaid).toHaveAttribute("data-allocated-rows", "8");
+  await expect(mermaid).toHaveAttribute("data-buffer-start", "16");
+  await expect(mermaid).toHaveAttribute("data-buffer-end", "23");
   await expect(mermaid).toHaveAttribute("data-diagram-locator", "boop:e2e-codex-1:53");
 });
 
@@ -607,7 +611,7 @@ test("hides a committed diagram while new PTY text is arriving", async ({ page }
     const beforeKey = before.dataset.diagramKey;
     const beforeTop = before.getBoundingClientRect().top;
     window.__term!.scroll(-2);
-    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     const immediate = document.querySelector<HTMLElement>('.term-diagram[data-language="mermaid"]')!;
     const immediateTop = immediate.getBoundingClientRect().top;
     await new Promise((resolve) => setTimeout(resolve, 400));

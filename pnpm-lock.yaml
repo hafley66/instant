@@ -20,8 +20,8 @@ importers:
         specifier: 0.1.2
         version: 0.1.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/md':
-        specifier: ^0.1.1
-        version: 0.1.1(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
+        specifier: 0.1.1-dev.1788134367104
+        version: 0.1.1-dev.1788134367104(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
       '@hafley66/signals':
         specifier: 0.1.1
         version: 0.1.1(react@19.2.7)(vite@8.1.5)
@@ -137,6 +137,9 @@ importers:
         specifier: ^0.2.6
         version: 0.2.6
     devDependencies:
+      '@microsoft/tui-test':
+        specifier: 0.1.0-beta.2
+        version: 0.1.0-beta.2
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
@@ -388,8 +391,8 @@ packages:
       react: ^19.0.0
       rxjs: ^7.8.0
 
-  '@hafley66/md@0.1.1':
-    resolution: {integrity: sha512-Rd0tBPQoxm+uf+H+HXJOcA5nHpfNooOYrmoSO0Baj9yVTanPNk/zOFXT6EB1Dn1eBAyHMw5TmlpQf5VrPPTpgw==}
+  '@hafley66/md@0.1.1-dev.1788134367104':
+    resolution: {integrity: sha512-wM9xVuz7O6S9d+AgZMmO999oRXIL2trzfXYWsw7wDxK1Sm6W4RYBmmqV9kIh/KH8hqtbIYXotNOapPxRsgQUvw==}
     peerDependencies:
       '@hafley66/signals': '>=0.1.0'
       '@streamdown/code': '>=1.1.1'
@@ -445,6 +448,52 @@ packages:
 
   '@mermaid-js/parser@1.2.0':
     resolution: {integrity: sha512-oYPyv8A4As1yH5Bx+04iQEQxXuIQDe0GKCNSRgao6z8AM9jixXIfP0vsppRLvGf+nKIOb9/LdpWA4YuJiVvESA==}
+
+  '@microsoft/tui-test-darwin-arm64@0.1.0-beta.2':
+    resolution: {integrity: sha512-3o9O7WQGE5vQcVuEZe2U9uajmi4PyalRFI14nccGSH8JoTIajBSZiRGV+6TFsxG4Gbfo5a+eVSeaa2eD4n5+5A==}
+    engines: {node: '>=20'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@microsoft/tui-test-darwin-x64@0.1.0-beta.2':
+    resolution: {integrity: sha512-qI+Eyn7hYzG5fUU7C5mMJG6fcfuk5HKYm6Ha74SC7J8cW8OtqYt5tVPfSlVGgTaaC0W/pcC8AWAXbLD0fbEGfQ==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@microsoft/tui-test-linux-arm64-gnu@0.1.0-beta.2':
+    resolution: {integrity: sha512-bxB/MBk5mtfpobhE7QYYLGMh4Tk+OPoiR361+siz42ZQRR1G6HZYcy6iEmnqLE/85/vqQvUhGRHA//F2b8j7SA==}
+    engines: {node: '>=20'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@microsoft/tui-test-linux-arm64-musl@0.1.0-beta.2':
+    resolution: {integrity: sha512-ERHvfe1+/vFyf7NroEUJJz6fp4l2mIGtyi9dARhkQyJAVuZ9kCpeUIjktRSOeG3Y7JzfSfAJ4UQxC+9/gFEQgQ==}
+    engines: {node: '>=20'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@microsoft/tui-test-linux-x64-gnu@0.1.0-beta.2':
+    resolution: {integrity: sha512-m614FBXWmUUBXX2UUEeF9KIsGHWeQdydqosVuuGLdOSGS/uw2/ioSo35MhHcwAXrkPqeInBrP43DJYDkufvhyQ==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [linux]
+
+  '@microsoft/tui-test-linux-x64-musl@0.1.0-beta.2':
+    resolution: {integrity: sha512-EhT8NiqT7w6kc+vNtkKkIxFephMIinTM3rGjfYv+uXRcPWNVlHmBuV5179oPh4LSy7aVh4QY/ke2DRVFIOyDzw==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [linux]
+
+  '@microsoft/tui-test-win32-x64-msvc@0.1.0-beta.2':
+    resolution: {integrity: sha512-JZozhcE5q5G2INwemvS88nL6jXZjuvU5M45zxh25VbIlfeczFe0yGODWfHQ+QrIwwYm3aAMRhXjFqWciKuzodA==}
+    engines: {node: '>=20'}
+    cpu: [x64]
+    os: [win32]
+
+  '@microsoft/tui-test@0.1.0-beta.2':
+    resolution: {integrity: sha512-xSnK4OUPjBHP/bfKgDiNB6AZNbGwHdGpDw/owR2uCdeCKBB/knraDWxMraPRFQcreMEtph0vWfOii4ESXIuSrg==}
+    engines: {node: '>=20'}
 
   '@mui/core-downloads-tracker@7.3.11':
     resolution: {integrity: sha512-a7I/b/nBTdXYz2cOSlEmkQ9WWE1x8FHpqMhFPp+Y1VPFxcOw91G5ELOHARQAGSPy5V+UCgJua6K/1x70bAtQPw==}
@@ -2876,7 +2925,7 @@ snapshots:
       - supports-color
       - vue
 
-  '@hafley66/md@0.1.1(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
+  '@hafley66/md@0.1.1-dev.1788134367104(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
     dependencies:
       '@hafley66/signals': 0.1.1(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
@@ -2938,6 +2987,37 @@ snapshots:
   '@mermaid-js/parser@1.2.0':
     dependencies:
       '@chevrotain/types': 11.1.2
+
+  '@microsoft/tui-test-darwin-arm64@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test-darwin-x64@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test-linux-arm64-gnu@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test-linux-arm64-musl@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test-linux-x64-gnu@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test-linux-x64-musl@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test-win32-x64-msvc@0.1.0-beta.2':
+    optional: true
+
+  '@microsoft/tui-test@0.1.0-beta.2':
+    optionalDependencies:
+      '@microsoft/tui-test-darwin-arm64': 0.1.0-beta.2
+      '@microsoft/tui-test-darwin-x64': 0.1.0-beta.2
+      '@microsoft/tui-test-linux-arm64-gnu': 0.1.0-beta.2
+      '@microsoft/tui-test-linux-arm64-musl': 0.1.0-beta.2
+      '@microsoft/tui-test-linux-x64-gnu': 0.1.0-beta.2
+      '@microsoft/tui-test-linux-x64-musl': 0.1.0-beta.2
+      '@microsoft/tui-test-win32-x64-msvc': 0.1.0-beta.2
 
   '@mui/core-downloads-tracker@7.3.11': {}
 
