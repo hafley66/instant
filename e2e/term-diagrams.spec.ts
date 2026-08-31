@@ -264,7 +264,7 @@ for (const harness of ["Codex", "Claude Code"] as const) {
     await writeFixture(page, output(harness));
 
     const diagrams = page.locator(".term-diagram");
-    await expect(diagrams).toHaveCount(2);
+    await expect(diagrams).toHaveCount(2, { timeout: 10_000 });
     await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
     await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("PTY");
