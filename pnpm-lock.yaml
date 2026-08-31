@@ -20,8 +20,8 @@ importers:
         specifier: 0.1.2
         version: 0.1.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/md':
-        specifier: 0.1.1-dev.1788134367104
-        version: 0.1.1-dev.1788134367104(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
+        specifier: 0.1.2
+        version: 0.1.2(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0)))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
       '@hafley66/signals':
         specifier: 0.1.1
         version: 0.1.1(react@19.2.7)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
@@ -568,8 +568,8 @@ packages:
       react: ^19.0.0
       rxjs: ^7.8.0
 
-  '@hafley66/md@0.1.1-dev.1788134367104':
-    resolution: {integrity: sha512-wM9xVuz7O6S9d+AgZMmO999oRXIL2trzfXYWsw7wDxK1Sm6W4RYBmmqV9kIh/KH8hqtbIYXotNOapPxRsgQUvw==}
+  '@hafley66/md@0.1.2':
+    resolution: {integrity: sha512-Iwl0fAmRfHLd0dAmnNkcgLKHXHAoCBx90a7cG2ZLR6oGKDSjynBXor5kZ5nMlIfZIxGIP7DwqaNUJ042C4XLqg==}
     peerDependencies:
       '@hafley66/signals': '>=0.1.0'
       '@streamdown/code': '>=1.1.1'
@@ -4807,7 +4807,7 @@ snapshots:
       - supports-color
       - vue
 
-  '@hafley66/md@0.1.1-dev.1788134367104(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
+  '@hafley66/md@0.1.2(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0)))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
     dependencies:
       '@hafley66/signals': 0.1.1(react@19.2.7)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
       '@streamdown/code': 1.1.1(react@19.2.7)

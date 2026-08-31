@@ -30,7 +30,7 @@
   "dependencies": {
     "@hafley66/grid": "0.1.7",
     "@hafley66/json-rx": "0.1.2",
-    "@hafley66/md": "0.1.1-dev.1788134367104",
+    "@hafley66/md": "0.1.2",
     "@hafley66/signals": "0.1.1",
     "@oddbird/css-anchor-positioning": "^0.9.0",
     "@react95/icons": "^2.5.0",
