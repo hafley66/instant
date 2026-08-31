@@ -251,6 +251,7 @@ describe("terminal turn visibility v2", () => {
           "anchorStart": 42,
           "bufferEnd": 43,
           "bufferStart": 42,
+          "clippedBelow": true,
           "confidence": "anchored",
           "harness": "codex",
           "id": "session-a:8",

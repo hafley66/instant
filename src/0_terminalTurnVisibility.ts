@@ -22,6 +22,8 @@ export type VisibleTurn = BoopTurn & {
   regions: ProjectedTurnRegion[];
   confidence: "anchored" | "extended";
   provenance: "xterm+boop" | "xterm+tmux+boop";
+  clippedAbove?: boolean;
+  clippedBelow?: boolean;
 };
 
 export type TurnVisibilityEvent = {
@@ -347,11 +349,23 @@ export function attachTurnRegions(
   lines: LogicalLine[],
   tmuxBacked = false,
 ): VisibleTurn[] {
-  return spans.map((span) => ({
-    ...span,
-    regions: projectTurnRegions(span.id, span.said, span, lines, normalizeTurnLine),
-    provenance: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
-  }));
+  return spans.map((span) => {
+    const source = span.said.split("\n").map(normalizeTurnLine).filter(Boolean);
+    const anchors = lines
+      .filter((line) => line.start <= span.anchorEnd && line.end >= span.anchorStart)
+      .map((line) => normalizeTurnLine(line.text))
+      .filter(Boolean);
+    const clippedAbove = !!source.length && !!anchors.length && !lineMatches(anchors[0], source[0]);
+    const clippedBelow = !!source.length && !!anchors.length
+      && !lineMatches(anchors[anchors.length - 1], source[source.length - 1]);
+    return {
+      ...span,
+      ...(clippedAbove ? { clippedAbove: true } : {}),
+      ...(clippedBelow ? { clippedBelow: true } : {}),
+      regions: projectTurnRegions(span.id, span.said, span, lines, normalizeTurnLine),
+      provenance: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
+    };
+  });
 }
 
 export class TerminalTurnVisibilityV2 {

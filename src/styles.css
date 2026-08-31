@@ -1255,10 +1255,23 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
 .term-turn-debug-row {
   position: absolute;
   box-sizing: border-box;
-  padding-left: 3px;
+  min-width: 106px;
+  padding: 0 5px;
   white-space: pre;
   font: 10px Menlo, Monaco, monospace;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.82);
+  border-radius: 2px 0 0 2px;
   pointer-events: none;
+}
+.term-turn-debug-row[data-span="body"] {
+  width: 2px;
+  min-width: 2px;
+  padding: 0;
+  overflow: hidden;
+  font-size: 0;
+  background: transparent;
+  border-radius: 0;
 }
 .term-structured-overlay {
   position: absolute;

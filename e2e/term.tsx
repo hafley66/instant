@@ -382,6 +382,8 @@ type TermHooks = {
   point: (row: number, col: number) => { x: number; y: number } | null;
   resize: (cols: number, rows: number) => void;
   dims: () => { cols: number; rows: number } | null;
+  position: () => { viewportY: number; baseY: number; length: number; rows: number } | null;
+  screen: () => string[];
   scroll: (lines: number) => void;
   selection: () => string;
   mouseMode: () => string;
@@ -394,6 +396,21 @@ type TermHooks = {
   point: (row, col) => termCellPoint(sessionId("e2e"), row, col),
   resize: (cols, rows) => resizeTerm(sessionId("e2e"), cols, rows),
   dims: () => termDims(sessionId("e2e")),
+  position: () => {
+    const tab = tabs.get(sessionId("e2e"));
+    const buffer = tab?.term.buffer.active;
+    return tab && buffer
+      ? { viewportY: buffer.viewportY, baseY: buffer.baseY, length: buffer.length, rows: tab.term.rows }
+      : null;
+  },
+  screen: () => {
+    const tab = tabs.get(sessionId("e2e"));
+    const buffer = tab?.term.buffer.active;
+    return tab && buffer
+      ? Array.from({ length: tab.term.rows }, (_, row) =>
+        buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "")
+      : [];
+  },
   // A pane whose app owns the mouse never fills xterm's own selection layer, so
   // the pinned overlay is the answer for it (see 0_terminalPinnedSelection.ts).
   selection: () => {

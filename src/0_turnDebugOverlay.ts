@@ -30,10 +30,14 @@ export function turnHue(turnId: string): number {
   return ((hash >>> 0) * 137) % 360;
 }
 
-function tagLabel(turn: VisibleTurn): string {
-  const role = (turn.role[0] ?? "?").toLowerCase();
+function tagLabel(turn: VisibleTurn, spanStart: boolean, spanEnd: boolean): string {
   const confidence = (turn.confidence[0] ?? "?").toUpperCase();
-  return `t${turn.turn} ${role} ${confidence}`;
+  const edge = spanStart
+    ? turn.clippedAbove ? "↑" : spanEnd ? "◆" : "┌"
+    : spanEnd
+      ? turn.clippedBelow ? "↓" : "└"
+      : "│";
+  return `${edge} t${turn.turn} ${turn.role} ${confidence}`;
 }
 
 /** What every visible row is attributed to. Pure: the DOM layer in
@@ -50,6 +54,8 @@ export function rowTags(
     const turn = visible.find((candidate) =>
       candidate.bufferStart <= bufferRow && bufferRow <= candidate.bufferEnd) ?? null;
     const region = turn ? regionAtBufferRow(turn.regions, bufferRow) : null;
+    const spanStart = !!turn && turn.bufferStart === bufferRow;
+    const spanEnd = !!turn && turn.bufferEnd === bufferRow;
     tags.push({
       bufferRow,
       viewportRow: index,
@@ -57,10 +63,10 @@ export function rowTags(
       turn: turn?.turn ?? null,
       role: turn?.role ?? "",
       confidence: turn?.confidence ?? null,
-      label: turn ? tagLabel(turn) : "·",
+      label: turn ? tagLabel(turn, spanStart, spanEnd) : "·",
       hue: turn ? turnHue(turn.id) : 0,
-      spanStart: !!turn && turn.bufferStart === bufferRow,
-      spanEnd: !!turn && turn.bufferEnd === bufferRow,
+      spanStart,
+      spanEnd,
       regionKind: region?.kind ?? null,
       pointer: pointerRow === bufferRow,
     });
@@ -178,7 +184,7 @@ export class TerminalTurnDebugOverlay {
     const hostRect = this.host.getBoundingClientRect();
     const screenRect = screen.getBoundingClientRect();
     const cellHeight = screenRect.height / this.term.rows || 0;
-    const left = screenRect.left - hostRect.left;
+    const right = hostRect.right - screenRect.right;
     const top = screenRect.top - hostRect.top;
     const tags = rowTags(
       shiftSpans(this.projection.visible, this.bufferShift()),
@@ -202,7 +208,11 @@ export class TerminalTurnDebugOverlay {
       node.dataset.turn = tag.turn === null ? "" : String(tag.turn);
       node.dataset.role = tag.role;
       node.dataset.confidence = tag.confidence ?? "";
-      node.style.left = `${left}px`;
+      node.dataset.span = tag.spanStart && tag.spanEnd
+        ? "single"
+        : tag.spanStart ? "start" : tag.spanEnd ? "end" : "body";
+      node.style.left = "";
+      node.style.right = `${right}px`;
       node.style.top = `${top + index * cellHeight}px`;
       node.style.height = `${cellHeight}px`;
       node.style.lineHeight = `${cellHeight}px`;

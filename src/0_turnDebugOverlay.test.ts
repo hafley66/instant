@@ -26,12 +26,18 @@ const visibleTurn = (
 });
 
 describe("turn debug overlay row tags", () => {
-  it("tags each row with its turn, role initial and confidence initial", () => {
+  it("tags each row with its turn, role, confidence and span edge", () => {
     const tags = rowTags([
       visibleTurn(564, 10, 11),
       visibleTurn(565, 13, 13, { role: "user", confidence: "extended" }),
     ], 10, 5, null);
-    expect(tags.map((tag) => tag.label)).toEqual(["t564 a A", "t564 a A", "·", "t565 u E", "·"]);
+    expect(tags.map((tag) => tag.label)).toEqual([
+      "┌ t564 assistant A",
+      "└ t564 assistant A",
+      "·",
+      "◆ t565 user E",
+      "·",
+    ]);
     expect(tags.map((tag) => tag.bufferRow)).toEqual([10, 11, 12, 13, 14]);
     expect(tags.map((tag) => tag.viewportRow)).toEqual([0, 1, 2, 3, 4]);
     expect(tags.map((tag) => tag.turnId)).toEqual([
@@ -43,6 +49,17 @@ describe("turn debug overlay row tags", () => {
     const tags = rowTags([visibleTurn(564, 10, 12)], 10, 4, null);
     expect(tags.map((tag) => [tag.spanStart, tag.spanEnd])).toEqual([
       [true, false], [false, false], [false, true], [false, false],
+    ]);
+  });
+
+  it("marks a turn continuing through both viewport edges", () => {
+    const tags = rowTags([
+      visibleTurn(16, 20, 22, { clippedAbove: true, clippedBelow: true }),
+    ], 20, 3, null);
+    expect(tags.map((tag) => tag.label)).toEqual([
+      "↑ t16 assistant A",
+      "│ t16 assistant A",
+      "↓ t16 assistant A",
     ]);
   });
 
@@ -100,12 +117,12 @@ describe("turn debug overlay row tags", () => {
     }).toMatchInlineSnapshot(`
       {
         "after": {
-          "label": "t23 a A",
+          "label": "┌ t23 assistant A",
           "pointer": true,
           "turnId": "session-a:23",
         },
         "before": {
-          "label": "t22 u A",
+          "label": "│ t22 user A",
           "pointer": true,
           "turnId": "session-a:22",
         },
