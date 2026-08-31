@@ -222,6 +222,8 @@ function resolveRefFixture(token: string, cwd: string) {
 
 (window as E2eWindow).__instantE2eNativeResults = {
   boop_mux_capture: "",
+  boop_mux_session: `e2e-${E2E_HARNESS}-1`,
+  boop_sync_session: { found: true, written: 0, dropped: 0, usageWritten: 0, usageUpdated: 0 },
   boop_favorites: [],
   boop_favorite_toggle: [],
   boop_turn_comments: [],
@@ -439,7 +441,7 @@ document.querySelector<HTMLButtonElement>("[data-testid=open-term]")!.onclick = 
     ...settings.termSidebar.$(),
     [sid]: { open: !E2E_NO_SIDEBAR, width: 460 },
   });
-  openTab("e2e", { cwd: ROOT, command: E2E_WHEEL_HARNESS || undefined });
+  openTab("e2e", { cwd: ROOT, command: E2E_WHEEL_HARNESS || E2E_HARNESS });
   const events: unknown[] = [];
   (window as Window & { __visibleTurnEvents?: unknown[] }).__visibleTurnEvents = events;
   const readout = document.createElement("pre");

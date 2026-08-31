@@ -1138,6 +1138,7 @@ pub fn run() {
             harness::harness_sessions,
             boop::boop_turns,
             boop::boop_turns_recent,
+            boop::boop_sync_session,
             boop::boop_locate_turns,
             boop::boop_favorite_add,
             boop::boop_favorites,

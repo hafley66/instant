@@ -15,7 +15,7 @@ const turn = (turn: number, said: string): BoopTurn => ({
 });
 
 describe("terminal turn visibility v2", () => {
-  it("rescans immediately for scroll activity and again after output settles", async () => {
+  it("rescans immediately, polls each active second, then stops after five quiet seconds", async () => {
     vi.useFakeTimers();
     const changes = new Subject<{
       kind: "write" | "scroll";
@@ -38,14 +38,23 @@ describe("terminal turn visibility v2", () => {
     changes.next({ kind: "scroll", cols: 120, rows: 40, viewportY: 4, bufferLength: 80 });
     changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 4, bufferLength: 80 });
     await vi.advanceTimersByTimeAsync(119);
-    const beforeSettle = vi.mocked(visibility.schedule).mock.calls.length;
+    const beforeWriteDebounce = vi.mocked(visibility.schedule).mock.calls.length;
     await vi.advanceTimersByTimeAsync(1);
-    const afterSettle = vi.mocked(visibility.schedule).mock.calls.length;
+    const afterWriteDebounce = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(880);
+    const afterFirstPoll = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    const afterLease = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const afterQuiet = vi.mocked(visibility.schedule).mock.calls.length;
 
-    expect({ beforeSettle, afterSettle }).toMatchInlineSnapshot(`
+    expect({ beforeWriteDebounce, afterWriteDebounce, afterFirstPoll, afterLease, afterQuiet }).toMatchInlineSnapshot(`
       {
-        "afterSettle": 2,
-        "beforeSettle": 1,
+        "afterFirstPoll": 3,
+        "afterLease": 7,
+        "afterQuiet": 7,
+        "afterWriteDebounce": 2,
+        "beforeWriteDebounce": 1,
       }
     `);
     visibility.dispose();
@@ -54,7 +63,7 @@ describe("terminal turn visibility v2", () => {
     vi.useRealTimers();
   });
 
-  it("reconciles after the one-second projector and turn-cache bounds", async () => {
+  it("polls through continuous output even when the write debounce never settles", async () => {
     vi.useFakeTimers();
     const changes = new Subject<{ kind: "write"; cols: number; rows: number; viewportY: number; bufferLength: number }>();
     const viewport: XtermViewport = {
@@ -68,19 +77,25 @@ describe("terminal turn visibility v2", () => {
     const visibility = new TerminalTurnVisibilityV2(viewport, async () => []);
     visibility.schedule = vi.fn();
 
-    changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 0, bufferLength: 40 });
-    await vi.advanceTimersByTimeAsync(2_199);
-    const beforeReconcile = vi.mocked(visibility.schedule).mock.calls.length;
-    await vi.advanceTimersByTimeAsync(1);
-    const afterReconcile = vi.mocked(visibility.schedule).mock.calls.length;
-    await vi.advanceTimersByTimeAsync(30_000);
-    const afterLegacyInterval = vi.mocked(visibility.schedule).mock.calls.length;
+    const writing = setInterval(() => {
+      changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 0, bufferLength: 40 });
+    }, 100);
+    await vi.advanceTimersByTimeAsync(3_000);
+    const whileWriting = vi.mocked(visibility.schedule).mock.calls.length;
+    clearInterval(writing);
+    await vi.advanceTimersByTimeAsync(120);
+    const afterWriteDebounce = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_880);
+    const afterLease = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const afterQuiet = vi.mocked(visibility.schedule).mock.calls.length;
 
-    expect({ beforeReconcile, afterReconcile, afterLegacyInterval }).toMatchInlineSnapshot(`
+    expect({ whileWriting, afterWriteDebounce, afterLease, afterQuiet }).toMatchInlineSnapshot(`
       {
-        "afterLegacyInterval": 2,
-        "afterReconcile": 2,
-        "beforeReconcile": 1,
+        "afterLease": 9,
+        "afterQuiet": 9,
+        "afterWriteDebounce": 4,
+        "whileWriting": 3,
       }
     `);
 

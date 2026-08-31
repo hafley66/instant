@@ -143,6 +143,9 @@ test("a Codex redraw clears stale attribution until the parent transcript projec
   const beforeOutput = `\u001b[?1003h\u001b[?1006h${renderConversationTurns(beforeTurns)}`;
   await openConversation(page, beforeTurns, 120, 18, beforeOutput);
   await expect.poll(() => page.evaluate(() => window.__term!.mouseMode())).toBe("any");
+  await expect.poll(() => page.evaluate(() =>
+    window.__instantE2eNativeCalls?.filter((command) => command === "boop_sync_session").length ?? 0,
+  )).toBeGreaterThan(0);
 
   await expect.poll(() => visibleTurnIds(page)).toEqual([
     "codex-real-session:4",
@@ -180,11 +183,9 @@ test("a Codex redraw clears stale attribution until the parent transcript projec
   await page.evaluate((turns) => {
     window.__instantE2eNativeResults!.boop_turns = turns;
   }, afterTurns);
-  // boopTurnsForSession retains a result for one second. Cross that exact
-  // boundary, then send the same tmux-owned wheel event that the live pane
-  // uses after the resident parent projector commits the appended records.
-  await page.waitForTimeout(1050);
-  await page.mouse.wheel(0, 120);
+  // The prior write and scroll keep the adaptive poll leased for five seconds.
+  // It must cross boopTurnsForSession's one-second cache bound and repaint
+  // without another wheel, key, or synthetic terminal write.
 
   await expect.poll(() => visibleTurnIds(page)).toEqual([
     "codex-real-session:14",

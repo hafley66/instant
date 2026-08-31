@@ -63,7 +63,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, sessionsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
 import {
   selectProjectionTurns,
   TerminalTurnVisibilityV2,
@@ -97,6 +97,7 @@ export type Tab = {
   diagrams?: TerminalDiagramOverlay;
   structured?: TerminalStructuredOverlay;
   turnVisibility?: TerminalTurnVisibilityV2;
+  syncTurns?: () => Promise<void>;
   turnDebugOverlay?: TerminalTurnDebugOverlay;
   viewport?: XtermViewportAdapter;
   lineAnchors?: TerminalLineAnchors;
@@ -149,8 +150,11 @@ export function observeTerminalOutput(id: string, chunk: string) {
   // The initial warm can happen before the terminal has printed its harness
   // banner. Re-read exactly once when output resolves that runtime identity so
   // a generic shell does not stay pinned to another editor's newest session.
-  if (tab.harness.id && tab.harness.id !== previousHarness) void warmTurns(id);
-  if (tab.harness.id && tab.harness.id !== previousHarness) tab.turnVisibility?.schedule();
+  if (tab.harness.id && tab.harness.id !== previousHarness) {
+    void warmTurns(id);
+    void tab.syncTurns?.();
+    tab.turnVisibility?.schedule();
+  }
   tab.el.dataset.harness = tab.harness.id ?? "unknown";
   tab.el.dataset.harnessConfidence = tab.harness.confidence;
   tab.el.title = tab.harness.id
@@ -666,6 +670,24 @@ export function openTab(
     tmuxPane,
     (lines, turns) => invoke<TurnSpan[]>(commands.boop.boopLocateTurns, { lines, turns }),
   );
+  let syncTurnsAt = Number.NEGATIVE_INFINITY;
+  let syncTurnsPending: Promise<void> | null = null;
+  const syncTurns = graphics || !tmuxPane || !turnVisibility ? undefined : () => {
+    if (syncTurnsPending) return syncTurnsPending;
+    if (performance.now() - syncTurnsAt < 1_000) return Promise.resolve();
+    syncTurnsPending = (async () => {
+      const session = await tmuxPane.session();
+      const activeHarness = tabs.get(id)?.harness.id ?? harness.id;
+      if (!session || !activeHarness) return;
+      syncTurnsAt = performance.now();
+      await invoke(commands.boop.boopSyncSession, { session, harness: activeHarness });
+      invalidateBoopTurns(session);
+      turnVisibility.schedule();
+    })().catch(() => {}).finally(() => {
+      syncTurnsPending = null;
+    });
+    return syncTurnsPending;
+  };
   const lineAnchors = graphics || !viewport ? undefined : new TerminalLineAnchors(term, viewport);
   const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
     term,
@@ -728,7 +750,8 @@ export function openTab(
       void navigator.clipboard.writeText(text).catch(() => {});
     },
   });
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, turnVisibility, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
+  void syncTurns?.();
   applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
@@ -934,6 +957,7 @@ export function openTab(
   term.textarea?.addEventListener("focus", () => {
     focusedTermId = id;
     focusedTermAt = performance.now();
+    void tabs.get(id)?.syncTurns?.();
   });
   term.textarea?.addEventListener("blur", () => {
     if (focusedTermId === id) focusedTermId = null;
@@ -1086,6 +1110,7 @@ export function onTermShown(id: string) {
   touchTab(id);
   logTabVisit(t.name);
   void warmTurns(id); // warm the ledger so right-click turn-identify stays sync
+  void t.syncTurns?.();
   requestAnimationFrame(() => {
     t.fit.fit();
     t.diagrams?.activate();

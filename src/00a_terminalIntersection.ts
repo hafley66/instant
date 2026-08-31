@@ -89,7 +89,7 @@ export interface TmuxPane {
 
 export class NativeTmuxPane implements TmuxPane {
   session_id: string | null = null;
-  session_read_at = 0;
+  session_read_at = Number.NEGATIVE_INFINITY;
   constructor(readonly target: string, readonly socket?: string) {}
 
   captureVisible(): Promise<string> {

@@ -137,6 +137,10 @@ export async function boopTurnsForSession(session: string): Promise<BoopTurn[]> 
   return read;
 }
 
+export function invalidateBoopTurns(session: string) {
+  boopTurnCache.delete(session);
+}
+
 export async function boopTurnsForTab(id: string): Promise<BoopTurn[]> {
   const sessions = await sessionsForTab(id);
   const batches = await Promise.all(sessions.map(({ sessionId }) => boopTurnsForSession(sessionId)));

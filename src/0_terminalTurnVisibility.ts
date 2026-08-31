@@ -1,4 +1,4 @@
-import { debounceTime, filter, share, Subject, type Observable, Subscription } from "rxjs";
+import { debounceTime, filter, interval, share, Subject, type Observable, Subscription } from "rxjs";
 import { projectTurnRegions, regionAtBufferRow, type ProjectedTurnRegion } from "./00_terminalTurnRegions";
 import type { LogicalLine, TmuxPane, XtermViewport } from "./00a_terminalIntersection";
 
@@ -344,6 +344,14 @@ export type TurnSpan = Omit<VisibleTurn, "regions" | "provenance">;
 
 export type TurnLocator = (lines: LogicalLine[], turns: BoopTurn[]) => Promise<TurnSpan[]>;
 
+// One clock serves every terminal projection. A write or scroll leases scans
+// for five seconds; each leased projection performs at most one clock-driven
+// scan per second. The per-instance schedule gate below coalesces this with
+// immediate viewport events and serializes scans already in flight.
+export const TURN_ACTIVITY_POLL_MS = 1_000;
+export const TURN_ACTIVITY_LEASE_MS = 5_000;
+const turnActivityClock = interval(TURN_ACTIVITY_POLL_MS).pipe(share());
+
 export function attachTurnRegions(
   spans: TurnSpan[],
   lines: LogicalLine[],
@@ -377,6 +385,7 @@ export class TerminalTurnVisibilityV2 {
   disposed = false;
   scanning = false;
   rescanPending = false;
+  activityAt = Number.NEGATIVE_INFINITY;
   subscription = new Subscription();
 
   constructor(
@@ -389,18 +398,22 @@ export class TerminalTurnVisibilityV2 {
   ) {
     const changes = viewport.changes.pipe(share());
     this.subscription.add(changes.pipe(
+      filter((event) => event.kind === "write" || event.kind === "scroll"),
+    ).subscribe(() => {
+      this.activityAt = performance.now();
+    }));
+    this.subscription.add(changes.pipe(
       filter((event) => event.kind !== "write"),
     ).subscribe(() => this.schedule()));
     this.subscription.add(changes.pipe(
       filter((event) => event.kind === "write"),
       debounceTime(120),
     ).subscribe(() => this.schedule()));
-    // Transcript ingestion trails the terminal's final parsed write. The
-    // resident parent projector and this client's turn cache each have a
-    // one-second bound, so reconcile beyond both without requiring user scroll.
-    this.subscription.add(changes.pipe(
-      filter((event) => event.kind === "write"),
-      debounceTime(2200),
+    // Transcript ingestion and the one-second turn cache can trail the parsed
+    // terminal output. Keep reconciling while output or scrolling is active,
+    // then stop after five quiet seconds.
+    this.subscription.add(turnActivityClock.pipe(
+      filter(() => performance.now() - this.activityAt <= TURN_ACTIVITY_LEASE_MS),
     ).subscribe(() => this.schedule()));
     this.schedule();
   }

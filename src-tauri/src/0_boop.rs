@@ -72,6 +72,54 @@ fn open_store_rw() -> Result<Store, String> {
     Store::open(path).map_err(|error| error.to_string())
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopSyncStat {
+    found: bool,
+    written: u64,
+    dropped: u64,
+    usage_written: u64,
+    usage_updated: u64,
+}
+
+fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
+    let store = open_store_rw()?;
+    let known = store.known_sessions().map_err(|error| error.to_string())?;
+    let registry = boop_harness::Registry::discover();
+    let adapter = registry
+        .by_name(harness)
+        .ok_or_else(|| format!("unknown harness `{harness}`"))?;
+    let Some(candidate) = adapter
+        .sync_candidate(&known, session)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(BoopSyncStat {
+            found: false,
+            written: 0,
+            dropped: 0,
+            usage_written: 0,
+            usage_updated: 0,
+        });
+    };
+    store.begin().map_err(|error| error.to_string())?;
+    match boop_harness::sync_session(&store, adapter, &candidate) {
+        Ok(stat) => {
+            store.commit().map_err(|error| error.to_string())?;
+            Ok(BoopSyncStat {
+                found: true,
+                written: stat.written,
+                dropped: stat.dropped,
+                usage_written: stat.usage_written,
+                usage_updated: stat.usage_updated,
+            })
+        }
+        Err(error) => {
+            let _ = store.rollback();
+            Err(error.to_string())
+        }
+    }
+}
+
 /// Turn visibility matches the visible pane against recent turns; a session's
 /// full history (2806 rows / 9.4MB measured 2026-08-22) re-read on every scan
 /// was instant's top CPU cost. Read only the newest window.
@@ -159,6 +207,13 @@ fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String>
 #[tauri::command]
 pub async fn boop_turns(session: String) -> Result<Vec<BoopTurn>, String> {
     tauri::async_runtime::spawn_blocking(move || read_turns(&session))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_sync_session(session: String, harness: String) -> Result<BoopSyncStat, String> {
+    tauri::async_runtime::spawn_blocking(move || sync_session(&session, &harness))
         .await
         .map_err(|error| error.to_string())?
 }
