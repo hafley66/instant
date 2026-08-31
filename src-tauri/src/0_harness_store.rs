@@ -1,3 +1,4 @@
+use boop_harness::live::{LiveSession, LiveSessionScope};
 use boop_harness::{HarnessId, Registry, SessionRef};
 use boop_mux::{Multiplexer, Tmux};
 use rusqlite::{Connection, OpenFlags};
@@ -251,10 +252,7 @@ fn wire_num(value: &Value, key: &str) -> u64 {
 
 /// `<session dir>/agents/<agent>/wire.jsonl` -> `<session dir>/state.json`.
 fn kimi_state_path(wire: &Path) -> PathBuf {
-    wire.ancestors()
-        .nth(3)
-        .unwrap_or(wire)
-        .join("state.json")
+    wire.ancestors().nth(3).unwrap_or(wire).join("state.json")
 }
 
 fn kimi_shape(session: &SessionRef) -> Option<HarnessSession> {
@@ -420,13 +418,55 @@ pub async fn boop_mux_session(
         let registry = Registry::discover();
         for harness in registry.all() {
             if let Ok(Some(live)) = harness.live().live_session_in_pane(&pane) {
-                return Ok(Some(live.session_id));
+                let sessions = harness.live().live_sessions().unwrap_or_default();
+                return Ok(Some(interactive_session_id(&live, &sessions)));
             }
         }
         route_session_in_pane(&pane)
+            .map(|session| session.map(|session| resolve_registered_session(&registry, &session)))
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Read-time repair for routes written before child sessions were classified.
+/// An explicit native parent wins. The closest preceding root in the same cwd
+/// covers Codex guardian rows whose source omits its parent thread id.
+fn interactive_session_id(bound: &LiveSession, sessions: &[LiveSession]) -> String {
+    if bound.scope != LiveSessionScope::Child {
+        return bound.session_id.clone();
+    }
+    if let Some(parent) = &bound.parent_session {
+        return parent.clone();
+    }
+    sessions
+        .iter()
+        .filter(|candidate| {
+            candidate.scope == LiveSessionScope::Root
+                && candidate.cwd == bound.cwd
+                && match (candidate.started_ms, bound.started_ms) {
+                    (Some(root), Some(child)) => root <= child,
+                    _ => false,
+                }
+        })
+        .max_by_key(|candidate| candidate.started_ms)
+        .map(|candidate| candidate.session_id.clone())
+        .unwrap_or_else(|| bound.session_id.clone())
+}
+
+fn resolve_registered_session(registry: &Registry, session: &str) -> String {
+    for harness in registry.all() {
+        let Ok(sessions) = harness.live().live_sessions() else {
+            continue;
+        };
+        if let Some(bound) = sessions
+            .iter()
+            .find(|candidate| candidate.session_id == session)
+        {
+            return interactive_session_id(bound, &sessions);
+        }
+    }
+    session.to_owned()
 }
 
 // boop-harness gap: live_pane_for_every_harness. Only claude fills

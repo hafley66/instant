@@ -1,5 +1,6 @@
 use boop_store::ident::{Store, TurnQuery};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -10,6 +11,38 @@ pub struct BoopTurn {
     pub ts: i64,
     pub role: String,
     pub said: String,
+    #[serde(default = "unknown_session_scope")]
+    pub session_scope: String,
+    #[serde(default)]
+    pub parent_session: Option<String>,
+}
+
+fn unknown_session_scope() -> String {
+    "unknown".to_owned()
+}
+
+fn live_relations(harness: &str) -> HashMap<String, (String, Option<String>)> {
+    let registry = boop_harness::Registry::discover();
+    let Some(adapter) = registry.by_name(harness) else {
+        return HashMap::new();
+    };
+    adapter
+        .live()
+        .live_sessions()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|session| {
+            let scope = match session.scope {
+                boop_harness::live::LiveSessionScope::Root => "root",
+                boop_harness::live::LiveSessionScope::Child => "child",
+                boop_harness::live::LiveSessionScope::Unknown => "unknown",
+            };
+            (
+                session.session_id,
+                (scope.to_owned(), session.parent_session),
+            )
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -62,15 +95,27 @@ fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
         ..Default::default()
     };
     let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    let relations = rows
+        .first()
+        .map(|row| live_relations(&row.harness))
+        .unwrap_or_default();
     Ok(rows
         .into_iter()
-        .map(|row| BoopTurn {
-            session: row.session,
-            harness: row.harness,
-            turn: row.turn,
-            ts: row.ts,
-            role: row.role,
-            said: row.said,
+        .map(|row| {
+            let (session_scope, parent_session) = relations
+                .get(&row.session)
+                .cloned()
+                .unwrap_or_else(|| (unknown_session_scope(), None));
+            BoopTurn {
+                session: row.session,
+                harness: row.harness,
+                turn: row.turn,
+                ts: row.ts,
+                role: row.role,
+                said: row.said,
+                session_scope,
+                parent_session,
+            }
         })
         .collect())
 }
@@ -79,21 +124,34 @@ fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String>
     let store = open_store_ro()?;
     let query = TurnQuery {
         since: if since > 0 { Some(since as u64) } else { None },
-        harness: if !harness.is_empty() { Some(harness.to_string()) } else { None },
+        harness: if !harness.is_empty() {
+            Some(harness.to_string())
+        } else {
+            None
+        },
         role: Some("assistant".to_string()),
         limit: Some(100),
         ..Default::default()
     };
     let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    let relations = live_relations(harness);
     Ok(rows
         .into_iter()
-        .map(|row| BoopTurn {
-            session: row.session,
-            harness: row.harness,
-            turn: row.turn,
-            ts: row.ts,
-            role: row.role,
-            said: row.said,
+        .map(|row| {
+            let (session_scope, parent_session) = relations
+                .get(&row.session)
+                .cloned()
+                .unwrap_or_else(|| (unknown_session_scope(), None));
+            BoopTurn {
+                session: row.session,
+                harness: row.harness,
+                turn: row.turn,
+                ts: row.ts,
+                role: row.role,
+                said: row.said,
+                session_scope,
+                parent_session,
+            }
         })
         .collect())
 }
@@ -129,7 +187,9 @@ fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
 
 fn read_favorites() -> Result<Vec<BoopFavorite>, String> {
     let store = open_store_ro()?;
-    let rows = store.query_favorites(None).map_err(|error| error.to_string())?;
+    let rows = store
+        .query_favorites(None)
+        .map_err(|error| error.to_string())?;
     rows.into_iter()
         .map(|row| serde_json::from_value(row).map_err(|error| error.to_string()))
         .collect()
@@ -162,7 +222,10 @@ pub async fn boop_favorites() -> Result<Vec<BoopFavorite>, String> {
 pub async fn boop_favorite_toggle(turn: BoopTurn) -> Result<Vec<BoopFavorite>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let source = format!("turn:{}:{}", turn.session, turn.turn);
-        if read_favorites()?.iter().any(|favorite| favorite.source == source) {
+        if read_favorites()?
+            .iter()
+            .any(|favorite| favorite.source == source)
+        {
             remove_favorite_source(&source)?;
         } else {
             add_favorite(&turn)?;
@@ -200,9 +263,27 @@ pub struct LocatedTurn {
 }
 
 fn locate_turns(lines: Vec<LogicalLine>, turns: Vec<BoopTurn>) -> Vec<LocatedTurn> {
+    let registry = boop_harness::Registry::discover();
+    let harness = turns
+        .iter()
+        .max_by_key(|turn| turn.ts)
+        .map(|turn| turn.harness.as_str());
+    let input = harness
+        .and_then(|name| registry.by_name(name))
+        .and_then(|adapter| {
+            let rows = lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>();
+            adapter.terminal_input_region(&rows)
+        });
     let lines: Vec<boop_turnvis::LogicalLine> = lines
         .into_iter()
-        .map(|line| boop_turnvis::LogicalLine {
+        .enumerate()
+        .filter(|(index, _)| {
+            input.is_none_or(|region| *index < region.start || *index > region.end)
+        })
+        .map(|(_, line)| boop_turnvis::LogicalLine {
             text: line.text,
             start: line.start,
             end: line.end,
@@ -261,7 +342,10 @@ mod tests {
     /// missed rename or a dropped field reads as an empty pane, never a crash.
     #[test]
     fn locate_turns_serializes_to_the_shape_the_frontend_golden_records() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../labs/turn-identity/fixtures");
+        let dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../labs/turn-identity/fixtures"
+        );
         let fixtures = [
             ("claude", "claude"),
             ("claude-wide", "claude"),
@@ -272,20 +356,35 @@ mod tests {
             ("kimi", "kimi"),
         ];
         for (capture_name, turns_name) in fixtures {
-            let capture: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{capture_name}.json")).unwrap()).unwrap();
+            let capture: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{capture_name}.json")).unwrap(),
+            )
+            .unwrap();
             let lines: Vec<LogicalLine> = serde_json::from_value(capture["lines"].clone()).unwrap();
-            let turns: Vec<BoopTurn> =
-                serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{turns_name}.turns.json")).unwrap()).unwrap();
-            let golden: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{capture_name}.golden.json")).unwrap()).unwrap();
+            let turns: Vec<BoopTurn> = serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{turns_name}.turns.json")).unwrap(),
+            )
+            .unwrap();
+            let golden: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{capture_name}.golden.json")).unwrap(),
+            )
+            .unwrap();
 
             let located = serde_json::to_value(locate_turns(lines, turns)).unwrap();
             let want = golden["turns"].as_array().unwrap();
             let got = located.as_array().unwrap();
             assert_eq!(got.len(), want.len(), "{capture_name}: turn count");
             for (index, (got, want)) in got.iter().zip(want).enumerate() {
-                for field in ["id", "turn", "role", "confidence", "anchorStart", "anchorEnd", "bufferStart", "bufferEnd"] {
+                for field in [
+                    "id",
+                    "turn",
+                    "role",
+                    "confidence",
+                    "anchorStart",
+                    "anchorEnd",
+                    "bufferStart",
+                    "bufferEnd",
+                ] {
                     assert_eq!(got[field], want[field], "{capture_name}[{index}] {field}");
                 }
             }
@@ -304,14 +403,91 @@ mod tests {
     }
 
     #[test]
+    fn native_locator_excludes_the_live_codex_composer() {
+        let lines = vec![
+            LogicalLine {
+                text: "› submitted prompt".into(),
+                start: 20,
+                end: 20,
+            },
+            LogicalLine {
+                text: "assistant answer".into(),
+                start: 21,
+                end: 21,
+            },
+            LogicalLine {
+                text: "› draft prompt".into(),
+                start: 22,
+                end: 22,
+            },
+            LogicalLine {
+                text: "gpt-5.6-sol · ~/projects · Approve for me · Context 40%".into(),
+                start: 23,
+                end: 23,
+            },
+        ];
+        let turns = vec![
+            BoopTurn {
+                session: "parent".into(),
+                harness: "codex".into(),
+                turn: 1,
+                ts: 1,
+                role: "user".into(),
+                said: "submitted prompt".into(),
+                session_scope: "root".into(),
+                parent_session: None,
+            },
+            BoopTurn {
+                session: "parent".into(),
+                harness: "codex".into(),
+                turn: 2,
+                ts: 2,
+                role: "assistant".into(),
+                said: "assistant answer".into(),
+                session_scope: "root".into(),
+                parent_session: None,
+            },
+            BoopTurn {
+                session: "parent".into(),
+                harness: "codex".into(),
+                turn: 3,
+                ts: 3,
+                role: "user".into(),
+                said: "draft prompt".into(),
+                session_scope: "root".into(),
+                parent_session: None,
+            },
+        ];
+        let located = locate_turns(lines, turns);
+        assert_eq!(
+            located
+                .iter()
+                .map(|turn| (
+                    turn.turn,
+                    turn.role.as_str(),
+                    turn.anchor_start,
+                    turn.anchor_end
+                ))
+                .collect::<Vec<_>>(),
+            vec![(1, "user", 20, 20), (2, "assistant", 21, 21)]
+        );
+    }
+
+    #[test]
     fn direct_store_reads_live_boop_database() {
         let store = open_store_ro();
-        assert!(store.is_ok(), "boop store opens read-only from default path");
+        assert!(
+            store.is_ok(),
+            "boop store opens read-only from default path"
+        );
         let store = store.unwrap();
         let turns = store.turn_rows(&TurnQuery {
             limit: Some(5),
             ..Default::default()
         });
-        assert!(turns.is_ok(), "turn_rows query succeeds directly against boop-store");
+        assert!(
+            turns.is_ok(),
+            "turn_rows query succeeds directly against boop-store"
+        );
     }
 }

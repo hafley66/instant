@@ -9,6 +9,8 @@ export type BoopTurn = {
   ts: number;
   role: string;
   said: string;
+  session_scope?: "root" | "child" | "unknown";
+  parent_session?: string | null;
 };
 
 export type VisibleTurn = BoopTurn & {
@@ -27,6 +29,28 @@ export type TurnVisibilityEvent = {
   entered: VisibleTurn[];
   exited: VisibleTurn[];
 };
+
+/** A root pane binding is stronger evidence than cwd-wide text candidates.
+ * Bindings left on harness-internal children are repaired through their
+ * parent identity; the remaining fallback covers unbound/uningested panes. */
+export function selectProjectionTurns(direct: BoopTurn[], candidates: BoopTurn[]): BoopTurn[] {
+  const directRoots = direct.filter((turn) => turn.session_scope !== "child");
+  const child = direct.find((turn) => turn.session_scope === "child");
+  const parentCandidates = child?.parent_session
+    ? candidates.filter((turn) => turn.session === child.parent_session)
+    : [];
+  const candidateRoots = candidates.filter((turn) => turn.session_scope === "root");
+  const source = directRoots.length
+    ? directRoots
+    : parentCandidates.length
+      ? parentCandidates
+      : candidateRoots.length
+        ? candidateRoots
+        : direct.length ? direct : candidates;
+  const unique = new Map<string, BoopTurn>();
+  for (const turn of source) unique.set(`${turn.session}:${turn.turn}`, turn);
+  return [...unique.values()].sort((left, right) => left.ts - right.ts || left.turn - right.turn);
+}
 
 const turnId = (turn: Pick<BoopTurn, "session" | "turn">) => `${turn.session}:${turn.turn}`;
 
@@ -163,6 +187,68 @@ export function dropTmuxStatusRow(lines: LogicalLine[], tmuxCapture: string): Lo
   const captured = new Set(tmuxCapture.split("\n").map(normalizeTurnLine).filter(Boolean));
   if (captured.has(normalized)) return lines;
   return lines.slice(0, -1);
+}
+
+export type TerminalInputRegion = { start: number; end: number };
+
+function lastIndexWhere<T>(rows: T[], predicate: (row: T) => boolean): number {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (predicate(rows[index])) return index;
+  }
+  return -1;
+}
+
+/** Frontend mirror of boop-harness `Harness::terminal_input_region`. Native
+ * matching applies the trait detector too; this copy keeps the local fallback
+ * and region projection on the same row set when IPC is unavailable. */
+export function terminalInputRegion(harness: string, lines: LogicalLine[]): TerminalInputRegion | null {
+  const rows = lines.map((line) => line.text);
+  if (harness === "codex") {
+    const end = lastIndexWhere(rows, (text) => {
+      const row = text.trim();
+      return row.includes(" · ") && (
+        row.includes("Approve for me") || row.includes(" changes") || row.includes("Context")
+      );
+    });
+    const start = lastIndexWhere(rows.slice(0, end), (text) => text.trimStart().startsWith("›"));
+    return start >= 0 && end >= 0 ? { start, end } : null;
+  }
+  if (harness === "claude") {
+    const border = (text: string) => {
+      const row = text.trim();
+      return [...row].length >= 8 && [...row].every((character) => "─━═".includes(character));
+    };
+    const end = lastIndexWhere(rows, border);
+    const start = lastIndexWhere(rows.slice(0, end), border);
+    return start >= 0 && end >= 0
+      && rows.slice(start + 1, end).some((text) => text.trimStart().startsWith("❯"))
+      ? { start, end }
+      : null;
+  }
+  if (harness === "kimi") {
+    const end = lastIndexWhere(rows, (text) => text.trimStart().startsWith("╰"));
+    const start = lastIndexWhere(rows.slice(0, end), (text) => text.trimStart().startsWith("╭"));
+    return start >= 0 && end >= 0 ? { start, end } : null;
+  }
+  if (harness === "opencode") {
+    const end = lastIndexWhere(rows, (text) => text.trimStart().startsWith("╹▀"));
+    if (end < 0) return null;
+    let start = end;
+    while (start > 0) {
+      const prior = rows[start - 1].trimStart();
+      if (prior && !prior.startsWith("┃")) break;
+      start -= 1;
+    }
+    return start < end ? { start, end } : null;
+  }
+  return null;
+}
+
+export function dropTerminalInputRows(lines: LogicalLine[], harness: string): LogicalLine[] {
+  const region = terminalInputRegion(harness, lines);
+  return region
+    ? lines.filter((_, index) => index < region.start || index > region.end)
+    : lines;
 }
 
 export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmuxCapture = ""): VisibleTurn[] {
@@ -303,6 +389,14 @@ export class TerminalTurnVisibilityV2 {
       filter((event) => event.kind === "write"),
       debounceTime(1200),
     ).subscribe(() => this.schedule()));
+    // `boop tui` projects native transcripts every 30 seconds by default. A
+    // turn completed just after one pass is absent from both scans above, and
+    // an idle pane emits no later viewport event to correct it. Reconcile once
+    // beyond that interval so the final rendered frame gains attribution.
+    this.subscription.add(changes.pipe(
+      filter((event) => event.kind === "write"),
+      debounceTime(32_000),
+    ).subscribe(() => this.schedule()));
     this.schedule();
   }
 
@@ -334,19 +428,21 @@ export class TerminalTurnVisibilityV2 {
     // Trim before either locator sees the rows: boop-turnvis answers over IPC
     // and the local matcher is only the fallback, so a fix applied inside one
     // of them is dead code in the other.
-    const lines = dropTmuxStatusRow(this.viewport.readVisibleLogicalLines(), tmuxCapture);
+    const paneLines = dropTmuxStatusRow(this.viewport.readVisibleLogicalLines(), tmuxCapture);
+    const harness = turns.reduce((latest, turn) => turn.ts >= latest.ts ? turn : latest, turns[0])?.harness ?? "";
+    const lines = dropTerminalInputRows(paneLines, harness);
     const next = await this.located(lines, turns, tmuxCapture);
     if (this.disposed || generation !== this.generation) return;
     const before = new Map(this.visible.map((turn) => [turn.id, turn]));
     const after = new Map(next.map((turn) => [turn.id, turn]));
     const entered = next.filter((turn) => !before.has(turn.id));
     const exited = this.visible.filter((turn) => !after.has(turn.id));
-    const moved = next.some((turn) => {
+    const changed = next.some((turn) => {
       const prior = before.get(turn.id);
-      return prior && (prior.bufferStart !== turn.bufferStart || prior.bufferEnd !== turn.bufferEnd);
+      return prior && JSON.stringify(prior) !== JSON.stringify(turn);
     });
     this.visible = next;
-    if (entered.length || exited.length || moved) this.updates.next({ visible: next, entered, exited });
+    if (entered.length || exited.length || changed) this.updates.next({ visible: next, entered, exited });
   }
 
   async located(lines: LogicalLine[], turns: BoopTurn[], tmuxCapture: string): Promise<VisibleTurn[]> {

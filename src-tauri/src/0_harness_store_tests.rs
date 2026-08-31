@@ -32,6 +32,42 @@ fn session_ref(harness: HarnessId, id: &str, path: PathBuf) -> SessionRef {
     }
 }
 
+fn live_session(
+    id: &str,
+    started_ms: u64,
+    scope: LiveSessionScope,
+    parent_session: Option<&str>,
+) -> LiveSession {
+    LiveSession {
+        harness: HarnessId::Codex,
+        session_id: id.to_owned(),
+        pid: None,
+        cwd: Some("/fixture".into()),
+        tmux_pane: None,
+        status: boop_harness::live::LiveStatus::Unknown,
+        door: boop_harness::live::DoorAddress::None,
+        observed_ms: started_ms,
+        started_ms: Some(started_ms),
+        scope,
+        parent_session: parent_session.map(str::to_owned),
+    }
+}
+
+#[test]
+fn an_existing_guardian_route_resolves_to_the_interactive_parent() {
+    let parent = live_session("parent", 1_788_113_899_820, LiveSessionScope::Root, None);
+    let guardian = live_session(
+        "guardian",
+        1_788_113_899_931,
+        LiveSessionScope::Child,
+        Some("parent"),
+    );
+    assert_eq!(
+        interactive_session_id(&guardian, &[parent, guardian.clone()]),
+        "parent"
+    );
+}
+
 #[test]
 fn claude_messages_resolve_one_exact_file_without_session_discovery() {
     let home = fixture_home();

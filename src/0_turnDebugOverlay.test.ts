@@ -87,6 +87,32 @@ describe("turn debug overlay row tags", () => {
     expect(rowTags([visibleTurn(564, 10, 12)], 10, 4, 99).some((tag) => tag.pointer)).toBe(false);
   });
 
+  it("retargets a fixed pointer row when the projection owner changes", () => {
+    const before = rowTags([
+      visibleTurn(22, 40, 42, { role: "user" }),
+    ], 40, 3, 41)[1];
+    const after = rowTags([
+      visibleTurn(23, 41, 43, { role: "assistant" }),
+    ], 40, 3, 41)[1];
+    expect({
+      before: { pointer: before.pointer, label: before.label, turnId: before.turnId },
+      after: { pointer: after.pointer, label: after.label, turnId: after.turnId },
+    }).toMatchInlineSnapshot(`
+      {
+        "after": {
+          "label": "t23 a A",
+          "pointer": true,
+          "turnId": "session-a:23",
+        },
+        "before": {
+          "label": "t22 u A",
+          "pointer": true,
+          "turnId": "session-a:22",
+        },
+      }
+    `);
+  });
+
   it("gives one turn id one stable hue in range and separates neighbouring turns", () => {
     expect(turnHue("session-a:564")).toBe(turnHue("session-a:564"));
     expect(turnHue("session-a:564")).toBeGreaterThanOrEqual(0);

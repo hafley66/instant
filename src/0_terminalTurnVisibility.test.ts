@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { EMPTY } from "rxjs";
+import { EMPTY, Subject } from "rxjs";
 import {
   locateVisibleTurns,
   normalizeTurnLine,
+  dropTerminalInputRows,
+  selectProjectionTurns,
   TerminalTurnVisibilityV2,
   type BoopTurn,
 } from "./0_terminalTurnVisibility";
@@ -13,6 +15,208 @@ const turn = (turn: number, said: string): BoopTurn => ({
 });
 
 describe("terminal turn visibility v2", () => {
+  it("reconciles once after the native projector's thirty-second ingestion interval", async () => {
+    vi.useFakeTimers();
+    const changes = new Subject<{ kind: "write"; cols: number; rows: number; viewportY: number; bufferLength: number }>();
+    const viewport: XtermViewport = {
+      changes,
+      readVisibleLogicalLines: () => [],
+      bufferRowAtClientY: () => null,
+      dispose: () => {},
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const visibility = new TerminalTurnVisibilityV2(viewport, async () => []);
+    visibility.schedule = vi.fn();
+
+    changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 0, bufferLength: 40 });
+    await vi.advanceTimersByTimeAsync(1_200);
+    expect(visibility.schedule).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30_800);
+    expect(visibility.schedule).toHaveBeenCalledTimes(3);
+
+    visibility.dispose();
+    changes.complete();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("keeps pane-bound parent turns ahead of a newer guardian embedding their transcript", () => {
+    const parent = [
+      { ...turn(214, "push to main thanks"), session: "parent", role: "user", ts: 1_000, session_scope: "root" as const },
+      { ...turn(215, "Using the git-commit skill to resolve the intended repository."), session: "parent", ts: 1_010, session_scope: "root" as const },
+    ];
+    const guardian = [{
+      ...turn(229, [
+        "The following is the Codex agent history added since your last approval assessment.",
+        "[214] user: push to main thanks",
+        "[215] assistant: Using the git-commit skill to resolve the intended repository.",
+      ].join("\n")),
+      session: "guardian",
+      role: "user",
+      ts: 1_111,
+      session_scope: "child" as const,
+      parent_session: "parent",
+    }];
+    const selected = selectProjectionTurns(guardian, parent);
+    const located = locateVisibleTurns([
+      { text: "› push to main thanks", start: 40, end: 40 },
+      { text: "", start: 41, end: 41 },
+      { text: "Using the git-commit skill to resolve the intended repository.", start: 42, end: 42 },
+    ], selected);
+    expect({
+      sources: selected.map(({ session, turn, role }) => ({ session, turn, role })),
+      rows: [40, 42].map((row) => {
+        const found = located.find((candidate) =>
+          candidate.anchorStart <= row && row <= candidate.anchorEnd);
+        return { row, id: found?.id, role: found?.role };
+      }),
+    }).toMatchInlineSnapshot(`
+      {
+        "rows": [
+          {
+            "id": "parent:214",
+            "role": "user",
+            "row": 40,
+          },
+          {
+            "id": "parent:215",
+            "role": "assistant",
+            "row": 42,
+          },
+        ],
+        "sources": [
+          {
+            "role": "user",
+            "session": "parent",
+            "turn": 214,
+          },
+          {
+            "role": "assistant",
+            "session": "parent",
+            "turn": 215,
+          },
+        ],
+      }
+    `);
+  });
+
+  it("uses cwd-wide candidates only until a pane-bound session has turns", () => {
+    const candidates = [{ ...turn(229, "embedded parent transcript"), session: "guardian", role: "user" }];
+    const direct = [{ ...turn(214, "parent prompt"), session: "parent", role: "user" }];
+    expect(selectProjectionTurns([], candidates).map((row) => row.session)).toEqual(["guardian"]);
+    expect(selectProjectionTurns(direct, candidates).map((row) => row.session)).toEqual(["parent"]);
+  });
+
+  it("recomputes a Codex multiline composer band after submit collapses it", () => {
+    const before = [
+      { text: "› prior user turn", start: 10, end: 10 },
+      { text: "assistant answer", start: 11, end: 11 },
+      { text: "", start: 12, end: 12 },
+      { text: "› first pasted line", start: 13, end: 13 },
+      { text: "  second pasted line", start: 14, end: 14 },
+      { text: "  third pasted line", start: 15, end: 15 },
+      { text: "gpt-5.6-sol · ~/projects · Approve for me · Context 41%", start: 16, end: 16 },
+    ];
+    const after = [
+      { text: "› first pasted line", start: 20, end: 20 },
+      { text: "  second pasted line", start: 21, end: 21 },
+      { text: "  third pasted line", start: 22, end: 22 },
+      { text: "", start: 23, end: 23 },
+      { text: "assistant answer after submit", start: 24, end: 24 },
+      { text: "", start: 25, end: 25 },
+      { text: "› Ask Codex to do anything", start: 26, end: 26 },
+      { text: "gpt-5.6-sol · ~/projects · Approve for me · Context 40%", start: 27, end: 27 },
+    ];
+    expect(dropTerminalInputRows(before, "codex").map((line) => line.start))
+      .toEqual([10, 11, 12]);
+    expect(dropTerminalInputRows(after, "codex").map((line) => line.start))
+      .toEqual([20, 21, 22, 23, 24, 25]);
+    const found = locateVisibleTurns(dropTerminalInputRows(after, "codex"), [
+      { ...turn(22, "first pasted line\nsecond pasted line\nthird pasted line"), role: "user" },
+      turn(23, "assistant answer after submit"),
+    ]);
+    expect([20, 21, 22, 24].map((row) => {
+      const hit = found.find((candidate) => candidate.anchorStart <= row && row <= candidate.anchorEnd);
+      return [row, hit?.turn, hit?.role];
+    })).toMatchInlineSnapshot(`
+      [
+        [
+          20,
+          22,
+          "user",
+        ],
+        [
+          21,
+          22,
+          "user",
+        ],
+        [
+          22,
+          22,
+          "user",
+        ],
+        [
+          24,
+          23,
+          "assistant",
+        ],
+      ]
+    `);
+  });
+
+  it("keeps semantic identities while resize reprojects logical lines onto new physical rows", () => {
+    const turns = [
+      { ...turn(30, "a parent prompt whose logical line wraps at narrow widths"), role: "user" },
+      turn(31, "an assistant response whose logical line also wraps at narrow widths"),
+    ];
+    const wide = locateVisibleTurns([
+      { text: "› a parent prompt whose logical line wraps at narrow widths", start: 100, end: 100 },
+      { text: "", start: 101, end: 101 },
+      { text: "an assistant response whose logical line also wraps at narrow widths", start: 102, end: 102 },
+    ], turns);
+    const narrow = locateVisibleTurns([
+      { text: "› a parent prompt whose logical line wraps at narrow widths", start: 200, end: 202 },
+      { text: "", start: 203, end: 203 },
+      { text: "an assistant response whose logical line also wraps at narrow widths", start: 204, end: 207 },
+    ], turns);
+    expect({
+      wide: wide.map(({ id, role, anchorStart, anchorEnd }) => ({ id, role, anchorStart, anchorEnd })),
+      narrow: narrow.map(({ id, role, anchorStart, anchorEnd }) => ({ id, role, anchorStart, anchorEnd })),
+    }).toMatchInlineSnapshot(`
+      {
+        "narrow": [
+          {
+            "anchorEnd": 202,
+            "anchorStart": 200,
+            "id": "session-a:30",
+            "role": "user",
+          },
+          {
+            "anchorEnd": 207,
+            "anchorStart": 204,
+            "id": "session-a:31",
+            "role": "assistant",
+          },
+        ],
+        "wide": [
+          {
+            "anchorEnd": 100,
+            "anchorStart": 100,
+            "id": "session-a:30",
+            "role": "user",
+          },
+          {
+            "anchorEnd": 102,
+            "anchorStart": 102,
+            "id": "session-a:31",
+            "role": "assistant",
+          },
+        ],
+      }
+    `);
+  });
+
   it("normalizes terminal chrome and locates unique Boop turns", () => {
     const rows = [
       { text: "⏺ Alpha response with a stable phrase", start: 40, end: 40 },
@@ -333,6 +537,53 @@ describe("terminal turn visibility v2", () => {
     await failing.scan([boopTurn]);
     expect(failing.visible.map((found) => [found.turn, found.anchorStart, found.anchorEnd])).toEqual([[88, 41, 42]]);
     failing.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it("emits when the same span identity changes role while the pointer row stays fixed", async () => {
+    const lines: LogicalLine[] = [{ text: "same rendered row", start: 41, end: 41 }];
+    const viewport: XtermViewport = {
+      changes: EMPTY,
+      readVisibleLogicalLines: () => lines,
+      bufferRowAtClientY: () => 41,
+      dispose: () => {},
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const locator = async (_lines: LogicalLine[], turns: BoopTurn[]) => [{
+      ...turns[0],
+      id: `${turns[0].session}:${turns[0].turn}`,
+      bufferStart: 41,
+      bufferEnd: 41,
+      anchorStart: 41,
+      anchorEnd: 41,
+      confidence: "anchored" as const,
+    }];
+    const visibility = new TerminalTurnVisibilityV2(viewport, async () => [], undefined, locator);
+    const events: Array<{ role: string; entered: number; exited: number }> = [];
+    visibility.changes.subscribe((event) => events.push({
+      role: event.visible[0]?.role ?? "",
+      entered: event.entered.length,
+      exited: event.exited.length,
+    }));
+    const sameId = { ...turn(88, "same rendered row"), role: "user" };
+    await visibility.scan([sameId]);
+    await visibility.scan([{ ...sameId, role: "assistant" }]);
+    expect(events).toMatchInlineSnapshot(`
+      [
+        {
+          "entered": 1,
+          "exited": 0,
+          "role": "user",
+        },
+        {
+          "entered": 0,
+          "exited": 0,
+          "role": "assistant",
+        },
+      ]
+    `);
+    visibility.dispose();
     vi.unstubAllGlobals();
   });
 });
