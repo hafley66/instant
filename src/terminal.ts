@@ -1287,9 +1287,12 @@ export function askAboutSelection(id: string) {
   const rows = pinned
     ? [Math.min(pinned.anchor.row, pinned.focus.row), Math.max(pinned.anchor.row, pinned.focus.row)] as const
     : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
-  tab.contextQueue.addSelection(tab.contextQueue.snapshotFor(text, rows[0], rows[1]));
+  const queued = tab.contextQueue.addSelection(tab.contextQueue.snapshotFor(text, rows[0], rows[1]));
   tab.pinnedSelection?.clear();
-  tab.term.focus();
+  // Caret goes to the new slice's note so the annotation can be typed at once;
+  // the terminal keeps focus only when nothing was queued.
+  if (queued) tab.contextQueue.focusNote(queued);
+  else tab.term.focus();
 }
 
 // Write text into a terminal's pty (path or selection, space-terminated so the

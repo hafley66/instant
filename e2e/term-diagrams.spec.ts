@@ -579,7 +579,7 @@ test("counts projected physical rows when wrapped Boop lines reach the viewport 
   await expect(mermaid).toHaveAttribute("data-diagram-locator", "boop:e2e-codex-1:53");
 });
 
-test("hides a committed diagram while new PTY text is arriving", async ({ page }) => {
+test("keeps a committed diagram visible while new PTY text is arriving", async ({ page }) => {
   await openTerminal(page);
   await page.evaluate(() => window.__term!.resize(80, 12));
   await writeFixture(page, renderedCliOutput("Codex"));
@@ -603,7 +603,7 @@ test("hides a committed diagram while new PTY text is arriving", async ({ page }
     return { hiddenSamples, visibleAfterIdle: !root.hidden, mutations };
   });
 
-  expect(result).toEqual({ hiddenSamples: Array(20).fill(true), visibleAfterIdle: true, mutations: 0 });
+  expect(result).toEqual({ hiddenSamples: Array(20).fill(false), visibleAfterIdle: true, mutations: 0 });
 
   await page.screenshot({ path: "artifacts/v2-overlay-before-scroll.png", fullPage: true });
   const tether = await page.evaluate(async () => {

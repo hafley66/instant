@@ -71,9 +71,10 @@ export function readRegistry(mailDir: string): Record<string, unknown> {
 
 // A real tmux client attached to a lane, riding `script` for the tty. Killing
 // it is what closing a viewer pty does; the lane must survive that.
-export function attachClient(name: string): ChildProcess {
+export function attachClient(name: string, stdio: "ignore" | "pipe" = "ignore"): ChildProcess {
   return spawn("script", ["-q", "/dev/null", "tmux", "attach-session", "-t", `=${name}`], {
-    stdio: "ignore",
+    env: { ...process.env, TERM: process.env.TERM ?? "xterm-256color" },
+    stdio,
   });
 }
 

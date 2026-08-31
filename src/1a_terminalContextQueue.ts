@@ -171,8 +171,8 @@ export class TerminalContextQueue {
   /// right-click menu is the only way in, and it reads whichever selection is
   /// live (xterm's own, or the pinned overlay's on a pane whose app owns the
   /// mouse and where xterm therefore makes none).
-  addSelection(snapshot: Pick<TerminalSelectionSnapshot, "text" | "turnIds">) {
-    if (!snapshot.text) return;
+  addSelection(snapshot: Pick<TerminalSelectionSnapshot, "text" | "turnIds">): string | null {
+    if (!snapshot.text) return null;
     const source = snapshot;
     const id = `selection:${Date.now()}:${this.items.size}`;
     this.items.set(id, {
@@ -184,6 +184,15 @@ export class TerminalContextQueue {
     });
     this.term.clearSelection();
     this.renderQueue();
+    return id;
+  }
+
+  /// Put the caret in a queued slice's note, so "Ask about this" types straight
+  /// into "what you want done with this…" without a click.
+  focusNote(id: string) {
+    this.queue
+      .querySelector<HTMLTextAreaElement>(`[data-context-id="${CSS.escape(id)}"] textarea`)
+      ?.focus();
   }
 
   /// The buffer rows a pinned selection covers, tagged with the turns whose own
