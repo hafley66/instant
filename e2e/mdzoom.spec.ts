@@ -129,9 +129,14 @@ test("a terminal the user is typing in still zooms its own font", async ({ page 
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
-  await page.getByTestId("open-md").click();
-  await expect(page.locator(".mdview-content")).toBeVisible();
   await useTerminal(page);
+  // Opening the preview from the terminal leaves xterm's textarea focused while
+  // Dockview makes Markdown active. A following byte must refresh terminal
+  // recency without reactivating its Dockview tab.
+  await page.keyboard.press("Meta+Shift+m");
+  await expect(page.locator(".mdview-content")).toBeVisible();
+  await page.keyboard.type("x");
+  await expect.poll(async () => (await state(page)).focusedTerm).not.toBeNull();
   expect((await state(page)).activePanel).toBe(
     await page.evaluate(() => (window as ZoomWindow).__mdzoom!.mdPid),
   );

@@ -927,7 +927,11 @@ export function openTab(
     if (focusedTermId === id) focusedTermId = null;
   });
 
-  term.onData((data) => invoke("write_pty", { id, data }).catch(console.error));
+  term.onData((data) => {
+    focusedTermId = id;
+    focusedTermAt = performance.now();
+    invoke("write_pty", { id, data }).catch(console.error);
+  });
   term.onResize(({ cols, rows }) =>
     invoke("resize_pty", { id, cols, rows, ...cellDims(term) }).catch(console.error),
   );
