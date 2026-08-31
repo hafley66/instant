@@ -15,6 +15,45 @@ const turn = (turn: number, said: string): BoopTurn => ({
 });
 
 describe("terminal turn visibility v2", () => {
+  it("rescans immediately for scroll activity and again after output settles", async () => {
+    vi.useFakeTimers();
+    const changes = new Subject<{
+      kind: "write" | "scroll";
+      cols: number;
+      rows: number;
+      viewportY: number;
+      bufferLength: number;
+    }>();
+    const viewport: XtermViewport = {
+      changes,
+      readVisibleLogicalLines: () => [],
+      bufferRowAtClientY: () => null,
+      dispose: () => {},
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const visibility = new TerminalTurnVisibilityV2(viewport, async () => []);
+    visibility.schedule = vi.fn();
+
+    changes.next({ kind: "scroll", cols: 120, rows: 40, viewportY: 4, bufferLength: 80 });
+    changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 4, bufferLength: 80 });
+    await vi.advanceTimersByTimeAsync(119);
+    const beforeSettle = vi.mocked(visibility.schedule).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(1);
+    const afterSettle = vi.mocked(visibility.schedule).mock.calls.length;
+
+    expect({ beforeSettle, afterSettle }).toMatchInlineSnapshot(`
+      {
+        "afterSettle": 2,
+        "beforeSettle": 1,
+      }
+    `);
+    visibility.dispose();
+    changes.complete();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
   it("reconciles once after the native projector's thirty-second ingestion interval", async () => {
     vi.useFakeTimers();
     const changes = new Subject<{ kind: "write"; cols: number; rows: number; viewportY: number; bufferLength: number }>();
@@ -530,7 +569,7 @@ describe("terminal turn visibility v2", () => {
     await native.scan([boopTurn]);
     // anchorEnd 41 is the native answer; the local matcher would say 42.
     expect(native.visible.map((found) => [found.turn, found.anchorStart, found.anchorEnd])).toEqual([[88, 41, 41]]);
-    expect(native.visible[0].regions).toBeDefined();
+    expect(native.visible[0].regions).toMatchInlineSnapshot(`[]`);
     expect(native.turnAtBufferRow(42)).toBeNull();
     native.dispose();
 

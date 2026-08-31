@@ -8,10 +8,15 @@ import {
   renderConversationWindow,
   type ConversationReplayTurn,
 } from "../scripts/3_claudeConversationReplay";
+import {
+  realCodexConversationReplay,
+  type CodexConversationReplayTurn,
+} from "../scripts/4_codexConversationReplay";
 
 declare global {
   interface Window {
     __instantE2eNativeResults?: Record<string, unknown>;
+    __instantE2eNativeCalls?: string[];
     __term?: {
       write: (data: string) => void;
       resize: (cols: number, rows: number) => void;
@@ -19,6 +24,7 @@ declare global {
       scroll: (lines: number) => void;
       position: () => { viewportY: number; baseY: number; length: number; rows: number } | null;
       screen: () => string[];
+      mouseMode: () => string;
     };
   }
 }
@@ -26,15 +32,18 @@ declare global {
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 const receipts = join(repo, "artifacts", "morning-report");
 const replay = realClaudeConversationReplay();
+const codexReplay = realCodexConversationReplay();
+type ReplayTurn = ConversationReplayTurn | CodexConversationReplayTurn;
 
 async function openConversation(
   page: Page,
-  turns: readonly ConversationReplayTurn[],
+  turns: readonly ReplayTurn[],
   cols: number,
   rows: number,
   output = renderConversationTurns(turns),
 ) {
-  await page.goto("/e2e-term.html?e2e=1&noSidebar=1&harness=claude");
+  const harness = turns[0]?.harness ?? "codex";
+  await page.goto(`/e2e-term.html?e2e=1&noSidebar=1&harness=${harness}`);
   await page.evaluate((value) => {
     window.__instantE2eNativeResults!.boop_turns = value;
   }, turns);
@@ -111,4 +120,44 @@ test("a real message taller than the viewport retains attribution at its start a
   await expect(rows.nth(occupied.at(-1)!)).toContainText("↓ t16 assistant A");
   const middlePath = await saveReceipt(page, "real-claude-long-turn-middle");
   await testInfo.attach("real-claude-long-turn-middle", { path: middlePath, contentType: "image/png" });
+});
+
+test("a real Codex turn rescans on wheel activity and repaints after the TUI redraw settles", async ({ page }, testInfo) => {
+  const turn = codexReplay.longTurn;
+  const sourceLines = turn.said.split("\n");
+  expect(sourceLines.length).toBeGreaterThan(8);
+  const beforeOutput = `\u001b[?1003h\u001b[?1006h${renderConversationWindow(turn, 0, 7)}`;
+  await openConversation(page, [turn], 120, 8, beforeOutput);
+  await expect.poll(() => page.evaluate(() => window.__term!.mouseMode())).toBe("any");
+
+  const beforeRows = page.locator('.term-turn-debug-row[data-turn="21"][data-role="assistant"]');
+  await expect(beforeRows.first()).toContainText("┌ t21 assistant A");
+  await expect(beforeRows.last()).toContainText("↓ t21 assistant A");
+  const beforePath = await saveReceipt(page, "real-codex-scroll-before");
+  await testInfo.attach("real-codex-scroll-before", { path: beforePath, contentType: "image/png" });
+
+  const afterOutput = renderConversationWindow(turn, 3, 9);
+  await page.evaluate((output) => {
+    window.__instantE2eNativeCalls = [];
+    window.__instantE2eNativeResults!.write_pty = () => {
+      window.setTimeout(() => window.__term!.write(`\u001b[2J\u001b[H${output}`), 250);
+    };
+  }, afterOutput);
+  const screen = page.locator(".xterm-screen");
+  const box = await screen.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, 120);
+
+  const locateCalls = () => page.evaluate(() =>
+    window.__instantE2eNativeCalls?.filter((command) => command === "boop_locate_turns").length ?? 0);
+  await expect.poll(locateCalls, { timeout: 200, intervals: [20] }).toBeGreaterThan(0);
+  await expect(page.locator(".xterm-rows")).toContainText(sourceLines[7]);
+  await expect.poll(locateCalls).toBeGreaterThanOrEqual(2);
+
+  const afterRows = page.locator('.term-turn-debug-row[data-turn="21"][data-role="assistant"]');
+  await expect(afterRows.first()).toContainText("↑ t21 assistant A");
+  await expect(afterRows.last()).toContainText("↓ t21 assistant A");
+  const afterPath = await saveReceipt(page, "real-codex-scroll-after");
+  await testInfo.attach("real-codex-scroll-after", { path: afterPath, contentType: "image/png" });
 });

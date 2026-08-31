@@ -30,6 +30,8 @@ export type ConversationReplay = Readonly<{
   contentTypes: readonly ConversationContentType[];
 }>;
 
+export type RenderableConversationTurn = Pick<ConversationReplayTurn, "role" | "said" | "subtype">;
+
 type JsonObject = Record<string, unknown>;
 
 const injectedTags = [
@@ -186,7 +188,7 @@ export function realClaudeConversationReplay(path = realClaudeTranscript): Conve
   };
 }
 
-function marker(turn: ConversationReplayTurn): string {
+function marker(turn: RenderableConversationTurn): string {
   if (turn.role === "user") return "❯";
   if (turn.role === "tool") return "⎿";
   if (turn.role === "meta") return "◆";
@@ -195,7 +197,7 @@ function marker(turn: ConversationReplayTurn): string {
   return "●";
 }
 
-export function renderConversationTurns(turns: readonly ConversationReplayTurn[]): string {
+export function renderConversationTurns(turns: readonly RenderableConversationTurn[]): string {
   return turns.map((turn) => {
     const [first = "", ...rest] = turn.said.split("\n");
     return [`${marker(turn)} ${first}`, ...rest.map((line) => `  ${line}`)].join("\r\n");
@@ -203,7 +205,7 @@ export function renderConversationTurns(turns: readonly ConversationReplayTurn[]
 }
 
 export function renderConversationWindow(
-  turn: ConversationReplayTurn,
+  turn: RenderableConversationTurn,
   start: number,
   end: number,
 ): string {

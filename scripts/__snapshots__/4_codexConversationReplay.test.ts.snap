@@ -1,0 +1,25 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`real Codex conversation replay > mirrors the ledger payload shapes and retains a viewport-tall tool result 1`] = `
+{
+  "longTurn": {
+    "characters": 401,
+    "lines": 10,
+    "preview": "Script completed Wall time 0.0 seconds Output:  /opt/homebrew/bin/bash: warning: setlocale: LC_ALL: ",
+    "role": "assistant",
+    "sourceLine": 21,
+    "subtype": "wait result",
+    "turn": 21,
+  },
+  "payloadTypes": [
+    "custom_tool_call",
+    "custom_tool_call_output",
+    "function_call",
+    "function_call_output",
+    "message",
+    "reasoning",
+  ],
+  "source": "fixtures/transcripts/codex/session.jsonl",
+  "turns": 12,
+}
+`;

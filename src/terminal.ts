@@ -715,7 +715,10 @@ export function openTab(
   const wheel = graphics ? undefined : new TerminalWheelRouter(
     term,
     (up, lines) => { void invoke(commands.pty.scrollSession, { name: tmuxTarget ?? name, up, lines }).catch(() => {}); },
-    () => diagrams?.viewportScrolled(),
+    () => {
+      diagrams?.viewportScrolled();
+      turnVisibility?.schedule();
+    },
   );
   // Autocopy at mouse-up plus a highlight that stays put, matching what a pane
   // whose TUI paints its own selection (claude) already gives the reader.
