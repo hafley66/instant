@@ -388,6 +388,7 @@ export class TerminalDiagramOverlay {
   lightboxActive = 0;
   hideRequested = false;
   lastVisibleFingerprint = "";
+  lastPaintedFingerprint = "";
 
   constructor(
     readonly term: Terminal,
@@ -593,12 +594,13 @@ export class TerminalDiagramOverlay {
     const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
-    // An idle rescan whose visible fence keys and viewport are unchanged needs
-    // no re-render and must not advance generation, so a later real change still
-    // wins the stale-paint check below. Anything that changes dark mode, the
-    // viewport, or a fence key changes the fingerprint and repaints.
-    const fingerprint = this.fenceFingerprint();
-    if (fingerprint === this.lastVisibleFingerprint) return;
+    // Covers the merged set, code length, and theme, so direct fences and
+    // streaming growth still repaint; skipping never advances generation.
+    const fingerprint = `${dark}:${viewportTop}:${visibleFences
+      .map((fence) => `${diagramElementKey(fence, dark)}#${fence.code.length}`)
+      .sort()
+      .join("|")}`;
+    if (fingerprint === this.lastPaintedFingerprint) return;
     const generation = ++this.generation;
     const rendered = await Promise.all(visibleFences.map(async (fence) => {
       const key = `${dark}:${fence.language}:${fence.code}`;
@@ -623,7 +625,7 @@ export class TerminalDiagramOverlay {
       }
     }));
     if (generation !== this.generation) return;
-    this.lastVisibleFingerprint = fingerprint;
+    this.lastPaintedFingerprint = fingerprint;
     this.root.hidden = false;
     const existing = new Map(Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
       .map((element) => [element.dataset.diagramKey ?? "", element]));
