@@ -317,10 +317,10 @@ describe("diagram location precedence", () => {
     expect([diagramElementKey(terminal, true), diagramElementKey(ledger, true)])
       .toMatchInlineSnapshot(`
         [
-          "true:mermaid:20:flowchart lr
+          "true:mermaid:flowchart lr
         pty --> tmux
         tmux --> xterm",
-          "true:mermaid:20:flowchart lr
+          "true:mermaid:flowchart lr
         pty --> tmux
         tmux --> xterm",
         ]
@@ -354,7 +354,7 @@ function scriptRecorder() {
 }
 
 describe("diagram overlay flicker (diagnostic lane)", () => {
-  it("hides the whole root on any write, before painting has decided anything", () => {
+  it("leaves the root visible on a write that changes nothing", () => {
     // Overlay construction touches only a handful of browser globals; the
     // write/scroll/resize subscriptions are captured, not exercised, and the
     // frame never fires because requestAnimationFrame is a no-op stub here.
@@ -387,20 +387,20 @@ describe("diagram overlay flicker (diagnostic lane)", () => {
 
     expect(overlay.root.hidden).toBe(false);
     onWrite!();
-    expect(overlay.root.hidden).toBe(true);
+    expect(overlay.root.hidden).toBe(false);
   });
 
-  it("re-creates the DOM element when a projected fence's buffer rows shift", () => {
-    // The element reuse at paint() keys only on diagramElementKey(), which codes
-    // fence.start (a physical buffer row) into the identity. A ledge rescan that
-    // moves the same logical diagram one row down therefore mints a fresh element
-    // and the old one is detached/re-attached: the idle re-create flash.
+  it("keeps the DOM element when a projected fence's buffer rows shift", () => {
+    // Element reuse at paint() keys only on diagramElementKey(), which now codes
+    // the stable turn-scoped locator, not the physical buffer row. A rescan that
+    // moves the same logical diagram one row down therefore reuses the element
+    // instead of re-minting it: no idle re-create flash.
     const fence = (start: number, end: number): DiagramFence => ({
       language: "mermaid", code: "flowchart LR\n  A --> B",
 start, end, inferred: false, locator: "boop:turn:1", messageId: "turn:1",
     });
     expect(fence(10, 12).locator).toBe(fence(11, 13).locator);
-    expect(diagramElementKey(fence(10, 12), false)).not.toBe(diagramElementKey(fence(11, 13), false));
+    expect(diagramElementKey(fence(10, 12), false)).toBe(diagramElementKey(fence(11, 13), false));
   });
 });
 

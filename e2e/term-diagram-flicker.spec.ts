@@ -1,10 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Diagnostic repro for the terminal diagram overlay flicker lane. This test is
-// written to PASS against the current (buggy) code: it records that streaming
-// text hides the overlay root and that the mermaid element is re-created when
-// its buffer rows move. The fix lane flips these assertions to "no hide" and
-// "stable key" and the plan names the exact guard for each.
+// Fix assertion for the terminal diagram overlay flicker lane. This test now
+// asserts the fixed behavior: streaming text never hides the overlay root and
+// the mermaid element keeps a stable data-diagram-key (and is never re-placed)
+// when its buffer rows move. The plan names the guard for each.
 //
 // Written repro steps (run with `pnpm test:e2e` against the dev page):
 //   1. openTerminal: boot /e2e-term.html with projection enabled.
@@ -14,8 +13,8 @@ import { test, expect, type Page } from "@playwright/test";
 //      write and record every childList mutation and every re-minted
 //      data-diagram-key.
 //   5. Stream "working N" writes while sampling.
-//   6. Assert the flicker is reproduced: at least one hidden root sample
-//      (hide on write) or a re-keyed element / a childList mutation.
+//   6. Assert the flicker is gone: zero hidden root samples, zero re-keys, and
+//      a stable before/after data-diagram-key.
 
 type TermHooks = {
   write: (data: string) => void;
@@ -53,7 +52,7 @@ async function writeFixture(page: Page, text: string) {
   }, text);
 }
 
-test("records the hide/re-key cycle while streaming text arrives", async ({ page }, testInfo) => {
+test("keeps the root visible and the element stable while streaming text arrives", async ({ page }, testInfo) => {
   await openTerminal(page);
   await writeFixture(page, diagramOutput);
 
@@ -96,7 +95,8 @@ test("records the hide/re-key cycle while streaming text arrives", async ({ page
     contentType: "image/png",
   });
 
-  const hid = result.hiddenSamples.filter(Boolean);
-  const recreated = result.replaces > 0 || result.reKeys > 0 || result.beforeKey !== result.afterKey;
-  expect(hid.length > 0 || recreated).toBe(true);
+  expect(result.hiddenSamples.filter(Boolean)).toHaveLength(0);
+  expect(result.replaces).toBe(0);
+  expect(result.reKeys).toBe(0);
+  expect(result.beforeKey).toBe(result.afterKey);
 });
