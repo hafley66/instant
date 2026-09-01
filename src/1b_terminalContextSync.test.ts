@@ -4,6 +4,7 @@ import type { PromptContextItem } from "./1a_terminalContextQueue";
 import type { VisibleTurn } from "./0_terminalTurnVisibility";
 import {
   diffItems,
+  rowShowsOn,
   shapeOf,
   splitTurnId,
   toComment,
@@ -81,8 +82,28 @@ describe("diffItems", () => {
   });
 });
 
-describe("turnsAcrossRange", () => {
-  const turn = (id: string, role: string, anchorStart: number, anchorEnd: number) =>
+describe("rowShowsOn", () => {
+  const row = (over: Partial<BoopTurnComment> = {}): BoopTurnComment => ({
+    ...toComment(item({ turnIds: ["sess-a:3"] }), "tab-owner"),
+    ...over,
+  });
+
+  it("always shows a row on the tab that owns it", () => {
+    expect(rowShowsOn(row(), "tab-owner", new Set())).toBe(true);
+  });
+
+  it("hides a foreign row whose turns are not on screen", () => {
+    expect(rowShowsOn(row({ tabName: "tab-other" }), "tab-owner", new Set(["sess-a:9"])))
+      .toBe(false);
+  });
+
+  it("shows a foreign row while one of its target turns is visible", () => {
+    expect(rowShowsOn(row({ tabName: "tab-other" }), "tab-owner", new Set(["sess-a:3"])))
+      .toBe(true);
+  });
+});
+
+describe("turnsAcrossRange", () => {  const turn = (id: string, role: string, anchorStart: number, anchorEnd: number) =>
     ({ id, role, anchorStart, anchorEnd }) as VisibleTurn;
 
   it("tags user turns exactly like assistant turns", () => {
