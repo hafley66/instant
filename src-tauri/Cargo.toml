@@ -56,3 +56,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # IPC/JSON path ~3x slower than needed (measured 2026-08-22).
 [profile.dev]
 opt-level = 1
+
+[dev-dependencies]
+anyhow = "1"

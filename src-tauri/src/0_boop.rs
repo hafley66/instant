@@ -82,6 +82,26 @@ pub struct BoopSyncStat {
     usage_updated: u64,
 }
 
+/// The singular refresh hit first; an id the store never projected (`/clear`
+/// mints one) falls back to one filtered discovery pass.
+fn candidate_for(
+    adapter: &dyn boop_harness::Harness,
+    known: &boop_harness::KnownSessions,
+    session: &str,
+) -> Result<Option<boop_harness::SessionRef>, String> {
+    if let Some(hit) = adapter
+        .sync_candidate(known, session)
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(Some(hit));
+    }
+    Ok(adapter
+        .sync_candidates(known)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|candidate| candidate.session_id == session))
+}
+
 fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
     let store = open_store_rw()?;
     let known = store.known_sessions().map_err(|error| error.to_string())?;
@@ -89,10 +109,7 @@ fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
     let adapter = registry
         .by_name(harness)
         .ok_or_else(|| format!("unknown harness `{harness}`"))?;
-    let Some(candidate) = adapter
-        .sync_candidate(&known, session)
-        .map_err(|error| error.to_string())?
-    else {
+    let Some(candidate) = candidate_for(adapter, &known, session)? else {
         return Ok(BoopSyncStat {
             found: false,
             written: 0,
@@ -677,5 +694,109 @@ mod tests {
             turns.is_ok(),
             "turn_rows query succeeds directly against boop-store"
         );
+    }
+
+    mod candidate_for {
+        use super::super::candidate_for;
+        use std::path::PathBuf;
+        use boop_harness::{
+            Capabilities, Harness, HarnessId, KnownSession, KnownSessions, LanePolicy, MailPolicy,
+            ReadChunk, SessionRef, VariantSupport,
+        };
+
+        static CAPS: Capabilities = Capabilities {
+            bans_plan_family_models: false,
+            lanes: LanePolicy::Allowed,
+            variant: VariantSupport::None,
+            mail: MailPolicy::Door,
+            native_tui_projector: false,
+            wrapper_owns_alternate_screen: false,
+        };
+
+        struct Scan(Vec<SessionRef>);
+
+        impl Harness for Scan {
+            fn id(&self) -> HarnessId {
+                HarnessId::Claude
+            }
+            fn capabilities(&self) -> &'static Capabilities {
+                &CAPS
+            }
+            fn sessions(&self) -> anyhow::Result<Vec<SessionRef>> {
+                Ok(self.0.clone())
+            }
+            fn read_from(&self, _: &SessionRef, _: u64) -> anyhow::Result<ReadChunk> {
+                Ok(ReadChunk {
+                    events: vec![],
+                    next_offset: 0,
+                    reset: false,
+                    skipped: 0,
+                })
+            }
+        }
+
+        fn reference(session_id: &str, path: &str) -> SessionRef {
+            SessionRef {
+                harness: HarnessId::Claude,
+                session_id: session_id.to_owned(),
+                nickname: session_id.to_owned(),
+                path: path.into(),
+                cwd: None,
+                git_branch: None,
+                modified_ms: 0,
+                size: 0,
+                tmux: None,
+                tmux_socket: None,
+                parent: None,
+            }
+        }
+
+        #[test]
+        fn an_unknown_id_is_found_by_the_discovery_fallback() {
+            let adapter = Scan(vec![
+                reference("older-session", "/tmp/older.jsonl"),
+                reference("fresh-after-clear", "/tmp/fresh.jsonl"),
+            ]);
+            let found = candidate_for(&adapter, &KnownSessions::new(), "fresh-after-clear")
+                .unwrap()
+                .expect("discovery must insert the unknown id");
+            assert_eq!(found.path, PathBuf::from("/tmp/fresh.jsonl"));
+        }
+
+        #[test]
+        fn a_known_id_refreshes_without_the_fallback() {
+            let path = std::env::temp_dir().join(format!(
+                "boop_sync_candidate_{}_known.jsonl",
+                std::process::id()
+            ));
+            std::fs::write(&path, "{}\n").unwrap();
+            let mut known = KnownSessions::new();
+            known.insert(
+                path.clone(),
+                KnownSession {
+                    harness: "claude".to_owned(),
+                    session_id: "known-session".to_owned(),
+                    nickname: "known-session".to_owned(),
+                    cwd: None,
+                    git_branch: None,
+                    parent: None,
+                    cursor: 0,
+                    modified_ms: 0,
+                    projection_version: 0,
+                },
+            );
+            let adapter = Scan(vec![]);
+            let found = candidate_for(&adapter, &known, "known-session")
+                .unwrap()
+                .expect("the known id refreshes from the store record");
+            assert_eq!(found.path, path);
+            let _ = std::fs::remove_file(&path);
+        }
+
+        #[test]
+        fn an_id_nowhere_stays_not_found() {
+            let adapter = Scan(vec![reference("older-session", "/tmp/older.jsonl")]);
+            assert!(candidate_for(&adapter, &KnownSessions::new(), "gone").unwrap().is_none());
+        }
     }
 }
