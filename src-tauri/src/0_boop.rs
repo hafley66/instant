@@ -242,6 +242,127 @@ pub async fn boop_turns_recent(since: i64, harness: String) -> Result<Vec<BoopTu
         .map_err(|error| error.to_string())?
 }
 
+// Boop panel reads. agent_route is the registry every lane spawn writes
+// into; liveness comes from the store's session view, not the route table.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopLane {
+    pub route: String,
+    pub kind: String,
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub goal: Option<String>,
+    pub parent: Option<String>,
+    pub cwd: Option<String>,
+    pub branch: Option<String>,
+    pub registered_ms: i64,
+    pub state: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopLaneEvent {
+    pub ts: i64,
+    pub kind: String,
+    pub from_route: String,
+    pub to_route: String,
+    pub preview: String,
+}
+
+fn read_lanes() -> Result<Vec<BoopLane>, String> {
+    let store = open_store_ro()?;
+    let mut statement = store
+        .connection()
+        .prepare(
+            "SELECT r.route, r.kind, r.harness, r.model, r.goal, r.parent, r.cwd,
+                    r.worktree_dir,
+                    CAST(strftime('%s', r.registered_at) AS INTEGER) * 1000
+                      + CAST(substr(r.registered_at, 21, 3) AS INTEGER),
+                    (SELECT CASE WHEN st.value IS NULL THEN 'closed' ELSE 'open' END
+                       FROM agent_live l
+                       JOIN dict_session ds ON ds.id = l.session_id
+                       LEFT JOIN dict_status st ON st.id = l.status_id
+                      WHERE ds.value = r.session_id)
+               FROM agent_route r
+              ORDER BY r.registered_at DESC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(BoopLane {
+                route: row.get(0)?,
+                kind: row.get(1)?,
+                harness: row.get(2)?,
+                model: row.get(3)?,
+                goal: row.get(4)?,
+                parent: row.get(5)?,
+                cwd: row.get(6)?,
+                branch: row
+                    .get::<_, Option<String>>(7)?
+                    .as_deref()
+                    .and_then(|dir| dir.trim_end_matches('/').rsplit('/').next())
+                    .map(str::to_string),
+                registered_ms: row.get(8)?,
+                state: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "closed".into()),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut lanes = Vec::new();
+    for row in rows {
+        lanes.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(lanes)
+}
+
+fn read_lane_events(since_ms: i64) -> Result<Vec<BoopLaneEvent>, String> {
+    let store = open_store_ro()?;
+    let mut statement = store
+        .connection()
+        .prepare(
+            "SELECT ts, kind, from_route, to_route, preview FROM (
+               SELECT CAST(strftime('%s', m.from_timestamp) AS INTEGER) * 1000
+                        + CAST(substr(m.from_timestamp, 21, 3) AS INTEGER) AS ts,
+                      m.kind AS kind, m.from_route AS from_route,
+                      m.to_route AS to_route,
+                      substr(replace(m.body, char(10), ' '), 1, 120) AS preview
+                 FROM agent_mail m
+                WHERE ?1 <= 0 OR ?1 <= CAST(strftime('%s', m.from_timestamp) AS INTEGER) * 1000
+                                  + CAST(substr(m.from_timestamp, 21, 3) AS INTEGER)
+             ) ORDER BY ts",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([since_ms], |row| {
+            Ok(BoopLaneEvent {
+                ts: row.get(0)?,
+                kind: row.get(1)?,
+                from_route: row.get(2)?,
+                to_route: row.get(3)?,
+                preview: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(events)
+}
+
+#[tauri::command]
+pub async fn boop_lanes() -> Result<Vec<BoopLane>, String> {
+    tauri::async_runtime::spawn_blocking(read_lanes)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn boop_lane_events(since_ms: i64) -> Result<Vec<BoopLaneEvent>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_lane_events(since_ms))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BoopTurnCommentTarget {
@@ -675,6 +796,29 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             vec![(1, "user", 20, 20), (2, "assistant", 21, 21)]
+        );
+    }
+
+    #[test]
+    fn lane_reads_live_boop_database() {
+        let lanes = read_lanes();
+        assert!(lanes.is_ok(), "read_lanes succeeds against the live store");
+        let lanes = lanes.unwrap();
+        assert!(!lanes.is_empty(), "agent_route has registered lanes");
+        assert!(
+            lanes.iter().all(|lane| lane.state == "open" || lane.state == "closed"),
+            "every lane reports an open/closed state"
+        );
+        let events = read_lane_events(0);
+        assert!(
+            events.is_ok(),
+            "read_lane_events succeeds against the live store: {:?}",
+            events.err()
+        );
+        let events = events.unwrap();
+        assert!(
+            events.windows(2).all(|pair| pair[0].ts <= pair[1].ts),
+            "lane events come back ordered by ts"
         );
     }
 

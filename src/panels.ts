@@ -4,6 +4,7 @@
 // to its lazy data refresh.
 import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
+import { BoopPanelV2 } from "./boopPanel";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { panic } from "./0_panicSettings";
 import { cdpPerf } from "./cdp";
@@ -92,6 +93,15 @@ export function registerBuiltin() {
         iconLabel: "Activity",
         html: "",
         component: ActivityPanelV2,
+      },
+      {
+        id: "boop",
+        title: "Boop",
+        icon: "⇄",
+        iconUrl: "/icons/WindowGraph_16x16_4.png",
+        iconLabel: "Boop",
+        html: "",
+        component: BoopPanelV2,
       },
     ],
   });
