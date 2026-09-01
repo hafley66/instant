@@ -42,7 +42,7 @@ function frameKind(mail: BoopLaneEvent, direction: "in" | "out" | "self"): Marbl
 
 // Mail rows carry both endpoints; a row lands as a dot on each lane it
 // touches, with the other endpoint as its peer so marbler can draw the link.
-export function laneFrames(lane: BoopLane, events: BoopLaneEvent[]): MarbleEvent["frames"] {
+export function laneFrames(lane: BoopLane, events: BoopLaneEvent[]): MarbleFrame[] {
   const touching = events.filter(
     (event) => event.fromRoute === lane.route || event.toRoute === lane.route,
   );
@@ -147,6 +147,15 @@ export function BoopPanelV2() {
     marbler.current.source.$(rows);
   }, [rows]);
 
+  const open = lanes.filter((lane) => lane.state === "open").length;
+  const summary = useMemo(
+    () => [
+      `${open} open · ${lanes.length - open} closed`,
+      `${events.length} mail in window`,
+    ],
+    [open, lanes.length, events.length],
+  );
+
   return (
     <div className="v2-panel boop-panel">
       <div className="fs-list boop-master">
@@ -170,7 +179,7 @@ export function BoopPanelV2() {
         )}
       </div>
       <div className="boop-marbler">
-        <MarblerPanel model={marbler.current} />
+        <MarblerPanel model={marbler.current} embedded summary={summary} />
       </div>
     </div>
   );

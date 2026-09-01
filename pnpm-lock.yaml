@@ -20,8 +20,8 @@ importers:
         specifier: 0.1.2
         version: 0.1.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/marbler':
-        specifier: 0.0.2-dev.1788296134910
-        version: 0.0.2-dev.1788296134910(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
+        specifier: 0.0.3-dev.1788299256103
+        version: 0.0.3-dev.1788299256103(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
       '@hafley66/md':
         specifier: 0.1.2
         version: 0.1.2(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0)))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
@@ -579,8 +579,8 @@ packages:
       react: ^19.0.0
       rxjs: ^7.8.0
 
-  '@hafley66/marbler@0.0.2-dev.1788296134910':
-    resolution: {integrity: sha512-5f0GOvl3BdH5xabpSv6Oznk6fOOhxtWS1LrGs/Lc/Sf6FDHUxcwIw85q/mBtrINrwfNAoyCb4uZsQYRXE8qygg==}
+  '@hafley66/marbler@0.0.3-dev.1788299256103':
+    resolution: {integrity: sha512-xd1vCuEX/DXc3k+4mUheyvWoBAWl/uyzERKXDYruiby1DpdkgZEkkp1USH5OoXix1BjcjuECcSTPAqAHn5+EWQ==}
 
   '@hafley66/md@0.1.2':
     resolution: {integrity: sha512-Iwl0fAmRfHLd0dAmnNkcgLKHXHAoCBx90a7cG2ZLR6oGKDSjynBXor5kZ5nMlIfZIxGIP7DwqaNUJ042C4XLqg==}
@@ -4893,7 +4893,7 @@ snapshots:
       - supports-color
       - vue
 
-  '@hafley66/marbler@0.0.2-dev.1788296134910(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))':
+  '@hafley66/marbler@0.0.3-dev.1788299256103(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))':
     dependencies:
       '@hafley66/grid': 0.1.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
       '@hafley66/signals': 0.1.1(react@19.2.8)(vite@8.1.5(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))

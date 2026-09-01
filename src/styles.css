@@ -4091,3 +4091,29 @@ body[data-skin="ac3"] .meme-canvas-wrap {
 .paint-caption-error { color: #c0392b; max-width: 300px; overflow-wrap: anywhere; }
 
 html body { min-width: 0; }
+
+/* ---- boop panel: master lane table over the embedded marbler bottom bar ---- */
+.boop-panel .boop-master {
+  flex: 1.15;
+  min-height: 0;
+  overflow: auto;
+}
+.boop-panel .boop-marbler {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border-top: var(--frame-w) solid var(--frame);
+  /* marbler embedded mode reads these; fallbacks stay inside marbler. */
+  --marbler-surface: var(--panel-bg);
+  --marbler-panel: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 3%);
+  --marbler-head: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 6%);
+  --marbler-ink: var(--panel-fg);
+  --marbler-muted: color-mix(in srgb, var(--panel-fg), transparent 34%);
+  --marbler-border: color-mix(in srgb, var(--panel-fg), transparent 78%);
+}
+.boop-panel .boop-master .boop-open {
+  color: var(--dot-on);
+}
+.boop-panel .boop-master .boop-closed {
+  color: var(--grid-muted-fg, var(--panel-fg));
+}
