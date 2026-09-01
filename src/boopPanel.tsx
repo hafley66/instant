@@ -86,7 +86,16 @@ export function toMarbleEvents(lanes: BoopLane[], events: BoopLaneEvent[]): Marb
   }));
 }
 
-const BOOP_COLUMNS: TreeColumn<BoopLane>[] = [
+// Rows carry the per-poll rollups so the column array stays module-stable:
+// rebuilt columns reset tanstack's sort state, killing header clicks.
+export interface BoopRow extends BoopLane {
+  mailCount: number;
+  lastTs: number;
+  dots: LaneStat["dots"];
+  windowRange: [number, number] | null;
+}
+
+const BOOP_COLUMNS: TreeColumn<BoopRow>[] = [
   {
     id: "route",
     header: "lane",
@@ -100,6 +109,41 @@ const BOOP_COLUMNS: TreeColumn<BoopLane>[] = [
   { id: "model", header: "model", sortValue: (r) => r.model ?? "", cell: (r) => (r.model ?? "").split("/").pop() ?? "" },
   { id: "parent", header: "parent", sortValue: (r) => r.parent ?? "", cell: (r) => r.parent ?? "" },
   { id: "goal", header: "goal", sortValue: (r) => r.goal ?? "", cell: (r) => r.goal ?? "" },
+  {
+    id: "mails",
+    header: "mail",
+    sortValue: (r) => r.mailCount,
+    cell: (r) => String(r.mailCount),
+    size: 52,
+  },
+  {
+    id: "lastEvent",
+    header: "last event",
+    sortValue: (r) => r.lastTs,
+    cell: (r) => (r.lastTs ? fmtAgo(r.lastTs, Date.now()) : "—"),
+    size: 84,
+  },
+  {
+    id: "waterfall",
+    header: "waterfall",
+    cell: (r) => {
+      if (!r.dots.length || !r.windowRange) return <span className="muted">—</span>;
+      const span = r.windowRange[1] - r.windowRange[0] || 1;
+      return (
+        <span className="boop-spark" title={`${r.mailCount} mail`}>
+          {r.dots.map((dot) => (
+            <i
+              key={dot.id}
+              className={dot.cls}
+              style={{ left: `${((dot.t - r.windowRange![0]) / span) * 100}%` }}
+            />
+          ))}
+        </span>
+      );
+    },
+    size: 160,
+    maxSize: 420,
+  },
 ];
 
 function fmtAgo(ts: number, now: number): string {
@@ -224,55 +268,24 @@ export function BoopPanelV2() {
     [open, lanes.length, events.length],
   );
 
-  const columns: TreeColumn<BoopLane>[] = useMemo(() => [
-    ...BOOP_COLUMNS,
-    {
-      id: "mails",
-      header: "mail",
-      sortValue: (r) => stats.get(r.route)?.count ?? 0,
-      cell: (r) => String(stats.get(r.route)?.count ?? 0),
-      size: 52,
-    },
-    {
-      id: "lastEvent",
-      header: "last event",
-      sortValue: (r) => stats.get(r.route)?.lastTs ?? 0,
-      cell: (r) => {
-        const last = stats.get(r.route)?.lastTs ?? 0;
-        return last ? fmtAgo(last, now) : "—";
-      },
-      size: 84,
-    },
-    {
-      id: "waterfall",
-      header: "waterfall",
-      cell: (r) => {
-        const stat = stats.get(r.route);
-        if (!stat || !stat.dots.length || !windowRange) return <span className="muted">—</span>;
-        const span = windowRange[1] - windowRange[0] || 1;
-        return (
-          <span className="boop-spark" title={`${stat.count} mail`}>
-            {stat.dots.map((dot) => (
-              <i
-                key={dot.id}
-                className={dot.cls}
-                style={{ left: `${((dot.t - windowRange[0]) / span) * 100}%` }}
-              />
-            ))}
-          </span>
-        );
-      },
-      size: 160,
-      maxSize: 420,
-    },
-  ], [stats, now, windowRange]);
+  const data: BoopRow[] = useMemo(
+    () =>
+      lanes.map((lane) => ({
+        ...lane,
+        mailCount: stats.get(lane.route)?.count ?? 0,
+        lastTs: stats.get(lane.route)?.lastTs ?? 0,
+        dots: stats.get(lane.route)?.dots ?? [],
+        windowRange,
+      })),
+    [lanes, stats, windowRange],
+  );
 
   return (
     <div className="v2-panel boop-panel">
       <div className="fs-list boop-master">
-        <TreeTable<BoopLane>
-          columns={columns}
-          data={lanes}
+        <TreeTable<BoopRow>
+          columns={BOOP_COLUMNS}
+          data={data}
           getRowId={(r) => r.route}
           defaultSorting={BOOP_SORT}
           virtual
