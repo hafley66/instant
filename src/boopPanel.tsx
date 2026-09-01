@@ -102,6 +102,53 @@ const BOOP_COLUMNS: TreeColumn<BoopLane>[] = [
   { id: "goal", header: "goal", sortValue: (r) => r.goal ?? "", cell: (r) => r.goal ?? "" },
 ];
 
+function fmtAgo(ts: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - ts) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+export interface LaneStat {
+  lastTs: number;
+  count: number;
+  dots: { id: string; t: number; cls: string }[];
+}
+
+// Per-lane rollup for the mail / last-event / spark columns. Dots cap at 240
+// so a chatty lane cannot blow up the DOM; the cap keeps the newest dots.
+export function laneStats(rows: MarbleEvent[]): Map<string, LaneStat> {
+  const map = new Map<string, LaneStat>();
+  for (const row of rows) {
+    for (const frame of row.frames ?? []) {
+      const stat = map.get(row.id) ?? { lastTs: 0, count: 0, dots: [] };
+      stat.count += 1;
+      stat.lastTs = Math.max(stat.lastTs, frame.t);
+      if (stat.dots.length < 240) {
+        stat.dots.push({
+          id: frame.id,
+          t: frame.t,
+          cls: frame.kind === "error" ? "err" : frame.direction,
+        });
+      }
+      map.set(row.id, stat);
+    }
+  }
+  return map;
+}
+
+export function stampsOf(rows: MarbleEvent[]): number[] {
+  const stamps: number[] = [];
+  for (const row of rows) {
+    if (row.start !== null) stamps.push(row.start);
+    for (const frame of row.frames ?? []) stamps.push(frame.t);
+  }
+  return stamps;
+}
+
 const BOOP_SORT: SortingState = [{ id: "route", desc: false }];
 
 const POLL_MS = 1000;
@@ -143,9 +190,30 @@ export function BoopPanelV2() {
   }, []);
 
   const rows = useMemo(() => toMarbleEvents(lanes, events), [lanes, events]);
+  const stats = useMemo(() => laneStats(rows), [rows]);
+  const now = Date.now();
+  const stamps = useMemo(() => stampsOf(rows), [rows]);
+  const windowRange: [number, number] | null = stamps.length
+    ? [Math.min(...stamps), Math.max(Math.max(...stamps), now - 1)]
+    : null;
+
   useEffect(() => {
     marbler.current.source.$(rows);
-  }, [rows]);
+    // The model was seeded empty, so its viewport range is degenerate until
+    // the first data lands; while following, chase the newest stamp.
+    const vp = marbler.current.viewport.$();
+    if (!windowRange) return;
+    if (vp.followLive) {
+      const span = vp.visible[1] - vp.visible[0] || windowRange[1] - windowRange[0];
+      marbler.current.viewport.$({
+        ...vp,
+        full: windowRange,
+        visible: [Math.max(windowRange[0], windowRange[1] - span), windowRange[1]],
+      });
+    } else {
+      marbler.current.viewport.$({ ...vp, full: windowRange });
+    }
+  }, [rows, windowRange]);
 
   const open = lanes.filter((lane) => lane.state === "open").length;
   const summary = useMemo(
@@ -156,14 +224,58 @@ export function BoopPanelV2() {
     [open, lanes.length, events.length],
   );
 
+  const columns: TreeColumn<BoopLane>[] = useMemo(() => [
+    ...BOOP_COLUMNS,
+    {
+      id: "mails",
+      header: "mail",
+      sortValue: (r) => stats.get(r.route)?.count ?? 0,
+      cell: (r) => String(stats.get(r.route)?.count ?? 0),
+      size: 52,
+    },
+    {
+      id: "lastEvent",
+      header: "last event",
+      sortValue: (r) => stats.get(r.route)?.lastTs ?? 0,
+      cell: (r) => {
+        const last = stats.get(r.route)?.lastTs ?? 0;
+        return last ? fmtAgo(last, now) : "—";
+      },
+      size: 84,
+    },
+    {
+      id: "waterfall",
+      header: "waterfall",
+      cell: (r) => {
+        const stat = stats.get(r.route);
+        if (!stat || !stat.dots.length || !windowRange) return <span className="muted">—</span>;
+        const span = windowRange[1] - windowRange[0] || 1;
+        return (
+          <span className="boop-spark" title={`${stat.count} mail`}>
+            {stat.dots.map((dot) => (
+              <i
+                key={dot.id}
+                className={dot.cls}
+                style={{ left: `${((dot.t - windowRange[0]) / span) * 100}%` }}
+              />
+            ))}
+          </span>
+        );
+      },
+      size: 160,
+      maxSize: 420,
+    },
+  ], [stats, now, windowRange]);
+
   return (
     <div className="v2-panel boop-panel">
       <div className="fs-list boop-master">
         <TreeTable<BoopLane>
-          columns={BOOP_COLUMNS}
+          columns={columns}
           data={lanes}
           getRowId={(r) => r.route}
           defaultSorting={BOOP_SORT}
+          virtual
           rowClass={(r) => (r.route === selected ? "fs-selected" : undefined)}
           onRowClick={(r) => setSelected(r.route)}
         />

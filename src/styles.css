@@ -4117,3 +4117,20 @@ html body { min-width: 0; }
 .boop-panel .boop-master .boop-closed {
   color: var(--grid-muted-fg, var(--panel-fg));
 }
+.boop-spark {
+  position: relative;
+  display: block;
+  height: 12px;
+}
+.boop-spark i {
+  position: absolute;
+  top: 4px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--panel-fg);
+  opacity: 0.45;
+}
+.boop-spark i.in { background: var(--row-active-bd); opacity: 0.9; }
+.boop-spark i.out { background: var(--panel-fg); opacity: 0.75; }
+.boop-spark i.err { background: #c0392b; opacity: 1; }

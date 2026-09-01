@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createMarbler } from "@hafley66/marbler";
-import { laneFrames, toMarbleEvents, type BoopLane, type BoopLaneEvent } from "./boopPanel";
+import {
+  laneFrames,
+  laneStats,
+  stampsOf,
+  toMarbleEvents,
+  type BoopLane,
+  type BoopLaneEvent,
+} from "./boopPanel";
 
 const LANE_A: BoopLane = {
   route: "feat-alpha",
@@ -103,5 +110,21 @@ describe("laneFrames", () => {
 
   it("ignores mail that touches other routes", () => {
     expect(laneFrames(LANE_A, [DIED])).toHaveLength(0);
+  });
+});
+
+describe("laneStats", () => {
+  it("rolls up count, last event, and dot classes per lane", () => {
+    const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
+    const stats = laneStats(rows);
+    expect(stats.get("feat-alpha")?.count).toBe(2);
+    expect(stats.get("feat-alpha")?.lastTs).toBe(4000);
+    expect(stats.get("fix-beta")?.dots.map((dot) => dot.cls)).toEqual(["in", "out", "err"]);
+  });
+
+  it("stampsOf covers lane starts and frame times for the viewport range", () => {
+    const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
+    expect(stampsOf(rows)).toEqual(expect.arrayContaining([1000, 2000, 3000, 4000, 5000]));
+    expect(stampsOf([])).toEqual([]);
   });
 });
