@@ -359,6 +359,7 @@ describe("diagram overlay flicker (diagnostic lane)", () => {
     // write/scroll/resize subscriptions are captured, not exercised, and the
     // frame never fires because requestAnimationFrame is a no-op stub here.
     vi.stubGlobal("requestAnimationFrame", () => 9);
+    vi.stubGlobal("getComputedStyle", () => ({ backgroundColor: "rgb(24, 24, 24)" }));
     vi.stubGlobal("document", {
       createElement: () => ({
         className: "", hidden: false,
@@ -446,5 +447,141 @@ describe("mermaid bundle loader", () => {
     expect(scripts).toHaveLength(2);
     scripts[1].listeners.get("error")!();
     await expect(second).rejects.toThrow();
+  });
+});
+
+function overlayRig(rows: string[]) {
+  vi.stubGlobal("requestAnimationFrame", () => 9);
+  vi.stubGlobal("getComputedStyle", () => ({ backgroundColor: "rgb(24, 24, 24)" }));
+  const created: Array<Record<string, any>> = [];
+  vi.stubGlobal("document", {
+    createElement: () => {
+      const element: Record<string, any> = {
+        className: "", hidden: false, title: "", innerHTML: "", textContent: "",
+        dataset: {}, style: {}, children: [],
+        classList: { contains: () => false },
+        addEventListener() {}, removeEventListener() {},
+        getBoundingClientRect: () => ({ left: 0, top: 0, right: 800, bottom: 400, width: 800, height: 400 }),
+        querySelectorAll: () => element.children.filter((child: any) =>
+          String(child.className).split(" ").includes("term-diagram")),
+        replaceChildren: (...next: any[]) => { element.children = next; },
+        remove() {},
+      };
+      created.push(element);
+      return element;
+    },
+  });
+  const screen = {
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 800, bottom: 400, width: 800, height: 400 }),
+  };
+  const host = {
+    appendChild() {}, addEventListener() {}, removeEventListener() {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }),
+    querySelector: (selector: string) => selector === ".xterm-screen" ? screen : null,
+  } as unknown as HTMLElement;
+  let onWrite: (() => void) | null = null;
+  const term = {
+    rows: 24,
+    buffer: {
+      active: {
+        viewportY: 0,
+        length: Math.max(rows.length, 24),
+        getLine: (row: number) => row < rows.length
+          ? { isWrapped: false, translateToString: () => rows[row] }
+          : null,
+      },
+    },
+    onWriteParsed: (cb: () => void) => { onWrite = cb; return { dispose() {} }; },
+    onScroll: () => ({ dispose() {} }),
+    onResize: () => ({ dispose() {} }),
+  } as unknown as Terminal;
+  const overlay = new TerminalDiagramOverlay(term, host, undefined, {
+    visible: [],
+    changes: new Subject<TurnVisibilityEvent>(),
+    scanning: false,
+  });
+  return { overlay, write: () => onWrite!(), elements: created };
+}
+
+describe("diagram overlay idle render", () => {
+  const fenceRows = ["```mermaid", "flowchart LR", "  A --> B", "```"];
+
+  it("paints a terminal fence on write even when the ledger has no turn", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const { overlay, write, elements } = overlayRig(fenceRows);
+
+    write();
+    expect(overlay.hideRequested).toBe(true);
+    await overlay.paint();
+
+    expect(overlay.root.hidden).toBe(false);
+    expect(elements[elements.length - 1].dataset.language).toBe("mermaid");
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves a painted overlay alone on a write that changes nothing", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const { overlay, write } = overlayRig(fenceRows);
+    await overlay.paint();
+
+    const generationBefore = overlay.generation;
+    write();
+
+    expect(overlay.hideRequested).toBe(false);
+    expect(overlay.generation).toBe(generationBefore);
+    expect(overlay.root.hidden).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("unhides on activate even when nothing about the fences changed", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const { overlay } = overlayRig(fenceRows);
+    await overlay.paint();
+    expect(overlay.lastPaintedFingerprint).not.toBe("");
+
+    overlay.activate();
+    await overlay.paint();
+
+    expect(overlay.root.hidden).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves the fingerprint unpinned on a failed render and schedules a retry", async () => {
+    const render = vi.fn().mockRejectedValue(new Error("bundle unreachable"));
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render } });
+    const { overlay } = overlayRig(fenceRows);
+
+    await overlay.paint();
+    expect(overlay.lastPaintedFingerprint).toBe("");
+    expect(overlay.retryTimer).not.toBeNull();
+
+    render.mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' });
+    await overlay.paint();
+    expect(overlay.lastPaintedFingerprint).not.toBe("");
+    expect(overlay.retryTimer).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("diagram overlay scroll debounce", () => {
+  const fenceRows = ["```mermaid", "flowchart LR", "  A --> B", "```"];
+
+  it("holds the root hidden across paints while the wheel is active", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const { overlay } = overlayRig(fenceRows);
+    await overlay.paint();
+    expect(overlay.root.hidden).toBe(false);
+
+    overlay.viewportScrolled();
+    expect(overlay.root.hidden).toBe(true);
+    await overlay.paint();
+    expect(overlay.root.hidden).toBe(true);
+
+    overlay.scrollEvents.next();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await overlay.paint();
+    expect(overlay.scrolling).toBe(false);
+    expect(overlay.root.hidden).toBe(false);
+    vi.unstubAllGlobals();
   });
 });
