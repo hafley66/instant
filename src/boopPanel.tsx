@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "./generated/native";
 import { TreeTable, type TreeColumn } from "./treetable";
+import { settings } from "./0_settings";
 import type { SortingState } from "@tanstack/react-table";
 import { createMarbler, MarblerPanel, type MarbleEvent, type MarbleFrame } from "@hafley66/marbler";
 
@@ -193,17 +194,35 @@ export function stampsOf(rows: MarbleEvent[]): number[] {
   return stamps;
 }
 
-// Lane narrowing: the selected lane plus its mail peers, so inter-lane
-// links keep both endpoints. Filtered lanes are disabled, never deleted.
-export function narrowRows(rows: MarbleEvent[], lane: string | null): MarbleEvent[] {
-  if (!lane) return rows;
-  const keep = new Set<string>([lane]);
-  const focus = rows.find((row) => row.id === lane);
-  for (const frame of focus?.frames ?? []) if (frame.peer) keep.add(frame.peer);
+// Lane narrowing: the selected root's subtree (parent-edge walk) plus mail
+// peers, so links keep both endpoints. Filtered lanes are disabled.
+export function subtreeLanes(lanes: BoopLane[], rows: MarbleEvent[], root: string | null): MarbleEvent[] {
+  if (!root) return rows;
+  const keep = new Set<string>([root]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const lane of lanes) {
+      if (lane.parent && keep.has(lane.parent) && !keep.has(lane.route)) {
+        keep.add(lane.route);
+        grew = true;
+      }
+    }
+  }
+  for (const row of rows) {
+    if (!keep.has(row.id)) continue;
+    for (const frame of row.frames ?? []) if (frame.peer) keep.add(frame.peer);
+  }
   return rows.filter((row) => keep.has(row.id));
 }
 
-const BOOP_SORT: SortingState = [{ id: "route", desc: false }];
+// Root sessions for the master table: TUI panes and top-level lanes; a named
+// parent that is itself a route means the row is an intermediate lane.
+export function rootLanes(lanes: BoopLane[]): BoopLane[] {
+  return lanes.filter((lane) => !lane.parent || lane.parent === "root");
+}
+
+const BOOP_SORT: SortingState = [{ id: "lastEvent", desc: true }];
 
 const POLL_MS = 1000;
 // Full history on first paint; after that only the tail, merged in memory.
@@ -253,9 +272,12 @@ export function BoopPanelV2() {
     ? [Math.min(...stamps), Math.max(newest + POLL_MS, newest + 1)]
     : null), [stamps, newest]);
 
-  // A selected lane narrows the network view to that line plus its peers
-  // (peers stay so inter-lane links still draw). Click the row again to clear.
-  const shown = useMemo(() => narrowRows(rows, selected), [rows, selected]);
+  // A selected root narrows the network view to its descendant subtree plus
+  // mail peers. Click the row again to clear.
+  const shown = useMemo(
+    () => subtreeLanes(lanes, rows, selected),
+    [lanes, rows, selected],
+  );
 
   useEffect(() => {
     marbler.current.source.$(shown);
@@ -281,17 +303,21 @@ export function BoopPanelV2() {
     }
   }, [shown, windowRange]);
 
-  const data: BoopRow[] = useMemo(
-    () =>
-      lanes.map((lane) => ({
-        ...lane,
-        mailCount: stats.get(lane.route)?.count ?? 0,
-        lastTs: stats.get(lane.route)?.lastTs ?? 0,
-        dots: stats.get(lane.route)?.dots ?? [],
-        windowRange,
-      })),
-    [lanes, stats, windowRange],
-  );
+  const onlyActive = settings.boopOnlyActive.$();
+  const roots = useMemo(() => rootLanes(lanes), [lanes]);
+  const data: BoopRow[] = useMemo(() => {
+    const source = onlyActive ? roots.filter((lane) => lane.state === "open") : roots;
+    return source.map((lane) => ({
+      ...lane,
+      mailCount: stats.get(lane.route)?.count ?? 0,
+      lastTs: stats.get(lane.route)?.lastTs ?? 0,
+      dots: stats.get(lane.route)?.dots ?? [],
+      windowRange,
+    }));
+  }, [roots, onlyActive, stats, windowRange]);
+  const hiddenByActive = onlyActive
+    ? roots.filter((lane) => lane.state !== "open").length
+    : 0;
 
   const summaryAll = useMemo(() => {
     const open = lanes.filter((lane) => lane.state === "open").length;
@@ -301,12 +327,25 @@ export function BoopPanelV2() {
     ];
   }, [lanes, events.length]);
   const summary = selected
-    ? [`showing ${selected} + peers`, `${shown.length} of ${rows.length} lanes`]
+    ? [`showing ${selected} + descendants`, `${shown.length} of ${rows.length} lanes`]
     : summaryAll;
 
   return (
     <div className="v2-panel boop-panel">
       <div className="fs-list boop-master">
+        <div className="boop-toolbar">
+          <label className="boop-only-active">
+            <input
+              type="checkbox"
+              checked={onlyActive}
+              onChange={(e) => settings.boopOnlyActive.$(e.target.checked)}
+            />
+            active only
+          </label>
+          {hiddenByActive > 0 && (
+            <span className="muted">{hiddenByActive} hidden by active-only</span>
+          )}
+        </div>
         <TreeTable<BoopRow>
           columns={BOOP_COLUMNS}
           data={data}
@@ -330,7 +369,7 @@ export function BoopPanelV2() {
       <div className="boop-marbler">
         {selected && (
           <button type="button" className="boop-narrow" onClick={() => setSelected(null)}>
-            showing {selected} + peers ×
+            showing {selected} + descendants ×
           </button>
         )}
         <MarblerPanel model={marbler.current} embedded summary={summary} />

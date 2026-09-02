@@ -86,6 +86,7 @@ export const settings = {
   // the bridge would push to the system clipboard on every drag.
   clipboardFromTerminal: setting("clipboardFromTerminal", true),
   inlineDiagrams: setting("inlineDiagrams", true),
+  boopOnlyActive: setting("boopOnlyActive", true),
   inlineStructuredSelectors: setting("inlineStructuredSelectors", true),
 
   // tabs and layout

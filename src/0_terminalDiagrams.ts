@@ -629,8 +629,14 @@ export class TerminalDiagramOverlay {
     this.root.hidden = false;
     const existing = new Map(Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
       .map((element) => [element.dataset.diagramKey ?? "", element]));
+    // Duplicate fences (same locator or same direct code) collapsed onto one
+    // element after the locator re-key; the occurrence suffix fixes that.
+    const occurrences = new Map<string, number>();
     const elements = rendered.map(({ fence, svg, error }) => {
-      const diagramKey = diagramElementKey(fence, dark);
+      const base = diagramElementKey(fence, dark);
+      const seen = occurrences.get(base) ?? 0;
+      occurrences.set(base, seen + 1);
+      const diagramKey = seen === 0 ? base : `${base}#${seen}`;
       const element = existing.get(diagramKey) ?? this.elementCache.get(diagramKey) ?? document.createElement("div");
       const created = !element.dataset.diagramKey;
       this.elementCache.set(diagramKey, element);

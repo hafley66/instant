@@ -1,10 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// boopPanel imports 0_settings, whose module body reads location/storage at
+// import time; vi.hoisted runs before the import graph evaluates.
+vi.hoisted(() => {
+  const storage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  globalThis.location = { search: "", hash: "" } as unknown as Location;
+  globalThis.localStorage = storage as unknown as Storage;
+  globalThis.sessionStorage = storage as unknown as Storage;
+});
+
 import { createMarbler } from "@hafley66/marbler";
 import {
   laneFrames,
   laneStats,
-  narrowRows,
+  rootLanes,
   stampsOf,
+  subtreeLanes,
   toMarbleEvents,
   type BoopLane,
   type BoopLaneEvent,
@@ -143,10 +154,11 @@ const LANE_C: BoopLane = {
   state: "closed",
 };
 
-describe("narrowRows", () => {
-  it("keeps the selected lane and its mail peers, drops the rest", () => {
+describe("subtreeLanes", () => {
+  it("keeps the selected root's descendants and mail peers, drops the sibling subtree", () => {
     const rows = toMarbleEvents([LANE_A, LANE_B, LANE_C], EVENTS);
-    expect(narrowRows(rows, "feat-alpha").map((row) => row.id).sort()).toEqual([
+    const lanes = [LANE_A, LANE_B, LANE_C];
+    expect(subtreeLanes(lanes, rows, "feat-alpha").map((row) => row.id).sort()).toEqual([
       "feat-alpha",
       "fix-beta",
     ]);
@@ -154,6 +166,13 @@ describe("narrowRows", () => {
 
   it("passes all rows through when nothing is selected", () => {
     const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
-    expect(narrowRows(rows, null)).toBe(rows);
+    expect(subtreeLanes([LANE_A, LANE_B], rows, null)).toBe(rows);
+  });
+});
+
+describe("rootLanes", () => {
+  it("keeps parentless and 'root' parents, drops named parents", () => {
+    const roots = rootLanes([LANE_A, LANE_B, LANE_C]).map((lane) => lane.route);
+    expect(roots).toEqual(["chore-gamma"]);
   });
 });
