@@ -387,8 +387,9 @@ export class TerminalDiagramOverlay {
   lightboxEntries: DiagramLightboxEntry[] = [];
   lightboxActive = 0;
   hideRequested = false;
-  lastVisibleFingerprint = "";
   lastPaintedFingerprint = "";
+  retryTimer: ReturnType<typeof setTimeout> | null = null;
+  retryDelayMs = 2_000;
 
   constructor(
     readonly term: Terminal,
@@ -427,10 +428,9 @@ export class TerminalDiagramOverlay {
       { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.projection) {
-          // A write that leaves the visible fence keys and viewport unchanged
-          // must not touch root.hidden at all; hiding is deferred to the
-          // recovery window so a keystroke burst hides at most once.
-          if (this.fenceFingerprint() === this.lastVisibleFingerprint) return;
+          // The gate covers the merged fence set, so a pane the turn ledger
+          // cannot see still paints the fences its own buffer carries.
+          if (this.renderPlan().fingerprint === this.lastPaintedFingerprint) return;
           this.hideRequested = true;
           this.generation++;
           this.positionElements();
@@ -451,16 +451,17 @@ export class TerminalDiagramOverlay {
         this.scheduleFrame();
       }),
     ];
-    this.lastVisibleFingerprint = this.fenceFingerprint();
     this.scheduleFrame();
   }
 
   viewportScrolled() {
     if (this.projection) {
-      if (this.fenceFingerprint() === this.lastVisibleFingerprint) return;
+      // A routed wheel gesture repaints the pane from tmux (copy-mode
+      // included), so the overlay ducks; the debounced scroll paint reveals.
       this.scrolling = true;
       this.lastScrollAt = performance.now();
-      this.hideRequested = true;
+      this.root.hidden = true;
+      this.hideRequested = false;
       this.generation++;
       this.positionElements();
       this.scrollEvents.next();
@@ -548,34 +549,9 @@ export class TerminalDiagramOverlay {
     };
   }
 
-  // A cheap signature of what a repaint would render: the projected fence keys
-  // inside the current viewport. When it is unchanged, hiding (on write/scroll)
-  // and repainting (on idle rescan) are both no-ops. Keyed on locator, so a
-  // rescan that re-anchors a turn one row without changing its content leaves
-  // the fingerprint stable.
-  fenceFingerprint(): string {
-    const top = this.term.buffer.active.viewportY;
-    const end = top + this.term.rows - 1;
-    const keys = this.projection?.visible
-      .flatMap((turn) => turn.regions)
-      .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
-        region.kind === "mermaid" || region.kind === "d2")
-      .filter((region) => region.bufferEnd >= top && region.bufferStart <= end)
-      .map((region) => diagramElementKey(this.fenceFor(region), darkBackground(this.host)))
-      .sort()
-      .join("|") ?? "";
-    return `${top}:${keys}`;
-  }
-
-  async paint() {
-    if (!this.enabled()) {
-      this.root.hidden = true;
-      return;
-    }
-    const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen) return;
-    const screenRect = screen.getBoundingClientRect();
-    const cellHeight = screenRect.height / this.term.rows;
+  // One buffer+projection pass shared by the write/scroll gates and paint(), so
+  // both answer "what would a repaint render?" identically.
+  renderPlan() {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
@@ -585,13 +561,9 @@ export class TerminalDiagramOverlay {
       .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
         (region.kind === "mermaid" || region.kind === "d2") && projectedDiagramIsCurrent(this.term, region))
       .map((region) => this.fenceFor(region))) ?? [];
-    // Keep exact, explicit terminal fences available while the harness ledger
-    // is empty, delayed, or unable to locate its source in the visible buffer.
-    // mergeLocatedDiagrams replaces a clipped terminal prefix with its complete
-    // ledger match while retaining the visible source when estimates disagree.
-    // Inferred arrow-shaped output remains excluded from `direct` above.
-    const fences = mergeLocatedDiagrams(direct, projected);
-    const visibleFences = fences.filter(
+    // Explicit terminal fences stay available while the ledger is empty or
+    // unable to locate its source; mergeLocatedDiagrams arbitrates overlap.
+    const visibleFences = mergeLocatedDiagrams(direct, projected).filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
     // Covers the merged set, code length, and theme, so direct fences and
@@ -600,7 +572,45 @@ export class TerminalDiagramOverlay {
       .map((fence) => `${diagramElementKey(fence, dark)}#${fence.code.length}`)
       .sort()
       .join("|")}`;
-    if (fingerprint === this.lastPaintedFingerprint) return;
+    return { dark, viewportTop, viewportEnd, visibleFences, fingerprint };
+  }
+
+  // A paint whose renders failed must recover on its own: backoff caps at 30s
+  // and a successful paint resets the delay.
+  scheduleRetry() {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.scheduleFrame();
+    }, this.retryDelayMs);
+    this.retryDelayMs = Math.min(this.retryDelayMs * 2, 30_000);
+  }
+
+  clearRetry() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.retryDelayMs = 2_000;
+  }
+
+  async paint() {
+    if (!this.enabled()) {
+      this.root.hidden = true;
+      return;
+    }
+    if (this.scrolling) {
+      // Wheel ticks hold the root hidden; the 80ms scroll-quiet window owns
+      // the one reveal paint, so nothing repaints mid-gesture.
+      this.root.hidden = true;
+      return;
+    }
+    const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) return;
+    const screenRect = screen.getBoundingClientRect();
+    const cellHeight = screenRect.height / this.term.rows;
+    const { dark, visibleFences, fingerprint } = this.renderPlan();
+    // A matching fingerprint skips the render only while the result is on
+    // screen; activate() and syncEnabled() hide the root to force a repaint.
+    if (fingerprint === this.lastPaintedFingerprint && !this.root.hidden) return;
     const generation = ++this.generation;
     const rendered = await Promise.all(visibleFences.map(async (fence) => {
       const key = `${dark}:${fence.language}:${fence.code}`;
@@ -625,7 +635,13 @@ export class TerminalDiagramOverlay {
       }
     }));
     if (generation !== this.generation) return;
-    this.lastPaintedFingerprint = fingerprint;
+    // An errored render stays unpinned so idle rescans and the retry timer
+    // keep attempting it; a success pins and resets the backoff.
+    if (rendered.some((entry) => entry.error)) this.scheduleRetry();
+    else {
+      this.lastPaintedFingerprint = fingerprint;
+      this.clearRetry();
+    }
     this.root.hidden = false;
     const existing = new Map(Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
       .map((element) => [element.dataset.diagramKey ?? "", element]));
@@ -751,6 +767,7 @@ export class TerminalDiagramOverlay {
   }
 
   dispose() {
+    this.clearRetry();
     if (this.frame) cancelAnimationFrame(this.frame);
     this.activitySubscription?.unsubscribe();
     this.scrollSubscription.unsubscribe();
