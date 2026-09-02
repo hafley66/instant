@@ -3,6 +3,7 @@ import { createMarbler } from "@hafley66/marbler";
 import {
   laneFrames,
   laneStats,
+  narrowRows,
   stampsOf,
   toMarbleEvents,
   type BoopLane,
@@ -126,5 +127,33 @@ describe("laneStats", () => {
     const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
     expect(stampsOf(rows)).toEqual(expect.arrayContaining([1000, 2000, 3000, 4000, 5000]));
     expect(stampsOf([])).toEqual([]);
+  });
+});
+
+const LANE_C: BoopLane = {
+  route: "chore-gamma",
+  kind: "lane",
+  harness: "claude",
+  model: "glm-5.3",
+  goal: "watch only",
+  parent: "root",
+  cwd: "/repo/c",
+  branch: "gamma",
+  registeredMs: 1500,
+  state: "closed",
+};
+
+describe("narrowRows", () => {
+  it("keeps the selected lane and its mail peers, drops the rest", () => {
+    const rows = toMarbleEvents([LANE_A, LANE_B, LANE_C], EVENTS);
+    expect(narrowRows(rows, "feat-alpha").map((row) => row.id).sort()).toEqual([
+      "feat-alpha",
+      "fix-beta",
+    ]);
+  });
+
+  it("passes all rows through when nothing is selected", () => {
+    const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
+    expect(narrowRows(rows, null)).toBe(rows);
   });
 });

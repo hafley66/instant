@@ -4134,3 +4134,17 @@ html body { min-width: 0; }
 .boop-spark i.in { background: var(--row-active-bd); opacity: 0.9; }
 .boop-spark i.out { background: var(--panel-fg); opacity: 0.75; }
 .boop-spark i.err { background: #c0392b; opacity: 1; }
+.boop-panel .boop-marbler { position: relative; }
+.boop-narrow {
+  position: absolute;
+  z-index: 4;
+  top: 6px;
+  right: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--frame);
+  border-radius: 3px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  font-size: 10px;
+}
+.boop-narrow:hover { background: var(--row-hover); }

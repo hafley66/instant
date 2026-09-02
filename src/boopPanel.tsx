@@ -193,6 +193,16 @@ export function stampsOf(rows: MarbleEvent[]): number[] {
   return stamps;
 }
 
+// Lane narrowing: the selected lane plus its mail peers, so inter-lane
+// links keep both endpoints. Filtered lanes are disabled, never deleted.
+export function narrowRows(rows: MarbleEvent[], lane: string | null): MarbleEvent[] {
+  if (!lane) return rows;
+  const keep = new Set<string>([lane]);
+  const focus = rows.find((row) => row.id === lane);
+  for (const frame of focus?.frames ?? []) if (frame.peer) keep.add(frame.peer);
+  return rows.filter((row) => keep.has(row.id));
+}
+
 const BOOP_SORT: SortingState = [{ id: "route", desc: false }];
 
 const POLL_MS = 1000;
@@ -235,38 +245,41 @@ export function BoopPanelV2() {
 
   const rows = useMemo(() => toMarbleEvents(lanes, events), [lanes, events]);
   const stats = useMemo(() => laneStats(rows), [rows]);
-  const now = Date.now();
   const stamps = useMemo(() => stampsOf(rows), [rows]);
-  const windowRange: [number, number] | null = stamps.length
-    ? [Math.min(...stamps), Math.max(Math.max(...stamps), now - 1)]
-    : null;
+  const newest = Math.max(0, ...stamps);
+  // Memoized: an unstable identity here fired the viewport effect on every
+  // render and stomped in-flight navigator gestures.
+  const windowRange = useMemo<[number, number] | null>(() => (stamps.length
+    ? [Math.min(...stamps), Math.max(newest + POLL_MS, newest + 1)]
+    : null), [stamps, newest]);
+
+  // A selected lane narrows the network view to that line plus its peers
+  // (peers stay so inter-lane links still draw). Click the row again to clear.
+  const shown = useMemo(() => narrowRows(rows, selected), [rows, selected]);
 
   useEffect(() => {
-    marbler.current.source.$(rows);
-    // The model was seeded empty, so its viewport range is degenerate until
-    // the first data lands; while following, chase the newest stamp.
+    marbler.current.source.$(shown);
+    marbler.current.selectedId.$(selected);
+  }, [shown, selected]);
+
+  useEffect(() => {
+    // Seeded-empty model starts with a degenerate range; while following,
+    // chase the newest stamp. Value-equal writes are skipped.
     const vp = marbler.current.viewport.$();
     if (!windowRange) return;
+    const fullSame = vp.full[0] === windowRange[0] && vp.full[1] === windowRange[1];
     if (vp.followLive) {
       const span = vp.visible[1] - vp.visible[0] || windowRange[1] - windowRange[0];
-      marbler.current.viewport.$({
-        ...vp,
-        full: windowRange,
-        visible: [Math.max(windowRange[0], windowRange[1] - span), windowRange[1]],
-      });
-    } else {
+      const visible: [number, number] = [
+        Math.max(windowRange[0], windowRange[1] - span),
+        windowRange[1],
+      ];
+      if (fullSame && vp.visible[0] === visible[0] && vp.visible[1] === visible[1]) return;
+      marbler.current.viewport.$({ ...vp, full: windowRange, visible });
+    } else if (!fullSame) {
       marbler.current.viewport.$({ ...vp, full: windowRange });
     }
-  }, [rows, windowRange]);
-
-  const open = lanes.filter((lane) => lane.state === "open").length;
-  const summary = useMemo(
-    () => [
-      `${open} open · ${lanes.length - open} closed`,
-      `${events.length} mail in window`,
-    ],
-    [open, lanes.length, events.length],
-  );
+  }, [shown, windowRange]);
 
   const data: BoopRow[] = useMemo(
     () =>
@@ -280,6 +293,17 @@ export function BoopPanelV2() {
     [lanes, stats, windowRange],
   );
 
+  const summaryAll = useMemo(() => {
+    const open = lanes.filter((lane) => lane.state === "open").length;
+    return [
+      `${open} open · ${lanes.length - open} closed`,
+      `${events.length} mail in window`,
+    ];
+  }, [lanes, events.length]);
+  const summary = selected
+    ? [`showing ${selected} + peers`, `${shown.length} of ${rows.length} lanes`]
+    : summaryAll;
+
   return (
     <div className="v2-panel boop-panel">
       <div className="fs-list boop-master">
@@ -290,7 +314,7 @@ export function BoopPanelV2() {
           defaultSorting={BOOP_SORT}
           virtual
           rowClass={(r) => (r.route === selected ? "fs-selected" : undefined)}
-          onRowClick={(r) => setSelected(r.route)}
+          onRowClick={(r) => setSelected((prior) => (prior === r.route ? null : r.route))}
         />
         {lanes.length === 0 && (
           <div className="empty-help">
@@ -304,6 +328,11 @@ export function BoopPanelV2() {
         )}
       </div>
       <div className="boop-marbler">
+        {selected && (
+          <button type="button" className="boop-narrow" onClick={() => setSelected(null)}>
+            showing {selected} + peers ×
+          </button>
+        )}
         <MarblerPanel model={marbler.current} embedded summary={summary} />
       </div>
     </div>
