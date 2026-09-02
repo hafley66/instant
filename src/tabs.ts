@@ -163,19 +163,8 @@ export async function reopenLastTab() {
   }
   const last = entry.tab;
   logLine(`[tab.reopen] selected=terminal name=${JSON.stringify(last.name)}`);
-  // Wait for the close's teardown to finish before recreating this name. The
-  // close runs exitOrDetachTab on closeChain (async kill_session / close_pty); if
-  // we recreate first, either tmux -A reattaches the dying corpse (dropping the
-  // --resume command) or the still-queued kill lands AFTER our new session and
-  // tears IT down — the "double reopen" failure. Awaiting frees the name first.
-  //
-  // resumeTabs is READ after this await too, not before: exitOrDetachTab writes
-  // it from inside that same closeChain (the async on-disk session probe), so
-  // reading it before the await could see the pre-close value — last reopen's
-  // id, or nothing — and silently replay a stale/blank command instead of this
-  // close's resume. That's the "works once, breaks the second time" failure:
-  // the first close's record happened to already be in the store by the time
-  // you reopened, masking the race until a faster close/reopen cycle hit it.
+  // Settle the close's teardown before recreating this name: a still-queued
+  // close_pty landing after the recreate would tear the new session down.
   await settleClosures();
   // ⌘⇧T is the "bring back what I just closed" gesture — so if we exited an agent
   // in this SESSION NAME, resume its conversation (name-keyed record) instead of

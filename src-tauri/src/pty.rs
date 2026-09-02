@@ -412,24 +412,41 @@ fn drain_utf8(pending: &mut Vec<u8>) -> String {
     out
 }
 
-/// Turn on mouse mode for a session so the wheel scrolls the pane / forwards to
-/// mouse-aware TUIs (claude, opencode). Per-session (not `-g`) to leave the
-/// user's other tmux sessions alone. Retries: a freshly-created session may not
-/// exist yet the instant new-session is spawned.
-fn enable_mouse(name: &str) {
+/// Per-session tmux setup for sessions instant owns: mouse for the wheel,
+/// remain-on-exit so self-exit leaves a respawnable dead pane, plus revive.
+fn enable_mouse(name: &str, respawn: Option<&str>) {
     let name = name.to_string();
+    let respawn = respawn.map(str::to_string);
     std::thread::spawn(move || {
         for _ in 0..15 {
-            let ok = tmux_cmd()
-                .args(["set-option", "-t", &name, "mouse", "on"])
-                .env("PATH", path_env())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ok {
+            let ok = |option: &str| {
+                tmux_cmd()
+                    .args(["set-option", "-t", &name, option, "on"])
+                    .env("PATH", path_env())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+            if ok("mouse") && ok("remain-on-exit") {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+        // A self-exited pane sits dead ("Pane is dead") under remain-on-exit;
+        // revive it with the tab's command. Lanes pass respawn=None (boop owns them).
+        if let Ok(out) = tmux_cmd()
+            .args(["display-message", "-p", "-t", &name, "#{pane_dead}"])
+            .env("PATH", path_env())
+            .output()
+        {
+            if String::from_utf8_lossy(&out.stdout).trim() == "1" {
+                let mut c = tmux_cmd();
+                c.args(["respawn-pane", "-k", "-t", &name]);
+                if let Some(cmd) = respawn.as_deref().filter(|s| !s.trim().is_empty()) {
+                    c.arg(cmd);
+                }
+                let _ = c.env("PATH", path_env()).status();
+            }
         }
         // `on` would make tmux emit an OSC 52 for every mouse drag, so each
         // selection overwrote the macOS clipboard. `external` forwards only an
@@ -579,7 +596,7 @@ pub async fn open_session(
         if map.contains_key(&id) {
             drop(map);
             if !graphics && !direct_pty_mode() {
-                enable_mouse(tmux_target.as_deref().unwrap_or(&name));
+                enable_mouse(tmux_target.as_deref().unwrap_or(&name), None);
             }
             return resize_pty(store, id, cols, rows, cell_w, cell_h);
         }
@@ -713,7 +730,13 @@ pub async fn open_session(
     );
 
     if !graphics && !direct_pty_mode() {
-        enable_mouse(&target_session); // wheel scrolls the pane / forwards to mouse-aware TUIs
+        // Lanes are viewer targets; only sessions instant created get respawned.
+        let revive = if attach_only.unwrap_or(false) || attach_target.is_some() {
+            None
+        } else {
+            command.as_deref()
+        };
+        enable_mouse(&target_session, revive); // wheel + remain-on-exit + revive
     }
 
     // Reader thread: pump pty -> bounded event queue until EOF (session detached/killed).

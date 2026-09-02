@@ -63,7 +63,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns, tabSessions, unclaimedSession } from "./favorites";
+import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns } from "./favorites";
 import {
   selectProjectionTurns,
   TerminalTurnVisibilityV2,
@@ -74,15 +74,8 @@ import { CmdClickGestureTracker } from "./0_clickRouter";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
-import { closedTabFate } from "./0_closedTabFate";
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
-import {
-  renderSessionActive,
-  refreshSessions,
-  foregroundProc,
-  looksLikeAgentProc,
-  KNOWN_RESUME,
-} from "./worktrees";
+import { renderSessionActive, refreshSessions } from "./worktrees";
 import { settings } from "./0_settings";
 
 export type Tab = {
@@ -1138,7 +1131,7 @@ export function closeTab(id: string) {
 export const closedTabs: { tab: OpenTab; ts: number; order: number }[] = [];
 // Runs close-time agent teardown one-at-a-time; see onTermClosed for why.
 let closeChain: Promise<unknown> = Promise.resolve();
-// Await all in-flight close teardown (kill_session / close_pty). Reopen paths
+// Await all in-flight close teardown (close_pty). Reopen paths
 // call this BEFORE recreating a session name so a recreated session can't be
 // reattached to a dying corpse or torn down by a kill still queued from its close.
 export const settleClosures = () => closeChain;
@@ -1165,16 +1158,6 @@ export function onTermClosed(id: string) {
   const t = tabs.get(id);
   if (!t) return;
   const name = t.name;
-  // Capture before teardown: cwd/command + the live foreground proc decide
-  // whether this is an agent tab to EXIT (free RAM) vs a shell we just detach.
-  const tabMeta = tabMetaById(id);
-  const live = store.get().sessions.find((s) => s.name === name);
-  const proc = foregroundProc(live?.commands ?? []);
-  const sessionListed = live != null;
-  const isGraphics = t.graphics ?? false;
-  // Read before forgetTab drops the row: the close decision runs async (below)
-  // and would find the record already gone.
-  const isViewer = settings.openTabs.$().find((o) => o.name === name)?.viewer ?? false;
   t.overlay?.dispose();
   t.diagrams?.dispose();
   t.structured?.dispose();
@@ -1198,17 +1181,9 @@ export function onTermClosed(id: string) {
     order: nextClosedOrder(),
   });
   forgetTab(id); // don't reattach a tab the user closed
-  // Agent tab → kill the tmux session so claude/opencode isn't left burning RAM
-  // (recording its id for --resume first, keyed by session name). Anything else →
-  // detach the pty; the tmux session survives (so a reload reattaches it). Decided
-  // async because the on-disk session probe is async; see exitOrDetachTab.
-  // Serialize teardown: two near-simultaneous closes must NOT interleave their
-  // resumeTabs read-modify-write, or both probe-record the same newest-in-cwd id
-  // and the 2nd reopen resumes the 1st's session ("rando old session"). Chaining
-  // lets each close fully claim its id before the next one probes.
-  closeChain = closeChain
-    .then(() => exitOrDetachTab(id, name, tabMeta, proc, sessionListed, isGraphics, isViewer))
-    .catch(() => {});
+  // Detach only: the tmux session keeps running for reattach. Kill stays
+  // explicit (sidebar ×, agent-menu Kill); closeChain fences same-name recreates.
+  closeChain = closeChain.then(() => invoke("close_pty", { id }).catch(() => {}));
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
@@ -1216,65 +1191,6 @@ export function onTermClosed(id: string) {
     if (nextId) activate(nextId);
   }
   renderSessionActive();
-  refreshSessions();
-}
-
-// closedTabFate decides: agent tab -> kill (after best-effort recording its id
-// for --resume; jsonl is incremental so mid-run kills stay resumable), else detach.
-async function exitOrDetachTab(
-  id: string,
-  name: string,
-  meta: { cwd: string; command: string | null; harness: HarnessObservation["id"] } | null,
-  proc: string,
-  sessionListed: boolean,
-  isGraphics = false,
-  isViewer = false,
-) {
-  // Graphics tabs (awrit) are never tmux sessions; close_pty kills the child so
-  // it can't orphan and hold its profile lock.
-  if (isGraphics) {
-    invoke("close_pty", { id }).catch(() => {});
-    return;
-  }
-  const sessions = meta ? await tabSessions(tabCwds(id), meta.command, meta.harness) : [];
-  const bin = (meta?.command ?? "").trim().split(/\s+/)[0]?.split("/").pop() ?? "";
-  const fate = closedTabFate({
-    isViewer,
-    isAgentProc: looksLikeAgentProc(proc),
-    launchNamesAgent: KNOWN_RESUME[bin] != null,
-    proc,
-    sessionListed,
-    onDiskSessions: sessions.length,
-  });
-  if (fate === "detach") {
-    invoke("close_pty", { id }).catch(() => {}); // tmux session keeps running
-    return;
-  }
-  // Resume id is keyed by SESSION NAME — the stable identity of this tab. A claude
-  // session we launched already has the AUTHORITATIVE id recorded at launch
-  // (newAgentLaunch's --session-id), so DON'T clobber it with the close-time cwd
-  // probe, which only resolves "latest jsonl in this cwd" and would grab a sibling
-  // when several sessions share the cwd. The probe is a fallback for agents we
-  // didn't launch with a chosen id (e.g. opencode, or a reattached external one).
-  if (!settings.resumeTabs.$()[name]) {
-    // Skip ids already claimed by another tab's record so same-cwd siblings each
-    // resume a DISTINCT session (the "rando old session" fix). Serialized teardown
-    // (closeChain) guarantees prior closes have recorded before we read here.
-    const claimed = new Set(Object.values(settings.resumeTabs.$()).map((r) => r.sessionId));
-    const s = meta ? await unclaimedSession(meta, claimed) : null;
-    if (s) {
-      settings.resumeTabs.$({
-        ...settings.resumeTabs.$(),
-        [name]: { editor: s.editor, sessionId: s.sessionId },
-      });
-      console.log("[resume] recorded (probe)", name, "->", s.editor, s.sessionId.slice(0, 8));
-    } else {
-      console.log("[resume] killed", name, "(no id to resume)");
-    }
-  } else {
-    console.log("[resume] killed", name, "(keeping launch id)");
-  }
-  await invoke("kill_session", { name }).catch(console.error); // kill regardless of id resolution
   refreshSessions();
 }
 

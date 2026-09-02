@@ -372,13 +372,8 @@ function freshSessionName(clone: string, branch: string): string {
 // matters when the base session was killed.
 export async function openWorktree(clone: string, branch: string, wtPath: string, command?: string, fresh = false) {
   const name = fresh ? freshSessionName(clone, branch) : baseSessionName(clone, branch);
-  // Wait for any in-flight close teardown on this name BEFORE reading
-  // resumeTabs or recreating the session: exitOrDetachTab writes the resume
-  // record (its on-disk session probe) and kills the tmux session both async,
-  // on closeChain. Reading resumeTabs first (the old order) could see the
-  // pre-close value and silently fall through to newAgentLaunch — a brand new
-  // conversation, the previous one lost outright — on a close/reopen fast
-  // enough to race it. Not needed for a fresh name (no prior session to race).
+  // Settle any in-flight close teardown BEFORE recreating this name: a queued
+  // close_pty landing after the recreate would tear the new session down.
   if (!fresh) await settleClosures();
   const known = settings.resumeTabs.$()[name];
   const live = !fresh && !!known && (await resumeIdIsLive(known!.editor, wtPath, known!.sessionId));
@@ -431,8 +426,7 @@ export const resumeLaunch = (editor: HarnessId, sessionId: string) =>
 // Tried falling back to the newest on-disk session in the same cwd when the
 // exact id didn't match, on the theory that the harness rotates ids on its
 // own resume. Wrong, and actively dangerous: a cwd can have several genuinely
-// distinct concurrent sessions (the whole reason exitOrDetachTab's `claimed`
-// set exists — see "rando old session"), so "newest in this cwd" is not "this
+// distinct concurrent sessions (see "rando old session"), so "newest in this cwd" is not "this
 // tab's session". It silently swapped in an unrelated conversation. An exact
 // id either matches or it doesn't; there is no safe guess in between.
 export async function resumeIdIsLive(
