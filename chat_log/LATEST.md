@@ -1,1 +1,1 @@
-20260808.1.instant-rectangle-window-graph.md
+20260902.0.panel-close-detach-remain-on-exit.md
