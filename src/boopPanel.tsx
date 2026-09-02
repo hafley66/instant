@@ -92,6 +92,7 @@ export function toMarbleEvents(lanes: BoopLane[], events: BoopLaneEvent[]): Marb
 export interface BoopRow extends BoopLane {
   mailCount: number;
   lastTs: number;
+  endedTs: number;
   dots: LaneStat["dots"];
   windowRange: [number, number] | null;
 }
@@ -118,11 +119,26 @@ const BOOP_COLUMNS: TreeColumn<BoopRow>[] = [
     size: 52,
   },
   {
-    id: "lastEvent",
-    header: "last event",
+    id: "started",
+    header: "started",
+    sortValue: (r) => r.registeredMs,
+    cell: (r) => (r.registeredMs ? fmtAgo(r.registeredMs, Date.now()) : "—"),
+    size: 84,
+  },
+  {
+    id: "updated",
+    header: "updated",
     sortValue: (r) => r.lastTs,
     cell: (r) => (r.lastTs ? fmtAgo(r.lastTs, Date.now()) : "—"),
     size: 84,
+  },
+  {
+    id: "ended",
+    header: "last run end",
+    sortValue: (r) => r.endedTs,
+    cell: (r) =>
+      r.state === "open" || !r.endedTs ? "—" : fmtAgo(r.endedTs, Date.now()),
+    size: 92,
   },
   {
     id: "waterfall",
@@ -159,19 +175,23 @@ function fmtAgo(ts: number, now: number): string {
 
 export interface LaneStat {
   lastTs: number;
+  endedTs: number;
   count: number;
   dots: { id: string; t: number; cls: string }[];
 }
 
-// Per-lane rollup for the mail / last-event / spark columns. Dots cap at 240
-// so a chatty lane cannot blow up the DOM; the cap keeps the newest dots.
+// Per-lane rollup for the mail / time / spark columns. Dots cap at 240 so a
+// chatty lane cannot blow up the DOM; the cap keeps the newest dots.
 export function laneStats(rows: MarbleEvent[]): Map<string, LaneStat> {
   const map = new Map<string, LaneStat>();
   for (const row of rows) {
     for (const frame of row.frames ?? []) {
-      const stat = map.get(row.id) ?? { lastTs: 0, count: 0, dots: [] };
+      const stat = map.get(row.id) ?? { lastTs: 0, endedTs: 0, count: 0, dots: [] };
       stat.count += 1;
       stat.lastTs = Math.max(stat.lastTs, frame.t);
+      if (frame.kind === "result" || frame.kind === "error" || frame.kind === "exit") {
+        stat.endedTs = Math.max(stat.endedTs, frame.t);
+      }
       if (stat.dots.length < 240) {
         stat.dots.push({
           id: frame.id,
@@ -222,7 +242,7 @@ export function rootLanes(lanes: BoopLane[]): BoopLane[] {
   return lanes.filter((lane) => !lane.parent || lane.parent === "root");
 }
 
-const BOOP_SORT: SortingState = [{ id: "lastEvent", desc: true }];
+const BOOP_SORT: SortingState = [{ id: "updated", desc: true }];
 
 const POLL_MS = 1000;
 // Full history on first paint; after that only the tail, merged in memory.
@@ -232,6 +252,7 @@ export function BoopPanelV2() {
   const [lanes, setLanes] = useState<BoopLane[]>([]);
   const [events, setEvents] = useState<BoopLaneEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [invokeError, setInvokeError] = useState<string | null>(null);
   const lastTs = useRef(0);
   const marbler = useRef(createMarbler([]));
 
@@ -245,13 +266,16 @@ export function BoopPanelV2() {
           invoke<BoopLaneEvent[]>("boop_lane_events", { sinceMs: since }),
         ]);
         if (stopped) return;
+        setInvokeError(null);
         setLanes(nextLanes);
         if (tail.length) {
           lastTs.current = tail[tail.length - 1].ts + 1;
           setEvents((prior) => prior.concat(tail));
         }
-      } catch {
-        // Store not reachable (no boop yet); the empty panel says so.
+      } catch (reason) {
+        // Shown in the empty state; a silent catch here once read as
+        // "no lanes" while the store was fine.
+        if (!stopped) setInvokeError(reason instanceof Error ? reason.message : String(reason));
       }
     };
     void refresh();
@@ -311,6 +335,7 @@ export function BoopPanelV2() {
       ...lane,
       mailCount: stats.get(lane.route)?.count ?? 0,
       lastTs: stats.get(lane.route)?.lastTs ?? 0,
+      endedTs: stats.get(lane.route)?.endedTs ?? 0,
       dots: stats.get(lane.route)?.dots ?? [],
       windowRange,
     }));
@@ -358,11 +383,15 @@ export function BoopPanelV2() {
         {lanes.length === 0 && (
           <div className="empty-help">
             <h3>boop — no lanes</h3>
-            <p>
-              Lanes appear when <code>boop beep lane create</code> registers
-              them. The panel reads the store read-only and refreshes every
-              second.
-            </p>
+            {invokeError ? (
+              <p className="act-warn">store read failed: {invokeError}</p>
+            ) : (
+              <p>
+                Lanes appear when <code>boop beep lane create</code> registers
+                them. The panel reads the store read-only and refreshes every
+                second.
+              </p>
+            )}
           </div>
         )}
       </div>

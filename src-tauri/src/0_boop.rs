@@ -270,19 +270,22 @@ pub struct BoopLaneEvent {
 }
 
 // agent_live keeps idle rows for panes that died long ago (28 of 29 lanes
-// measured); liveness reads the tmux server, with a pid row as fallback.
-fn tmux_session_names() -> std::collections::HashSet<String> {
-    let output = crate::pty::tmux_cmd()
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .env("PATH", crate::pty::path_env())
-        .output();
-    match output {
-        Ok(out) => String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(str::to_string)
-            .collect(),
-        Err(_) => Default::default(),
+// measured); liveness reads the tmux server. Routes carry either a session
+// name or a pane id (%NNN), so both id shapes are collected.
+fn tmux_live_ids() -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for format in ["#{session_name}", "#{pane_id}"] {
+        let output = crate::pty::tmux_cmd()
+            .args(["list-panes", "-a", "-F", format])
+            .env("PATH", crate::pty::path_env())
+            .output();
+        if let Ok(out) = output {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                ids.insert(line.to_string());
+            }
+        }
     }
+    ids
 }
 
 fn read_lanes() -> Result<Vec<BoopLane>, String> {
@@ -326,7 +329,7 @@ fn read_lanes() -> Result<Vec<BoopLane>, String> {
             ))
         })
         .map_err(|error| error.to_string())?;
-    let sessions = tmux_session_names();
+    let sessions = tmux_live_ids();
     let mut lanes = Vec::new();
     for row in rows {
         let (mut lane, tmux, live_pid) = row.map_err(|error| error.to_string())?;

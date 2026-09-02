@@ -126,11 +126,13 @@ describe("laneFrames", () => {
 });
 
 describe("laneStats", () => {
-  it("rolls up count, last event, and dot classes per lane", () => {
+  it("rolls up count, last event, run end, and dot classes per lane", () => {
     const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
     const stats = laneStats(rows);
     expect(stats.get("feat-alpha")?.count).toBe(2);
     expect(stats.get("feat-alpha")?.lastTs).toBe(4000);
+    expect(stats.get("feat-alpha")?.endedTs).toBe(4000);
+    expect(stats.get("fix-beta")?.endedTs).toBe(5000);
     expect(stats.get("fix-beta")?.dots.map((dot) => dot.cls)).toEqual(["in", "out", "err"]);
   });
 
