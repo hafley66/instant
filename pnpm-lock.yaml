@@ -580,7 +580,7 @@ packages:
       rxjs: ^7.8.0
 
   '@hafley66/marbler@0.0.3':
-    resolution: {integrity: sha512-acZdyq4ANOcmvzxUm1SJ9nJvcvBX//YrD0z7hRzPgV5JgfLnvCoD4sLQaBhQRVpcIiBtmD7cLqjil/DnNZOwGQ==}
+    resolution: {integrity: sha512-oQX82T8Knjw52YFR+NMql6HhFTizcvJ0uKJk2MjPu3vUWg9fNFdhtktGQVy0HF45vfQN6xHDpnS7XdFH/9U62Q==}
 
   '@hafley66/md@0.1.2':
     resolution: {integrity: sha512-Iwl0fAmRfHLd0dAmnNkcgLKHXHAoCBx90a7cG2ZLR6oGKDSjynBXor5kZ5nMlIfZIxGIP7DwqaNUJ042C4XLqg==}
