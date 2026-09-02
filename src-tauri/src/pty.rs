@@ -126,7 +126,7 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
     c
 }
 
-fn tmux_cmd() -> std::process::Command {
+pub(crate) fn tmux_cmd() -> std::process::Command {
     tmux_cmd_for_socket(None)
 }
 

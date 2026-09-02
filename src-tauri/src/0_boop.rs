@@ -269,19 +269,34 @@ pub struct BoopLaneEvent {
     pub preview: String,
 }
 
+// agent_live keeps idle rows for panes that died long ago (28 of 29 lanes
+// measured); liveness reads the tmux server, with a pid row as fallback.
+fn tmux_session_names() -> std::collections::HashSet<String> {
+    let output = crate::pty::tmux_cmd()
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .env("PATH", crate::pty::path_env())
+        .output();
+    match output {
+        Ok(out) => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        Err(_) => Default::default(),
+    }
+}
+
 fn read_lanes() -> Result<Vec<BoopLane>, String> {
     let store = open_store_ro()?;
     let mut statement = store
         .connection()
         .prepare(
             "SELECT r.route, r.kind, r.harness, r.model, r.goal, r.parent, r.cwd,
-                    r.worktree_dir,
+                    r.tmux, r.worktree_dir,
                     CAST(strftime('%s', r.registered_at) AS INTEGER) * 1000
                       + CAST(substr(r.registered_at, 21, 3) AS INTEGER),
-                    (SELECT CASE WHEN st.value IS NULL THEN 'closed' ELSE 'open' END
+                    (SELECT CASE WHEN l.pid IS NOT NULL THEN 1 ELSE 0 END
                        FROM agent_live l
                        JOIN dict_session ds ON ds.id = l.session_id
-                       LEFT JOIN dict_status st ON st.id = l.status_id
                       WHERE ds.value = r.session_id)
                FROM agent_route r
               ORDER BY r.registered_at DESC",
@@ -289,27 +304,40 @@ fn read_lanes() -> Result<Vec<BoopLane>, String> {
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([], |row| {
-            Ok(BoopLane {
-                route: row.get(0)?,
-                kind: row.get(1)?,
-                harness: row.get(2)?,
-                model: row.get(3)?,
-                goal: row.get(4)?,
-                parent: row.get(5)?,
-                cwd: row.get(6)?,
-                branch: row
-                    .get::<_, Option<String>>(7)?
-                    .as_deref()
-                    .and_then(|dir| dir.trim_end_matches('/').rsplit('/').next())
-                    .map(str::to_string),
-                registered_ms: row.get(8)?,
-                state: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "closed".into()),
-            })
+            Ok((
+                BoopLane {
+                    route: row.get(0)?,
+                    kind: row.get(1)?,
+                    harness: row.get(2)?,
+                    model: row.get(3)?,
+                    goal: row.get(4)?,
+                    parent: row.get(5)?,
+                    cwd: row.get(6)?,
+                    branch: row
+                        .get::<_, Option<String>>(8)?
+                        .as_deref()
+                        .and_then(|dir| dir.trim_end_matches('/').rsplit('/').next())
+                        .map(str::to_string),
+                    registered_ms: row.get(9)?,
+                    state: String::new(),
+                },
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<i64>>(10)?.unwrap_or(0),
+            ))
         })
         .map_err(|error| error.to_string())?;
+    let sessions = tmux_session_names();
     let mut lanes = Vec::new();
     for row in rows {
-        lanes.push(row.map_err(|error| error.to_string())?);
+        let (mut lane, tmux, live_pid) = row.map_err(|error| error.to_string())?;
+        lane.state = if tmux.as_deref().is_some_and(|name| sessions.contains(name)) || live_pid == 1
+        {
+            "open"
+        } else {
+            "closed"
+        }
+        .to_string();
+        lanes.push(lane);
     }
     Ok(lanes)
 }
@@ -802,7 +830,11 @@ mod tests {
     #[test]
     fn lane_reads_live_boop_database() {
         let lanes = read_lanes();
-        assert!(lanes.is_ok(), "read_lanes succeeds against the live store");
+        assert!(
+            lanes.is_ok(),
+            "read_lanes succeeds against the live store: {:?}",
+            lanes.err()
+        );
         let lanes = lanes.unwrap();
         assert!(!lanes.is_empty(), "agent_route has registered lanes");
         assert!(
