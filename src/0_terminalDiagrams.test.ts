@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { Subject } from "rxjs";
 import type { Terminal } from "@xterm/xterm";
-import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, projectedDiagramIsCurrent, renderDiagram, svgAspectRatio, type DiagramFence } from "./0_terminalDiagrams";
+import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, projectedDiagramIsCurrent, renderDiagram, svgAspectRatio, TerminalDiagramOverlay, type DiagramFence } from "./0_terminalDiagrams";
 import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import type { TurnVisibilityEvent } from "./0_terminalTurnVisibility";
 
 function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): Terminal {
   const lines = rows.map((text) => ({
@@ -315,10 +317,10 @@ describe("diagram location precedence", () => {
     expect([diagramElementKey(terminal, true), diagramElementKey(ledger, true)])
       .toMatchInlineSnapshot(`
         [
-          "true:mermaid:20:flowchart lr
+          "true:mermaid:flowchart lr
         pty --> tmux
         tmux --> xterm",
-          "true:mermaid:20:flowchart lr
+          "true:mermaid:flowchart lr
         pty --> tmux
         tmux --> xterm",
         ]
@@ -350,6 +352,57 @@ function scriptRecorder() {
   });
   return scripts;
 }
+
+describe("diagram overlay flicker (diagnostic lane)", () => {
+  it("leaves the root visible on a write that changes nothing", () => {
+    // Overlay construction touches only a handful of browser globals; the
+    // write/scroll/resize subscriptions are captured, not exercised, and the
+    // frame never fires because requestAnimationFrame is a no-op stub here.
+    vi.stubGlobal("requestAnimationFrame", () => 9);
+    vi.stubGlobal("document", {
+      createElement: () => ({
+        className: "", hidden: false,
+        dataset: {}, style: {}, classList: { contains: () => false },
+        addEventListener() {}, querySelectorAll: () => [], remove() {},
+      }),
+    });
+    let onWrite: (() => void) | null = null;
+    const term = {
+      rows: 20,
+      buffer: { active: { viewportY: 0, length: 30, getLine: () => null } },
+      onWriteParsed: (cb: () => void) => { onWrite = cb; return { dispose() {} }; },
+      onScroll: () => ({ dispose() {} }),
+      onResize: () => ({ dispose() {} }),
+    } as unknown as Terminal;
+    const host = {
+      appendChild() {}, addEventListener() {}, removeEventListener() {},
+      querySelector: () => null,
+    } as unknown as HTMLElement;
+    const projection = {
+      visible: [],
+      changes: new Subject<TurnVisibilityEvent>(),
+      scanning: false,
+    };
+    const overlay = new TerminalDiagramOverlay(term, host, undefined, projection);
+
+    expect(overlay.root.hidden).toBe(false);
+    onWrite!();
+    expect(overlay.root.hidden).toBe(false);
+  });
+
+  it("keeps the DOM element when a projected fence's buffer rows shift", () => {
+    // Element reuse at paint() keys only on diagramElementKey(), which now codes
+    // the stable turn-scoped locator, not the physical buffer row. A rescan that
+    // moves the same logical diagram one row down therefore reuses the element
+    // instead of re-minting it: no idle re-create flash.
+    const fence = (start: number, end: number): DiagramFence => ({
+      language: "mermaid", code: "flowchart LR\n  A --> B",
+start, end, inferred: false, locator: "boop:turn:1", messageId: "turn:1",
+    });
+    expect(fence(10, 12).locator).toBe(fence(11, 13).locator);
+    expect(diagramElementKey(fence(10, 12), false)).toBe(diagramElementKey(fence(11, 13), false));
+  });
+});
 
 describe("mermaid bundle loader", () => {
   it("reports the network reason a script element hides", async () => {

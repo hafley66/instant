@@ -252,7 +252,12 @@ export function projectedDiagramIsCurrent(
 }
 
 export function diagramElementKey(fence: DiagramFence, dark: boolean): string {
-  return `${dark}:${fence.language}:${fence.start}:${normalizedDiagramLines(fence.code).join("\n")}`;
+  // The physical buffer row is positioning data, not identity. A rescan that
+  // re-anchors the same logical diagram one row must keep its DOM element, so
+  // the key codes the stable turn-scoped locator when present and falls back to
+  // a code fingerprint for terminal-only explicit fences that carry no locator.
+  const stable = fence.locator ?? `${fence.language}:${normalizedDiagramLines(fence.code).join("\n")}`;
+  return `${dark}:${stable}`;
 }
 
 function stripTuiBullet(line: string): string {
@@ -381,6 +386,9 @@ export class TerminalDiagramOverlay {
   lightboxMount: HTMLDivElement | null = null;
   lightboxEntries: DiagramLightboxEntry[] = [];
   lightboxActive = 0;
+  hideRequested = false;
+  lastVisibleFingerprint = "";
+  lastPaintedFingerprint = "";
 
   constructor(
     readonly term: Terminal,
@@ -397,12 +405,16 @@ export class TerminalDiagramOverlay {
       debounceTime(80),
     ).subscribe(() => {
       this.scrolling = false;
+      this.applyPendingHide();
       this.positionElements();
       this.scheduleFrame();
     });
     this.recoverySubscription = this.recoveryEvents.pipe(
       debounceTime(80),
-    ).subscribe(() => this.scheduleFrame());
+    ).subscribe(() => {
+      this.applyPendingHide();
+      this.scheduleFrame();
+    });
     const onClick = (event: MouseEvent) => {
       // ⌘-click routes the label as a token (clickrules.ts); plain click zooms.
       if (event.metaKey) return;
@@ -415,7 +427,11 @@ export class TerminalDiagramOverlay {
       { dispose: () => host.removeEventListener("click", onClick, { capture: true }) },
       term.onWriteParsed(() => {
         if (this.projection) {
-          this.root.hidden = true;
+          // A write that leaves the visible fence keys and viewport unchanged
+          // must not touch root.hidden at all; hiding is deferred to the
+          // recovery window so a keystroke burst hides at most once.
+          if (this.fenceFingerprint() === this.lastVisibleFingerprint) return;
+          this.hideRequested = true;
           this.generation++;
           this.positionElements();
           if (!this.scrolling) this.recoveryEvents.next();
@@ -435,14 +451,16 @@ export class TerminalDiagramOverlay {
         this.scheduleFrame();
       }),
     ];
+    this.lastVisibleFingerprint = this.fenceFingerprint();
     this.scheduleFrame();
   }
 
   viewportScrolled() {
     if (this.projection) {
+      if (this.fenceFingerprint() === this.lastVisibleFingerprint) return;
       this.scrolling = true;
       this.lastScrollAt = performance.now();
-      this.root.hidden = true;
+      this.hideRequested = true;
       this.generation++;
       this.positionElements();
       this.scrollEvents.next();
@@ -512,12 +530,48 @@ export class TerminalDiagramOverlay {
     });
   }
 
+  applyPendingHide() {
+    if (!this.hideRequested) return;
+    this.root.hidden = true;
+    this.hideRequested = false;
+  }
+
+  fenceFor(region: ProjectedTurnRegion & { kind: "mermaid" | "d2" }): DiagramFence {
+    return {
+      language: region.kind,
+      code: region.text,
+      start: region.bufferStart,
+      end: region.bufferEnd,
+      inferred: false,
+      locator: `boop:${region.turnId}`,
+      messageId: region.turnId,
+    };
+  }
+
+  // A cheap signature of what a repaint would render: the projected fence keys
+  // inside the current viewport. When it is unchanged, hiding (on write/scroll)
+  // and repainting (on idle rescan) are both no-ops. Keyed on locator, so a
+  // rescan that re-anchors a turn one row without changing its content leaves
+  // the fingerprint stable.
+  fenceFingerprint(): string {
+    const top = this.term.buffer.active.viewportY;
+    const end = top + this.term.rows - 1;
+    const keys = this.projection?.visible
+      .flatMap((turn) => turn.regions)
+      .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
+        region.kind === "mermaid" || region.kind === "d2")
+      .filter((region) => region.bufferEnd >= top && region.bufferStart <= end)
+      .map((region) => diagramElementKey(this.fenceFor(region), darkBackground(this.host)))
+      .sort()
+      .join("|") ?? "";
+    return `${top}:${keys}`;
+  }
+
   async paint() {
     if (!this.enabled()) {
       this.root.hidden = true;
       return;
     }
-    const generation = ++this.generation;
     const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) return;
     const screenRect = screen.getBoundingClientRect();
@@ -530,15 +584,7 @@ export class TerminalDiagramOverlay {
     const projected = this.projection?.visible.flatMap((turn) => turn.regions
       .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
         (region.kind === "mermaid" || region.kind === "d2") && projectedDiagramIsCurrent(this.term, region))
-      .map((region): DiagramFence => ({
-        language: region.kind,
-        code: region.text,
-        start: region.bufferStart,
-        end: region.bufferEnd,
-        inferred: false,
-        locator: `boop:${region.turnId}`,
-        messageId: region.turnId,
-      }))) ?? [];
+      .map((region) => this.fenceFor(region))) ?? [];
     // Keep exact, explicit terminal fences available while the harness ledger
     // is empty, delayed, or unable to locate its source in the visible buffer.
     // mergeLocatedDiagrams replaces a clipped terminal prefix with its complete
@@ -548,6 +594,14 @@ export class TerminalDiagramOverlay {
     const visibleFences = fences.filter(
       (fence) => fence.end >= viewportTop && fence.start <= viewportEnd,
     );
+    // Covers the merged set, code length, and theme, so direct fences and
+    // streaming growth still repaint; skipping never advances generation.
+    const fingerprint = `${dark}:${viewportTop}:${visibleFences
+      .map((fence) => `${diagramElementKey(fence, dark)}#${fence.code.length}`)
+      .sort()
+      .join("|")}`;
+    if (fingerprint === this.lastPaintedFingerprint) return;
+    const generation = ++this.generation;
     const rendered = await Promise.all(visibleFences.map(async (fence) => {
       const key = `${dark}:${fence.language}:${fence.code}`;
       let pending = this.cache.get(key);
@@ -571,6 +625,7 @@ export class TerminalDiagramOverlay {
       }
     }));
     if (generation !== this.generation) return;
+    this.lastPaintedFingerprint = fingerprint;
     this.root.hidden = false;
     const existing = new Map(Array.from(this.root.querySelectorAll<HTMLElement>(".term-diagram"))
       .map((element) => [element.dataset.diagramKey ?? "", element]));
