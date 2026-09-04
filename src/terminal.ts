@@ -15,6 +15,8 @@ import { turnDebug } from "./0_turnDebugSettings";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { TerminalContextSync } from "./1b_terminalContextSync";
+import { TerminalHoverCheck } from "./1c_terminalHoverCheck";
+import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
 import { TerminalWheelRouter } from "./0_terminalWheel";
 import { TerminalPinnedSelection } from "./0_terminalPinnedSelection";
 import { runMatchingCommand } from "./keymap";
@@ -96,6 +98,8 @@ export type Tab = {
   lineAnchors?: TerminalLineAnchors;
   contextQueue?: TerminalContextQueue;
   contextSync?: TerminalContextSync;
+  hoverCheck?: TerminalHoverCheck;
+  turnMarks?: TerminalTurnMarks;
   cmdClickGesture?: CmdClickGestureTracker;
   wheel?: TerminalWheelRouter;
   pinnedSelection?: TerminalPinnedSelection;
@@ -706,6 +710,9 @@ export function openTab(
     // and it never reaches the input bar, so leave the mode first. The command
     // is a no-op on a pane that is in no mode, and it resolves even when there
     // is no tmux at all, so the write is not gated on it succeeding.
+    //
+    // The write's outcome is the send's outcome: the queue clears on resolve
+    // and keeps its rows on reject.
     (text) => {
       const body = bracketedPaste(text);
       const settled = graphics
@@ -713,9 +720,9 @@ export function openTab(
         : invoke(commands.boop_mux.boopMuxExitCopyMode, {
             target: tmuxTarget ?? name, socket: null,
           }).catch(() => {});
-      void settled.then(() => invoke(commands.pty.writePty, { id, data: body }))
-        .catch(() => {})
-        .then(() => term.focus());
+      return settled
+        .then(() => invoke(commands.pty.writePty, { id, data: body }))
+        .then(() => { term.focus(); });
     },
     () => settings.inlineStructuredSelectors.$(),
   );
@@ -724,6 +731,8 @@ export function openTab(
     name,
     async () => (await sessionsForTab(id)).map((session) => session.sessionId),
   );
+  const hoverCheck = !contextQueue ? undefined : new TerminalHoverCheck(contextQueue);
+  const turnMarks = !contextQueue || !contextSync ? undefined : new TerminalTurnMarks(contextQueue, contextSync.annotations);
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";
@@ -743,7 +752,7 @@ export function openTab(
       void navigator.clipboard.writeText(text).catch(() => {});
     },
   });
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
   void syncTurns?.();
   applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
@@ -1161,6 +1170,8 @@ export function onTermClosed(id: string) {
   t.overlay?.dispose();
   t.diagrams?.dispose();
   t.structured?.dispose();
+  t.turnMarks?.dispose();
+  t.hoverCheck?.dispose();
   t.contextSync?.dispose();
   t.contextQueue?.dispose();
   t.lineAnchors?.dispose();

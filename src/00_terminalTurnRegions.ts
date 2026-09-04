@@ -1,4 +1,4 @@
-export type TurnRegionKind = "mermaid" | "d2" | "table" | "list";
+export type TurnRegionKind = "mermaid" | "d2" | "table" | "list" | "heading";
 
 export type TurnRegion = {
   kind: TurnRegionKind;
@@ -70,6 +70,9 @@ const anyFence = /^\s*(`{3,}|~{3,})/;
 const tableSeparator = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+(?:\s*:?-{3,}:?\s*)\|?\s*$/;
 const tableRow = /^\s*\|.*\|\s*$/;
 const listRow = /^\s*(?:[-+*]|\d+[.)])\s+\S/;
+/// An ATX heading, or a line that is nothing but a bold run (how a harness
+/// titles a section when it skips `#`), optionally ending in a colon.
+const headingRow = /^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*:?\s*$)/;
 
 export function detectTurnRegions(said: string): TurnRegion[] {
   const lines = said.split("\n");
@@ -100,6 +103,11 @@ export function detectTurnRegions(said: string): TurnRegion[] {
     regions.push({ kind: "table", sourceStart: index - 1, sourceEnd: end - 1, text: lines.slice(index - 1, end).join("\n") });
     for (let row = index - 1; row < end; row++) occupied.add(row);
     index = end - 1;
+  }
+  for (let index = 0; index < lines.length; index++) {
+    if (occupied.has(index) || !headingRow.test(lines[index])) continue;
+    regions.push({ kind: "heading", sourceStart: index, sourceEnd: index, text: lines[index] });
+    occupied.add(index);
   }
   for (let start = 0; start < lines.length; start++) {
     if (occupied.has(start) || !listRow.test(lines[start])) continue;

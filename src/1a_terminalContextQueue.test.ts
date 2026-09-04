@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { formatQueuedContext, structuredSelectables, type PromptContextItem } from "./1a_terminalContextQueue";
 
 describe("terminal next-message context", () => {
+  it("projects one selectable onto a heading region, at the heading's own row", () => {
+    expect(structuredSelectables([{
+      regions: [{
+        id: "s:1:heading:4", turnId: "s:1", kind: "heading", sourceStart: 4, sourceEnd: 4,
+        bufferStart: 70, bufferEnd: 70, text: "## Storage layout",
+      }],
+    }])).toEqual([
+      { bufferRow: 70, id: "s:1:heading:4:heading", kind: "heading", text: "## Storage layout", turnId: "s:1" },
+    ]);
+  });
+
   it("formats enabled editable selections and canonical tables", () => {
     expect(formatQueuedContext([
       { id: "s", kind: "selection", text: " selected text ", turnIds: ["boop:4"], enabled: true },

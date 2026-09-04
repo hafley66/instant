@@ -401,6 +401,10 @@ pub struct BoopTurnCommentTarget {
     pub turn: i64,
     #[serde(default)]
     pub role: String,
+    /// The assistant turn that answered a sent comment, off
+    /// agent_turn_comment_reply; absent while pending or un-ingested.
+    #[serde(default)]
+    pub reply_turn: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -426,6 +430,35 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn comment_to_wire(row: boop_store::ident::TurnComment) -> BoopTurnComment {
+    BoopTurnComment {
+        client_id: row.client_id,
+        kind: row.kind,
+        quote: row.quote,
+        note: row.note,
+        enabled: row.enabled,
+        tab_name: row.tab_name,
+        targets: row
+            .targets
+            .into_iter()
+            .map(|target| BoopTurnCommentTarget {
+                session: target.session,
+                turn: target.turn,
+                role: target.role,
+                reply_turn: target.reply_turn,
+            })
+            .collect(),
+        created_ts: row.created_ts,
+        updated_ts: row.updated_ts,
+    }
+}
+
+fn targets_any_of(row: &boop_store::ident::TurnComment, sessions: &[String]) -> bool {
+    row.targets
+        .iter()
+        .any(|target| sessions.iter().any(|session| *session == target.session))
+}
+
 /// Pending comments whose tab or target session matches the caller; a comment
 /// with neither key is invisible everywhere, so it never strands.
 fn read_turn_comments(tab: &str, sessions: &[String]) -> Result<Vec<BoopTurnComment>, String> {
@@ -435,33 +468,31 @@ fn read_turn_comments(tab: &str, sessions: &[String]) -> Result<Vec<BoopTurnComm
         .map_err(|error| error.to_string())?;
     Ok(rows
         .into_iter()
-        .filter(|row| {
-            row.tab_name.as_deref() == Some(tab)
-                || row
-                    .targets
-                    .iter()
-                    .any(|target| sessions.iter().any(|session| *session == target.session))
-        })
-        .map(|row| BoopTurnComment {
-            client_id: row.client_id,
-            kind: row.kind,
-            quote: row.quote,
-            note: row.note,
-            enabled: row.enabled,
-            tab_name: row.tab_name,
-            targets: row
-                .targets
-                .into_iter()
-                .map(|target| BoopTurnCommentTarget {
-                    session: target.session,
-                    turn: target.turn,
-                    role: target.role,
-                })
-                .collect(),
-            created_ts: row.created_ts,
-            updated_ts: row.updated_ts,
-        })
+        .filter(|row| row.tab_name.as_deref() == Some(tab) || targets_any_of(row, sessions))
+        .map(comment_to_wire)
         .collect())
+}
+
+/// Sent comments targeting any of the caller's sessions: the annotations a
+/// terminal paints back onto the turns they quote, each with the reply turn
+/// it drew.
+fn read_turn_annotations(sessions: &[String]) -> Result<Vec<BoopTurnComment>, String> {
+    let store = open_store_ro()?;
+    let rows = store
+        .turn_comments_sent()
+        .map_err(|error| error.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| targets_any_of(row, sessions))
+        .map(comment_to_wire)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn boop_turn_annotations(sessions: Vec<String>) -> Result<Vec<BoopTurnComment>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_turn_annotations(&sessions))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

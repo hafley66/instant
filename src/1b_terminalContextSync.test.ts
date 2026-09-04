@@ -1,5 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { Signal } from "@hafley66/signals";
+import { Subject } from "rxjs";
+import { describe, expect, it, vi } from "vitest";
 import { turnsAcrossRange } from "./1a_terminalContextQueue";
+
+const native = vi.hoisted(() => ({ calls: [] as Array<[string, unknown]> }));
+vi.mock("./generated/native", () => ({
+  commands: {
+    boop: {
+      boopTurnComments: "boop_turn_comments",
+      boopTurnCommentUpsert: "boop_turn_comment_upsert",
+      boopTurnCommentDelete: "boop_turn_comment_delete",
+      boopTurnCommentsSent: "boop_turn_comments_sent",
+      boopTurnAnnotations: "boop_turn_annotations",
+    },
+  },
+  invoke: async (command: string, args: unknown) => {
+    native.calls.push([command, args]);
+    return command === "boop_turn_comments" || command === "boop_turn_annotations" ? [] : undefined;
+  },
+}));
+import { TerminalContextSync } from "./1b_terminalContextSync";
 import type { PromptContextItem } from "./1a_terminalContextQueue";
 import type { VisibleTurn } from "./0_terminalTurnVisibility";
 import {
@@ -113,5 +133,51 @@ describe("turnsAcrossRange", () => {  const turn = (id: string, role: string, an
       turn("sess-a:5", "assistant", 20, 30),
     ];
     expect(turnsAcrossRange(turns, 2, 7)).toEqual(["sess-a:3", "sess-a:4"]);
+  });
+});
+
+/// The queue as the sync layer sees it: items by id, a change stream, and the
+/// `sent` burst that fires before the clear.
+function fakeQueue() {
+  const items = new Map<string, PromptContextItem>();
+  const state = Signal<PromptContextItem[]>([]);
+  return {
+    items,
+    state,
+    changes: state.$,
+    sent: new Subject<string[]>(),
+    projection: { visible: [] as VisibleTurn[] },
+    hydrate: () => {},
+  };
+}
+
+describe("send never loses the last edit", () => {
+  it("writes the final note before stamping the row sent, ahead of the debounce", async () => {
+    native.calls.length = 0;
+    const queue = fakeQueue();
+    const sync = new TerminalContextSync(
+      queue as unknown as ConstructorParameters<typeof TerminalContextSync>[0],
+      "tab-1",
+      async () => ["sess-a"],
+    );
+    const row = item({ note: "typed fast" });
+    queue.items.set(row.id, row);
+    queue.state.$([row]);
+    // Send inside the 300 ms debounce window: the queue emits `sent`, then
+    // clears, and the debounced change collapses to the empty list.
+    queue.sent.next([row.id]);
+    queue.items.clear();
+    queue.state.$([]);
+    await sync.flush();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await sync.flush();
+
+    const writes = native.calls.filter(([command]) => command !== "boop_turn_comments" && command !== "boop_turn_annotations");
+    expect(writes.map(([command]) => command)).toEqual(["boop_turn_comment_upsert", "boop_turn_comments_sent"]);
+    const upsert = writes[0][1] as { comment: BoopTurnComment };
+    expect(upsert.comment.note).toBe("typed fast");
+    expect(writes[1][1]).toEqual({ clientIds: [row.id] });
+    expect(native.calls.some(([command]) => command === "boop_turn_comment_delete"), "a sent row is never deleted").toBe(false);
+    sync.dispose();
   });
 });

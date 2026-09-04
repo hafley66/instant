@@ -1060,10 +1060,40 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   inset: 0;
 }
 .term-context-structured-check,
+.term-context-hover-check,
+.term-context-mark,
 .term-context-queue {
   pointer-events: auto;
 }
-.term-context-root input.term-context-structured-check {
+/* The hover checkbox is the structured one, dimmer until checked, following
+   the pointer down the gutter. */
+.term-context-root input.term-context-hover-check { opacity: .55; }
+.term-context-root input.term-context-hover-check:hover,
+.term-context-root input.term-context-hover-check:checked { opacity: 1; }
+/* A sent comment painted back on the row it quoted. */
+.term-context-mark {
+  position: absolute;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--accent);
+  font: 12px/14px Menlo, Monaco, monospace;
+  cursor: pointer;
+  opacity: .8;
+}
+.term-context-mark:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.term-context-queue-status {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e2a65a;
+  font-size: 10px;
+}
+.term-context-queue[data-sending="true"] header button { opacity: .6; }
+.term-context-root input.term-context-structured-check,
+.term-context-root input.term-context-hover-check {
   position: absolute;
   opacity: 1;
   margin: 1px 0 0;
@@ -1075,7 +1105,8 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   background: color-mix(in srgb, var(--term-bg) 82%, white);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--term-bg) 65%, transparent);
 }
-.term-context-root input.term-context-structured-check:checked::after {
+.term-context-root input.term-context-structured-check:checked::after,
+.term-context-root input.term-context-hover-check:checked::after {
   content: "✓";
   display: block;
   color: var(--accent);

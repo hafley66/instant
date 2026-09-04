@@ -2,6 +2,27 @@ import { describe, expect, it } from "vitest";
 import { detectTurnRegions, projectTurnRegions } from "./00_terminalTurnRegions";
 
 describe("terminal turn regions", () => {
+  it("detects an ATX heading and a bold-only title line as one-line heading regions", () => {
+    expect(detectTurnRegions([
+      "## Plan",
+      "prose under it",
+      "**Storage layout:**",
+      "- item",
+      "#not a heading",
+    ].join("\n")).filter((region) => region.kind === "heading")).toEqual([
+      { kind: "heading", sourceStart: 0, sourceEnd: 0, text: "## Plan" },
+      { kind: "heading", sourceStart: 2, sourceEnd: 2, text: "**Storage layout:**" },
+    ]);
+  });
+
+  it("keeps a heading out of the list that follows it", () => {
+    const regions = detectTurnRegions(["# Title", "- a", "- b"].join("\n"));
+    expect(regions.map((region) => [region.kind, region.sourceStart, region.sourceEnd])).toEqual([
+      ["heading", 0, 0],
+      ["list", 1, 2],
+    ]);
+  });
+
   it("detects diagram, table, and list regions in source order", () => {
     expect(detectTurnRegions([
       "before",

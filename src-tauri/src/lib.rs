@@ -1149,6 +1149,7 @@ pub fn run() {
             boop::boop_turn_comment_upsert,
             boop::boop_turn_comment_delete,
             boop::boop_turn_comments_sent,
+            boop::boop_turn_annotations,
             boop_tmux::boop_mux_capture,
             boop_tmux::boop_mux_exit_copy_mode,
             harness_store::boop_mux_session,

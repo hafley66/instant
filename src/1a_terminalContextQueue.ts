@@ -7,7 +7,10 @@ import { turnHue } from "./0_turnDebugOverlay";
 
 export type PromptContextItem = {
   id: string;
-  kind: "selection" | "table" | "list";
+  /// `selection`: a range the reader picked; `table`/`list`/`heading`: a
+  /// structured row taken by its gutter checkbox; `line`: one logical line
+  /// taken by the hover checkbox.
+  kind: "selection" | "table" | "list" | "heading" | "line";
   /// The slice taken off the screen. Held as read, so the quote in the prompt
   /// is what the turn actually said.
   text: string;
@@ -48,9 +51,9 @@ export function turnsAcrossRange(turns: VisibleTurn[], start: number, end: numbe
     .map((turn) => turn.id);
 }
 
-type StructuredSelectable = {
+export type StructuredSelectable = {
   id: string;
-  kind: "table" | "list";
+  kind: "table" | "list" | "heading";
   text: string;
   turnId: string;
   bufferRow: number;
@@ -87,8 +90,18 @@ export function structuredSelectables(
   visibleLines: VisibleSourceLine[] = [],
 ): StructuredSelectable[] {
   return turns.flatMap((turn) => turn.regions.flatMap((region): StructuredSelectable[] => {
-    if (region.kind !== "table" && region.kind !== "list") return [];
+    if (region.kind !== "table" && region.kind !== "list" && region.kind !== "heading") return [];
     const lines = region.text.split("\n");
+    if (region.kind === "heading") {
+      const bufferRow = selectableBufferRow(region, 0, lines[0], visibleLines);
+      return bufferRow === null ? [] : [{
+        id: `${region.id}:heading`,
+        kind: "heading" as const,
+        text: lines[0],
+        turnId: region.turnId,
+        bufferRow,
+      }];
+    }
     if (region.kind === "table") return lines.flatMap((line, sourceRow) => {
       const bufferRow = selectableBufferRow(region, sourceRow, line, visibleLines);
       return !line.trim() || tableSeparator.test(line) || bufferRow === null ? [] : [{
@@ -133,12 +146,16 @@ export class TerminalContextQueue {
   projectionSubscription: Subscription;
   anchorSubscription: Subscription;
 
+  /// Why the last Send kept its rows, shown in the header until a send lands.
+  sendError: string | null = null;
+
   constructor(
     readonly term: Terminal,
     readonly host: HTMLElement,
     readonly projection: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
     readonly anchors: TerminalLineAnchors,
-    readonly paste: (text: string) => void,
+    /// Resolves once the pty took the body; a rejection keeps the queue.
+    readonly paste: (text: string) => Promise<void> | void,
     readonly enabled: () => boolean,
   ) {
     this.root.className = "term-context-root";
@@ -175,20 +192,54 @@ export class TerminalContextQueue {
   /// right-click menu is the only way in, and it reads whichever selection is
   /// live (xterm's own, or the pinned overlay's on a pane whose app owns the
   /// mouse and where xterm therefore makes none).
-  addSelection(snapshot: Pick<TerminalSelectionSnapshot, "text" | "turnIds">): string | null {
+  addSelection(
+    snapshot: Pick<TerminalSelectionSnapshot, "text" | "turnIds"> & {
+      id?: string;
+      kind?: PromptContextItem["kind"];
+      note?: string;
+    },
+  ): string | null {
     if (!snapshot.text) return null;
     const source = snapshot;
-    const id = `selection:${Date.now()}:${this.items.size}`;
+    const id = source.id ?? `selection:${Date.now()}:${this.items.size}`;
     this.items.set(id, {
       id,
-      kind: "selection",
+      kind: source.kind ?? "selection",
       text: source.text,
+      note: source.note,
       turnIds: source.turnIds,
       enabled: true,
     });
     this.term.clearSelection();
     this.renderQueue();
     return id;
+  }
+
+  /// Send the queue as one prompt body. The rows clear only once the pty took
+  /// the write; a failed write keeps every row and says why in the header, so
+  /// a note typed at length is never gone with nothing to show for it. `sent`
+  /// fires before the clear, so the sync layer flushes the final text and
+  /// stamps the rows sent rather than deleted.
+  async send(): Promise<boolean> {
+    const items = [...this.items.values()];
+    const text = formatQueuedContext(items);
+    if (!text) return false;
+    this.sendError = null;
+    this.queue.dataset.sending = "true";
+    try {
+      await this.paste(text);
+    } catch (error) {
+      this.sendError = error instanceof Error ? error.message : String(error);
+      delete this.queue.dataset.sending;
+      this.renderQueue();
+      return false;
+    }
+    delete this.queue.dataset.sending;
+    this.sent.next(items.map((item) => item.id));
+    this.items.clear();
+    this.renderQueue();
+    this.paintSelections();
+    return true;
   }
 
   /// Rows read back from the store. An id already present locally wins: under
@@ -304,7 +355,9 @@ export class TerminalContextQueue {
         checkbox.type = "checkbox";
         checkbox.className = "term-context-structured-check";
         checkbox.dataset.regionId = selectable.id;
-        checkbox.title = `Add ${selectable.kind} row to next prompt`;
+        checkbox.title = selectable.kind === "heading"
+          ? "Add heading to next prompt"
+          : `Add ${selectable.kind} row to next prompt`;
         checkbox.addEventListener("mousedown", (event) => event.stopPropagation());
         checkbox.addEventListener("change", () => this.toggleStructured(selectable, checkbox!.checked));
         this.gutter.appendChild(checkbox);
@@ -366,6 +419,7 @@ export class TerminalContextQueue {
     this.queue.replaceChildren();
     if (!this.items.size) {
       this.queue.hidden = true;
+      this.sendError = null;
       this.state.$([]);
       return;
     }
@@ -375,16 +429,24 @@ export class TerminalContextQueue {
     title.className = "term-context-queue-title";
     title.textContent = `NEXT MESSAGE · ${this.items.size}`;
     header.appendChild(title);
+    if (this.sendError) {
+      const status = document.createElement("span");
+      status.className = "term-context-queue-status";
+      status.textContent = `send failed, kept: ${this.sendError}`;
+      status.title = this.sendError;
+      header.appendChild(status);
+    }
     const pasteButton = document.createElement("button");
     pasteButton.type = "button";
     pasteButton.textContent = "Send";
     pasteButton.addEventListener("click", () => {
-      const text = formatQueuedContext([...this.items.values()]);
-      if (text) this.paste(text);
-      this.sent.next([...this.items.keys()]);
-      this.items.clear();
-      this.renderQueue();
-      this.paintSelections();
+      pasteButton.disabled = true;
+      pasteButton.textContent = "Sending…";
+      void this.send().then((landed) => {
+        if (landed || !pasteButton.isConnected) return;
+        pasteButton.disabled = false;
+        pasteButton.textContent = "Send";
+      });
     });
     header.appendChild(pasteButton);
     this.queue.appendChild(header);
