@@ -209,6 +209,29 @@ pub fn rank_exact(rel: &str, entries: &[IndexEntry]) -> Vec<(String, bool)> {
     scored.into_iter().map(|(rank, _, path)| (path.to_string(), rank == 0)).collect()
 }
 
+/// `rel` joined to each indexed directory, kept when it exists on disk. This is
+/// the one rung that reaches into gitignored folders: their parent is indexed
+/// even when their contents are not. Shallowest match first.
+pub fn under_indexed_dirs(rel: &str, entries: &[IndexEntry]) -> Vec<String> {
+    let tail = rel.trim_start_matches("./").trim_start_matches('/');
+    if tail.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<String> = entries
+        .iter()
+        .filter(|e| e.is_dir)
+        .filter_map(|e| {
+            let candidate = Path::new(&e.path).join(tail);
+            std::fs::symlink_metadata(&candidate)
+                .is_ok()
+                .then(|| candidate.to_string_lossy().into_owned())
+        })
+        .collect();
+    found.sort_by(|a, b| a.matches('/').count().cmp(&b.matches('/').count()).then(a.cmp(b)));
+    found.dedup();
+    found
+}
+
 /// fzf ranking over the index. A token carrying a separator matches whole paths;
 /// a bare filename matches basenames, so a folder chain cannot out-score a file.
 pub fn rank_fuzzy(query: &str, entries: &[IndexEntry], limit: usize) -> Vec<(String, u32)> {
@@ -376,7 +399,13 @@ fn index_for(root: &Path) -> Arc<Vec<IndexEntry>> {
         .git_global(true)
         .git_exclude(true)
         .parents(true)
-        .follow_links(false);
+        .follow_links(false)
+        // Dependency trees and git internals are never what a pasted path
+        // means; keeping them out stops fzf offering node_modules noise.
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            name != "node_modules" && name != ".git"
+        });
     for result in walker.build() {
         if entries.len() >= INDEX_CAP {
             break;
@@ -472,6 +501,21 @@ fn resolve_ref_blocking(token: String, cwd: String, home: String) -> ResolveResu
         return ResolveResult::Choices { paths, line, via: "exact" };
     }
 
+    // A file inside a gitignored directory: `out/timeline.txt` under a lab whose
+    // .gitignore hides `out`. The walker never lists the file, but it lists the
+    // lab, so the token joined to every indexed directory finds it with a stat.
+    let ignored = under_indexed_dirs(&rel, &entries);
+    if ignored.len() == 1 {
+        return ResolveResult::Hit {
+            reference: ResolvedRef { path: ignored[0].clone(), line, source: "ignored" },
+        };
+    }
+    if ignored.len() > 1 {
+        let mut paths = ignored;
+        paths.truncate(MAX_CHOICES);
+        return ResolveResult::Choices { paths, line, via: "exact" };
+    }
+
     for candidate in sibling_candidates(&rel, &cwd, repo_root.as_deref(), &home, MAX_RUNGS) {
         if std::fs::symlink_metadata(&candidate).is_ok() {
             return ResolveResult::Hit {
@@ -555,6 +599,43 @@ mod tests {
             dir(&format!("{REPO}/packages")),
             dir(&format!("{REPO}/packages/patchset-diff")),
         ]
+    }
+
+    /// RECEIPT. A repo-relative token whose file sits inside a gitignored
+    /// directory resolves to that file, before fzf gets to guess.
+    #[test]
+    fn a_file_inside_a_gitignored_directory_still_resolves() {
+        let root = std::env::temp_dir().join(format!("instant-ignored-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let lab = root.join("labs").join("otel");
+        std::fs::create_dir_all(lab.join("out")).unwrap();
+        std::fs::write(lab.join(".gitignore"), "out\n").unwrap();
+        std::fs::write(lab.join("out").join("timeline.txt"), "0.371s span>\n").unwrap();
+        std::fs::write(root.join("README.md"), "root\n").unwrap();
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["init", "-q"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok, "git init in {}", root.display());
+        clear_index_cache();
+        let entries = index_for(&root);
+        assert!(
+            !entries.iter().any(|e| e.path.ends_with("out/timeline.txt")),
+            "the walker honours .gitignore, so the file is not indexed"
+        );
+        let cwd = root.to_string_lossy().into_owned();
+        let result = resolve_ref_blocking("out/timeline.txt".into(), cwd.clone(), cwd.clone());
+        let expected = lab.join("out").join("timeline.txt").to_string_lossy().into_owned();
+        assert_eq!(
+            result,
+            ResolveResult::Hit {
+                reference: ResolvedRef { path: expected, line: None, source: "ignored" }
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
