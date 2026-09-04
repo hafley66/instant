@@ -1095,3 +1095,75 @@ pub fn evidence_dirs(paths: &[String], cwds: &[String], boundary: &str) -> Vec<S
     }
     dirs
 }
+
+/// One file the agent touched, for the jump palette.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTouchRow {
+    pub path: String,
+    pub session: String,
+    pub turn: i64,
+    pub ts: i64,
+    pub verb: String,
+}
+
+/// Files the given sessions touched, newest first, one row per path (the
+/// newest touch wins). Bounded by `limit`, default 2000.
+#[tauri::command]
+pub async fn boop_agent_touches(
+    sessions: Vec<String>,
+    limit: Option<usize>,
+) -> Result<Vec<AgentTouchRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_agent_touches(&sessions, limit.unwrap_or(EVIDENCE_PATH_CAP)))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn read_agent_touches(sessions: &[String], limit: usize) -> Result<Vec<AgentTouchRow>, String> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let store = open_store_ro()?;
+    let connection = store.connection();
+    let filter: Vec<String> = (0..sessions.len())
+        .map(|index| format!("(s.value = ?{n} OR s.value LIKE ?{n} || '/%')", n = index + 1))
+        .collect();
+    let params: Vec<rusqlite::types::Value> = sessions
+        .iter()
+        .map(|session| rusqlite::types::Value::Text(session.clone()))
+        .collect();
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT p.value, s.value, t.turn, t.ts, COALESCE(v.value, '')
+               FROM agent_touch t
+               JOIN dict_path p ON p.id = t.path_id
+               JOIN dict_session s ON s.id = t.session_id
+               LEFT JOIN dict_verb v ON v.id = t.verb_id
+              WHERE {}
+              ORDER BY t.ts DESC, t.turn DESC",
+            filter.join(" OR ")
+        ))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(AgentTouchRow {
+                path: row.get(0)?,
+                session: row.get(1)?,
+                turn: row.get(2)?,
+                ts: row.get(3)?,
+                verb: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut out: Vec<AgentTouchRow> = Vec::new();
+    for row in rows.flatten() {
+        if out.iter().any(|seen| seen.path == row.path) {
+            continue;
+        }
+        out.push(row);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    Ok(out)
+}

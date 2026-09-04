@@ -625,19 +625,55 @@ fn resolve_ref_with(
     }
 }
 
+/// Every ⌘-click resolution lands in instant.log as one `resolve_ref` event:
+/// what was asked, what the ledger offered, which rung answered, how long.
 #[tauri::command]
 pub async fn resolve_ref(
+    app: tauri::AppHandle,
     token: String,
     cwd: String,
     sessions: Option<Vec<String>>,
 ) -> Result<ResolveResult, String> {
     let home = home_dir();
-    tauri::async_runtime::spawn_blocking(move || {
-        let evidence = crate::boop::agent_evidence(&sessions.unwrap_or_default(), &home);
-        resolve_ref_with(token, cwd, home, &evidence)
+    let sessions = sessions.unwrap_or_default();
+    let started = Instant::now();
+    let (result, evidence_paths, evidence_dirs) = tauri::async_runtime::spawn_blocking({
+        let token = token.clone();
+        let cwd = cwd.clone();
+        let sessions = sessions.clone();
+        move || {
+            let evidence = crate::boop::agent_evidence(&sessions, &home);
+            let result = resolve_ref_with(token, cwd, home, &evidence);
+            (result, evidence.paths.len(), evidence.dirs.len())
+        }
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    let (kind, path, source, via, count) = match &result {
+        ResolveResult::Hit { reference } => ("hit", reference.path.clone(), reference.source, "", 1),
+        ResolveResult::Choices { paths, via, .. } => ("choices", paths.first().cloned().unwrap_or_default(), "", *via, paths.len()),
+        ResolveResult::Absent { repo, rev, .. } => ("absent", format!("{repo}@{rev}"), "", "", 0),
+        ResolveResult::Miss => ("miss", String::new(), "", "", 0),
+    };
+    crate::log_event(
+        &app,
+        "INFO",
+        "resolve_ref",
+        serde_json::json!({
+            "token": token,
+            "cwd": cwd,
+            "sessions": sessions,
+            "evidence_paths": evidence_paths,
+            "evidence_dirs": evidence_dirs,
+            "result": kind,
+            "path": path,
+            "source": source,
+            "via": via,
+            "count": count,
+            "ms": started.elapsed().as_millis() as u64,
+        }),
+    );
+    Ok(result)
 }
 
 /// The bytes of a path at a revision, for a file the working tree does not hold.
