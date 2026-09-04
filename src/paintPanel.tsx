@@ -40,7 +40,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stateRef = useRef<PaintPanelState | null>(null);
   const quicksaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [bridgeRevision, setBridgeRevision] = useState(0);
+  const [, setBridgeRevision] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
   const [fileRoot, setFileRoot] = useState(() => settings.scanRoot.$());
   const state = stateRef.current ?? paintPanelState(panelId);
@@ -157,7 +157,7 @@ const PaintEditor = SignalReact(function PaintEditor({ panelId, initialPath }: P
         src="/vendor/miniPaint/index.html"
         title="miniPaint layers image editor"
         style={{ flex: 1, minHeight: 0, width: "100%", border: 0, display: "block", background: "#fff" }}
-      /><PaintMemeControls key={bridgeRevision} bridge={state.bridge} /></div>
+      /><PaintMemeControls bridge={state.bridge} /></div>
     </div>
   );
 });
