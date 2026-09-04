@@ -391,6 +391,7 @@ type TermHooks = {
   position: () => { viewportY: number; baseY: number; length: number; rows: number } | null;
   screen: () => string[];
   scroll: (lines: number) => void;
+  scrollback: (lines: number) => void;
   selection: () => string;
   mouseMode: () => string;
   pinned: () => string;
@@ -431,6 +432,12 @@ type TermHooks = {
     const tab = tabs.get(sessionId("e2e"));
     if (tab) tab.term.scrollToLine(Math.max(0, tab.term.buffer.active.viewportY + lines));
     tab?.diagrams?.viewportScrolled();
+  },
+  // The app runs xterm with no scrollback (tmux owns history), so a spec that
+  // needs viewportY to move at all buys itself some history first.
+  scrollback: (lines) => {
+    const tab = tabs.get(sessionId("e2e"));
+    if (tab) tab.term.options.scrollback = lines;
   },
 };
 
