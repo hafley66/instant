@@ -9,7 +9,7 @@ const line = (id: string, row: number, text: string): VisibleTerminalLine =>
 
 const turn = (id: string, start: number, end: number): VisibleTurn => ({
   id, bufferStart: start, bufferEnd: end, anchorStart: start, anchorEnd: end,
-  regions: [], confidence: "anchored", provenance: "xterm+boop",
+  regions: [], confidence: "anchored", source: "xterm+boop",
 } as unknown as VisibleTurn);
 
 const comment = (over: Partial<BoopTurnComment> = {}): BoopTurnComment => ({

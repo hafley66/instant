@@ -21,7 +21,7 @@ export type VisibleTurn = BoopTurn & {
   anchorEnd: number;
   regions: ProjectedTurnRegion[];
   confidence: "anchored" | "extended";
-  provenance: "xterm+boop" | "xterm+tmux+boop";
+  source: "xterm+boop" | "xterm+tmux+boop";
   clippedAbove?: boolean;
   clippedBelow?: boolean;
 };
@@ -292,7 +292,7 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
       anchorEnd,
       regions: [],
       confidence: "anchored",
-      provenance: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
+      source: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
     });
   }
   growAnchors(visible, screen, sources);
@@ -340,7 +340,7 @@ export function extendTo(
 
 // What `locateVisibleTurns` and the Rust port in boop-turnvis both produce.
 // Regions stay on this side, since only the frontend renders them.
-export type TurnSpan = Omit<VisibleTurn, "regions" | "provenance">;
+export type TurnSpan = Omit<VisibleTurn, "regions" | "source">;
 
 export type TurnLocator = (lines: LogicalLine[], turns: BoopTurn[]) => Promise<TurnSpan[]>;
 
@@ -371,7 +371,7 @@ export function attachTurnRegions(
       ...(clippedAbove ? { clippedAbove: true } : {}),
       ...(clippedBelow ? { clippedBelow: true } : {}),
       regions: projectTurnRegions(span.id, span.said, span, lines, normalizeTurnLine),
-      provenance: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
+      source: tmuxBacked ? "xterm+tmux+boop" : "xterm+boop",
     };
   });
 }
