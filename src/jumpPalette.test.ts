@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jumpLabel } from "./jumpPalette";
+import { jumpLabel } from "./0_jumpLabel";
 
 describe("jump palette labels", () => {
   it("shows a path under the pane cwd relative to it", () => {

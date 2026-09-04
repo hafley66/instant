@@ -6,6 +6,7 @@
 import { invoke } from "./generated/native";
 import { fuzzyFilter } from "./fuzzy";
 import { getHomeDir } from "./core";
+import { jumpLabel } from "./0_jumpLabel";
 import { dispatchClick, runClickRule } from "./clickrules";
 import { openPathInInstant } from "./preview";
 import { getFocusedTermId, tabMetaById, tabSessionIds } from "./terminal";
@@ -29,15 +30,6 @@ function dismiss() {
   }
   window.removeEventListener("blur", dismiss);
   window.removeEventListener("resize", dismiss);
-}
-
-// A path shown relative to the pane cwd when it sits under it, else to $HOME.
-export function jumpLabel(path: string, cwd: string, home: string): string {
-  const base = cwd.replace(/\/$/, "");
-  if (base && path.startsWith(`${base}/`)) return path.slice(base.length + 1);
-  const h = home.replace(/\/$/, "");
-  if (h && path.startsWith(`${h}/`)) return `~/${path.slice(h.length + 1)}`;
-  return path;
 }
 
 export async function openJumpPalette(): Promise<void> {
