@@ -1,4 +1,5 @@
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openExternal } from "./0_openExternal";
+import { showError } from "./core";
 import { PanZoomViewport } from "./0_PanZoomViewport";
 import { SvgDocumentViewer } from "./1_SvgDocumentViewer";
 import { PdfDocumentViewer } from "./1_PdfDocumentViewer";
@@ -36,7 +37,7 @@ export function FileImageViewer({
               <button type="button" onClick={reset} title="fit image">Fit</button>
               <span>{Math.round(zoom * 100)}%</span>
               <button type="button" onClick={zoomIn} title="zoom in">+</button>
-              <button type="button" onClick={() => void openPath(path).catch(console.error)} title="open in the OS default app">↗ external</button>
+              <button type="button" onClick={() => void openExternal(path).catch((error) => showError("open external", error))} title="open in the OS default app">↗ external</button>
             </div>
           )}
         >

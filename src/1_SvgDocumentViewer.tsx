@@ -1,9 +1,9 @@
-import { openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { clampPanZoom, pinchPanZoom, wheelZooms } from "./0_PanZoomViewport";
 import { sanitizeSvgDocument } from "./0_svgSanitize";
 import { panSvgBox, svgBoxAtZoom, svgNativeBox, svgSourceBox, type SvgBox } from "./0_svgViewport";
-import { openExternalUrl } from "./0_openExternal";
+import { openExternal, openExternalUrl } from "./0_openExternal";
+import { showError } from "./core";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 
 export function SvgDocumentViewer({
@@ -171,7 +171,7 @@ export function SvgDocumentViewer({
         <span ref={zoomLabel}>100%</span>
         <button type="button" onClick={() => setZoom(clampPanZoom(native.current.width / currentBox().width * 1.2))} title="zoom in">+</button>
         <button type="button" onClick={() => { followsNative.current = false; scheduleBox(original); }} title="fit the complete SVG">Fit</button>
-        <button type="button" onClick={() => void openPath(path).catch(console.error)} title="open in the OS default app">↗ external</button>
+        <button type="button" onClick={() => void openExternal(path).catch((error) => showError("open external", error))} title="open in the OS default app">↗ external</button>
       </div>
       <div
         ref={stage}

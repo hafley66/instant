@@ -41,6 +41,7 @@ import {
   termPanelId,
 } from "./reactdock";
 import { cmdClickRouter, dispatchClick, clickIntent, resolveReference } from "./clickrules";
+import { openExternal, revealExternal } from "./0_openExternal";
 import { tokenAtColumn } from "./termTokens";
 import {
   joinWrappedRows,
@@ -585,6 +586,8 @@ export function openTab(
     if (action === "preview") openPreviewPanel(inspectorRef.path, inspectorRef.line);
     if (action === "search") void dispatchClick(inspectorToken, inspectorCwd);
     if (action === "copy") void navigator.clipboard.writeText(inspectorRef.path);
+    if (action === "external") void openExternal(inspectorRef.path).catch((error) => showError("open external", error));
+    if (action === "reveal") void revealExternal(inspectorRef.path).catch((error) => showError("reveal", error));
   });
   window.addEventListener("keydown", (e) => {
     if (e.key === "Meta") commandHeld = true;
@@ -892,7 +895,7 @@ export function openTab(
           if (request !== inspectorRequest) return;
           return inlineSnippetHtml(ref.path, text, settings.mode.$() === "dark").then((html) => {
             if (request !== inspectorRequest) return;
-            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button></div>`;
+            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button><button data-inspector-action="external">open external</button><button data-inspector-action="reveal">reveal</button></div>`;
           });
         });
       }).catch(() => {});
