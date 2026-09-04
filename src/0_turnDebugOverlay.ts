@@ -1,7 +1,16 @@
-import type { IDisposable, IMarker, Terminal } from "@xterm/xterm";
+import type { IDisposable, Terminal } from "@xterm/xterm";
 import type { Subscription } from "rxjs";
 import { regionAtBufferRow, type TurnRegionKind } from "./00_terminalTurnRegions";
+import {
+  bufferRowAtClientY,
+  readRowGeometry,
+  rowTop,
+  shiftSpans,
+  TerminalScanShift,
+} from "./0_terminalRowGeometry";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
+
+export { shiftSpans };
 
 export type RowTag = {
   bufferRow: number;
@@ -74,25 +83,6 @@ export function rowTags(
   return tags;
 }
 
-/// A span holds absolute buffer rows from the scan that produced it. Once
-/// scrollback is full xterm trims one line per line written, sliding every row
-/// under a projection that has not rescanned yet.
-export function shiftSpans(visible: VisibleTurn[], shift: number): VisibleTurn[] {
-  if (!shift) return visible;
-  return visible.map((turn) => ({
-    ...turn,
-    bufferStart: turn.bufferStart - shift,
-    bufferEnd: turn.bufferEnd - shift,
-    anchorStart: turn.anchorStart - shift,
-    anchorEnd: turn.anchorEnd - shift,
-    regions: turn.regions.map((region) => ({
-      ...region,
-      bufferStart: region.bufferStart - shift,
-      bufferEnd: region.bufferEnd - shift,
-    })),
-  }));
-}
-
 export class TerminalTurnDebugOverlay {
   root = document.createElement("div");
   nodes: HTMLDivElement[] = [];
@@ -100,8 +90,7 @@ export class TerminalTurnDebugOverlay {
   subscription: Subscription;
   frame = 0;
   pointerRow: number | null = null;
-  scanMarker: IMarker | undefined;
-  scanLine = 0;
+  scan: TerminalScanShift;
 
   constructor(
     readonly term: Terminal,
@@ -110,6 +99,7 @@ export class TerminalTurnDebugOverlay {
   ) {
     this.root.className = "term-turn-debug";
     host.appendChild(this.root);
+    this.scan = new TerminalScanShift(term);
     this.subscription = projection.changes.subscribe(() => {
       this.markScan();
       this.schedule();
@@ -133,41 +123,23 @@ export class TerminalTurnDebugOverlay {
       term.onScroll(() => this.schedule()),
       term.onResize(() => this.schedule()),
       term.onWriteParsed(() => this.schedule()),
-      { dispose: () => this.scanMarker?.dispose() },
+      { dispose: () => this.scan.dispose() },
     ];
     this.markScan();
     this.schedule();
   }
 
-  /// Pin the row the newest projection was measured against. xterm keeps a
-  /// marker's `line` correct as scrollback trims, so the gap between the two
-  /// is how far every span has slid.
-  markScan() {
-    this.scanMarker?.dispose();
-    this.scanMarker = this.term.registerMarker(0);
-    this.scanLine = this.scanMarker?.line ?? 0;
-  }
+  markScan() { this.scan.mark(); }
 
-  bufferShift(): number {
-    const marker = this.scanMarker;
-    if (!marker || marker.line < 0) return 0;
-    return this.scanLine - marker.line;
-  }
+  bufferShift(): number { return this.scan.shift(); }
 
   screen(): HTMLElement | null {
     return this.host.querySelector<HTMLElement>(".xterm-screen");
   }
 
   bufferRowAtClientY(clientY: number): number | null {
-    const screen = this.screen();
-    if (!screen) return null;
-    const rect = screen.getBoundingClientRect();
-    if (clientY < rect.top || clientY > rect.bottom) return null;
-    const viewportRow = Math.min(
-      this.term.rows - 1,
-      Math.max(0, Math.floor((clientY - rect.top) / (rect.height / this.term.rows || 1))),
-    );
-    return this.term.buffer.active.viewportY + viewportRow;
+    const geometry = readRowGeometry(this.term, this.host);
+    return geometry ? bufferRowAtClientY(geometry, clientY) : null;
   }
 
   schedule() {
@@ -179,17 +151,13 @@ export class TerminalTurnDebugOverlay {
   }
 
   paint() {
-    const screen = this.screen();
-    if (!screen) return;
-    const hostRect = this.host.getBoundingClientRect();
-    const screenRect = screen.getBoundingClientRect();
-    const cellHeight = screenRect.height / this.term.rows || 0;
-    const right = hostRect.right - screenRect.right;
-    const top = screenRect.top - hostRect.top;
+    const geometry = readRowGeometry(this.term, this.host);
+    if (!geometry) return;
+    const cellHeight = geometry.cellHeight;
     const tags = rowTags(
       shiftSpans(this.projection.visible, this.bufferShift()),
-      this.term.buffer.active.viewportY,
-      this.term.rows,
+      geometry.viewportY,
+      geometry.rows,
       this.pointerRow,
     );
     while (this.nodes.length > tags.length) this.nodes.pop()?.remove();
@@ -212,8 +180,8 @@ export class TerminalTurnDebugOverlay {
         ? "single"
         : tag.spanStart ? "start" : tag.spanEnd ? "end" : "body";
       node.style.left = "";
-      node.style.right = `${right}px`;
-      node.style.top = `${top + index * cellHeight}px`;
+      node.style.right = `${geometry.right}px`;
+      node.style.top = `${rowTop(geometry, tag.bufferRow)}px`;
       node.style.height = `${cellHeight}px`;
       node.style.lineHeight = `${cellHeight}px`;
       node.style.color = tag.turnId
