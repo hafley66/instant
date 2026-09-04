@@ -244,14 +244,36 @@ pub fn rank_fuzzy(query: &str, entries: &[IndexEntry], limit: usize) -> Vec<(Str
     config.set_match_paths();
     let mut matcher = Matcher::new(config);
     let pattern = Pattern::parse(clean, CaseMatching::Ignore, Normalization::Smart);
+    // `by-test.md` may fuzz its stem, never its extension: a candidate that is
+    // not a `.md` file is a coincidence of letters, not the file.
+    let extension: Option<String> = clean
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+        .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty() && ext.len() <= 16 && ext.chars().all(|c| c.is_ascii_alphanumeric()))
+        .map(|(_, ext)| format!(".{}", ext.to_ascii_lowercase()));
     let haystack: Vec<&str> = entries
         .iter()
-        .map(|e| if scoped { e.path.as_str() } else { e.name.as_str() })
+        .map(|e| {
+            let keep = extension
+                .as_deref()
+                .is_none_or(|ext| e.name.to_ascii_lowercase().ends_with(ext));
+            if !keep {
+                ""
+            } else if scoped {
+                e.path.as_str()
+            } else {
+                e.name.as_str()
+            }
+        })
         .collect();
     let floor = MIN_SCORE_PER_CHAR * clean.chars().filter(|c| *c != '/').count().min(64) as u32;
     let mut buf = Vec::new();
     let mut hits: Vec<(usize, u32)> = Vec::new();
     for (index, candidate) in haystack.iter().enumerate() {
+        if candidate.is_empty() {
+            continue;
+        }
         let Some(score) = pattern.score(Utf32Str::new(candidate, &mut buf), &mut matcher) else {
             continue;
         };
@@ -440,7 +462,57 @@ fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
+/// The rung that knows what the agent did: a token the agent printed names a
+/// file it touched, or a file beside one. Exact tail on the touched paths
+/// first (newest wins when only one distinct file carries the tail), then the
+/// token joined to every directory the evidence sits under.
+pub fn resolve_from_evidence(rel: &str, evidence: &crate::boop::AgentEvidence) -> Option<ResolveResult> {
+    let tail = rel.trim_start_matches("./").trim_start_matches('/');
+    if tail.is_empty() {
+        return None;
+    }
+    let suffix = format!("/{tail}");
+    let mut touched: Vec<String> = Vec::new();
+    for path in &evidence.paths {
+        if (path.ends_with(&suffix) || path == tail) && !touched.contains(path) {
+            touched.push(path.clone());
+        }
+    }
+    touched.retain(|path| std::fs::symlink_metadata(path).is_ok());
+    if touched.len() == 1 {
+        return Some(ResolveResult::Hit {
+            reference: ResolvedRef { path: touched.remove(0), line: None, source: "touched" },
+        });
+    }
+    if touched.len() > 1 {
+        touched.truncate(MAX_CHOICES);
+        return Some(ResolveResult::Choices { paths: touched, line: None, via: "exact" });
+    }
+    for dir in &evidence.dirs {
+        let candidate = Path::new(dir).join(tail);
+        if std::fs::symlink_metadata(&candidate).is_ok() {
+            return Some(ResolveResult::Hit {
+                reference: ResolvedRef {
+                    path: candidate.to_string_lossy().into_owned(),
+                    line: None,
+                    source: "touched",
+                },
+            });
+        }
+    }
+    None
+}
+
 fn resolve_ref_blocking(token: String, cwd: String, home: String) -> ResolveResult {
+    resolve_ref_with(token, cwd, home, &crate::boop::AgentEvidence::default())
+}
+
+fn resolve_ref_with(
+    token: String,
+    cwd: String,
+    home: String,
+    evidence: &crate::boop::AgentEvidence,
+) -> ResolveResult {
     let clean = token.trim().trim_matches(|c| c == '\'' || c == '"' || c == '`');
     if clean.is_empty() {
         return ResolveResult::Miss;
@@ -453,6 +525,16 @@ fn resolve_ref_blocking(token: String, cwd: String, home: String) -> ResolveResu
     if rel.starts_with('/') || rel.starts_with("~/") {
         return ResolveResult::Hit {
             reference: ResolvedRef { path: rel, line, source: "absolute" },
+        };
+    }
+
+    if let Some(found) = resolve_from_evidence(&rel, evidence) {
+        return match found {
+            ResolveResult::Hit { reference } => ResolveResult::Hit {
+                reference: ResolvedRef { line, ..reference },
+            },
+            ResolveResult::Choices { paths, via, .. } => ResolveResult::Choices { paths, line, via },
+            other => other,
         };
     }
 
@@ -544,11 +626,18 @@ fn resolve_ref_blocking(token: String, cwd: String, home: String) -> ResolveResu
 }
 
 #[tauri::command]
-pub async fn resolve_ref(token: String, cwd: String) -> Result<ResolveResult, String> {
+pub async fn resolve_ref(
+    token: String,
+    cwd: String,
+    sessions: Option<Vec<String>>,
+) -> Result<ResolveResult, String> {
     let home = home_dir();
-    tauri::async_runtime::spawn_blocking(move || resolve_ref_blocking(token, cwd, home))
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let evidence = crate::boop::agent_evidence(&sessions.unwrap_or_default(), &home);
+        resolve_ref_with(token, cwd, home, &evidence)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// The bytes of a path at a revision, for a file the working tree does not hold.
@@ -636,6 +725,67 @@ mod tests {
             }
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// RECEIPT. What the agent touched outranks every filesystem guess: the
+    /// token joins to a directory above a touched file, so a file the walker
+    /// never indexes (gitignored `out/`) resolves from the ledger alone.
+    #[test]
+    fn a_token_resolves_beside_a_file_the_agent_touched() {
+        let root = std::env::temp_dir().join(format!("instant-evidence-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let lab = root.join("labs").join("otel");
+        std::fs::create_dir_all(lab.join("out")).unwrap();
+        std::fs::write(lab.join("out").join("timeline.txt"), "t\n").unwrap();
+        std::fs::write(lab.join("out").join("perfetto.png"), "p\n").unwrap();
+        let touched = lab.join("out").join("perfetto.png").to_string_lossy().into_owned();
+        let boundary = root.to_string_lossy().into_owned();
+        let evidence = crate::boop::AgentEvidence {
+            dirs: crate::boop::evidence_dirs(&[touched.clone()], &[], &boundary),
+            paths: vec![touched.clone()],
+        };
+        assert_eq!(
+            evidence.dirs,
+            vec![
+                lab.join("out").to_string_lossy().into_owned(),
+                lab.to_string_lossy().into_owned(),
+                root.join("labs").to_string_lossy().into_owned(),
+            ]
+        );
+        let cwd = boundary.clone();
+        let hit = resolve_ref_with("out/timeline.txt:3".into(), cwd.clone(), boundary.clone(), &evidence);
+        assert_eq!(
+            hit,
+            ResolveResult::Hit {
+                reference: ResolvedRef {
+                    path: lab.join("out").join("timeline.txt").to_string_lossy().into_owned(),
+                    line: Some(3),
+                    source: "touched",
+                }
+            }
+        );
+        let exact = resolve_ref_with("perfetto.png".into(), cwd, boundary, &evidence);
+        assert_eq!(
+            exact,
+            ResolveResult::Hit {
+                reference: ResolvedRef { path: touched, line: None, source: "touched" }
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// RECEIPT. A token with an extension never fuzzes onto a file of another
+    /// kind: `out/by-test.md` finds no `.md` here, so fzf answers nothing.
+    #[test]
+    fn fzf_keeps_the_extension_literal() {
+        let entries = vec![
+            file(&format!("{REPO}/node_modules/.pnpm/buffer-equal-constant-time@1.0.1/node_modules/buffer-equal-constant-time/index.js")),
+            dir(&format!("{REPO}/node_modules/.pnpm/buffer-equal-constant-time@1.0.1/node_modules/buffer-equal-constant-time")),
+            file(&format!("{REPO}/lab/out/by-tests.md")),
+        ];
+        let hits = rank_fuzzy("out/by-test.md", &entries, 20);
+        assert_eq!(hits.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), vec![format!("{REPO}/lab/out/by-tests.md").as_str()]);
+        assert!(rank_fuzzy("out/by-test.txt", &entries, 20).is_empty());
     }
 
     #[test]

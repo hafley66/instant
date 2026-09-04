@@ -16,12 +16,12 @@ export function looksLikePath(token: string): boolean {
 const RESOLVE_TTL_MS = 1_000;
 const pending = new Map<string, { at: number; result: Promise<ResolveResult> }>();
 
-export function resolveRef(token: string, cwd: string): Promise<ResolveResult> {
-  const key = `${cwd} ${token}`;
+export function resolveRef(token: string, cwd: string, sessions: string[] = []): Promise<ResolveResult> {
+  const key = `${cwd} ${sessions.join(",")} ${token}`;
   const hit = pending.get(key);
   if (hit && Date.now() - hit.at < RESOLVE_TTL_MS) return hit.result;
   const result = clickRpc
-    .resolveRef({ token, cwd })
+    .resolveRef({ token, cwd, sessions })
     .catch(() => ({ kind: "miss" }) as ResolveResult);
   pending.set(key, { at: Date.now(), result });
   return result;

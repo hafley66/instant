@@ -6,6 +6,8 @@ export type CmdClickRequest = {
   token: string;
   cwd: string;
   source: CmdClickSource;
+  /** The pane's agent session ids; the resolver checks what they touched first. */
+  sessions?: string[];
 };
 
 export type CmdClickRoute = {

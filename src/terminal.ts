@@ -327,6 +327,18 @@ export function tabCwds(id: string): string[] {
   return [...new Set(cands)];
 }
 
+// The agent session ids behind a tab, for the ⌘-click resolver. favorites.ts
+// imports this module, so the import is deferred to break the cycle; a lookup
+// failure is an empty list, never a blocked click.
+export async function tabSessionIds(id: string): Promise<string[]> {
+  try {
+    const { sessionsForTab } = await import("./favorites");
+    return (await sessionsForTab(id)).map((session) => session.sessionId);
+  } catch {
+    return [];
+  }
+}
+
 // Cheap front gate so a ⌘-click on a plain word does nothing (no window hide):
 // a URL scheme, a www. host, or a token bearing a slash/dot/tilde path marker.
 export function looksOpenable(tok: string): boolean {
@@ -871,7 +883,7 @@ export function openTab(
       inspector.style.left = `${Math.max(8, Math.min(e.clientX + 12, window.innerWidth - inspectorW - 8))}px`;
       inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
-      void resolveRef(token, cwd).then((result) => {
+      void tabSessionIds(id).then((sessions) => resolveRef(token, cwd, sessions)).then((result) => {
         if (request !== inspectorRequest) return;
         if (result.kind === "choices") {
           inspectorRef = null;
@@ -930,7 +942,7 @@ export function openTab(
     if (!word) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    void dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal");
+    void tabSessionIds(id).then((sessions) => dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", sessions));
   }, { capture: true });
 
   // Right-click must be claimed before tmux mouse mode consumes it.

@@ -48,11 +48,11 @@ export const cmdClickRouter = new CmdClickRouter();
 
 cmdClickRouter.register({
   id: "file",
-  async handle({ token, cwd }) {
+  async handle({ token, cwd, sessions }) {
   // A path-shaped token goes to the resolver, which checks the cwd, the repo
   // root, and finally a filename search: agent output prints repo-relative
   // paths and bare filenames that do not exist under the shell's directory.
-  const result = await resolveRef(token, cwd);
+  const result = await resolveRef(token, cwd, sessions ?? []);
   if (result.kind === "choices") {
     openRefChoices(token, result.paths, result.line, cwd, result.via);
     return true;
@@ -118,8 +118,8 @@ async function openGitBlobPanel(
   });
 }
 
-export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown") {
-  return cmdClickRouter.dispatch({ token: rawToken, cwd, source });
+export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown", sessions: string[] = []) {
+  return cmdClickRouter.dispatch({ token: rawToken, cwd, source, sessions });
 }
 
 // cwd to search from when a ⌘-click happens outside a terminal: the focused
