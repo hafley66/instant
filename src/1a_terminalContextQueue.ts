@@ -1,9 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 import { Signal } from "@hafley66/signals";
-import { debounceTime, filter, merge, Observable, share, startWith, Subject, Subscription, switchMap, take, tap } from "rxjs";
+import { Observable, Subject } from "rxjs";
 import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
 import { turnHue } from "./0_turnDebugOverlay";
+import { TerminalContextGutter, type StructuredSelectable } from "./1a2_terminalContextGutter";
 
 export type PromptContextItem = {
   id: string;
@@ -51,100 +52,18 @@ export function turnsAcrossRange(turns: VisibleTurn[], start: number, end: numbe
     .map((turn) => turn.id);
 }
 
-export type StructuredSelectable = {
-  id: string;
-  kind: "table" | "list" | "heading";
-  text: string;
-  turnId: string;
-  bufferRow: number;
-};
-
-const listItem = /^\s*(?:[│┃]\s*)?(?:[-+*•]|\d+[.)])\s+\S/;
-const tableSeparator = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+(?:\s*:?-{3,}:?\s*)\|?\s*$/;
-
-type VisibleSourceLine = { bufferStart: number; text: string };
-const projection_grace_ms = 2000;
-
-function normalizeSelectableLine(line: string): string {
-  return line.toLowerCase().replace(/[`_*~#|]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function selectableBufferRow(
-  region: VisibleTurn["regions"][number],
-  sourceRow: number,
-  sourceLine: string,
-  visibleLines: VisibleSourceLine[],
-): number | null {
-  if (region.sourceBufferRows?.[sourceRow] !== null && region.sourceBufferRows?.[sourceRow] !== undefined) {
-    return region.sourceBufferRows[sourceRow];
-  }
-  if (region.sourceBufferRows) {
-    const source = normalizeSelectableLine(sourceLine);
-    return visibleLines.find((line) => normalizeSelectableLine(line.text) === source)?.bufferStart ?? null;
-  }
-  return region.bufferStart + sourceRow;
-}
-
-export function structuredSelectables(
-  turns: Array<Pick<VisibleTurn, "regions">>,
-  visibleLines: VisibleSourceLine[] = [],
-): StructuredSelectable[] {
-  return turns.flatMap((turn) => turn.regions.flatMap((region): StructuredSelectable[] => {
-    if (region.kind !== "table" && region.kind !== "list" && region.kind !== "heading") return [];
-    const lines = region.text.split("\n");
-    if (region.kind === "heading") {
-      const bufferRow = selectableBufferRow(region, 0, lines[0], visibleLines);
-      return bufferRow === null ? [] : [{
-        id: `${region.id}:heading`,
-        kind: "heading" as const,
-        text: lines[0],
-        turnId: region.turnId,
-        bufferRow,
-      }];
-    }
-    if (region.kind === "table") return lines.flatMap((line, sourceRow) => {
-      const bufferRow = selectableBufferRow(region, sourceRow, line, visibleLines);
-      return !line.trim() || tableSeparator.test(line) || bufferRow === null ? [] : [{
-        id: `${region.id}:row:${sourceRow}`,
-        kind: "table" as const,
-        text: line,
-        turnId: region.turnId,
-        bufferRow,
-      }];
-    });
-    const starts = lines.flatMap((line, sourceRow) => listItem.test(line) ? [sourceRow] : []);
-    const sourceItems = starts.flatMap((sourceRow, index): StructuredSelectable[] => {
-      const end = starts[index + 1] ?? lines.length;
-      const bufferRow = selectableBufferRow(region, sourceRow, lines[sourceRow], visibleLines);
-      if (bufferRow === null) return [];
-      return [{
-        id: `${region.id}:item:${sourceRow}`,
-        kind: "list" as const,
-        text: lines.slice(sourceRow, end).join("\n"),
-        turnId: region.turnId,
-        bufferRow,
-      }];
-    });
-    return sourceItems;
-  }));
-}
-
 export class TerminalContextQueue {
   root = document.createElement("div");
   gutter = document.createElement("div");
   queue = document.createElement("section");
   items = new Map<string, PromptContextItem>();
-  checkboxes = new Map<string, HTMLInputElement>();
-  paintedLineIds = new Set<string>();
-  paintDirty = true;
-  revealFrame = 0;
+  /// Owns every checkbox in the gutter and the frame they are painted on.
+  readonly gutterPaint: TerminalContextGutter;
   readonly state = Signal<PromptContextItem[]>([]);
   readonly changes: Observable<PromptContextItem[]> = this.state.$;
   /// Item ids delivered into a prompt by Send, emitted before the queue
   /// clears, so a sync layer marks them sent instead of deleted.
   readonly sent = new Subject<string[]>();
-  projectionSubscription: Subscription;
-  anchorSubscription: Subscription;
 
   /// Why the last Send kept its rows, shown in the header until a send lands.
   sendError: string | null = null;
@@ -164,28 +83,7 @@ export class TerminalContextQueue {
     this.queue.hidden = true;
     this.root.append(this.gutter, this.queue);
     host.appendChild(this.root);
-    this.projectionSubscription = projection.changes.pipe(debounceTime(100)).subscribe(() => {
-      this.paintDirty = true;
-      if (!this.gutter.hidden) this.paintSelections();
-    });
-    const viewport_changes = anchors.viewport.changes.pipe(share());
-    const selection_motion = anchors.events.$.pipe(filter((events) =>
-      events.some((event) =>
-        event.kind === "viewport-jump" || event.kind === "top-line-changed" ||
-        event.kind === "exited" && this.paintedLineIds.has(event.id) ||
-        "line" in event && this.paintedLineIds.has(event.line.id)),
-    ));
-    const viewport_motion = viewport_changes.pipe(
-      filter((event) => event.kind === "scroll" || event.kind === "resize"),
-    );
-    this.anchorSubscription = merge(selection_motion, viewport_motion).pipe(
-      tap(() => this.invalidateSelections()),
-      switchMap(() => viewport_changes.pipe(startWith(null), debounceTime(650), take(1))),
-    ).subscribe(() => {
-      this.anchors.refresh();
-      if (this.paintDirty) this.paintSelections();
-    });
-    this.paintSelections();
+    this.gutterPaint = new TerminalContextGutter(this);
   }
 
   /// Queue a slice for the next message. The caller names it outright: the
@@ -287,105 +185,15 @@ export class TerminalContextQueue {
     this.renderQueue();
   }
 
-  invalidateSelections() {
-    this.paintDirty = true;
-    if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
-    this.revealFrame = 0;
-    this.gutter.hidden = true;
-  }
-
-  clearSelections() {
-    this.checkboxes.clear();
-    this.paintedLineIds.clear();
-    this.gutter.replaceChildren();
-    this.gutter.hidden = false;
-  }
-
   activate() {
     this.anchors.refresh();
-    this.paintDirty = true;
-    this.paintSelections();
+    this.gutterPaint.schedule();
   }
 
+  /// Repaint the gutter on the next frame. Kept as the name the terminal's
+  /// wiring already calls; the painter decides what moves.
   paintSelections() {
-    if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
-    this.revealFrame = 0;
-    this.gutter.hidden = true;
-    if (!this.enabled()) {
-      this.clearSelections();
-      this.paintDirty = false;
-      return;
-    }
-    const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen) return;
-    const top = this.term.buffer.active.viewportY;
-    const bottom = top + this.term.rows - 1;
-    const hostRect = this.host.getBoundingClientRect();
-    const screenRect = screen.getBoundingClientRect();
-    const live = new Set<string>();
-    const now = performance.now();
-    this.paintedLineIds.clear();
-    const visibleByLineId = new Map(this.anchors.visible.$().map((line) => [line.id, line]));
-    for (const [id, checkbox] of this.checkboxes) {
-      checkbox.hidden = true;
-      const confirmed_at = Number(checkbox.dataset.confirmedAt ?? 0);
-      if (now - confirmed_at > projection_grace_ms) continue;
-      const lineId = checkbox.dataset.terminalLineId;
-      const line = lineId ? visibleByLineId.get(lineId) : undefined;
-      if (!line) continue;
-      const anchor = this.anchors.elementForBufferRow(line.bufferStart);
-      if (!anchor) continue;
-      live.add(id);
-      checkbox.hidden = false;
-      this.paintedLineIds.add(line.id);
-      const anchorRect = anchor.getBoundingClientRect();
-      Object.assign(checkbox.style, {
-        left: `${Math.max(2, screenRect.left - hostRect.left - 42)}px`,
-        top: `${anchorRect.top - hostRect.top}px`,
-      });
-    }
-    for (const selectable of structuredSelectables(this.projection.visible, this.anchors.visible.$())) {
-      if (selectable.bufferRow < top || selectable.bufferRow > bottom) continue;
-      live.add(selectable.id);
-      const anchor = this.anchors.elementForBufferRow(selectable.bufferRow);
-      if (!anchor) continue;
-      let checkbox = this.checkboxes.get(selectable.id);
-      if (!checkbox) {
-        checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "term-context-structured-check";
-        checkbox.dataset.regionId = selectable.id;
-        checkbox.title = selectable.kind === "heading"
-          ? "Add heading to next prompt"
-          : `Add ${selectable.kind} row to next prompt`;
-        checkbox.addEventListener("mousedown", (event) => event.stopPropagation());
-        checkbox.addEventListener("change", () => this.toggleStructured(selectable, checkbox!.checked));
-        this.gutter.appendChild(checkbox);
-        this.checkboxes.set(selectable.id, checkbox);
-      }
-      checkbox.checked = this.items.has(selectable.id);
-      checkbox.hidden = false;
-      checkbox.dataset.confirmedAt = String(now);
-      checkbox.dataset.terminalLineId = anchor.dataset.terminalLineId;
-      if (anchor.dataset.terminalLineId) this.paintedLineIds.add(anchor.dataset.terminalLineId);
-      const anchorRect = anchor.getBoundingClientRect();
-      Object.assign(checkbox.style, {
-        left: `${Math.max(2, screenRect.left - hostRect.left - 42)}px`,
-        top: `${anchorRect.top - hostRect.top}px`,
-      });
-    }
-    for (const [id, checkbox] of this.checkboxes) {
-      const expired = now - Number(checkbox.dataset.confirmedAt ?? 0) > projection_grace_ms;
-      const over_limit = this.checkboxes.size > 512;
-      if (live.has(id) || !checkbox.hidden || !expired && !over_limit) continue;
-        checkbox.remove();
-        this.checkboxes.delete(id);
-    }
-    this.paintDirty = false;
-    this.revealFrame = requestAnimationFrame(() => {
-      this.revealFrame = 0;
-      if (!this.paintDirty && this.enabled()) this.gutter.hidden = false;
-    });
+    this.gutterPaint.schedule();
   }
 
   /// One chip per turn the slice came out of, coloured with the same hue the
@@ -501,11 +309,7 @@ export class TerminalContextQueue {
   }
 
   dispose() {
-    this.projectionSubscription.unsubscribe();
-    this.anchorSubscription.unsubscribe();
-    if (this.revealFrame) cancelAnimationFrame(this.revealFrame);
-    this.checkboxes.clear();
-    this.paintedLineIds.clear();
+    this.gutterPaint.dispose();
     this.root.remove();
   }
 }

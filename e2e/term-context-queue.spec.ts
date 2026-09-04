@@ -44,16 +44,21 @@ test("queues individual Boop table rows and list items for the next prompt", asy
     observer.disconnect();
     return childMutations;
   })).toBe(0);
-  expect(await page.evaluate(() => new Promise<boolean>((resolve) => {
+  // Output appended under the rows repaints the gutter in place; it never
+  // blanks, so the boxes do not blink off and back on for every write.
+  expect(await page.evaluate(async () => {
     const gutter = document.querySelector<HTMLElement>(".term-context-gutter")!;
-    const observer = new MutationObserver(() => {
-      if (!gutter.hidden) return;
-      observer.disconnect();
-      resolve(gutter.hidden);
-    });
+    let blanked = false;
+    const observer = new MutationObserver(() => { blanked ||= gutter.hidden; });
     observer.observe(gutter, { attributes: true, attributeFilter: ["hidden"] });
     window.__term!.write("\r\nterminal output appended");
-  }))).toBe(true);
+    for (let tick = 0; tick < 45; tick++) {
+      await new Promise((resolve) => setTimeout(resolve, 16));
+      blanked ||= gutter.hidden;
+    }
+    observer.disconnect();
+    return blanked;
+  })).toBe(false);
   await expect(page.locator(".term-context-gutter")).toBeVisible();
   await expect(tableCheck).toHaveCount(5);
   const wall = await page.evaluate(() => window.__term!.point(7, 0));

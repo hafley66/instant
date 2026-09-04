@@ -1,10 +1,11 @@
 import type { Signal as SignalOf } from "@hafley66/signals";
-import { debounceTime, merge, Subscription } from "rxjs";
+import { Subscription } from "rxjs";
 import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
+import { gutterLeft, rowOnScreen, rowTop } from "./0_terminalRowGeometry";
 import type { VisibleTurn } from "./0_terminalTurnVisibility";
 import type { TerminalContextQueue } from "./1a_terminalContextQueue";
+import { gutter_offset_px, type GutterPaint } from "./1a2_terminalContextGutter";
 import type { BoopTurnComment } from "./1b_terminalContextSync";
-import { gutter_offset_px } from "./1c_terminalHoverCheck";
 
 /// A sent comment placed on screen: the turn it quoted and the row its quote
 /// starts on.
@@ -62,7 +63,12 @@ export function markTitle(placed: PlacedAnnotation[]): string {
 /// that re-queues the slice with its note for a follow-up.
 export class TerminalTurnMarks {
   readonly layer = document.createElement("div");
+  /// One button per stack of marks, keyed by the comments it carries and
+  /// reused across paints so a hovered tooltip survives the next frame.
+  readonly marks = new Map<string, HTMLButtonElement>();
+  private placedByKey = new Map<string, PlacedAnnotation[]>();
   private lifetime = new Subscription();
+  private follow = (paint: GutterPaint) => this.paint(paint);
 
   constructor(
     readonly queue: TerminalContextQueue,
@@ -70,42 +76,49 @@ export class TerminalTurnMarks {
   ) {
     this.layer.className = "term-context-marks";
     queue.gutter.appendChild(this.layer);
-    this.lifetime.add(
-      merge(annotations.$, queue.anchors.visible.$, queue.projection.changes)
-        .pipe(debounceTime(150))
-        .subscribe(() => this.paint()),
-    );
+    this.lifetime.add(annotations.$.subscribe(() => queue.gutterPaint.schedule()));
+    queue.gutterPaint.followers.add(this.follow);
   }
 
-  paint() {
-    this.layer.replaceChildren();
-    if (!this.queue.enabled()) return;
-    const placed = placeAnnotations(this.annotations.$(), this.queue.projection.visible, this.queue.anchors.visible.$());
-    if (!placed.length) return;
-    const screen = this.queue.host.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen) return;
-    const hostRect = this.queue.host.getBoundingClientRect();
-    const screenRect = screen.getBoundingClientRect();
+  markFor(key: string): HTMLButtonElement {
+    const existing = this.marks.get(key);
+    if (existing) return existing;
+    const mark = document.createElement("button");
+    mark.type = "button";
+    mark.className = "term-context-mark";
+    mark.dataset.commentIds = key;
+    mark.addEventListener("mousedown", (event) => event.stopPropagation());
+    mark.addEventListener("click", () => {
+      const entries = this.placedByKey.get(key);
+      if (entries) this.requeue(entries);
+    });
+    this.layer.appendChild(mark);
+    this.marks.set(key, mark);
+    return mark;
+  }
+
+  paint({ geometry, turns, lines }: GutterPaint) {
+    const placed = this.queue.enabled() ? placeAnnotations(this.annotations.$(), turns, lines) : [];
     const byRow = new Map<number, PlacedAnnotation[]>();
     for (const entry of placed) byRow.set(entry.bufferRow, [...byRow.get(entry.bufferRow) ?? [], entry]);
+    const left = gutterLeft(geometry, gutter_offset_px + 18);
+    this.placedByKey.clear();
     for (const [row, entries] of byRow) {
-      const anchor = this.queue.anchors.elementForBufferRow(row);
-      if (!anchor) continue;
-      const mark = document.createElement("button");
-      mark.type = "button";
-      mark.className = "term-context-mark";
-      mark.textContent = entries.length > 1 ? `✎${entries.length}` : "✎";
+      const key = entries.map((entry) => entry.comment.clientId).join(" ");
+      this.placedByKey.set(key, entries);
+      const mark = this.markFor(key);
+      const label = entries.length > 1 ? `✎${entries.length}` : "✎";
+      if (mark.textContent !== label) mark.textContent = label;
       mark.title = markTitle(entries);
       mark.dataset.bufferRow = String(row);
-      mark.dataset.commentIds = entries.map((entry) => entry.comment.clientId).join(" ");
-      mark.addEventListener("mousedown", (event) => event.stopPropagation());
-      mark.addEventListener("click", () => this.requeue(entries));
-      const anchorRect = anchor.getBoundingClientRect();
-      Object.assign(mark.style, {
-        left: `${Math.max(2, screenRect.left - hostRect.left - gutter_offset_px - 18)}px`,
-        top: `${anchorRect.top - hostRect.top}px`,
-      });
-      this.layer.appendChild(mark);
+      mark.hidden = !rowOnScreen(geometry, row);
+      mark.style.left = `${left}px`;
+      mark.style.top = `${rowTop(geometry, row)}px`;
+    }
+    for (const [key, mark] of this.marks) {
+      if (this.placedByKey.has(key)) continue;
+      mark.remove();
+      this.marks.delete(key);
     }
   }
 
@@ -125,7 +138,10 @@ export class TerminalTurnMarks {
   }
 
   dispose() {
+    this.queue.gutterPaint.followers.delete(this.follow);
     this.lifetime.unsubscribe();
+    this.marks.clear();
+    this.placedByKey.clear();
     this.layer.remove();
   }
 }
