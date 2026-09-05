@@ -42,7 +42,7 @@ import {
 } from "./reactdock";
 import { cmdClickRouter, dispatchClick, clickIntent, resolveReference } from "./clickrules";
 import { openExternal, revealExternal } from "./0_openExternal";
-import { tokenAtColumn } from "./termTokens";
+import { tokenAtColumn, widenAcrossSpaces } from "./termTokens";
 import {
   joinWrappedRows,
   capWrappedRows,
@@ -330,6 +330,9 @@ export function tabCwds(id: string): string[] {
 // The agent session ids behind a tab, for the ⌘-click resolver. favorites.ts
 // imports this module, so the import is deferred to break the cycle; a lookup
 // failure is an empty list, never a blocked click.
+// The narrow word behind the wide token of the gesture in flight.
+let pendingNarrow = "";
+
 export async function tabSessionIds(id: string): Promise<string[]> {
   try {
     const { sessionsForTab } = await import("./favorites");
@@ -480,8 +483,15 @@ function overDiagram(e: { target: EventTarget | null }): boolean {
 // link provider uses, so the card names exactly the characters the underline
 // covers.
 function wordAt(id: string, clientX: number, clientY: number): string {
+  return wordSpanAt(id, clientX, clientY).wide;
+}
+
+// The clicked token two ways: `wide` grows an unquoted path across spaces
+// (`/var/x/Screenshot 2026-09-04 at 8.24.07 PM.png`), `narrow` is the bare
+// whitespace-delimited word. The resolver tries wide first, narrow on a miss.
+function wordSpanAt(id: string, clientX: number, clientY: number): { wide: string; narrow: string } {
   const t = tabs.get(id);
-  if (!t) return "";
+  if (!t) return { wide: "", narrow: "" };
   const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
   const rect = screen.getBoundingClientRect();
   const cellH = rect.height / t.term.rows || 1;
@@ -492,12 +502,15 @@ function wordAt(id: string, clientX: number, clientY: number): string {
   const bufferRow = buf.viewportY + row;
   const softRows = softPathRows(id, bufferRow);
   const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
-  if (soft && col >= soft.range.startCol && col < soft.range.endCol) return soft.text;
+  if (soft && col >= soft.range.startCol && col < soft.range.endCol) return { wide: soft.text, narrow: soft.text };
   const wrapped = wrappedLineRows(id, bufferRow);
-  if (!wrapped) return "";
+  if (!wrapped) return { wide: "", narrow: "" };
   const joined = joinWrappedRows(wrapped.rows);
   const offset = joined.rowStartOffsets[wrapped.index] + col;
-  return tokenAtColumn(joined.text, offset)?.text ?? "";
+  const span = tokenAtColumn(joined.text, offset);
+  if (!span) return { wide: "", narrow: "" };
+  const wide = widenAcrossSpaces(joined.text, span);
+  return { wide: wide.text, narrow: span.text };
 }
 
 // opts let a Space override the agent command and launch cwd; plain sessions
@@ -927,8 +940,10 @@ export function openTab(
     (e) => {
       if (!e.metaKey || e.button !== 0 || overDiagram(e)) return;
       const sel = term.getSelection().trim();
-      const word = sel || wordAt(id, e.clientX, e.clientY);
+      const span = wordSpanAt(id, e.clientX, e.clientY);
+      const word = sel || span.wide;
       if (!word) return;
+      pendingNarrow = sel ? "" : span.narrow;
       if (!cmdClickGesture.pointerDown(pointerInput(e), word)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -942,7 +957,9 @@ export function openTab(
     if (!word) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    void tabSessionIds(id).then((sessions) => dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", sessions));
+    const fallback = pendingNarrow && pendingNarrow !== word ? pendingNarrow : undefined;
+    pendingNarrow = "";
+    void tabSessionIds(id).then((sessions) => dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", sessions, fallback));
   }, { capture: true });
 
   // Right-click must be claimed before tmux mouse mode consumes it.

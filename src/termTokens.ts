@@ -158,3 +158,46 @@ export function splitLineRef(token: string): { path: string; line?: number } {
   if (!path || /^[A-Za-z]$/.test(path) || /:\/\/[^/]*$/.test(path)) return { path: token };
   return { path, line: Number(m[1]) };
 }
+
+// An unquoted path with spaces: `/var/folders/x/Screenshot 2026-09-04 at 8.24.07 PM.png`.
+// The whitespace pass cuts it into words; this pass grows the clicked word
+// outward across single spaces while the leftmost word starts like a path
+// (`/`, `~/`, `./`, `../`) and the rightmost word ends in an extension. Both
+// bounds are required, at most WIDEN_WORDS away each; otherwise the span is
+// returned as it was. The caller resolves the wide span first and falls back
+// to the narrow word when nothing on disk answers.
+const WIDEN_WORDS = 8;
+const PATH_START = /^(?:~\/|\.\.?\/|\/)/;
+// `8.24.07` is a time, not a file: the extension needs a letter.
+const EXT_END = /\.(?=[A-Za-z0-9]{1,8}$)[0-9]*[A-Za-z][A-Za-z0-9]*$/;
+
+export function widenAcrossSpaces(line: string, span: TokenSpan): TokenSpan {
+  const words: TokenSpan[] = [];
+  for (const m of line.matchAll(/\S+/g)) {
+    const at = m.index ?? 0;
+    words.push({ text: m[0], start: at, end: at + m[0].length });
+  }
+  const here = words.findIndex((w) => w.start <= span.start && w.end >= span.end);
+  if (here < 0) return span;
+  const strip = (w: string) => w.replace(/[.,;:!?)\]}>'"`]+$/, "");
+  const startsPath = (w: string) => PATH_START.test(w.replace(/^[('"`<[{]+/, ""));
+  const endsFile = (w: string) => EXT_END.test(strip(w));
+  let left = -1;
+  for (let i = here; i >= 0 && here - i <= WIDEN_WORDS; i--) {
+    if (i < here && words[i + 1].start - words[i].end !== 1) break;
+    if (startsPath(words[i].text)) { left = i; break; }
+  }
+  let right = -1;
+  for (let i = here; i < words.length && i - here <= WIDEN_WORDS; i++) {
+    if (i > here && words[i].start - words[i - 1].end !== 1) break;
+    if (endsFile(words[i].text)) { right = i; break; }
+  }
+  if (left < 0 || right < 0 || left === right) return span;
+  const startWord = words[left].text;
+  const lead = startWord.length - startWord.replace(/^[('"`<[{]+/, "").length;
+  const endWord = words[right].text;
+  const trail = endWord.length - strip(endWord).length;
+  const start = words[left].start + lead;
+  const end = words[right].end - trail;
+  return { text: line.slice(start, end), start, end };
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scanLineTokens, tokenAtColumn, unwrapToken, splitLineRef } from "./termTokens";
+import { scanLineTokens, tokenAtColumn, unwrapToken, splitLineRef, widenAcrossSpaces } from "./termTokens";
 
 // The span a caller would highlight, rendered against the source line, so a
 // failure shows the drift instead of two column numbers.
@@ -204,5 +204,29 @@ describe("splitLineRef", () => {
 
   it("does not split a url port", () => {
     expect(splitLineRef("http://localhost:5173")).toEqual({ path: "http://localhost:5173" });
+  });
+});
+
+describe("widenAcrossSpaces", () => {
+  const line = "saved '/tmp/a.png' and /var/folders/z2/T/Screenshot 2026-09-04 at 8.24.07 PM.png (done)";
+  const wordAt = (needle: string) => {
+    const start = line.indexOf(needle);
+    return { text: needle, start, end: start + needle.length };
+  };
+  it("grows a clicked middle word out to the path start and the extension", () => {
+    expect(widenAcrossSpaces(line, wordAt("2026-09-04")).text).toBe("/var/folders/z2/T/Screenshot 2026-09-04 at 8.24.07 PM.png");
+    expect(widenAcrossSpaces(line, wordAt("PM.png")).text).toBe("/var/folders/z2/T/Screenshot 2026-09-04 at 8.24.07 PM.png");
+    expect(widenAcrossSpaces(line, wordAt("/var/folders/z2/T/Screenshot")).text).toBe("/var/folders/z2/T/Screenshot 2026-09-04 at 8.24.07 PM.png");
+  });
+  it("leaves a complete single-word path alone", () => {
+    expect(widenAcrossSpaces(line, wordAt("/tmp/a.png")).text).toBe("/tmp/a.png");
+  });
+  it("needs both a path start and an extension", () => {
+    const prose = "see the folder ~/Library/Application Support and the file";
+    const start = prose.indexOf("Support");
+    expect(widenAcrossSpaces(prose, { text: "Support", start, end: start + 7 }).text).toBe("Support");
+    const rel = "open Screenshot 2026-09-04 at 8.24.07 PM.png now";
+    const s2 = rel.indexOf("at");
+    expect(widenAcrossSpaces(rel, { text: "at", start: s2, end: s2 + 2 }).text).toBe("at");
   });
 });
