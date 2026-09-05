@@ -17,7 +17,7 @@ mod kitty;
 mod ledger;
 #[path = "0_pty_events.rs"]
 mod pty_events;
-pub use ledger::AiMessage;
+pub use boop_harness::transcript::Message as AiMessage;
 mod meme;
 mod pty;
 // sprefa integration disabled for now (2026-07-18): commands kept compiling

@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::ledger::AiMessage;
+use boop_harness::transcript::Message as AiMessage;
 
 pub struct Favorites(pub Mutex<Option<rusqlite::Connection>>);
 impl Default for Favorites {
@@ -102,7 +102,7 @@ pub async fn fav_add(
 ) -> Result<Vec<Fav>, String> {
     let guard = store.0.lock().unwrap();
     let conn = guard.as_ref().ok_or("favorites db not open")?;
-    let editor = crate::ledger::editor_tag(&msg.editor);
+    let editor = crate::ledger::editor_tag(msg.harness);
     conn.execute(
         "INSERT OR REPLACE INTO favorites \
          (editor, session_id, message_id, role, ts, seq, preview, text, locator, cwd, created) \
