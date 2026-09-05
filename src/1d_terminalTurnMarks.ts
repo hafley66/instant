@@ -5,7 +5,8 @@ import { gutterLeft, rowOnScreen, rowTop } from "./0_terminalRowGeometry";
 import type { VisibleTurn } from "./0_terminalTurnVisibility";
 import type { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { gutter_offset_px, type GutterPaint } from "./1a2_terminalContextGutter";
-import type { BoopTurnComment } from "./1b_terminalContextSync";
+import type { BoopTurnComment, BoopTurnCommentFork } from "./1b_terminalContextSync";
+import { placeForks, type PlacedFork } from "./1e_terminalForkMarks";
 
 /// A sent comment placed on screen: the turn it quoted and the row its quote
 /// starts on.
@@ -67,16 +68,21 @@ export class TerminalTurnMarks {
   /// reused across paints so a hovered tooltip survives the next frame.
   readonly marks = new Map<string, HTMLButtonElement>();
   private placedByKey = new Map<string, PlacedAnnotation[]>();
+  /// Forks placed in the last paint, on the same rows as their comments; the
+  /// horizontal block renderer reads this to append rows under the turns.
+  placedForks: PlacedFork[] = [];
   private lifetime = new Subscription();
   private follow = (paint: GutterPaint) => this.paint(paint);
 
   constructor(
     readonly queue: TerminalContextQueue,
     readonly annotations: SignalOf<BoopTurnComment[]>,
+    readonly forks: SignalOf<BoopTurnCommentFork[]>,
   ) {
     this.layer.className = "term-context-marks";
     queue.gutter.appendChild(this.layer);
     this.lifetime.add(annotations.$.subscribe(() => queue.gutterPaint.schedule()));
+    this.lifetime.add(forks.$.subscribe(() => queue.gutterPaint.schedule()));
     queue.gutterPaint.followers.add(this.follow);
   }
 
@@ -99,6 +105,9 @@ export class TerminalTurnMarks {
 
   paint({ geometry, turns, lines }: GutterPaint) {
     const placed = this.queue.enabled() ? placeAnnotations(this.annotations.$(), turns, lines) : [];
+    // Forks place in the same tick as their comment's annotation, on the same
+    // row, so the block renderer can append rows right under the quoted turn.
+    this.placedForks = placeForks(placed, this.forks.$());
     const byRow = new Map<number, PlacedAnnotation[]>();
     for (const entry of placed) byRow.set(entry.bufferRow, [...byRow.get(entry.bufferRow) ?? [], entry]);
     const left = gutterLeft(geometry, gutter_offset_px + 18);

@@ -12,11 +12,13 @@ vi.mock("./generated/native", () => ({
       boopTurnCommentDelete: "boop_turn_comment_delete",
       boopTurnCommentsSent: "boop_turn_comments_sent",
       boopTurnAnnotations: "boop_turn_annotations",
+      boopTurnCommentForks: "boop_turn_comment_forks",
     },
   },
   invoke: async (command: string, args: unknown) => {
     native.calls.push([command, args]);
-    return command === "boop_turn_comments" || command === "boop_turn_annotations" ? [] : undefined;
+    return command === "boop_turn_comments" || command === "boop_turn_annotations"
+      || command === "boop_turn_comment_forks" ? [] : undefined;
   },
 }));
 import { TerminalContextSync } from "./1b_terminalContextSync";
@@ -172,7 +174,7 @@ describe("send never loses the last edit", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
     await sync.flush();
 
-    const writes = native.calls.filter(([command]) => command !== "boop_turn_comments" && command !== "boop_turn_annotations");
+    const writes = native.calls.filter(([command]) => command !== "boop_turn_comments" && command !== "boop_turn_annotations" && command !== "boop_turn_comment_forks");
     expect(writes.map(([command]) => command)).toEqual(["boop_turn_comment_upsert", "boop_turn_comments_sent"]);
     const upsert = writes[0][1] as { comment: BoopTurnComment };
     expect(upsert.comment.note).toBe("typed fast");

@@ -37,3 +37,11 @@ git log --oneline -1
 ```
 instant clippy has 12 pre-existing errors outside your lines; do not fix them, do not gate on clippy.
 Write REPORT.md at the worktree root.
+
+## Amendment 1 (2026-09-05 19:50, after the first run stopped on two blockers)
+The uncommitted Rust work in $PWD (`src-tauri/src/0_boop.rs`, `lib.rs`, `src/generated/native.ts`, `REPORT.md`) is yours; keep it.
+- Ownership added: src/1b_terminalContextSync.ts, src/terminal.ts (the constructor call at :771 only), src/1d_terminalTurnMarks.ts.
+- Wire key: `boop_store::ident::TurnComment` carries `comment_id: i64` (ident.rs:191). In `comment_to_wire` add `#[serde(default)] pub comment_id: i64` to `BoopTurnComment` (camelCase wire `commentId`); add `commentId: number` to the client `BoopTurnComment` type in 1b. `placeForks` keys on `comment.commentId`.
+- Data path: in 1b add a `forks` signal fetched in `pullAnnotations` for the visible comment ids (same tick, no timer); pass it into `TerminalTurnMarks` at terminal.ts:771; call `placeForks` in the 1d paint tick.
+- Build: the cold target dir caused the SIGTERM. Use `export CARGO_TARGET_DIR=$HOME/.cache/cargo-target/instant-harness-out` (warm, same deps) for every cargo command.
+- Then write 1e + its test, run vitest and tsc, one commit with the subject above, and rewrite REPORT.md without the blocker sections.
