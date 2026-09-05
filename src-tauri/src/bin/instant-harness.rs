@@ -1,5 +1,4 @@
-use boop_harness::HarnessId;
-use instant_lib::harness_store::{messages, resolve, sessions};
+use boop_harness::{HarnessId, Registry};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -15,14 +14,15 @@ fn main() {
         std::process::exit(1)
     };
     let cwd = value("--cwd");
+    let registry = Registry::discover();
     let output = match command {
-        "sessions" => serde_json::to_value(sessions(id, cwd)).unwrap(),
+        "sessions" => serde_json::to_value(registry.describe_all(id, cwd)).unwrap(),
         "resolve" => {
             let Some(cwd) = cwd else {
                 eprintln!("resolve requires --cwd");
                 std::process::exit(1)
             };
-            serde_json::to_value(resolve(id, cwd)).unwrap()
+            serde_json::to_value(registry.describe_all(id, Some(cwd)).into_iter().next()).unwrap()
         }
         "messages" => {
             let Some(cwd) = cwd else {
@@ -34,7 +34,7 @@ fn main() {
                 std::process::exit(1)
             };
             let after_seq = value("--after-seq").and_then(|value| value.parse().ok());
-            serde_json::to_value(messages(id, session, cwd, after_seq)).unwrap()
+            serde_json::to_value(registry.messages_by_id(id, session, cwd, after_seq)).unwrap()
         }
         _ => {
             eprintln!("usage: instant-harness sessions|resolve|messages --harness <id> [--cwd <dir>] [--session <id>] [--after-seq <n>]");
