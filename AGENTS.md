@@ -1,5 +1,12 @@
 # Rules for agents working in this repo
 
+## Issue tracking
+
+Use `issuectl` for feature requests, bugs, and tasks; follow `issues/AGENTS.md`.
+Always create and update issues in the checkout of `main`, including when
+implementation happens in another worktree. Use `issuectl --root <main-checkout>`
+from other worktrees; do not switch a working implementation checkout to main.
+
 ## No bespoke list/table UIs
 Never hand-roll a list, table, or tree-list UI in a panel. Any UI that renders rows of
 data reuses the existing grid stack:

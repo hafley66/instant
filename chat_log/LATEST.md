@@ -1,1 +1,1 @@
-20260902.0.panel-close-detach-remain-on-exit.md
+20260905.0.instant-managed-forks-turn-navigator.md
