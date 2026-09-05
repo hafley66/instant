@@ -9,6 +9,8 @@ import type { Subscription } from "rxjs";
 import { runMatchingCommand } from "./keymap";
 import { history as navHistory } from "./nav";
 import { fuzzyFilter } from "./fuzzy";
+import { openExternalUrl } from "./0_openExternal";
+import { showError } from "./core";
 
 type FrameEvent = { id: string; data: string };
 
@@ -215,6 +217,13 @@ export class CdpView {
     this.backBtn = mkBtn("←", "Back", () => this.goBack(), (b) => this.showHistMenu(b, -1));
     this.fwdBtn = mkBtn("→", "Forward", () => this.goForward(), (b) => this.showHistMenu(b, 1));
     const reloadBtn = mkBtn("⟳", "Reload", () => this.reload());
+    // The page in the OS browser: the screencast is for a glance, the real
+    // browser is for everything a glance cannot do.
+    const externalBtn = mkBtn("↗", "Open in the default browser", () => {
+      const url = this.urls[this.idx] ?? this.urlbar.value.trim();
+      if (!url) return;
+      void openExternalUrl(url).catch((error) => showError("open external", error));
+    });
     Object.assign(this.urlbar.style, {
       flex: "1 1 auto",
       width: "100%",
@@ -247,7 +256,7 @@ export class CdpView {
       boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
     } satisfies Partial<CSSStyleDeclaration>);
     urlWrap.append(this.urlbar, this.suggestBox);
-    navrow.append(this.backBtn, this.fwdBtn, reloadBtn, urlWrap);
+    navrow.append(this.backBtn, this.fwdBtn, reloadBtn, externalBtn, urlWrap);
     this.updateNavButtons();
 
     // Back/forward history menu (Chrome's press-and-hold list), anchored under
