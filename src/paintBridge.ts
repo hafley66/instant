@@ -18,6 +18,10 @@ interface MiniPaintLayer {
   _instantCaptionKey?: string;
   _needs_update_data?: boolean;
   visible: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface MemeCaption {
@@ -210,7 +214,11 @@ export function installPaintBridge(
           continue;
         }
         const next = caption(value, Math.round(AppConfig.HEIGHT * (value.id === "top" ? 0.04 : 0.78)));
-        if (existing) Object.assign(existing, next, { visible: value.enabled, _needs_update_data: true });
+        // A layer the user already dragged or resized keeps its box; only the text and style follow the form.
+        if (existing) {
+          const { x, y, width, height } = existing;
+          Object.assign(existing, next, { x, y, width, height, visible: value.enabled, _needs_update_data: true });
+        }
         else await Layers.insert({ ...next, visible: value.enabled });
       }
       Layers.render(true);

@@ -1010,3 +1010,160 @@ mod tests {
         }
     }
 }
+
+/// What the pane's agent sessions have touched, for the ⌘-click resolver:
+/// every file path the ledger recorded (newest first) and every directory
+/// those paths sit under, plus each session's launch cwd. A token the agent
+/// printed almost always names something on this list.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentEvidence {
+    pub paths: Vec<String>,
+    pub dirs: Vec<String>,
+}
+
+const EVIDENCE_PATH_CAP: usize = 2000;
+
+pub fn agent_evidence(sessions: &[String], boundary: &str) -> AgentEvidence {
+    if sessions.is_empty() {
+        return AgentEvidence::default();
+    }
+    let Ok(store) = open_store_ro() else {
+        return AgentEvidence::default();
+    };
+    let connection = store.connection();
+    let placeholders: Vec<String> = (0..sessions.len())
+        .map(|index| format!("(s.value = ?{n} OR s.value LIKE ?{n} || '/%')", n = index + 1))
+        .collect();
+    let filter = placeholders.join(" OR ");
+    let params: Vec<rusqlite::types::Value> = sessions
+        .iter()
+        .map(|session| rusqlite::types::Value::Text(session.clone()))
+        .collect();
+    let mut paths: Vec<String> = Vec::new();
+    if let Ok(mut statement) = connection.prepare(&format!(
+        "SELECT p.value FROM agent_touch t
+           JOIN dict_path p ON p.id = t.path_id
+           JOIN dict_session s ON s.id = t.session_id
+          WHERE {filter}
+          ORDER BY t.ts DESC, t.turn DESC LIMIT {EVIDENCE_PATH_CAP}"
+    )) {
+        if let Ok(rows) = statement.query_map(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, String>(0)) {
+            for path in rows.flatten() {
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+    let mut cwds: Vec<String> = Vec::new();
+    if let Ok(mut statement) = connection.prepare(&format!(
+        "SELECT c.value FROM agent_session a
+           JOIN dict_session s ON s.id = a.session_id
+           JOIN dict_cwd c ON c.id = a.cwd_id
+          WHERE {filter}"
+    )) {
+        if let Ok(rows) = statement.query_map(rusqlite::params_from_iter(params.iter()), |row| row.get::<_, String>(0)) {
+            cwds.extend(rows.flatten());
+        }
+    }
+    AgentEvidence { dirs: evidence_dirs(&paths, &cwds, boundary), paths }
+}
+
+/// Distinct directories above each touched path up to `boundary`, newest
+/// evidence first, then the session cwds. Order is the retry order.
+pub fn evidence_dirs(paths: &[String], cwds: &[String], boundary: &str) -> Vec<String> {
+    let mut dirs: Vec<String> = Vec::new();
+    let mut push = |dir: String| {
+        if !dir.is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    };
+    let boundary = boundary.trim_end_matches('/');
+    for path in paths {
+        let mut current = std::path::Path::new(path).parent();
+        while let Some(dir) = current {
+            let text = dir.to_string_lossy();
+            if text.len() <= boundary.len() || !text.starts_with(boundary) {
+                break;
+            }
+            push(text.into_owned());
+            current = dir.parent();
+        }
+    }
+    for cwd in cwds {
+        push(cwd.trim_end_matches('/').to_string());
+    }
+    dirs
+}
+
+/// One file the agent touched, for the jump palette.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTouchRow {
+    pub path: String,
+    pub session: String,
+    pub turn: i64,
+    pub ts: i64,
+    pub verb: String,
+}
+
+/// Files the given sessions touched, newest first, one row per path (the
+/// newest touch wins). Bounded by `limit`, default 2000.
+#[tauri::command]
+pub async fn boop_agent_touches(
+    sessions: Vec<String>,
+    limit: Option<usize>,
+) -> Result<Vec<AgentTouchRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_agent_touches(&sessions, limit.unwrap_or(EVIDENCE_PATH_CAP)))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn read_agent_touches(sessions: &[String], limit: usize) -> Result<Vec<AgentTouchRow>, String> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let store = open_store_ro()?;
+    let connection = store.connection();
+    let filter: Vec<String> = (0..sessions.len())
+        .map(|index| format!("(s.value = ?{n} OR s.value LIKE ?{n} || '/%')", n = index + 1))
+        .collect();
+    let params: Vec<rusqlite::types::Value> = sessions
+        .iter()
+        .map(|session| rusqlite::types::Value::Text(session.clone()))
+        .collect();
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT p.value, s.value, t.turn, t.ts, COALESCE(v.value, '')
+               FROM agent_touch t
+               JOIN dict_path p ON p.id = t.path_id
+               JOIN dict_session s ON s.id = t.session_id
+               LEFT JOIN dict_verb v ON v.id = t.verb_id
+              WHERE {}
+              ORDER BY t.ts DESC, t.turn DESC",
+            filter.join(" OR ")
+        ))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(AgentTouchRow {
+                path: row.get(0)?,
+                session: row.get(1)?,
+                turn: row.get(2)?,
+                ts: row.get(3)?,
+                verb: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut out: Vec<AgentTouchRow> = Vec::new();
+    for row in rows.flatten() {
+        if out.iter().any(|seen| seen.path == row.path) {
+            continue;
+        }
+        out.push(row);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    Ok(out)
+}

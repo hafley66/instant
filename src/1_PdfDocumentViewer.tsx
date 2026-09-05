@@ -3,6 +3,7 @@ import type { PDFViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
 import type { PDFDocumentLoadingTask } from "pdfjs-dist/types/src/pdf.d.ts";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { openExternal } from "./0_openExternal";
+import { showError } from "./core";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 
 function dataUrlBytes(url: string): Uint8Array {
@@ -104,7 +105,7 @@ export function PdfDocumentViewer({
         <span>{Math.round(zoom * 100)}%</span>
         <button type="button" onClick={() => zoomBy(1.2)} title="zoom in">+</button>
         <span>{status}</span>
-        <button type="button" onClick={() => void openExternal(path).catch(console.error)} title="open in the OS default app">
+        <button type="button" onClick={() => void openExternal(path).catch((error) => showError("open external", error))} title="open in the OS default app">
           ↗ external
         </button>
       </div>

@@ -142,7 +142,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
     }
   }
   // Claude and Codex render Markdown fences without the backticks. The language
-  // label survives as its own row, which is enough provenance to distinguish a
+  // label survives as its own row, which is enough origin to distinguish a
   // diagram from arrow-shaped source code. Code rows retain Markdown's leading
   // indentation, including across internal blank rows.
   for (let index = 0; index < lines.length; index++) {

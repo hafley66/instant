@@ -4,7 +4,7 @@ import type { Call, Client, Contract } from "./client";
 import { createClient } from "./client";
 import { invoke } from "../generated/native";
 
-export type RefSource = "absolute" | "cwd" | "repo" | "ancestor" | "sibling" | "search" | "fuzzy";
+export type RefSource = "touched" | "absolute" | "cwd" | "repo" | "ancestor" | "ignored" | "sibling" | "search" | "fuzzy";
 export type ResolvedRef = { path: string; line?: number; source: RefSource };
 export type ResolveResult =
   | { kind: "hit"; ref: ResolvedRef }
@@ -14,7 +14,8 @@ export type ResolveResult =
 
 export type ClickContract = {
   // src-tauri/src/refresolve.rs
-  resolve_ref: Call<{ token: string; cwd: string }, ResolveResult>;
+  // sessions: the pane's agent session ids; what they touched is the first rung.
+  resolve_ref: Call<{ token: string; cwd: string; sessions?: string[] }, ResolveResult>;
   clear_ref_index: Call<void, void>;
   read_git_blob: Call<{ repo: string; rev: string; path: string }, string>;
   // src-tauri/src/shell.rs

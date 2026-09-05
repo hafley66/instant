@@ -78,6 +78,7 @@ export type CommandName =
   | "boop_turn_annotations"
   | "boop_lanes"
   | "boop_lane_events"
+  | "boop_agent_touches"
   | "boop_mux_capture"
   | "boop_mux_session"
   | "boop_mux_send_keys"
@@ -230,6 +231,7 @@ export namespace commands {
     export const boopTurnAnnotations = "boop_turn_annotations";
     export const boopLanes = "boop_lanes";
     export const boopLaneEvents = "boop_lane_events";
+    export const boopAgentTouches = "boop_agent_touches";
   }
 
   export namespace boop_mux {

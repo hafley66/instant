@@ -21,7 +21,7 @@ const visibleTurn = (
   anchorEnd: bufferEnd,
   regions: [],
   confidence: "anchored",
-  provenance: "xterm+boop",
+  source: "xterm+boop",
   ...overrides,
 });
 

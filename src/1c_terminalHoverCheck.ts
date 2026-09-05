@@ -1,6 +1,14 @@
-import type { Subscription } from "rxjs";
 import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
+import {
+  gutterLeft,
+  readRowGeometry,
+  rowTop,
+  type TerminalRowGeometry,
+} from "./0_terminalRowGeometry";
 import { turnsAcrossRange, type TerminalContextQueue } from "./1a_terminalContextQueue";
+import { gutter_check_px, gutter_offset_px, type GutterPaint } from "./1a2_terminalContextGutter";
+
+export { gutter_offset_px };
 
 /// The queue id a hover-taken line carries; one per logical line, so a second
 /// click on the same line unchecks rather than queues a duplicate.
@@ -12,10 +20,6 @@ export function hoverTargetAt(lines: VisibleTerminalLine[], bufferRow: number): 
   const line = lines.find((candidate) => candidate.bufferStart <= bufferRow && bufferRow <= candidate.bufferEnd);
   return line && line.text.trim() ? line : null;
 }
-
-/// How far left of the screen edge the gutter checkboxes sit, matching the
-/// structured checkboxes the queue paints.
-export const gutter_offset_px = 42;
 
 /// The screen row under a pointer, by geometry rather than by hit target:
 /// xterm stacks selection, decoration and helper layers over its row
@@ -39,7 +43,7 @@ export class TerminalHoverCheck {
   readonly check = document.createElement("input");
   line: VisibleTerminalLine | null = null;
   private pointer: { x: number; y: number } | null = null;
-  private anchorSubscription: Subscription;
+  private follow = (paint: GutterPaint) => this.evaluate(paint.geometry);
 
   constructor(readonly queue: TerminalContextQueue) {
     this.check.type = "checkbox";
@@ -51,8 +55,8 @@ export class TerminalHoverCheck {
     queue.gutter.appendChild(this.check);
     queue.host.addEventListener("mousemove", this.onMove);
     queue.host.addEventListener("mouseleave", this.onLeave);
-    // Anchors settle after the write the pointer is already resting on.
-    this.anchorSubscription = queue.anchors.visible.$.subscribe(() => this.evaluate());
+    // Repositioned inside the paint the structured boxes were placed by.
+    queue.gutterPaint.followers.add(this.follow);
   }
 
   private onMove = (event: MouseEvent) => {
@@ -67,30 +71,25 @@ export class TerminalHoverCheck {
     this.hide();
   };
 
-  evaluate() {
+  evaluate(geometry = readRowGeometry(this.queue.term, this.queue.host)) {
     const pointer = this.pointer;
-    if (!pointer || !this.queue.enabled()) return this.hide();
-    const screen = this.queue.host.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen) return this.hide();
-    const row = screenRowAt(screen.getBoundingClientRect(), this.queue.term.rows, pointer.x, pointer.y);
+    if (!pointer || !geometry || !this.queue.enabled()) return this.hide();
+    // A pane flush against its left edge has no room for a gutter, so the
+    // column sits over the first cells: never summon a box under the pointer.
+    const column = geometry.screen.left - geometry.left + gutterLeft(geometry, gutter_offset_px);
+    if (pointer.x >= column && pointer.x < column + gutter_check_px) return;
+    const row = screenRowAt(geometry.screen, geometry.rows, pointer.x, pointer.y);
     if (row === null) return this.hide();
-    const bufferRow = this.queue.term.buffer.active.viewportY + row;
-    const line = hoverTargetAt(this.queue.anchors.visible.$(), bufferRow);
-    if (!line || this.queue.paintedLineIds.has(line.id)) return this.hide();
-    const anchor = this.queue.anchors.elementForBufferRow(line.bufferStart);
-    if (!anchor) return this.hide();
-    this.show(line, anchor);
+    const line = hoverTargetAt(this.queue.anchors.visible.$(), geometry.viewportY + row);
+    if (!line || this.queue.gutterPaint.paintedLineIds.has(line.id)) return this.hide();
+    this.show(line, geometry);
   }
 
-  show(line: VisibleTerminalLine, anchor: HTMLElement) {
+  show(line: VisibleTerminalLine, geometry: TerminalRowGeometry) {
     this.line = line;
-    const screen = this.queue.host.querySelector<HTMLElement>(".xterm-screen");
-    const hostRect = this.queue.host.getBoundingClientRect();
-    const screenRect = (screen ?? anchor).getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
     Object.assign(this.check.style, {
-      left: `${Math.max(2, screenRect.left - hostRect.left - gutter_offset_px)}px`,
-      top: `${anchorRect.top - hostRect.top}px`,
+      left: `${gutterLeft(geometry, gutter_offset_px)}px`,
+      top: `${rowTop(geometry, line.bufferStart)}px`,
     });
     this.check.dataset.terminalLineId = line.id;
     this.check.checked = this.queue.items.has(hoverLineId(line));
@@ -120,7 +119,7 @@ export class TerminalHoverCheck {
   }
 
   dispose() {
-    this.anchorSubscription.unsubscribe();
+    this.queue.gutterPaint.followers.delete(this.follow);
     this.queue.host.removeEventListener("mousemove", this.onMove);
     this.queue.host.removeEventListener("mouseleave", this.onLeave);
     this.check.remove();

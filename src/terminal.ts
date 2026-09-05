@@ -41,6 +41,7 @@ import {
   termPanelId,
 } from "./reactdock";
 import { cmdClickRouter, dispatchClick, clickIntent, resolveReference } from "./clickrules";
+import { openExternal, revealExternal } from "./0_openExternal";
 import { tokenAtColumn } from "./termTokens";
 import {
   joinWrappedRows,
@@ -326,6 +327,18 @@ export function tabCwds(id: string): string[] {
   return [...new Set(cands)];
 }
 
+// The agent session ids behind a tab, for the ⌘-click resolver. favorites.ts
+// imports this module, so the import is deferred to break the cycle; a lookup
+// failure is an empty list, never a blocked click.
+export async function tabSessionIds(id: string): Promise<string[]> {
+  try {
+    const { sessionsForTab } = await import("./favorites");
+    return (await sessionsForTab(id)).map((session) => session.sessionId);
+  } catch {
+    return [];
+  }
+}
+
 // Cheap front gate so a ⌘-click on a plain word does nothing (no window hide):
 // a URL scheme, a www. host, or a token bearing a slash/dot/tilde path marker.
 export function looksOpenable(tok: string): boolean {
@@ -585,6 +598,8 @@ export function openTab(
     if (action === "preview") openPreviewPanel(inspectorRef.path, inspectorRef.line);
     if (action === "search") void dispatchClick(inspectorToken, inspectorCwd);
     if (action === "copy") void navigator.clipboard.writeText(inspectorRef.path);
+    if (action === "external") void openExternal(inspectorRef.path).catch((error) => showError("open external", error));
+    if (action === "reveal") void revealExternal(inspectorRef.path).catch((error) => showError("reveal", error));
   });
   window.addEventListener("keydown", (e) => {
     if (e.key === "Meta") commandHeld = true;
@@ -868,7 +883,7 @@ export function openTab(
       inspector.style.left = `${Math.max(8, Math.min(e.clientX + 12, window.innerWidth - inspectorW - 8))}px`;
       inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
-      void resolveRef(token, cwd).then((result) => {
+      void tabSessionIds(id).then((sessions) => resolveRef(token, cwd, sessions)).then((result) => {
         if (request !== inspectorRequest) return;
         if (result.kind === "choices") {
           inspectorRef = null;
@@ -892,7 +907,7 @@ export function openTab(
           if (request !== inspectorRequest) return;
           return inlineSnippetHtml(ref.path, text, settings.mode.$() === "dark").then((html) => {
             if (request !== inspectorRequest) return;
-            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button></div>`;
+            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button><button data-inspector-action="external">open external</button><button data-inspector-action="reveal">reveal</button></div>`;
           });
         });
       }).catch(() => {});
@@ -927,7 +942,7 @@ export function openTab(
     if (!word) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    void dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal");
+    void tabSessionIds(id).then((sessions) => dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", sessions));
   }, { capture: true });
 
   // Right-click must be claimed before tmux mouse mode consumes it.

@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 export async function openExternal(path: string): Promise<void> {
   const window = getCurrentWindow();
@@ -21,4 +21,9 @@ export async function openExternalUrl(url: string): Promise<void> {
     await window.show();
     throw error;
   }
+}
+
+/** Show the file in Finder without hiding Instant: the user is picking, not leaving. */
+export async function revealExternal(path: string): Promise<void> {
+  await revealItemInDir(path);
 }

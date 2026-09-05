@@ -38,6 +38,7 @@ import { registerPaint } from "./paintPanel";
 import { isFilePickerOpen } from "./overlayGuard";
 import { installKeymap, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
+import { openJumpPalette, isJumpOpen } from "./jumpPalette";
 import { type GraphicsFrame } from "./graphics";
 import { cdpPerf } from "./cdp";
 import { claimFsWatch } from "./fsWatch";
@@ -453,7 +454,7 @@ async function main() {
   // Esc hides the popover — unless the command palette is open, where Esc just
   // closes the palette (handled on its own input, which stops propagation).
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !isPaletteOpen()) getCurrentWindow().hide();
+    if (e.key === "Escape" && !isPaletteOpen() && !isJumpOpen()) getCurrentWindow().hide();
   });
 
   // Central keymap: binds the command table on the window. The focused-terminal
@@ -469,7 +470,14 @@ async function main() {
     group: "Panel",
     run: () => togglePanel(p.id),
   }));
-  installKeymap([...TAB_COMMANDS, ...pluginCommands(), ...panelCommands]);
+  const jumpCommand: Command = {
+    id: "agent.jump",
+    keys: ["$mod+Shift+j"],
+    title: "Jump to a file the agent touched",
+    group: "Agent",
+    run: () => void openJumpPalette(),
+  };
+  installKeymap([...TAB_COMMANDS, ...pluginCommands(), ...panelCommands, jumpCommand]);
 
   // Overlay: re-apply on any change to its config or the frontmost app, then once
   // now so a persisted mini/fade/follow is restored on boot.

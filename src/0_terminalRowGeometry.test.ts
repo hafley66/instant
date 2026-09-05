@@ -79,7 +79,7 @@ const turn = (start: number, end: number): VisibleTurn => ({
     text: "| a |\n| - |\n| b |",
   }] as VisibleTurn["regions"],
   confidence: "anchored",
-  provenance: "xterm+boop",
+  source: "xterm+boop",
 });
 
 describe("spans slid by a scrollback trim", () => {

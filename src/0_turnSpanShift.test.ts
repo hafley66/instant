@@ -24,7 +24,7 @@ const turn = (id: string, start: number, end: number): VisibleTurn => ({
     bufferEnd: end,
   }] as VisibleTurn["regions"],
   confidence: "anchored",
-  provenance: "xterm+boop",
+  source: "xterm+boop",
 });
 
 // xterm trims the oldest scrollback line per line written once the buffer is
