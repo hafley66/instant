@@ -1167,3 +1167,92 @@ fn read_agent_touches(sessions: &[String], limit: usize) -> Result<Vec<AgentTouc
     }
     Ok(out)
 }
+
+/// The session graph boop itself projects (`boop db agent-summary`): every
+/// harness session, the spawn edges between them, every registered lane
+/// (shell) with its parent lane, and liveness from tmux and the process
+/// table. This is the tree the boop panel nests on; `agent_route` alone is
+/// the live registry and forgets a lane the moment it is done.
+fn read_session_graph(
+    history_since_ms: Option<u64>,
+) -> Result<boop_store::_0_session_graph::AgentSessionGraph, String> {
+    use boop_store::_0_session_graph::{
+        load_agent_session_graph_with_runtime, AgentSessionGraphQuery, AgentSessionGraphRuntime,
+    };
+    let store = open_store_ro()?;
+    let db_path = boop_db_path()?;
+    let dir = db_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| "boop.db has no parent directory".to_string())?;
+    let routes = boop_store::bus::read_routes(&dir).map_err(|error| error.to_string())?;
+    let mut messages = Vec::new();
+    for path in boop_store::bus::read_boxes(&dir).map_err(|error| error.to_string())? {
+        messages.extend(boop_store::bus::parse_box(&path));
+    }
+    let processes = boop_store::proc::SysinfoSnapshot::capture().map_err(|error| error.to_string())?;
+    load_agent_session_graph_with_runtime(
+        &store,
+        AgentSessionGraphQuery {
+            cwd: None,
+            include_history: true,
+            tmux: None,
+            history_since_ts: history_since_ms,
+        },
+        AgentSessionGraphRuntime {
+            routes: &routes,
+            messages: &messages,
+            multiplexer: boop_store::tmux::mux(),
+            tmux_socket: None,
+            processes: &processes,
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn boop_session_graph(
+    history_since_ms: Option<u64>,
+) -> Result<boop_store::_0_session_graph::AgentSessionGraph, String> {
+    tauri::async_runtime::spawn_blocking(move || read_session_graph(history_since_ms))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod session_graph_probe {
+    /// Manual probe against the live store: `cargo test session_graph_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn print_live_session_graph_shape() {
+        let since = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+            .saturating_sub(24 * 60 * 60 * 1000);
+        let graph = super::read_session_graph(Some(since)).expect("graph");
+        println!(
+            "sessions={} edges={} shells={} trace_events={}",
+            graph.sessions.len(),
+            graph.edges.len(),
+            graph.shells.len(),
+            graph.trace_events.len()
+        );
+        for node in graph.sessions.iter().take(3) {
+            println!("session {}", serde_json::to_string(node).unwrap());
+        }
+        for edge in graph.edges.iter().take(3) {
+            println!("edge {}", serde_json::to_string(edge).unwrap());
+        }
+        for shell in graph.shells.iter().filter(|s| s.parent_lane.is_some()).take(2) {
+            println!("shell {}", serde_json::to_string(shell).unwrap());
+        }
+        for shell in graph.shells.iter().filter(|s| s.session.is_some()).take(2) {
+            println!("bound-shell {}", serde_json::to_string(shell).unwrap());
+        }
+        let states: std::collections::BTreeMap<&str, usize> = graph.shells.iter().fold(Default::default(), |mut m, s| { *m.entry(s.state.as_str()).or_default() += 1; m });
+        println!("shell states {states:?}");
+        let sstates: std::collections::BTreeMap<String, usize> = graph.sessions.iter().fold(Default::default(), |mut m, s| { *m.entry(s.state.clone().unwrap_or_default()).or_default() += 1; m });
+        println!("session states {sstates:?}");
+    }
+}

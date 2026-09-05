@@ -1151,6 +1151,7 @@ pub fn run() {
             boop::boop_turn_comments_sent,
             boop::boop_turn_annotations,
             boop::boop_agent_touches,
+            boop::boop_session_graph,
             boop_tmux::boop_mux_capture,
             boop_tmux::boop_mux_exit_copy_mode,
             harness_store::boop_mux_session,

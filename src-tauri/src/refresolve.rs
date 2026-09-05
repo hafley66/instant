@@ -503,6 +503,7 @@ pub fn resolve_from_evidence(rel: &str, evidence: &crate::boop::AgentEvidence) -
     None
 }
 
+#[cfg(test)]
 fn resolve_ref_blocking(token: String, cwd: String, home: String) -> ResolveResult {
     resolve_ref_with(token, cwd, home, &crate::boop::AgentEvidence::default())
 }

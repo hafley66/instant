@@ -6,6 +6,7 @@ import { TreeTable, type TreeColumn } from "./treetable";
 import { settings } from "./0_settings";
 import type { SortingState } from "@tanstack/react-table";
 import { createMarbler, MarblerPanel, type MarbleEvent, type MarbleFrame } from "@hafley66/marbler";
+import { buildGraphTree, flattenTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
 
 export interface BoopLane {
   route: string;
@@ -87,30 +88,30 @@ export function toMarbleEvents(lanes: BoopLane[], events: BoopLaneEvent[]): Marb
   }));
 }
 
-// Rows carry the per-poll rollups so the column array stays module-stable:
-// rebuilt columns reset tanstack's sort state, killing header clicks.
-export interface BoopRow extends BoopLane {
+// Rows are graph nodes (lanes and sessions, nested) carrying the per-poll
+// rollups; the column array stays module-stable because rebuilt columns reset
+// tanstack's sort state, killing header clicks.
+export interface BoopRow extends GraphNode {
   mailCount: number;
-  lastTs: number;
   endedTs: number;
   dots: LaneStat["dots"];
   windowRange: [number, number] | null;
+  subRows: BoopRow[];
 }
 
 const BOOP_COLUMNS: TreeColumn<BoopRow>[] = [
   {
     id: "route",
-    header: "lane",
+    header: "agent",
     tree: true,
-    sortValue: (r) => r.route,
-    cell: (r) => r.route,
-    cellClass: (r) => (r.state === "open" ? "boop-open" : "boop-closed"),
+    sortValue: (r) => r.label,
+    cell: (r) => r.label,
+    cellClass: (r) => (r.state === "live" ? "boop-open" : "boop-closed"),
   },
-  { id: "state", header: "state", sortValue: (r) => r.state, cell: (r) => r.state },
+  { id: "kind", header: "kind", sortValue: (r) => r.kind, cell: (r) => r.kind, size: 64 },
+  { id: "state", header: "state", sortValue: (r) => r.state, cell: (r) => r.state, size: 56 },
   { id: "harness", header: "harness", sortValue: (r) => r.harness ?? "", cell: (r) => r.harness ?? "" },
-  { id: "model", header: "model", sortValue: (r) => r.model ?? "", cell: (r) => (r.model ?? "").split("/").pop() ?? "" },
-  { id: "parent", header: "parent", sortValue: (r) => r.parent ?? "", cell: (r) => r.parent ?? "" },
-  { id: "goal", header: "goal", sortValue: (r) => r.goal ?? "", cell: (r) => r.goal ?? "" },
+  { id: "cwd", header: "cwd", sortValue: (r) => r.cwd ?? "", cell: (r) => (r.cwd ?? "").split("/").filter(Boolean).slice(-2).join("/") },
   {
     id: "mails",
     header: "mail",
@@ -121,8 +122,8 @@ const BOOP_COLUMNS: TreeColumn<BoopRow>[] = [
   {
     id: "started",
     header: "started",
-    sortValue: (r) => r.registeredMs,
-    cell: (r) => (r.registeredMs ? fmtAgo(r.registeredMs, Date.now()) : "—"),
+    sortValue: (r) => r.startedTs,
+    cell: (r) => (r.startedTs ? fmtAgo(r.startedTs, Date.now()) : "—"),
     size: 84,
   },
   {
@@ -134,10 +135,12 @@ const BOOP_COLUMNS: TreeColumn<BoopRow>[] = [
   },
   {
     id: "ended",
-    header: "last run end",
-    sortValue: (r) => r.endedTs,
-    cell: (r) =>
-      r.state === "open" || !r.endedTs ? "—" : fmtAgo(r.endedTs, Date.now()),
+    header: "ended",
+    sortValue: (r) => r.finishedTs || r.endedTs,
+    cell: (r) => {
+      const at = r.finishedTs || r.endedTs;
+      return r.state === "live" || !at ? "—" : fmtAgo(at, Date.now());
+    },
     size: 92,
   },
   {
@@ -242,15 +245,42 @@ export function rootLanes(lanes: BoopLane[]): BoopLane[] {
   return lanes.filter((lane) => !lane.parent || lane.parent === "root");
 }
 
+// The marbler and the mail rollups still speak BoopLane; every graph node is
+// one lane-shaped row, its parent the node it nests under.
+export function lanesOfNodes(nodes: GraphNode[]): BoopLane[] {
+  return nodes.map((node) => ({
+    route: node.id,
+    kind: node.kind,
+    harness: node.harness,
+    model: null,
+    goal: node.label,
+    parent: node.parentId,
+    cwd: node.cwd,
+    branch: null,
+    registeredMs: node.startedTs,
+    state: node.state === "live" ? "open" : "closed",
+  }));
+}
+
+// A root stays under "active only" when anything in its subtree is live.
+export function subtreeLive(node: GraphNode): boolean {
+  return node.state === "live" || node.children.some(subtreeLive);
+}
+
 const BOOP_SORT: SortingState = [{ id: "updated", desc: true }];
+const GRAPH_POLL_MS = 3000;
 
 const POLL_MS = 1000;
 // Full history on first paint; after that only the tail, merged in memory.
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 export function BoopPanelV2() {
-  const [lanes, setLanes] = useState<BoopLane[]>([]);
+  const [graph, setGraph] = useState<SessionGraph | null>(null);
   const [events, setEvents] = useState<BoopLaneEvent[]>([]);
+  const sinceTs = useRef(Date.now() - LOOKBACK_MS);
+  const roots = useMemo(() => (graph ? buildGraphTree(graph, sinceTs.current) : []), [graph]);
+  const nodes = useMemo(() => flattenTree(roots), [roots]);
+  const lanes = useMemo(() => lanesOfNodes(nodes), [nodes]);
   const [selected, setSelected] = useState<string | null>(null);
   const [invokeError, setInvokeError] = useState<string | null>(null);
   const lastTs = useRef(0);
@@ -261,13 +291,9 @@ export function BoopPanelV2() {
     const refresh = async () => {
       try {
         const since = lastTs.current === 0 ? Date.now() - LOOKBACK_MS : lastTs.current;
-        const [nextLanes, tail] = await Promise.all([
-          invoke<BoopLane[]>("boop_lanes"),
-          invoke<BoopLaneEvent[]>("boop_lane_events", { sinceMs: since }),
-        ]);
+        const tail = await invoke<BoopLaneEvent[]>("boop_lane_events", { sinceMs: since });
         if (stopped) return;
         setInvokeError(null);
-        setLanes(nextLanes);
         if (tail.length) {
           lastTs.current = tail[tail.length - 1].ts + 1;
           setEvents((prior) => prior.concat(tail));
@@ -278,11 +304,26 @@ export function BoopPanelV2() {
         if (!stopped) setInvokeError(reason instanceof Error ? reason.message : String(reason));
       }
     };
+    // The graph read walks the process table and tmux, so it polls slower
+    // than the mail tail.
+    const refreshGraph = async () => {
+      try {
+        const next = await invoke<SessionGraph>("boop_session_graph", { historySinceMs: sinceTs.current });
+        if (stopped) return;
+        setInvokeError(null);
+        setGraph(next);
+      } catch (reason) {
+        if (!stopped) setInvokeError(reason instanceof Error ? reason.message : String(reason));
+      }
+    };
     void refresh();
+    void refreshGraph();
     const timer = window.setInterval(refresh, POLL_MS);
+    const graphTimer = window.setInterval(refreshGraph, GRAPH_POLL_MS);
     return () => {
       stopped = true;
       window.clearInterval(timer);
+      window.clearInterval(graphTimer);
     };
   }, []);
 
@@ -328,22 +369,20 @@ export function BoopPanelV2() {
   }, [shown, windowRange]);
 
   const onlyActive = settings.boopOnlyActive.$();
-  const roots = useMemo(() => rootLanes(lanes), [lanes]);
+  const toRow = (node: GraphNode): BoopRow => ({
+    ...node,
+    mailCount: stats.get(node.id)?.count ?? 0,
+    endedTs: stats.get(node.id)?.endedTs ?? 0,
+    dots: stats.get(node.id)?.dots ?? [],
+    windowRange,
+    subRows: node.children.map(toRow),
+  });
   const data: BoopRow[] = useMemo(() => {
-    const source = onlyActive ? roots.filter((lane) => lane.state === "open") : roots;
-    return source.map((lane) => ({
-      ...lane,
-      mailCount: stats.get(lane.route)?.count ?? 0,
-      lastTs: stats.get(lane.route)?.lastTs ?? 0,
-      endedTs: stats.get(lane.route)?.endedTs ?? 0,
-      dots: stats.get(lane.route)?.dots ?? [],
-      windowRange,
-    }));
+    const source = onlyActive ? roots.filter(subtreeLive) : roots;
+    return source.map(toRow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roots, onlyActive, stats, windowRange]);
-  const hiddenByActive = onlyActive
-    ? roots.filter((lane) => lane.state !== "open").length
-    : 0;
-
+  const hiddenByActive = onlyActive ? roots.filter((node) => !subtreeLive(node)).length : 0;
   const summaryAll = useMemo(() => {
     const open = lanes.filter((lane) => lane.state === "open").length;
     return [
@@ -374,22 +413,24 @@ export function BoopPanelV2() {
         <TreeTable<BoopRow>
           columns={BOOP_COLUMNS}
           data={data}
-          getRowId={(r) => r.route}
+          getRowId={(r) => r.id}
+          getSubRows={(r) => r.subRows}
+          defaultExpandedAll
           defaultSorting={BOOP_SORT}
           virtual
-          rowClass={(r) => (r.route === selected ? "fs-selected" : undefined)}
-          onRowClick={(r) => setSelected((prior) => (prior === r.route ? null : r.route))}
+          rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
+          onRowClick={(r) => setSelected((prior) => (prior === r.id ? null : r.id))}
         />
         {lanes.length === 0 && (
           <div className="empty-help">
-            <h3>boop — no lanes</h3>
+            <h3>boop: no agents in the window</h3>
             {invokeError ? (
               <p className="act-warn">store read failed: {invokeError}</p>
             ) : (
               <p>
-                Lanes appear when <code>boop beep lane create</code> registers
-                them. The panel reads the store read-only and refreshes every
-                second.
+                Rows come from boop's session graph: every lane and harness
+                session active in the last 24 hours, nested by who spawned whom.
+                Mail refreshes every second, the graph every three.
               </p>
             )}
           </div>
