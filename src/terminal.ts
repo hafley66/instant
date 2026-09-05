@@ -74,6 +74,7 @@ import {
 } from "./0_terminalTurnVisibility";
 import { NativeTmuxPane, XtermViewportAdapter } from "./00a_terminalIntersection";
 import { CmdClickGestureTracker } from "./0_clickRouter";
+import { InspectorMachine, type InspectorEvent } from "./0_inspectorState";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
@@ -576,9 +577,11 @@ export function openTab(
   inspector.className = "term-inspector";
   inspector.setAttribute("popover", "manual");
   document.body.appendChild(inspector);
+  // 0_inspectorState owns whether the card shows. Every listener below reports
+  // one event and lets `inspectorSend` repaint the DOM from the answer.
+  const inspectorState = new InspectorMachine();
   const hideInspector = () => {
     inspectorRequest++;
-    inspectorPinned = false;
     inspectorToken = "";
     inspectorCwd = "";
     inspectorRef = null;
@@ -587,25 +590,31 @@ export function openTab(
     delete inspector.dataset.inside;
     try { inspector.hidePopover(); } catch { inspector.removeAttribute("data-open"); }
   };
+  const inspectorSend = (event: InspectorEvent) => {
+    inspectorState.send(event);
+    if (inspectorState.pinned) inspector.dataset.pinned = "1";
+    else delete inspector.dataset.pinned;
+    if (!inspectorState.visible) hideInspector();
+  };
   let inspectorRequest = 0;
-  let commandHeld = false;
   let inspectorToken = "";
   let inspectorCwd = "";
   let inspectorRef: { path: string; line?: number } | null = null;
-  let inspectorPinned = false;
-  inspector.addEventListener("mouseenter", () => { inspector.dataset.inside = "1"; });
+  inspector.addEventListener("mouseenter", () => {
+    inspector.dataset.inside = "1";
+    inspectorSend("card-enter");
+  });
   inspector.addEventListener("mousemove", (e) => e.stopPropagation());
   inspector.addEventListener("mouseleave", () => {
     delete inspector.dataset.inside;
-    if (!commandHeld) hideInspector();
+    inspectorSend("card-leave");
   });
   inspector.addEventListener("click", (e) => {
     const action = (e.target as HTMLElement).closest<HTMLElement>("[data-inspector-action]")?.dataset.inspectorAction;
     if (!inspectorRef) return;
     if (!action) {
       openPreviewPanel(inspectorRef.path, inspectorRef.line);
-      inspectorPinned = true;
-      inspector.dataset.pinned = "1";
+      inspectorSend("pin");
       return;
     }
     if (action === "preview") openPreviewPanel(inspectorRef.path, inspectorRef.line);
@@ -615,27 +624,26 @@ export function openTab(
     if (action === "reveal") void revealExternal(inspectorRef.path).catch((error) => showError("reveal", error));
   });
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Meta") commandHeld = true;
+    if (e.key === "Meta") inspectorSend("meta-down");
+    if (e.key === "Escape") inspectorSend("escape");
   });
   window.addEventListener("keyup", (e) => {
-    if (e.key === "Meta") {
-      commandHeld = false;
-      if (!inspectorPinned && !inspector.matches(":hover")) hideInspector();
-    }
+    if (e.key === "Meta") inspectorSend("meta-up");
   });
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && inspectorPinned) {
-      inspectorPinned = false;
-      delete inspector.dataset.pinned;
-      hideInspector();
-    }
-  });
+  // A pointerdown anywhere but the card is the user moving on.
   document.addEventListener("pointerdown", (e) => {
-    if (inspectorPinned && !inspector.contains(e.target as Node)) {
-      inspectorPinned = false;
-      delete inspector.dataset.pinned;
-      hideInspector();
-    }
+    if (inspectorState.pinned && !inspector.contains(e.target as Node)) inspectorSend("click-dispatched");
+  });
+  // Three dismissals the terminal element cannot report, because a ⌘-click that
+  // swaps panels leaves it hidden and unhovered: the window losing focus, the
+  // document going to the background, and this tab ceasing to be the active one
+  // (or losing its offsetParent, which is a dock panel behind another).
+  window.addEventListener("blur", () => inspectorSend("window-blur"));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") inspectorSend("tab-hidden");
+  });
+  settings.active.$.subscribe((active) => {
+    if (active !== id || !el.offsetParent) inspectorSend("tab-hidden");
   });
   // Live in the pool (in-document, so xterm can measure) until dockview adopts
   // it into the terminal's panel.
@@ -868,18 +876,21 @@ export function openTab(
   el.addEventListener(
     "mousemove",
     (e) => {
-      if (inspectorPinned) return;
+      if (inspectorState.pinned) return;
       if (overDiagram(e)) return;
-      if (!e.metaKey) { inspectorRequest++; hideInspector(); return; }
+      // A move without Meta is the same input as releasing it: the hover gesture
+      // is over unless the card is pinned or the pointer is reading the card.
+      if (!e.metaKey) { inspectorSend("meta-up"); return; }
+      inspectorSend("meta-down");
       const token = wordAt(id, e.clientX, e.clientY);
       const cwd = tabMetaById(id)?.cwd ?? "";
-      if (!token || !looksOpenable(token)) {
-        if (!inspectorPinned && !commandHeld && !inspector.dataset.inside) hideInspector();
-        return;
-      }
+      // Meta held over a gap between tokens leaves an open card alone.
+      if (!token || !looksOpenable(token)) return;
       // Once the card is open, keep its anchor stable while the pointer travels
       // from the terminal token into the card. Reposition only for a new token.
       if (inspector.dataset.token === token) return;
+      inspectorSend("pointer-enter-token");
+      if (!inspectorState.visible) return;
       // First paint uses the cheap guess (cwd-joined) so the card appears with
       // the pointer; the resolver then replaces the path with the file it
       // actually found, which for agent output is often under the repo root
@@ -927,6 +938,7 @@ export function openTab(
     },
     { capture: true },
   );
+  el.addEventListener("mouseleave", () => inspectorSend("pointer-leave-terminal"));
 
   const pointerInput = (e: PointerEvent) => ({
     pointerId: e.pointerId,
@@ -960,6 +972,9 @@ export function openTab(
     const fallback = pendingNarrow && pendingNarrow !== word ? pendingNarrow : undefined;
     pendingNarrow = "";
     void tabSessionIds(id).then((sessions) => dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", sessions, fallback));
+    // The click opens the file elsewhere, so the preview of it goes away here
+    // rather than waiting for a hover that a hidden terminal never receives.
+    inspectorSend("click-dispatched");
   }, { capture: true });
 
   // Right-click must be claimed before tmux mouse mode consumes it.
