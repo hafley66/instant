@@ -8,6 +8,8 @@ export type CmdClickRequest = {
   source: CmdClickSource;
   /** The pane's agent session ids; the resolver checks what they touched first. */
   sessions?: string[];
+  /** The bare word under the pointer when `token` was widened across spaces. */
+  fallback?: string;
 };
 
 export type CmdClickRoute = {
