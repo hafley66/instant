@@ -36,6 +36,7 @@ const fork = (over: Partial<BoopTurnCommentFork> = {}): BoopTurnCommentFork => (
   state: "done",
   rc: 0,
   reply: { session: "fork-comment-26", turn: 40, said: "the fix is a one-line change to the query" },
+  tmux: "fork-comment-26",
   ...over,
 });
 

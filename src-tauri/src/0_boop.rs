@@ -517,6 +517,19 @@ pub struct BoopTurnCommentFork {
     pub state: String,
     pub rc: Option<i64>,
     pub reply: Option<BoopTurnCommentForkReply>,
+    /// The lane's tmux target off `agent_route.tmux`; what a child pane binds
+    /// to, already resolved through `fork_pane_target`.
+    pub tmux: String,
+}
+
+/// The tmux target a fork's child pane attaches to. A lane registers its target
+/// in `agent_route.tmux`; before it does, the lane name is the session name the
+/// spawner asked for, so it is the fallback rather than an empty pane.
+pub fn fork_pane_target(tmux: Option<&str>, lane: &str) -> String {
+    match tmux {
+        Some(target) if !target.trim().is_empty() => target.trim().to_owned(),
+        _ => lane.to_owned(),
+    }
 }
 
 /// A fork lane's state off its result row and session liveness: a result row
@@ -586,6 +599,12 @@ fn read_turn_comment_forks(comment_ids: &[i64]) -> Result<Vec<BoopTurnCommentFor
             let has_result = result.is_some();
             let rc = result.flatten();
             let (session, reply) = fork_reply(&store, &row.lane);
+            let tmux: Option<String> = store
+                .connection()
+                .prepare("SELECT tmux FROM agent_route WHERE route = ?1")
+                .and_then(|mut statement| statement.query_row([row.lane.as_str()], |r| r.get(0)))
+                .ok()
+                .flatten();
             let live = match &session {
                 Some(session) => store
                     .connection()
@@ -598,15 +617,17 @@ fn read_turn_comment_forks(comment_ids: &[i64]) -> Result<Vec<BoopTurnCommentFor
                     .is_ok(),
                 None => false,
             };
+            let lane = row.lane;
             forks.push(BoopTurnCommentFork {
                 comment_id: row.comment_id,
-                lane: row.lane,
+                lane: lane.clone(),
                 branch: row.branch,
                 brief: row.brief,
                 created_ts: row.created_ts,
                 state: fork_state(has_result, live).to_string(),
                 rc,
                 reply,
+                tmux: fork_pane_target(tmux.as_deref(), &lane),
             });
         }
     }
@@ -850,6 +871,15 @@ pub async fn boop_locate_turns(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A lane that has not registered a tmux target yet still names a session
+    /// the child pane can attach to, so the pane shape never binds to "".
+    #[test]
+    fn fork_pane_target_falls_back_to_the_lane_name() {
+        assert_eq!(fork_pane_target(Some("fork-comment-26"), "lane-26"), "fork-comment-26");
+        assert_eq!(fork_pane_target(Some("  "), "lane-26"), "lane-26");
+        assert_eq!(fork_pane_target(None, "lane-26"), "lane-26");
+    }
 
     /// The IPC boundary is where a correct matcher still ships wrong data: a
     /// missed rename or a dropped field reads as an empty pane, never a crash.
