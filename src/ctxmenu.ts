@@ -1,13 +1,12 @@
 // Windows-XP-style right-click menu. The webview's native context menu is
 // suppressed; the rows are rendered by 0_navMenu.ts (submenus, keyboard,
 // hold-to-reorder) under the same .ctx-menu class names the skins style.
-import {
-  closeNavMenu,
-  openNavMenu,
-  type NavChildren,
-  type NavEntry,
-  type NavMenuOptions,
-  type NavMenuPersistence,
+import { closeNavMenu, openNavMenu } from "./0_NavMenuView";
+import type {
+  NavChildren,
+  NavEntry,
+  NavMenuOptions,
+  NavMenuPersistence,
 } from "./0_navMenu";
 
 export type CtxItem =
