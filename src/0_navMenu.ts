@@ -200,7 +200,8 @@ export type NavDrag = { depth: number; id: string; kind: "item" | "group"; moved
 export function levelRows(
   level: NavLevelState,
   order: NavMenuOrder,
-  favorites: NavMenuFavorites,
+  /// `null` where the caller injected no persistence: no star is offered.
+  favorites: NavMenuFavorites | null,
   query: string,
   focusedId: string | null,
   dragId: string | null,
@@ -221,11 +222,13 @@ export function levelRows(
     return level.entries.map((entry) =>
       isSeparator(entry) ? { kind: "sep" } as NavRowView : itemRow(entry, null));
   }
-  const pinned = withFavorites(orderedGroups(level.groups, order), favorites);
+  const pinned = withFavorites(orderedGroups(level.groups, order), favorites ?? []);
   const rows: NavRowView[] = navItemCount(pinned) > searchAfter ? [{ kind: "search", query }] : [];
   for (const group of filterGroups(pinned, query)) {
     rows.push({ kind: "group", id: group.id, label: group.label, dragging: group.id === dragId });
-    for (const item of group.items) rows.push(itemRow(item, favorites.includes(favoriteHomeId(item.id))));
+    for (const item of group.items) {
+      rows.push(itemRow(item, favorites ? favorites.includes(favoriteHomeId(item.id)) : null));
+    }
   }
   return rows;
 }
@@ -252,6 +255,10 @@ export type NavMenuModel = {
   activate: () => void;
   run: (depth: number, itemId: string) => void;
   toggleFavorite: (depth: number, itemId: string) => void;
+  /// The press starts the hold; the model owns the timer so the renderer
+  /// keeps no state of its own.
+  pressed: (depth: number, id: string, kind: "item" | "group") => void;
+  release: () => void;
   armDrag: (depth: number, id: string, kind: "item" | "group") => void;
   dragOver: (overId: string) => void;
   endDrag: () => void;
@@ -267,6 +274,7 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
   const drag = Signal<NavDrag | null>(null);
   const dragClick = Signal<string | null>(null);
   let options: NavMenuOptions = defaults;
+  let hold: ReturnType<typeof setTimeout> | null = null;
 
   const persistenceAt = (depth: number): NavMenuPersistence | null =>
     stack.$()[depth]?.persistence ?? options.persistence ?? null;
@@ -288,7 +296,7 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
         rows: levelRows(
           level,
           level.persistence?.order.$() ?? empty_nav_order,
-          level.persistence?.favorites.$() ?? [],
+          level.persistence?.favorites.$() ?? null,
           query[depth] ?? "",
           focus,
           dragging?.id ?? null,
@@ -412,6 +420,15 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
       if (!favorites) return;
       favorites.$(toggleFavorite(favorites.$(), itemId));
     },
+    pressed(depth, id, kind) {
+      if (hold) clearTimeout(hold);
+      hold = setTimeout(() => drag.$({ depth, id, kind, moved: false }), options.holdMs ?? nav_hold_ms);
+    },
+    release() {
+      if (hold) clearTimeout(hold);
+      hold = null;
+      this.endDrag();
+    },
     armDrag(depth, id, kind) {
       drag.$({ depth, id, kind, moved: false });
     },
@@ -452,6 +469,22 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
       return true;
     },
     itemAt,
+  };
+}
+
+/// Where a menu box lands: at the point, flipped away from the right or the
+/// bottom edge, and for a submenu flipped to the left of its owner row.
+export function placeMenu(
+  size: { width: number; height: number },
+  point: { x: number; y: number },
+  viewport: { width: number; height: number },
+  flipTo?: number,
+): { left: number; top: number } {
+  return {
+    left: point.x + size.width > viewport.width
+      ? Math.max(0, (flipTo ?? point.x) - size.width)
+      : point.x,
+    top: point.y + size.height > viewport.height ? Math.max(0, point.y - size.height) : point.y,
   };
 }
 
@@ -499,285 +532,4 @@ export function injectNavMenuCss(doc: Document = document) {
   style.textContent = NAV_MENU_CSS;
   doc.head.appendChild(style);
   cssInjected = true;
-}
-
-/// The DOM as a function of the view: every paint rebuilds the rows from the
-/// signal, and the only thing read back off an element is an id.
-export function renderNavMenu(model: NavMenuModel, host: HTMLElement = document.body) {
-  const roots: HTMLElement[] = [];
-  let hold: ReturnType<typeof setTimeout> | null = null;
-
-  const dropLevel = (root: HTMLElement) => {
-    try {
-      (root as HTMLElement & { hidePopover?: () => void }).hidePopover?.();
-    } catch {
-      /* never shown */
-    }
-    root.remove();
-  };
-
-  const place = (root: HTMLElement, x: number, y: number, flipTo?: number) => {
-    root.style.visibility = "hidden";
-    root.style.left = "0px";
-    root.style.top = "0px";
-    const { width, height } = root.getBoundingClientRect();
-    const left = x + width > window.innerWidth ? Math.max(0, (flipTo ?? x) - width) : x;
-    const top = y + height > window.innerHeight ? Math.max(0, y - height) : y;
-    root.style.left = `${left}px`;
-    root.style.top = `${top}px`;
-    root.style.visibility = "visible";
-  };
-
-  const rowElement = (row: NavRowView, depth: number): HTMLElement => {
-    if (row.kind === "sep") {
-      const separator = document.createElement("div");
-      separator.className = "ctx-sep";
-      return separator;
-    }
-    if (row.kind === "search") {
-      const wrap = document.createElement("div");
-      wrap.className = "ctx-search";
-      const input = document.createElement("input");
-      input.type = "text";
-      input.className = "ctx-search-input";
-      input.placeholder = "search";
-      input.value = row.query;
-      input.addEventListener("pointerdown", (event) => event.stopPropagation());
-      input.addEventListener("input", () => model.setQuery(depth, input.value));
-      wrap.appendChild(input);
-      return wrap;
-    }
-    if (row.kind === "group") {
-      const header = document.createElement("div");
-      header.className = "ctx-group" + (row.dragging ? " ctx-dragging" : "");
-      header.dataset.groupId = row.id;
-      header.textContent = row.label;
-      return header;
-    }
-    const element = document.createElement("div");
-    element.className = "ctx-item"
-      + (row.disabled ? " ctx-disabled" : "")
-      + (row.focused ? " ctx-active" : "")
-      + (row.dragging ? " ctx-dragging" : "");
-    element.dataset.navId = row.id;
-    element.setAttribute("role", "menuitem");
-    const label = document.createElement("span");
-    label.className = "ctx-label";
-    label.textContent = row.label;
-    element.appendChild(label);
-    if (row.subtext) {
-      const subtext = document.createElement("span");
-      subtext.className = "ctx-subtext";
-      subtext.textContent = row.subtext;
-      element.appendChild(subtext);
-    }
-    if (row.hasChildren) {
-      const arrow = document.createElement("span");
-      arrow.className = "ctx-arrow";
-      arrow.textContent = "▸";
-      element.appendChild(arrow);
-    }
-    if (row.favorite !== null) {
-      const star = document.createElement("button");
-      star.type = "button";
-      star.className = "ctx-star";
-      star.dataset.favorite = String(row.favorite);
-      star.textContent = row.favorite ? "★" : "☆";
-      // The star acts on the press, not the click: any emission between the
-      // two redraws the row, and the browser then fires no click on it.
-      star.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        model.toggleFavorite(depth, row.id);
-      });
-      star.addEventListener("click", (event) => event.stopPropagation());
-      element.appendChild(star);
-    }
-    element.addEventListener("mouseenter", () => {
-      model.focus(row.id);
-      if (row.hasChildren) model.openSubmenu(depth, row.id);
-      else model.closeTo(depth);
-    });
-    if (!row.disabled) {
-      element.addEventListener("click", () => {
-        if (model.consumeDragClick(row.id)) return;
-        model.run(depth, row.id);
-      });
-    }
-    return element;
-  };
-
-  const levelRoot = (depth: number): HTMLElement => {
-    const existing = roots[depth];
-    if (existing) return existing;
-    const root = document.createElement("div");
-    root.className = "ctx-menu";
-    root.setAttribute("role", "menu");
-    root.setAttribute("popover", "manual");
-    root.addEventListener("pointerdown", (event) => {
-      if ((event as PointerEvent).button !== 0) return;
-      const target = (event.target as HTMLElement).closest<HTMLElement>("[data-nav-id],[data-group-id]");
-      if (!target) return;
-      const groupId = target.dataset.groupId;
-      const id = groupId ?? target.dataset.navId!;
-      if (hold) clearTimeout(hold);
-      hold = setTimeout(() => model.armDrag(depth, id, groupId ? "group" : "item"), model.holdMs());
-    });
-    root.addEventListener("pointermove", (event) => {
-      const under = (document.elementFromPoint?.(
-        (event as PointerEvent).clientX,
-        (event as PointerEvent).clientY,
-      ) ?? event.target) as HTMLElement | null;
-      const target = under?.closest<HTMLElement>("[data-nav-id],[data-group-id]");
-      const id = target?.dataset.groupId ?? target?.dataset.navId;
-      if (id) model.dragOver(id);
-    });
-    const release = () => {
-      if (hold) clearTimeout(hold);
-      hold = null;
-      model.endDrag();
-    };
-    root.addEventListener("pointerup", release);
-    root.addEventListener("pointercancel", release);
-    host.appendChild(root);
-    try {
-      (root as HTMLElement & { showPopover?: () => void }).showPopover?.();
-    } catch {
-      /* no popover support: the fixed position still holds */
-    }
-    roots[depth] = root;
-    return root;
-  };
-
-  const paint = (view: NavMenuView) => {
-    injectNavMenuCss();
-    while (roots.length > view.levels.length) {
-      const root = roots.pop();
-      if (root) dropLevel(root);
-    }
-    if (!view.open) return;
-    for (const level of view.levels) {
-      const root = levelRoot(level.depth);
-      const open = root.querySelector<HTMLInputElement>(".ctx-search-input");
-      const caret = open && document.activeElement === open ? open.selectionStart : null;
-      root.textContent = "";
-      for (const row of level.rows) root.appendChild(rowElement(row, level.depth));
-      const input = root.querySelector<HTMLInputElement>(".ctx-search-input");
-      if (input && caret !== null) {
-        input.focus();
-        input.setSelectionRange(caret, caret);
-      }
-      if (level.depth === 0) {
-        place(root, view.x, view.y);
-        continue;
-      }
-      const owner = level.ownerId
-        ? roots[level.depth - 1]?.querySelector<HTMLElement>(`[data-nav-id="${CSS.escape(level.ownerId)}"]`)
-        : null;
-      const rect = owner?.getBoundingClientRect();
-      place(root, rect?.right ?? view.x, rect?.top ?? view.y, rect?.left);
-    }
-  };
-
-  const onOutside = (event: PointerEvent) => {
-    if (roots.some((root) => root.contains(event.target as Node))) return;
-    queueMicrotask(() => model.close());
-  };
-
-  const isTyping = (event: KeyboardEvent) =>
-    (event.target as HTMLElement | null)?.classList?.contains("ctx-search-input") === true;
-
-  const focusedRow = (view: NavMenuView, depth: number) =>
-    view.levels[depth]?.rows.find((row) => row.kind === "item" && row.focused);
-
-  const onKey = (event: KeyboardEvent) => {
-    const view = model.view.$();
-    if (!view.open) return;
-    const depth = view.levels.length - 1;
-    const stop = () => { event.preventDefault(); event.stopPropagation(); };
-    if (event.key === "Escape") { stop(); if (!model.clearQuery(depth)) model.close(); return; }
-    if (event.key === "ArrowDown") { stop(); model.moveFocus(1); return; }
-    if (event.key === "ArrowUp") { stop(); model.moveFocus(-1); return; }
-    if (event.key === "ArrowRight") {
-      const row = focusedRow(view, depth);
-      if (row?.kind === "item" && row.hasChildren) { stop(); model.openSubmenu(depth, row.id); }
-      return;
-    }
-    if (event.key === "ArrowLeft") { if (depth > 0) { stop(); model.closeTo(depth - 1); } return; }
-    if (event.key === "Enter") { stop(); model.activate(); return; }
-    if (event.key === "f" && !isTyping(event)) {
-      const row = focusedRow(view, depth);
-      if (row?.kind === "item" && row.favorite !== null) { stop(); model.toggleFavorite(depth, row.id); }
-    }
-  };
-
-  const dismiss = () => model.close();
-  document.addEventListener("pointerdown", onOutside, true);
-  document.addEventListener("keydown", onKey, true);
-  window.addEventListener("blur", dismiss);
-  window.addEventListener("resize", dismiss);
-  document.addEventListener("scroll", dismiss, true);
-  const subscription = model.view.$.subscribe(paint);
-
-  return {
-    roots,
-    dispose() {
-      subscription.unsubscribe();
-      document.removeEventListener("pointerdown", onOutside, true);
-      document.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("blur", dismiss);
-      window.removeEventListener("resize", dismiss);
-      document.removeEventListener("scroll", dismiss, true);
-      while (roots.length) {
-        const root = roots.pop();
-        if (root) dropLevel(root);
-      }
-    },
-  };
-}
-
-export type NavMenu = {
-  model: NavMenuModel;
-  open: (x: number, y: number, entries: NavEntry[], options?: NavMenuOptions) => void;
-  close: () => void;
-  levels: () => HTMLElement[];
-  dispose: () => void;
-};
-
-/// One menu: the model, the renderer bound to it, and the two calls a caller
-/// needs. A host that renders its own DOM uses `navMenuModel` alone.
-export function createNavMenu(options: NavMenuOptions = {}, host?: HTMLElement): NavMenu {
-  const model = navMenuModel(options);
-  const rendered = renderNavMenu(model, host);
-  return {
-    model,
-    open: model.open,
-    close: model.close,
-    levels: () => roots(rendered.roots),
-    dispose: rendered.dispose,
-  };
-}
-
-function roots(list: HTMLElement[]): HTMLElement[] {
-  return [...list];
-}
-
-let shared: NavMenu | null = null;
-
-function sharedMenu(): NavMenu {
-  shared ??= createNavMenu();
-  return shared;
-}
-
-export function openNavMenu(x: number, y: number, entries: NavEntry[], options: NavMenuOptions = {}) {
-  sharedMenu().open(x, y, entries, options);
-}
-
-export function closeNavMenu() {
-  shared?.close();
-}
-
-/// The open levels, for tests and for a caller that needs to know a menu is up.
-export function navMenuLevels(): HTMLElement[] {
-  return shared?.levels() ?? [];
 }

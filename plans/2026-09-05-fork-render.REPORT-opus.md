@@ -166,6 +166,32 @@ package; `src/0_navMenuStore.ts` is instant's storage adapter. API and keys:
 | 4 reorder | holds a pinned row 350 ms, moves it | `drag` arms, `dragOver` rewrites the favourites list itself (pinned ids carry a `fav:` prefix, so they never collide with home ids and never leave the pinned group) |
 | 5 reopen | right-clicks again tomorrow | `fork.presets.favorites` and `fork.presets.order` read back through `mergeIds`, ids that no longer exist drop, and the main row's subtext is the first favourite when nothing has been run yet |
 
+### The star that could not be clicked, and the React render
+
+Root cause: the hand-rolled painter rebuilt every row on every `view` emission,
+and hovering a row called `focus`, which emitted even when the focused id was
+unchanged. A pointer resting on a row therefore had its element replaced under
+it, and a browser fires no click when the node pressed is gone by the time the
+button comes up. The four suspects, each checked:
+
+| suspect | finding |
+|---|---|
+| (a) rows rebuilt between press and click | the cause. `focus` and `setQuery` now no-op on an unchanged value, and the star acts on pointerdown |
+| (b) `persistenceAt` null for the child level | not it: the submenu level takes `item.persist`, which the fork row sets |
+| (c) `.ctx-star` hidden under a wrong row class | not it: the row is `.ctx-item` and the hover rule matched |
+| (d) the parent row's `closeTo` closing the submenu | not it: the owner row has children, and re-opening the same submenu is a no-op |
+
+The render is React now, over the same `navMenuModel`. `NavMenu` is
+`SignalReact` and reads `model.view.$()` with no hook; `NavRow` is
+`memo(SignalReact(...))` on primitive props. A favourite toggle:
+
+| # | what moves |
+|---|---|
+| 1 | pointerdown on the star calls `model.toggleFavorite(depth, id)`, the only thing the handler does |
+| 2 | the injected `favorites` signal takes the new list; the derived `view` recomputes through `withFavorites` |
+| 3 | `SignalReact` sees the read it tracked and re-renders `NavMenu`, which hands each row its props |
+| 4 | React's memo skips every row whose props are identical: the starred row and the new pinned row repaint, the rest keep their DOM. A test asserts exactly that, and another asserts the search input survives a query narrowing the list (the old painter destroyed it on every keystroke) |
+
 `src/ctxmenu.ts` kept `CtxItem` and became the adapter over the new module
 rather than staying a second menu implementation: ten call sites already speak
 that type, and one of them (the terminal's) needed submenus, so two menu
@@ -199,6 +225,7 @@ renderers would have had to agree on the same `.ctx-menu` skin CSS forever.
 | `src/ctxmenu.ts` | `CtxItem` unchanged, now an adapter over `0_navMenu` |
 | `src/1g_forkPresetMenu.ts` | new: `boop config presets` cached, grouped by harness, main-row preset |
 | `src/0_navMenuStore.ts` | new: instant's `<key>.order` / `<key>.favorites` adapter |
+| `src/0_NavMenuView.tsx` | new: the React render, the mount, and the shared instance |
 | `docs/navmenu.md` | new: the module's API, behaviour and persisted keys |
 | `src/1b_terminalContextSync.ts` | `sendSelection`: upsert, stamp sent, return the id |
 | `src/main.ts` | palette entry |
@@ -214,7 +241,7 @@ test result: ok. 69 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
 
 $ npx vitest run
  Test Files  92 passed (92)
-      Tests  545 passed (545)
+      Tests  551 passed (551)
 
 $ npx tsc --noEmit
 tsc exit=0
