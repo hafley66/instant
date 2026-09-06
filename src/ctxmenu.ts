@@ -19,6 +19,7 @@ export type CtxItem =
       subtext?: string;
       children?: NavChildren;
       order?: SignalOf<NavMenuOrder>;
+      favorites?: SignalOf<string[]>;
     }
   | { sep: true };
 
@@ -34,6 +35,7 @@ export function toNavEntries(items: CtxItem[], open: number): NavEntry[] {
     disabled: item.disabled,
     children: item.children,
     order: item.order,
+    favorites: item.favorites,
     run: item.disabled ? undefined : item.action,
   });
 }

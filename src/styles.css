@@ -1625,6 +1625,27 @@ body[data-mode="dark"] .act-last.ok {
 }
 .ctx-active { background: var(--row-active-bg); color: var(--row-active-fg); }
 .ctx-dragging { opacity: .6; outline: 1px dashed var(--frame); }
+.ctx-search { padding: 3px 4px 5px; }
+.ctx-search-input {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--frame);
+  background: var(--term-bg, #fff);
+  color: inherit;
+  font: inherit;
+}
+.ctx-star {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+}
+.ctx-item:hover .ctx-star,
+.ctx-active .ctx-star,
+.ctx-star[data-favorite="true"] { opacity: .85; }
 
 /* ---- command palette (⌘P): centered fuzzy command list ---- */
 .cmdp-root {

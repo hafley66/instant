@@ -8,10 +8,14 @@ import {
   moveNavGroup,
   moveNavItem,
   moveWithin,
+  favoriteHomeId,
+  filterGroups,
   navGroupOf,
   navMenuLevels,
   openNavMenu,
   orderedGroups,
+  toggleFavorite,
+  withFavorites,
   type NavGroup,
   type NavMenuOrder,
 } from "./0_navMenu";
@@ -184,5 +188,112 @@ describe("hold to reorder", () => {
     pointer("pointerup", rows[2]);
     expect(order.$()).toEqual(empty_nav_order);
     vi.useRealTimers();
+  });
+});
+
+describe("favorites", () => {
+  it("pins a starred item to a top group titled by its home group", () => {
+    const pinned = withFavorites(groups(), ["opus"]);
+    expect(pinned[0].id).toBe("__favorites");
+    expect(pinned[0].items.map((item) => [item.id, item.label]))
+      .toEqual([["fav:opus", "claude: opus"]]);
+    expect(pinned[2].items.map((item) => item.id)).toEqual(["opus"]);
+  });
+
+  it("keeps the favorites order and drops ids that no longer exist", () => {
+    const pinned = withFavorites(groups(), ["opus", "gone", "flash4"]);
+    expect(pinned[0].items.map((item) => item.id)).toEqual(["fav:opus", "fav:flash4"]);
+  });
+
+  it("adds no group when nothing is starred", () => {
+    expect(withFavorites(groups(), []).map((group) => group.id)).toEqual(["opencode", "claude"]);
+  });
+
+  it("stars and unstars by home id, whichever id the row carried", () => {
+    expect(toggleFavorite([], "fav:opus")).toEqual(["opus"]);
+    expect(toggleFavorite(["opus"], "opus")).toEqual([]);
+    expect(favoriteHomeId("fav:opus")).toBe("opus");
+    expect(favoriteHomeId("opus")).toBe("opus");
+  });
+});
+
+describe("search", () => {
+  it("matches across every group on \"<group>: <item>\" and collapses the rest", () => {
+    const hit = filterGroups(groups(), "clop");
+    expect(hit.map((group) => group.id)).toEqual(["claude"]);
+    expect(hit[0].items.map((item) => item.id)).toEqual(["opus"]);
+  });
+
+  it("returns every group for an empty query", () => {
+    expect(filterGroups(groups(), "  ")).toEqual(groups());
+  });
+
+  it("returns nothing when no row matches", () => {
+    expect(filterGroups(groups(), "zzzz")).toEqual([]);
+  });
+});
+
+describe("the submenu's search row and stars", () => {
+  const many = (): NavGroup[] => [
+    { id: "opencode", label: "opencode", items: Array.from({ length: 6 }, (_, at) => ({
+      id: `o${at}`, label: `preset-${at}`,
+    })) },
+    { id: "claude", label: "claude", items: [{ id: "opus", label: "opus" }] },
+  ];
+
+  async function openSub(children: NavGroup[], favorites = Signal<string[]>([])) {
+    openNavMenu(10, 10, [{ id: "fork", label: "Fork", children }], {
+      order: Signal<NavMenuOrder>(empty_nav_order),
+      favorites,
+    });
+    rowsOf(0)[0].dispatchEvent(new MouseEvent("mouseenter"));
+    await flush();
+  }
+
+  it("draws a search row past the item threshold and filters as it is typed", async () => {
+    await openSub(many());
+    const input = navMenuLevels()[1].querySelector<HTMLInputElement>(".ctx-search-input")!;
+    expect(input).toBeTruthy();
+    input.value = "opus";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(rowsOf(1).map((row) => row.dataset.navId)).toEqual(["opus"]);
+    const groupsShown = [...navMenuLevels()[1].querySelectorAll<HTMLElement>(".ctx-group")];
+    expect(groupsShown.map((group) => group.dataset.groupId)).toEqual(["claude"]);
+  });
+
+  it("draws no search row for a short submenu", async () => {
+    await openSub(groups());
+    expect(navMenuLevels()[1].querySelector(".ctx-search-input")).toBeNull();
+  });
+
+  it("clears the query on Escape before it closes the menu", async () => {
+    await openSub(many());
+    const input = navMenuLevels()[1].querySelector<HTMLInputElement>(".ctx-search-input")!;
+    input.value = "opus";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const escape = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    escape();
+    expect(navMenuLevels()).toHaveLength(2);
+    expect(rowsOf(1).length).toBeGreaterThan(1);
+    escape();
+    expect(navMenuLevels()).toHaveLength(0);
+  });
+
+  it("stars a row from its glyph and pins it to the top on the next render", async () => {
+    const favorites = Signal<string[]>([]);
+    await openSub(groups(), favorites);
+    const star = rowsOf(1)[2].querySelector<HTMLButtonElement>(".ctx-star")!;
+    star.click();
+    expect(favorites.$()).toEqual(["opus"]);
+    expect(rowsOf(1)[0].dataset.navId).toBe("fav:opus");
+    expect(rowsOf(1)[0].querySelector(".ctx-label")!.textContent).toBe("claude: opus");
+  });
+
+  it("stars the focused row from the keyboard", async () => {
+    const favorites = Signal<string[]>([]);
+    await openSub(groups(), favorites);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+    expect(favorites.$()).toEqual(["flash4"]);
   });
 });

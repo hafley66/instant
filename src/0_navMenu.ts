@@ -1,6 +1,7 @@
 import type { Signal as SignalOf } from "@hafley66/signals";
 import { setting } from "./0_persistedSetting";
 import { mergeOrder } from "./railOrder";
+import { fuzzyFilter } from "./fuzzy";
 
 /// One row. `children` opens a submenu of groups; a group's items never leave
 /// their group when reordered.
@@ -15,6 +16,8 @@ export type NavItem = {
   /// The persisted order its submenu reorders into; without one the submenu
   /// still opens, it just does not move.
   order?: SignalOf<NavMenuOrder>;
+  /// The persisted favourite item ids its submenu pins to the top.
+  favorites?: SignalOf<NavMenuFavorites>;
 };
 
 /// Groups resolved when the submenu opens, so a caller may fetch them.
@@ -31,9 +34,66 @@ export type NavMenuOrder = { groups: string[]; items: Record<string, string[]> }
 
 export const empty_nav_order: NavMenuOrder = { groups: [], items: {} };
 
+/// Item ids the user starred, in the order they are pinned.
+export type NavMenuFavorites = string[];
+
+/// A pinned row's id, so it never collides with its home row's id.
+export const fav_prefix = "fav:";
+export const favorites_group_id = "__favorites";
+export const favorites_group_label = "Favorites";
+
+/// A submenu longer than this gets a search row.
+export const nav_search_after = 6;
+
+export function favoriteHomeId(id: string): string {
+  return id.startsWith(fav_prefix) ? id.slice(fav_prefix.length) : id;
+}
+
+export function toggleFavorite(favorites: NavMenuFavorites, id: string): NavMenuFavorites {
+  const home = favoriteHomeId(id);
+  return favorites.includes(home) ? favorites.filter((entry) => entry !== home) : [...favorites, home];
+}
+
+/// The starred items pinned as one group at the top, titled by their home
+/// group, still listed in their home group. Ids that no longer exist drop out.
+export function withFavorites(groups: NavGroup[], favorites: NavMenuFavorites): NavGroup[] {
+  const byId = new Map<string, { group: NavGroup; item: NavItem }>();
+  for (const group of groups) for (const item of group.items) byId.set(item.id, { group, item });
+  const items = favorites.flatMap((id) => {
+    const hit = byId.get(id);
+    return hit ? [{ ...hit.item, id: `${fav_prefix}${id}`, label: `${hit.group.label}: ${hit.item.label}` }] : [];
+  });
+  if (!items.length) return groups;
+  return [{ id: favorites_group_id, label: favorites_group_label, items }, ...groups];
+}
+
+/// Rows matching the query across every group, keyed "<group>: <item>"; a
+/// group with no match is not drawn.
+export function filterGroups(groups: NavGroup[], query: string): NavGroup[] {
+  if (!query.trim()) return groups;
+  const rows = groups.flatMap((group) => group.items.map((item) => ({ group, item })));
+  const hits = new Set(
+    fuzzyFilter(query, rows, (row) => `${row.group.label}: ${row.item.label}`)
+      .map((row) => `${row.group.id}/${row.item.id}`),
+  );
+  return groups.flatMap((group) => {
+    const items = group.items.filter((item) => hits.has(`${group.id}/${item.id}`));
+    return items.length ? [{ ...group, items }] : [];
+  });
+}
+
+export function navItemCount(groups: NavGroup[]): number {
+  return groups.reduce((total, group) => total + group.items.length, 0);
+}
+
 /// The persisted order under a key the caller names.
 export function navOrder(key: string): SignalOf<NavMenuOrder> {
   return setting<NavMenuOrder>(key, empty_nav_order);
+}
+
+/// The persisted favourite ids under a key the caller names.
+export function navFavorites(key: string): SignalOf<NavMenuFavorites> {
+  return setting<NavMenuFavorites>(key, []);
 }
 
 /// `dragId` takes the slot `overId` holds. `railOrder.moveBefore` inserts
@@ -104,6 +164,7 @@ export const nav_hold_ms = 350;
 
 export type NavMenuOptions = {
   order?: SignalOf<NavMenuOrder>;
+  favorites?: SignalOf<NavMenuFavorites>;
   holdMs?: number;
 };
 
@@ -113,6 +174,8 @@ type Level = {
   groups: NavGroup[] | null;
   owner: HTMLElement | null;
   order: SignalOf<NavMenuOrder> | null;
+  favorites: SignalOf<NavMenuFavorites> | null;
+  query: string;
   active: number;
 };
 
@@ -195,11 +258,34 @@ function activeRow(level: Level): HTMLElement | undefined {
   return rows(level)[level.active];
 }
 
+function isTyping(event: KeyboardEvent): boolean {
+  return (event.target as HTMLElement | null)?.classList?.contains("ctx-search-input") === true;
+}
+
 function onKey(event: KeyboardEvent) {
   const level = levels[levels.length - 1];
   if (!level) return;
   const stop = () => { event.preventDefault(); event.stopPropagation(); };
-  if (event.key === "Escape") { stop(); closeNavMenu(); return; }
+  if (event.key === "Escape") {
+    stop();
+    if (level.query) {
+      level.query = "";
+      renderLevel(level);
+      return;
+    }
+    closeNavMenu();
+    return;
+  }
+  if (event.key === "f" && !isTyping(event) && level.favorites && level.groups) {
+    const row = activeRow(level);
+    const id = row?.dataset.navId;
+    if (id) {
+      stop();
+      level.favorites.$(toggleFavorite(level.favorites.$(), id));
+      renderLevel(level);
+    }
+    return;
+  }
   if (event.key === "ArrowDown") { stop(); setActive(level, level.active + 1); return; }
   if (event.key === "ArrowUp") { stop(); setActive(level, level.active < 0 ? -1 : level.active - 1); return; }
   if (event.key === "ArrowRight") {
@@ -215,6 +301,24 @@ function onKey(event: KeyboardEvent) {
     const row = activeRow(level);
     if (row) { stop(); row.click(); }
   }
+}
+
+function starButton(item: NavItem, level: Level): HTMLElement {
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "ctx-star";
+  const favorites = level.favorites;
+  const home = favoriteHomeId(item.id);
+  star.dataset.favorite = String(!!favorites?.$().includes(home));
+  star.textContent = star.dataset.favorite === "true" ? "★" : "☆";
+  star.addEventListener("pointerdown", (event) => event.stopPropagation());
+  star.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!favorites) return;
+    favorites.$(toggleFavorite(favorites.$(), home));
+    renderLevel(level);
+  });
+  return star;
 }
 
 function itemRow(item: NavItem, level: () => Level): HTMLElement {
@@ -242,6 +346,7 @@ function itemRow(item: NavItem, level: () => Level): HTMLElement {
   } else {
     row.addEventListener("mouseenter", () => closeBelow(levels.indexOf(level())));
   }
+  if (level().favorites && level().groups) row.appendChild(starButton(item, level()));
   if (!item.disabled) {
     row.addEventListener("click", () => {
       if (row.dataset.dragged === "true") { delete row.dataset.dragged; return; }
@@ -268,12 +373,37 @@ function groupRow(group: NavGroup): HTMLElement {
 
 /// A level's rows, rebuilt from the current order every time it renders, so a
 /// move lands the same way a reopen does.
+function searchRow(level: Level): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "ctx-search";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "ctx-search-input";
+  input.placeholder = "search";
+  input.value = level.query;
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+  input.addEventListener("input", () => {
+    level.query = input.value;
+    level.active = -1;
+    renderLevel(level);
+    const next = level.root.querySelector<HTMLInputElement>(".ctx-search-input");
+    next?.focus();
+    next?.setSelectionRange(next.value.length, next.value.length);
+  });
+  row.appendChild(input);
+  return row;
+}
+
+/// A level's rows, rebuilt from the current order, favourites and query every
+/// time it renders, so a move lands the same way a reopen does.
 function renderLevel(level: Level) {
   level.root.textContent = "";
   const index = () => level;
   if (level.groups) {
     const order = level.order?.$() ?? empty_nav_order;
-    for (const group of orderedGroups(level.groups, order)) {
+    const pinned = withFavorites(orderedGroups(level.groups, order), level.favorites?.$() ?? []);
+    if (navItemCount(pinned) > nav_search_after) level.root.appendChild(searchRow(level));
+    for (const group of filterGroups(pinned, level.query)) {
       level.root.appendChild(groupRow(group));
       for (const item of group.items) level.root.appendChild(itemRow(item, index));
     }
@@ -289,12 +419,13 @@ function newLevel(
   groups: NavGroup[] | null,
   owner: HTMLElement | null,
   order: SignalOf<NavMenuOrder> | null,
+  favorites: SignalOf<NavMenuFavorites> | null,
 ): Level {
   const root = document.createElement("div");
   root.className = "ctx-menu";
   root.setAttribute("role", "menu");
   root.setAttribute("popover", "manual");
-  const level: Level = { root, entries, groups, owner, order, active: -1 };
+  const level: Level = { root, entries, groups, owner, order, favorites, query: "", active: -1 };
   renderLevel(level);
   wireHoldReorder(level);
   return level;
@@ -316,6 +447,7 @@ async function openSubmenu(parent: Level, row: HTMLElement) {
     null,
     row,
     item.order ?? options.order ?? null,
+    item.favorites ?? options.favorites ?? null,
   );
   levels.push(level);
   showLevel(level.root);
@@ -370,6 +502,15 @@ function wireHoldReorder(level: Level) {
       const target = under?.closest<HTMLElement>(groupDrag ? "[data-group-id]" : "[data-nav-id]");
       const overId = groupDrag ? target?.dataset.groupId : target?.dataset.navId;
       if (!overId || overId === dragId || !level.groups) return;
+      if (dragId.startsWith(fav_prefix)) {
+        const favorites = level.favorites;
+        if (!favorites || !overId.startsWith(fav_prefix)) return;
+        const moved = moveWithin(favorites.$(), favoriteHomeId(dragId), favoriteHomeId(overId));
+        if (moved === favorites.$()) return;
+        favorites.$(moved);
+        renderLevel(level);
+        return;
+      }
       const next = groupDrag
         ? moveNavGroup(level.groups, working, dragId, overId)
         : moveNavItem(level.groups, working, dragId, overId);
@@ -398,7 +539,7 @@ export function openNavMenu(x: number, y: number, entries: NavEntry[], opts: Nav
   closeNavMenu();
   if (!entries.length) return;
   options = opts;
-  const level = newLevel(entries, null, null, opts.order ?? null);
+  const level = newLevel(entries, null, null, opts.order ?? null, opts.favorites ?? null);
   levels = [level];
   showLevel(level.root);
   place(level.root, x, y);

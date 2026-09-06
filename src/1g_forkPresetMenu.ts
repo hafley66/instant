@@ -1,4 +1,12 @@
-import { navOrder, orderedGroups, type NavGroup, type NavItem } from "./0_navMenu";
+import {
+  favoriteHomeId,
+  navFavorites,
+  navOrder,
+  orderedGroups,
+  withFavorites,
+  type NavGroup,
+  type NavItem,
+} from "./0_navMenu";
 import { forkRender } from "./0_forkRenderSettings";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
 import { commands, invoke } from "./generated/native";
@@ -17,6 +25,8 @@ export type BoopPreset = {
 
 /// The user's own order of the preset submenu, groups and items alike.
 export const forkPresetOrder = navOrder("fork.presetOrder");
+/// The presets the user starred; they pin to the top of the submenu.
+export const forkPresetFavorites = navFavorites("fork.presetFavorites");
 
 /// A preset the config marks DEAD cannot spawn a lane.
 export function livePresets(presets: BoopPreset[]): BoopPreset[] {
@@ -45,10 +55,10 @@ export function presetGroups(presets: BoopPreset[], run: (name: string) => void)
 }
 
 /// What the main row runs and names: the preset last picked here, else the
-/// first one in the user's own order, else the built-in default.
+/// first favourite, else the first in the user's order, else the default.
 export function mainPreset(lastPreset: string, groups: NavGroup[], fallback = FORK_PRESET): string {
   if (lastPreset) return lastPreset;
-  return groups[0]?.items[0]?.id ?? fallback;
+  return favoriteHomeId(groups[0]?.items[0]?.id ?? fallback);
 }
 
 /// One read per menu open at most.
@@ -78,6 +88,9 @@ export function resetForkPresetCache() {
 /// The preset a click on the main row runs, read without waiting on the store:
 /// the last one used, else the first of whatever the last read cached.
 export function currentForkPreset(): string {
-  const groups = orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetOrder.$());
+  const groups = withFavorites(
+    orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetOrder.$()),
+    forkPresetFavorites.$(),
+  );
   return mainPreset(forkRender.lastPreset.$(), groups);
 }
