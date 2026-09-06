@@ -5,9 +5,10 @@
 3. Shape A: overlay
 4. Shape D: child pane
 5. Trigger: right-click the gutter mark
-6. Files and commits
-7. Validation
-8. What is left
+6. The menu behind the trigger
+7. Files and commits
+8. Validation
+9. What is left
 
 ## 1. What shipped
 
@@ -118,10 +119,48 @@ handing back and the command was discarding. That is the whole tauri change.
 The gutter mark's right-click menu stays as a second way in for a comment that
 already exists; it costs nothing and reuses the same `forkCommand`.
 
-## 6. Files and commits
+## 6. The menu behind the trigger
+
+Research first, per the build-vs-buy law: `plans/2026-09-05-navmenu.BUY-VS-BUILD.md`.
+
+| verdict | call |
+|---|---|
+| menu + submenu | build `src/0_navMenu.ts` in-repo, adopt native `popover=manual` for the top layer, hand-measure the position. Radix / Base UI / Kobalte are React or Solid at 107 KB to 4.3 MB against 10 imperative call sites; Floating UI (174 KB) only replaces the measure-and-flip `ctxmenu.ts` already had; this engine is Safari 17.6, so CSS anchor positioning is not available to any of them |
+| grouped drag reorder | hand-rolled pointer events with a hold timer, reusing `railOrder.mergeOrder`. `@atlaskit/pragmatic-drag-and-drop` (505 KB) is the strongest buy and SortableJS's `delay` is the exact gesture, but both want a list that outlives the gesture and a menu is built per open |
+
+Five steps, and what runs at each:
+
+| # | the user | the code |
+|---|---|---|
+| 1 open | right-click in a terminal | `wireContextMenu` -> `ctxItemsFor` -> `showContextMenu` -> `openNavMenu`; the root is a `popover=manual` `.ctx-menu` measured and flipped off the window edges. `Fork selection` carries its subtext, the preset `currentForkPreset()` names |
+| 2 hover | hover `Fork selection`, or ArrowRight onto it | `openSubmenu` opens a second level at the row's right edge, flipping to its left when it will not fit, and awaits `children()` = `presetGroups(await forkPresets())`: one group per harness, one row per preset, subtext = model (+ `@effort`), DEAD status skipped, the read cached 60 s |
+| 3 hold-move | press a preset row (or a harness header) for 350 ms, then move | `wireHoldReorder` arms on the timer, reads the row under the pointer, and applies `moveNavItem` / `moveNavGroup`; a drop on another harness's row returns the order untouched, so an item never leaves its group |
+| 4 pick | click a preset, or Enter on it | the menu closes first, then `forkSelection(id, preset)` runs the existing flow: comment row, sent stamp, `boop beep fork <id> --preset <p>`, toast |
+| 5 persist | nothing | `fork.lastPreset` takes the preset just run, `fork.presetOrder` holds the order; both are `storageSignal` keys, and the next open reads them back through `orderedGroups` |
+
+```mermaid
+stateDiagram-v2
+  [*] --> Root: right-click
+  Root --> Sub: hover / ArrowRight
+  Sub --> Sub: hold 350ms then move (moveNavItem, own group only)
+  Sub --> [*]: pick a preset -> forkSelection
+  Root --> [*]: click Fork selection -> last preset
+  Root --> [*]: Escape
+```
+
+`src/ctxmenu.ts` kept `CtxItem` and became the adapter over the new module
+rather than staying a second menu implementation: ten call sites already speak
+that type, and one of them (the terminal's) needed submenus, so two menu
+renderers would have had to agree on the same `.ctx-menu` skin CSS forever.
+
+## 7. Files and commits
 
 | commit | subject |
 |---|---|
+| 00ce053 | docs: navmenu buy-vs-build |
+| 17c19f2 | ui: reusable nav menu on signals, submenus, hold-to-reorder within groups |
+| b588237 | terminal: Fork selection submenu of presets by harness, last-run preset on the main item |
+| 73e01f4 | terminal: select text, right-click, Fork selection → preset; the comment is made for you |
 | 497d84c | terminal: the comment fork read carries the lane's tmux target |
 | 304fcd5 | terminal: both comment fork shapes, switched by forkRender.livePane |
 | bfcfb45 | terminal: right-click a gutter mark to fork its comment |
@@ -136,22 +175,25 @@ already exists; it costs nothing and reuses the same `forkCommand`.
 | `src/1e_terminalForkMarks.ts` | `FORK_PRESET` exported |
 | `src/1d_terminalTurnMarks.ts` | optional `onMenu` on the mark |
 | `src/terminal.ts` | constructs `TerminalForkRender`, `forkSelection` (select -> comment -> fork), the mark menu, disposal |
-| `src/chrome.ts` | `Fork selection → <preset>` in the terminal right-click menu |
+| `src/chrome.ts` | the `Fork selection` row in the terminal right-click menu |
+| `src/0_navMenu.ts` | new: the reusable menu (submenus, keyboard, hold-to-reorder, persisted order) |
+| `src/ctxmenu.ts` | `CtxItem` unchanged, now an adapter over `0_navMenu` |
+| `src/1g_forkPresetMenu.ts` | new: `boop config presets` cached, grouped by harness, main-row preset |
 | `src/1b_terminalContextSync.ts` | `sendSelection`: upsert, stamp sent, return the id |
 | `src/main.ts` | palette entry |
 | `src/styles.css` | `.term-fork*` for both shapes |
 
-## 7. Validation
+## 8. Validation
 
 ```
 $ cd src-tauri && CARGO_TARGET_DIR=$HOME/.cache/cargo-target/instant-harness-out cargo test
 test boop::tests::fork_state_derives_from_result_row_and_liveness ... ok
 test boop::tests::fork_pane_target_falls_back_to_the_lane_name ... ok
-test result: ok. 68 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.77s
+test result: ok. 69 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.41s
 
 $ npx vitest run
- Test Files  90 passed (90)
-      Tests  505 passed (505)
+ Test Files  92 passed (92)
+      Tests  529 passed (529)
 
 $ npx tsc --noEmit
 tsc exit=0
@@ -159,7 +201,7 @@ tsc exit=0
 
 clippy was not run: instant carries 12 pre-existing errors there.
 
-## 8. What is left
+## 9. What is left
 
 | open | why it is open |
 |---|---|
@@ -168,3 +210,5 @@ clippy was not run: instant carries 12 pre-existing errors there.
 | preset choice is fixed at `flash4` | `FORK_PRESET` is a constant; the menu could offer pro4/opus once the fork row carries the preset it ran with |
 | the fork row does not store its preset | the header prints `flash4` unconditionally, inherited from `1e_terminalForkMarks.ts` |
 | no visual check in the running app | gates are unit-level; the shapes and the menu have not been seen against a live lane |
+| no typeahead, no `aria-activedescendant` in the menu | pass one covers arrows, Enter, Escape and ArrowRight/Left; the buy-vs-build doc names Base UI as the revisit if screen-reader-grade menus are ever needed |
+| the rail keeps its own drag gesture | `rail.ts wireDragReorder` predates `0_navMenu`; merging them means reconciling `moveBefore` with `moveWithin` |
