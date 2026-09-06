@@ -114,7 +114,9 @@ export async function dropIntoTerminal(
   drops: StashedDrop[] = [],
 ): Promise<void> {
   const tab = tabs.get(id);
-  const target = tab?.tmuxTarget;
+  // A plain tab attaches tmux under its own name; only viewer tabs carry an
+  // explicit target. Same rule as terminal.ts:707. A graphics tab has no pane.
+  const target = tab && !tab.graphics ? tab.tmuxTarget ?? tab.name : undefined;
   const byPath = new Map(drops.map((drop) => [dropPath(drop), drop]));
   const typed: string[] = [];
   for (const path of paths) {
