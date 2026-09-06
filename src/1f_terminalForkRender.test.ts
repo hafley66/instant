@@ -13,6 +13,9 @@ import {
   forkBodyLines,
   forkCommand,
   forkHeaderText,
+  forkSpawnStatus,
+  selectionClientId,
+  FORK_PRESETS,
   forkKey,
   forkMenuTargets,
   forkShape,
@@ -166,6 +169,24 @@ describe("the child pane's mirror", () => {
 describe("the fork trigger", () => {
   it("spells the verb boop already has", () => {
     expect(forkCommand(26, "flash4")).toBe("boop beep fork 26 --preset flash4");
+  });
+
+  it("offers the three presets the menu lists", () => {
+    expect([...FORK_PRESETS]).toEqual(["flash4", "pro4", "opus"]);
+  });
+
+  it("keys a selection's comment row by what was selected, not by the clock", () => {
+    const first = selectionClientId("sprefa-2", "DBSP.State.Retain", ["sess-a:3080"]);
+    expect(first).toBe(selectionClientId("sprefa-2", "DBSP.State.Retain", ["sess-a:3080"]));
+    expect(first).not.toBe(selectionClientId("sprefa-2", "DBSP.State.Integrate", ["sess-a:3080"]));
+    expect(first).not.toBe(selectionClientId("other-tab", "DBSP.State.Retain", ["sess-a:3080"]));
+    expect(first.startsWith("fork-selection:")).toBe(true);
+  });
+
+  it("names the lane the fork verb printed, and predicts it when it printed none", () => {
+    expect(forkSpawnStatus(47, "flash4", "brief /x.md\nforked comment 47 -> lane fork-comment-47\n"))
+      .toBe("fork-comment-47 spawned, flash4");
+    expect(forkSpawnStatus(47, "pro4", "")).toBe("fork-comment-47 spawned, pro4");
   });
 
   it("offers one target per stored comment, labelled by its note", () => {

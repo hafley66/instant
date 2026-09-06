@@ -13,12 +13,12 @@ import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
 import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
 import { turnDebug } from "./0_turnDebugSettings";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
-import { TerminalContextQueue } from "./1a_terminalContextQueue";
+import { TerminalContextQueue, type PromptContextItem } from "./1a_terminalContextQueue";
 import { TerminalContextSync } from "./1b_terminalContextSync";
 import { TerminalHoverCheck } from "./1c_terminalHoverCheck";
 import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
-import { forkCommand, forkMenuTargets, TerminalForkRender } from "./1f_terminalForkRender";
+import { forkCommand, forkMenuTargets, forkSpawnStatus, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
 import { forkRender } from "./0_forkRenderSettings";
 import { showContextMenu } from "./ctxmenu";
 import { clickRpc } from "./ipc/contract";
@@ -1323,16 +1323,52 @@ export function askAboutSelection(id: string) {
   const tab = tabs.get(id);
   const text = termSelectionText(id);
   if (!tab?.contextQueue || !text) return;
-  const pinned = tab.pinnedSelection?.selection;
-  const rows = pinned
-    ? [Math.min(pinned.anchor.row, pinned.focus.row), Math.max(pinned.anchor.row, pinned.focus.row)] as const
-    : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
+  const rows = selectionRows(tab);
   const queued = tab.contextQueue.addSelection(tab.contextQueue.snapshotFor(text, rows[0], rows[1]));
   tab.pinnedSelection?.clear();
   // Caret goes to the new slice's note so the annotation can be typed at once;
   // the terminal keeps focus only when nothing was queued.
   if (queued) tab.contextQueue.focusNote(queued);
   else tab.term.focus();
+}
+
+/// The buffer rows a selection covers: the pinned overlay's own rows where it
+/// holds the selection, else the whole viewport.
+function selectionRows(tab: Tab): readonly [number, number] {
+  const pinned = tab.pinnedSelection?.selection;
+  return pinned
+    ? [Math.min(pinned.anchor.row, pinned.focus.row), Math.max(pinned.anchor.row, pinned.focus.row)] as const
+    : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
+}
+
+/// Select text, right-click, pick a preset: the comment row the fork verb keys
+/// off is written here, sent, and forked in one step the reader never sees.
+export async function forkSelection(id: string, preset: string) {
+  const tab = tabs.get(id);
+  const text = termSelectionText(id);
+  if (!tab?.contextQueue || !tab.contextSync || !text) return;
+  const rows = selectionRows(tab);
+  const snapshot = tab.contextQueue.snapshotFor(text, rows[0], rows[1]);
+  tab.pinnedSelection?.clear();
+  tab.term.clearSelection();
+  const item: PromptContextItem = {
+    id: selectionClientId(tab.name, snapshot.text, snapshot.turnIds),
+    kind: "selection",
+    text: snapshot.text,
+    turnIds: snapshot.turnIds,
+    enabled: true,
+  };
+  const commentId = await tab.contextSync.sendSelection(item);
+  if (!commentId) {
+    flashStatus("fork: the selection did not store");
+    return;
+  }
+  const out = await clickRpc.runClick({
+    command: forkCommand(commentId, preset),
+    cwd: tabMetaById(id)?.cwd ?? "",
+  }).catch(() => "");
+  flashStatus(forkSpawnStatus(commentId, preset, out));
+  tab.contextSync.activate();
 }
 
 // Write text into a terminal's pty (path or selection, space-terminated so the

@@ -17,6 +17,7 @@ vi.mock("./generated/native", () => ({
   },
   invoke: async (command: string, args: unknown) => {
     native.calls.push([command, args]);
+    if (command === "boop_turn_comment_upsert") return 47;
     return command === "boop_turn_comments" || command === "boop_turn_annotations"
       || command === "boop_turn_comment_forks" ? [] : undefined;
   },
@@ -180,6 +181,28 @@ describe("send never loses the last edit", () => {
     expect(upsert.comment.note).toBe("typed fast");
     expect(writes[1][1]).toEqual({ clientIds: [row.id] });
     expect(native.calls.some(([command]) => command === "boop_turn_comment_delete"), "a sent row is never deleted").toBe(false);
+    sync.dispose();
+  });
+});
+
+describe("a selection forked straight from the right-click menu", () => {
+  it("stores the slice as an already-sent comment and hands back its id", async () => {
+    native.calls.length = 0;
+    const queue = fakeQueue();
+    const sync = new TerminalContextSync(
+      queue as unknown as ConstructorParameters<typeof TerminalContextSync>[0],
+      "tab-1",
+      async () => ["sess-a"],
+    );
+    const commentId = await sync.sendSelection(item({ id: "fork-selection:9zk" }));
+    expect(commentId).toBe(47);
+    const writes = native.calls.filter(([command]) =>
+      command === "boop_turn_comment_upsert" || command === "boop_turn_comments_sent");
+    expect(writes.map(([command]) => command))
+      .toEqual(["boop_turn_comment_upsert", "boop_turn_comments_sent"]);
+    expect((writes[0][1] as { comment: BoopTurnComment }).comment.kind).toBe("selection");
+    expect(writes[1][1]).toEqual({ clientIds: ["fork-selection:9zk"] });
+    expect(native.calls.some(([command]) => command === "boop_turn_comment_delete")).toBe(false);
     sync.dispose();
   });
 });
