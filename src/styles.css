@@ -1083,6 +1083,49 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   opacity: .8;
 }
 .term-context-mark:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* A comment fork drawn under the row it was forked from: the overlay shape
+   (collapsed header, click to expand) and the child pane shape. */
+.term-fork-layer { position: absolute; inset: 0; }
+.term-fork {
+  position: absolute;
+  pointer-events: auto;
+  overflow: hidden;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  font: 11px/16px Menlo, Monaco, monospace;
+  box-shadow: 0 6px 18px rgb(0 0 0 / .55);
+  z-index: 3;
+}
+.term-fork[data-shape="pane"] {
+  border-color: #34d399;
+  background: color-mix(in srgb, var(--term-bg) 88%, black);
+}
+.term-fork[data-state="dead"] { border-color: #b45309; }
+.term-fork-header {
+  display: block;
+  width: 100%;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  white-space: pre;
+  cursor: pointer;
+}
+.term-fork[data-shape="pane"] .term-fork-header {
+  color: #34d399;
+  border-bottom: 1px solid color-mix(in srgb, var(--frame-dark) 70%, transparent);
+  cursor: default;
+}
+.term-fork-body {
+  margin: 0;
+  padding: 0 6px 3px;
+  white-space: pre;
+  overflow: hidden;
+}
 .term-context-queue-status {
   flex: 1;
   overflow: hidden;

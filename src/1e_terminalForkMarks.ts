@@ -23,7 +23,7 @@ export function placeForks(
 
 /// The fork lane's preset from `boop beep fork --preset flash4`; not carried on
 /// the fork row, so the block hardcodes it in the header.
-const FORK_PRESET = "flash4";
+export const FORK_PRESET = "flash4";
 
 /// Wrap `text` at `cols` on word boundaries, dropping blank runs.
 export function wrapText(text: string, cols: number): string[] {

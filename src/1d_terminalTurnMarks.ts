@@ -78,6 +78,9 @@ export class TerminalTurnMarks {
     readonly queue: TerminalContextQueue,
     readonly annotations: SignalOf<BoopTurnComment[]>,
     readonly forks: SignalOf<BoopTurnCommentFork[]>,
+    /// Right-click on a mark: the caller owns the item list, so this module
+    /// stays free of the fork verb and of the menu widget.
+    readonly onMenu?: (event: MouseEvent, entries: PlacedAnnotation[]) => void,
   ) {
     this.layer.className = "term-context-marks";
     queue.gutter.appendChild(this.layer);
@@ -97,6 +100,13 @@ export class TerminalTurnMarks {
     mark.addEventListener("click", () => {
       const entries = this.placedByKey.get(key);
       if (entries) this.requeue(entries);
+    });
+    mark.addEventListener("contextmenu", (event) => {
+      const entries = this.placedByKey.get(key);
+      if (!entries || !this.onMenu) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.onMenu(event, entries);
     });
     this.layer.appendChild(mark);
     this.marks.set(key, mark);

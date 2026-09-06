@@ -17,6 +17,11 @@ import { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { TerminalContextSync } from "./1b_terminalContextSync";
 import { TerminalHoverCheck } from "./1c_terminalHoverCheck";
 import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
+import { FORK_PRESET } from "./1e_terminalForkMarks";
+import { forkCommand, forkMenuTargets, TerminalForkRender } from "./1f_terminalForkRender";
+import { forkRender } from "./0_forkRenderSettings";
+import { showContextMenu } from "./ctxmenu";
+import { clickRpc } from "./ipc/contract";
 import { TerminalWheelRouter } from "./0_terminalWheel";
 import { TerminalPinnedSelection } from "./0_terminalPinnedSelection";
 import { runMatchingCommand } from "./keymap";
@@ -102,6 +107,7 @@ export type Tab = {
   contextSync?: TerminalContextSync;
   hoverCheck?: TerminalHoverCheck;
   turnMarks?: TerminalTurnMarks;
+  forkPaint?: TerminalForkRender;
   cmdClickGesture?: CmdClickGestureTracker;
   wheel?: TerminalWheelRouter;
   pinnedSelection?: TerminalPinnedSelection;
@@ -135,6 +141,13 @@ function applyTurnDebugOverlay(tab: Tab) {
 }
 export function syncTurnDebugOverlays() {
   for (const tab of tabs.values()) applyTurnDebugOverlay(tab);
+}
+
+/// The fork verb runs in the tab's cwd, so the lane branches from the repo the
+/// pane stands in; the re-pull paints it on the next gutter tick.
+async function runFork(commentId: number, cwd: string, sync: TerminalContextSync) {
+  await clickRpc.runClick({ command: forkCommand(commentId, FORK_PRESET), cwd }).catch(() => "");
+  sync.activate();
 }
 const inspectorTextCache = new Map<string, string>();
 
@@ -544,6 +557,7 @@ export function openTab(
     stale?.overlay?.dispose();
     stale?.diagrams?.dispose();
     stale?.structured?.dispose();
+    stale?.forkPaint?.dispose();
     stale?.contextSync?.dispose();
     stale?.contextQueue?.dispose();
     stale?.lineAnchors?.dispose();
@@ -768,7 +782,20 @@ export function openTab(
     async () => (await sessionsForTab(id)).map((session) => session.sessionId),
   );
   const hoverCheck = !contextQueue ? undefined : new TerminalHoverCheck(contextQueue);
-  const turnMarks = !contextQueue || !contextSync ? undefined : new TerminalTurnMarks(contextQueue, contextSync.annotations, contextSync.forks);
+  const turnMarks = !contextQueue || !contextSync ? undefined : new TerminalTurnMarks(
+    contextQueue,
+    contextSync.annotations,
+    contextSync.forks,
+    (event, entries) => showContextMenu(event.clientX, event.clientY, forkMenuTargets(entries).map((target) => ({
+      label: `Fork "${target.label}" → ${FORK_PRESET}`,
+      action: () => void runFork(target.commentId, tabMetaById(id)?.cwd ?? "", contextSync),
+    }))),
+  );
+  const forkPaint = !contextQueue || !turnMarks ? undefined : new TerminalForkRender(contextQueue, {
+    livePane: forkRender.livePane,
+    placedForks: () => turnMarks.placedForks,
+    capture: (target) => invoke<string>(commands.boop_mux.boopMuxCapture, { target, socket: null }),
+  });
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";
@@ -788,7 +815,7 @@ export function openTab(
       void navigator.clipboard.writeText(text).catch(() => {});
     },
   });
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
   void syncTurns?.();
   applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
@@ -1217,6 +1244,7 @@ export function onTermClosed(id: string) {
   t.overlay?.dispose();
   t.diagrams?.dispose();
   t.structured?.dispose();
+  t.forkPaint?.dispose();
   t.turnMarks?.dispose();
   t.hoverCheck?.dispose();
   t.contextSync?.dispose();
