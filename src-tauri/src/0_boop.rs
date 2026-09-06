@@ -410,6 +410,8 @@ pub struct BoopTurnCommentTarget {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BoopTurnComment {
+    #[serde(default)]
+    pub comment_id: i64,
     pub client_id: String,
     pub kind: String,
     pub quote: String,
@@ -432,6 +434,7 @@ fn now_ms() -> u64 {
 
 fn comment_to_wire(row: boop_store::ident::TurnComment) -> BoopTurnComment {
     BoopTurnComment {
+        comment_id: row.comment_id,
         client_id: row.client_id,
         kind: row.kind,
         quote: row.quote,
@@ -491,6 +494,128 @@ fn read_turn_annotations(sessions: &[String]) -> Result<Vec<BoopTurnComment>, St
 #[tauri::command]
 pub async fn boop_turn_annotations(sessions: Vec<String>) -> Result<Vec<BoopTurnComment>, String> {
     tauri::async_runtime::spawn_blocking(move || read_turn_annotations(&sessions))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopTurnCommentForkReply {
+    pub session: String,
+    pub turn: i64,
+    pub said: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopTurnCommentFork {
+    pub comment_id: i64,
+    pub lane: String,
+    pub branch: String,
+    pub brief: String,
+    pub created_ts: i64,
+    pub state: String,
+    pub rc: Option<i64>,
+    pub reply: Option<BoopTurnCommentForkReply>,
+}
+
+/// A fork lane's state off its result row and session liveness: a result row
+/// wins as `done`, a live session with none yet is `running`, otherwise `dead`.
+fn fork_state(has_result: bool, live: bool) -> &'static str {
+    if has_result {
+        "done"
+    } else if live {
+        "running"
+    } else {
+        "dead"
+    }
+}
+
+/// The lane's session value from agent_route, joined to the last assistant
+/// turn of that session for the reply text.
+fn fork_reply(store: &Store, lane: &str) -> (Option<String>, Option<BoopTurnCommentForkReply>) {
+    let session: Option<String> = store
+        .connection()
+        .prepare("SELECT session_id FROM agent_route WHERE route = ?1")
+        .and_then(|mut statement| statement.query_row([lane], |row| row.get(0)))
+        .ok();
+    let reply = match &session {
+        Some(session) => store
+            .connection()
+            .prepare(
+                "SELECT t.turn, t.said FROM agent_turn t
+                   JOIN dict_session ds ON ds.id = t.session_id
+                   JOIN dict_role r ON r.id = t.role_id
+                  WHERE ds.value = ?1 AND r.value = 'assistant'
+                    AND t.said IS NOT NULL AND t.said != ''
+                  ORDER BY t.turn DESC LIMIT 1",
+            )
+            .and_then(|mut statement| {
+                statement.query_row([session], |row| {
+                    Ok(BoopTurnCommentForkReply {
+                        session: session.clone(),
+                        turn: row.get(0)?,
+                        said: row.get(1)?,
+                    })
+                })
+            })
+            .ok(),
+        None => None,
+    };
+    (session, reply)
+}
+
+fn read_turn_comment_forks(comment_ids: &[i64]) -> Result<Vec<BoopTurnCommentFork>, String> {
+    let store = open_store_ro()?;
+    let mut forks = Vec::new();
+    for &comment_id in comment_ids {
+        let rows = store
+            .turn_comment_forks(comment_id)
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            // Latest result row; outer None is no row, inner None is a row with rc NULL.
+            let result: Option<Option<i64>> = store
+                .connection()
+                .prepare(
+                    "SELECT rc FROM agent_mail
+                      WHERE kind = 'result' AND from_route = ?1
+                      ORDER BY seq DESC LIMIT 1",
+                )
+                .and_then(|mut statement| statement.query_row([row.lane.as_str()], |r| r.get(0)))
+                .ok();
+            let has_result = result.is_some();
+            let rc = result.flatten();
+            let (session, reply) = fork_reply(&store, &row.lane);
+            let live = match &session {
+                Some(session) => store
+                    .connection()
+                    .prepare(
+                        "SELECT 1 FROM agent_live l
+                           JOIN dict_session ds ON ds.id = l.session_id
+                          WHERE ds.value = ?1 AND l.pid IS NOT NULL LIMIT 1",
+                    )
+                    .and_then(|mut statement| statement.query_row([session], |_| Ok(1)))
+                    .is_ok(),
+                None => false,
+            };
+            forks.push(BoopTurnCommentFork {
+                comment_id: row.comment_id,
+                lane: row.lane,
+                branch: row.branch,
+                brief: row.brief,
+                created_ts: row.created_ts,
+                state: fork_state(has_result, live).to_string(),
+                rc,
+                reply,
+            });
+        }
+    }
+    Ok(forks)
+}
+
+#[tauri::command]
+pub async fn boop_turn_comment_forks(comment_ids: Vec<i64>) -> Result<Vec<BoopTurnCommentFork>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_turn_comment_forks(&comment_ids))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -886,6 +1011,14 @@ mod tests {
             events.windows(2).all(|pair| pair[0].ts <= pair[1].ts),
             "lane events come back ordered by ts"
         );
+    }
+
+    #[test]
+    fn fork_state_derives_from_result_row_and_liveness() {
+        assert_eq!(fork_state(true, false), "done");
+        assert_eq!(fork_state(true, true), "done");
+        assert_eq!(fork_state(false, true), "running");
+        assert_eq!(fork_state(false, false), "dead");
     }
 
     #[test]

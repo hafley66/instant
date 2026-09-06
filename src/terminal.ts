@@ -768,7 +768,7 @@ export function openTab(
     async () => (await sessionsForTab(id)).map((session) => session.sessionId),
   );
   const hoverCheck = !contextQueue ? undefined : new TerminalHoverCheck(contextQueue);
-  const turnMarks = !contextQueue || !contextSync ? undefined : new TerminalTurnMarks(contextQueue, contextSync.annotations);
+  const turnMarks = !contextQueue || !contextSync ? undefined : new TerminalTurnMarks(contextQueue, contextSync.annotations, contextSync.forks);
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";

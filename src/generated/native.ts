@@ -76,6 +76,7 @@ export type CommandName =
   | "boop_turn_comment_delete"
   | "boop_turn_comments_sent"
   | "boop_turn_annotations"
+  | "boop_turn_comment_forks"
   | "boop_lanes"
   | "boop_lane_events"
   | "boop_agent_touches"
@@ -230,6 +231,7 @@ export namespace commands {
     export const boopTurnCommentDelete = "boop_turn_comment_delete";
     export const boopTurnCommentsSent = "boop_turn_comments_sent";
     export const boopTurnAnnotations = "boop_turn_annotations";
+    export const boopTurnCommentForks = "boop_turn_comment_forks";
     export const boopLanes = "boop_lanes";
     export const boopLaneEvents = "boop_lane_events";
     export const boopAgentTouches = "boop_agent_touches";

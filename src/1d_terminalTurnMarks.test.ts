@@ -13,6 +13,7 @@ const turn = (id: string, start: number, end: number): VisibleTurn => ({
 } as unknown as VisibleTurn);
 
 const comment = (over: Partial<BoopTurnComment> = {}): BoopTurnComment => ({
+  commentId: 26,
   clientId: "selection:1:0",
   kind: "selection",
   quote: "DBSP.State.Retain",
