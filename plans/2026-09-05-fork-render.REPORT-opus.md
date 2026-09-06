@@ -148,6 +148,24 @@ stateDiagram-v2
   Root --> [*]: Escape
 ```
 
+### Search, favourites, and the model/render split
+
+The menu is now two exports: `navMenuModel(opts)` holds every visible fact as
+signals (query, stack, focus, drag, plus the injected order and favourites) and
+derives one `view: SignalOf<NavMenuView>`; `renderNavMenu(view)` is the DOM as a
+function of that signal and reads nothing back off an element except an id. It
+imports `@hafley66/signals` and `./fuzzy` and nothing else, so it lifts out as a
+package; `src/0_navMenuStore.ts` is instant's storage adapter. API and keys:
+`docs/navmenu.md`.
+
+| # | the user | the state that moves |
+|---|---|---|
+| 1 open | right-click, hover `Fork selection` | `stack` gains a level; the view derives its rows through `orderedGroups` then `withFavorites`, and adds a search row because the level offers more than six items |
+| 2 type | types "opus" in the search row | `queries[depth]`; `filterGroups` runs `fuzzyFilter` over `"<group>: <item>"` and every group with no match is not drawn. Escape clears the query and leaves the menu open |
+| 3 star | clicks the ☆ on `claude: opus`, or presses `f` on it | `favorites` gains `opus`; the next derivation puts a `Favorites` group on top with the title `claude: opus`, and the row stays in `claude` too |
+| 4 reorder | holds a pinned row 350 ms, moves it | `drag` arms, `dragOver` rewrites the favourites list itself (pinned ids carry a `fav:` prefix, so they never collide with home ids and never leave the pinned group) |
+| 5 reopen | right-clicks again tomorrow | `fork.presets.favorites` and `fork.presets.order` read back through `mergeIds`, ids that no longer exist drop, and the main row's subtext is the first favourite when nothing has been run yet |
+
 `src/ctxmenu.ts` kept `CtxItem` and became the adapter over the new module
 rather than staying a second menu implementation: ten call sites already speak
 that type, and one of them (the terminal's) needed submenus, so two menu
@@ -158,6 +176,7 @@ renderers would have had to agree on the same `.ctx-menu` skin CSS forever.
 | commit | subject |
 |---|---|
 | 00ce053 | docs: navmenu buy-vs-build |
+| e8ebef6 | ui: nav menu search row on fuzzyFilter, favorites group with group-prefixed titles |
 | 17c19f2 | ui: reusable nav menu on signals, submenus, hold-to-reorder within groups |
 | b588237 | terminal: Fork selection submenu of presets by harness, last-run preset on the main item |
 | 73e01f4 | terminal: select text, right-click, Fork selection → preset; the comment is made for you |
@@ -179,6 +198,8 @@ renderers would have had to agree on the same `.ctx-menu` skin CSS forever.
 | `src/0_navMenu.ts` | new: the reusable menu (submenus, keyboard, hold-to-reorder, persisted order) |
 | `src/ctxmenu.ts` | `CtxItem` unchanged, now an adapter over `0_navMenu` |
 | `src/1g_forkPresetMenu.ts` | new: `boop config presets` cached, grouped by harness, main-row preset |
+| `src/0_navMenuStore.ts` | new: instant's `<key>.order` / `<key>.favorites` adapter |
+| `docs/navmenu.md` | new: the module's API, behaviour and persisted keys |
 | `src/1b_terminalContextSync.ts` | `sendSelection`: upsert, stamp sent, return the id |
 | `src/main.ts` | palette entry |
 | `src/styles.css` | `.term-fork*` for both shapes |
@@ -193,7 +214,7 @@ test result: ok. 69 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
 
 $ npx vitest run
  Test Files  92 passed (92)
-      Tests  529 passed (529)
+      Tests  545 passed (545)
 
 $ npx tsc --noEmit
 tsc exit=0
@@ -210,5 +231,6 @@ clippy was not run: instant carries 12 pre-existing errors there.
 | preset choice is fixed at `flash4` | `FORK_PRESET` is a constant; the menu could offer pro4/opus once the fork row carries the preset it ran with |
 | the fork row does not store its preset | the header prints `flash4` unconditionally, inherited from `1e_terminalForkMarks.ts` |
 | no visual check in the running app | gates are unit-level; the shapes and the menu have not been seen against a live lane |
-| no typeahead, no `aria-activedescendant` in the menu | pass one covers arrows, Enter, Escape and ArrowRight/Left; the buy-vs-build doc names Base UI as the revisit if screen-reader-grade menus are ever needed |
+| no typeahead, no `aria-activedescendant` in the menu | the search row covers finding a row by name; the buy-vs-build doc names Base UI as the revisit if screen-reader-grade menus are ever needed |
+| no keyboard reorder | the move is a pointer hold; arrow-key move is the a11y gap the libraries would have covered |
 | the rail keeps its own drag gesture | `rail.ts wireDragReorder` predates `0_navMenu`; merging them means reconciling `moveBefore` with `moveWithin` |

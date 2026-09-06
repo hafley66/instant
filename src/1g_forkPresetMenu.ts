@@ -1,4 +1,11 @@
-import { navOrder, orderedGroups, type NavGroup, type NavItem } from "./0_navMenu";
+import {
+  favoriteHomeId,
+  orderedGroups,
+  withFavorites,
+  type NavGroup,
+  type NavItem,
+} from "./0_navMenu";
+import { navMenuStore } from "./0_navMenuStore";
 import { forkRender } from "./0_forkRenderSettings";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
 import { commands, invoke } from "./generated/native";
@@ -15,8 +22,9 @@ export type BoopPreset = {
   default: boolean;
 };
 
-/// The user's own order of the preset submenu, groups and items alike.
-export const forkPresetOrder = navOrder("fork.presetOrder");
+/// The submenu's own order and starred presets: keys fork.presets.order and
+/// fork.presets.favorites.
+export const forkPresetStore = navMenuStore("fork.presets");
 
 /// A preset the config marks DEAD cannot spawn a lane.
 export function livePresets(presets: BoopPreset[]): BoopPreset[] {
@@ -45,10 +53,10 @@ export function presetGroups(presets: BoopPreset[], run: (name: string) => void)
 }
 
 /// What the main row runs and names: the preset last picked here, else the
-/// first one in the user's own order, else the built-in default.
+/// first favourite, else the first in the user's order, else the default.
 export function mainPreset(lastPreset: string, groups: NavGroup[], fallback = FORK_PRESET): string {
   if (lastPreset) return lastPreset;
-  return groups[0]?.items[0]?.id ?? fallback;
+  return favoriteHomeId(groups[0]?.items[0]?.id ?? fallback);
 }
 
 /// One read per menu open at most.
@@ -78,6 +86,9 @@ export function resetForkPresetCache() {
 /// The preset a click on the main row runs, read without waiting on the store:
 /// the last one used, else the first of whatever the last read cached.
 export function currentForkPreset(): string {
-  const groups = orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetOrder.$());
+  const groups = withFavorites(
+    orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetStore.order.$()),
+    forkPresetStore.favorites.$(),
+  );
   return mainPreset(forkRender.lastPreset.$(), groups);
 }

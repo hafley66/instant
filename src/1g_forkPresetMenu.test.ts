@@ -10,7 +10,7 @@ vi.mock("./generated/native", () => ({
   },
 }));
 
-import { orderedGroups, empty_nav_order } from "./0_navMenu";
+import { orderedGroups, empty_nav_order, withFavorites } from "./0_navMenu";
 import {
   forkPresets,
   livePresets,
@@ -85,6 +85,12 @@ describe("the preset the main row runs", () => {
 
   it("falls back to the built-in preset when nothing has been read yet", () => {
     expect(mainPreset("", [], "flash4")).toBe("flash4");
+  });
+
+  it("takes the first favourite when nothing has run yet, by its home id", () => {
+    const pinned = withFavorites(presetGroups(rows(), () => {}), ["opus"]);
+    expect(mainPreset("", pinned)).toBe("opus");
+    expect(mainPreset("pro4", pinned)).toBe("pro4");
   });
 });
 
