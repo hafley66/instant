@@ -12,8 +12,7 @@ import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, forkSelection, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
-import { FORK_PRESETS } from "./1f_terminalForkRender";
+import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   favoriteBoopTurn,
@@ -419,10 +418,7 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
         } satisfies CtxItem,
         // Forking takes the selection straight to a lane: the comment row the
         // fork verb keys off is written for the reader, never asked for.
-        ...FORK_PRESETS.map((preset) => ({
-          label: `Fork selection → ${preset}`,
-          action: () => { if (id) void forkSelection(id, preset); },
-        } satisfies CtxItem)),
+        forkSelectionItem(id) satisfies CtxItem,
         { sep: true } satisfies CtxItem,
       ] : []),
       {

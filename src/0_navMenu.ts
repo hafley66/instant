@@ -12,6 +12,9 @@ export type NavItem = {
   run?: () => void;
   disabled?: boolean;
   children?: NavChildren;
+  /// The persisted order its submenu reorders into; without one the submenu
+  /// still opens, it just does not move.
+  order?: SignalOf<NavMenuOrder>;
 };
 
 /// Groups resolved when the submenu opens, so a caller may fetch them.
@@ -109,6 +112,7 @@ type Level = {
   entries: NavEntry[];
   groups: NavGroup[] | null;
   owner: HTMLElement | null;
+  order: SignalOf<NavMenuOrder> | null;
   active: number;
 };
 
@@ -268,7 +272,7 @@ function renderLevel(level: Level) {
   level.root.textContent = "";
   const index = () => level;
   if (level.groups) {
-    const order = options.order?.$() ?? empty_nav_order;
+    const order = level.order?.$() ?? empty_nav_order;
     for (const group of orderedGroups(level.groups, order)) {
       level.root.appendChild(groupRow(group));
       for (const item of group.items) level.root.appendChild(itemRow(item, index));
@@ -280,12 +284,17 @@ function renderLevel(level: Level) {
   }
 }
 
-function newLevel(entries: NavEntry[], groups: NavGroup[] | null, owner: HTMLElement | null): Level {
+function newLevel(
+  entries: NavEntry[],
+  groups: NavGroup[] | null,
+  owner: HTMLElement | null,
+  order: SignalOf<NavMenuOrder> | null,
+): Level {
   const root = document.createElement("div");
   root.className = "ctx-menu";
   root.setAttribute("role", "menu");
   root.setAttribute("popover", "manual");
-  const level: Level = { root, entries, groups, owner, active: -1 };
+  const level: Level = { root, entries, groups, owner, order, active: -1 };
   renderLevel(level);
   wireHoldReorder(level);
   return level;
@@ -302,7 +311,12 @@ async function openSubmenu(parent: Level, row: HTMLElement) {
   const item = findItem(parent, row.dataset.navId ?? "");
   if (!item?.children) return;
   const rect = row.getBoundingClientRect();
-  const level = newLevel([{ id: "__loading", label: "…", disabled: true }], null, row);
+  const level = newLevel(
+    [{ id: "__loading", label: "…", disabled: true }],
+    null,
+    row,
+    item.order ?? options.order ?? null,
+  );
   levels.push(level);
   showLevel(level.root);
   place(level.root, rect.right, rect.top, rect.left);
@@ -328,7 +342,7 @@ function findItem(level: Level, id: string): NavItem | undefined {
 /// their own group, groups reorder among themselves, and the order persists.
 function wireHoldReorder(level: Level) {
   level.root.addEventListener("pointerdown", (event) => {
-    const order = options.order;
+    const order = level.order;
     if (!order || !level.groups || event.button !== 0) return;
     const row = (event.target as HTMLElement).closest<HTMLElement>("[data-nav-id],[data-group-id]");
     if (!row) return;
@@ -384,7 +398,7 @@ export function openNavMenu(x: number, y: number, entries: NavEntry[], opts: Nav
   closeNavMenu();
   if (!entries.length) return;
   options = opts;
-  const level = newLevel(entries, null, null);
+  const level = newLevel(entries, null, null, opts.order ?? null);
   levels = [level];
   showLevel(level.root);
   place(level.root, x, y);

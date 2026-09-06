@@ -1,10 +1,25 @@
 // Windows-XP-style right-click menu. The webview's native context menu is
 // suppressed; the rows are rendered by 0_navMenu.ts (submenus, keyboard,
 // hold-to-reorder) under the same .ctx-menu class names the skins style.
-import { closeNavMenu, openNavMenu, type NavChildren, type NavEntry, type NavMenuOptions } from "./0_navMenu";
+import {
+  closeNavMenu,
+  openNavMenu,
+  type NavChildren,
+  type NavEntry,
+  type NavMenuOptions,
+  type NavMenuOrder,
+} from "./0_navMenu";
+import type { Signal as SignalOf } from "@hafley66/signals";
 
 export type CtxItem =
-  | { label: string; action: () => void; disabled?: boolean; subtext?: string; children?: NavChildren }
+  | {
+      label: string;
+      action: () => void;
+      disabled?: boolean;
+      subtext?: string;
+      children?: NavChildren;
+      order?: SignalOf<NavMenuOrder>;
+    }
   | { sep: true };
 
 let seq = 0;
@@ -18,6 +33,7 @@ export function toNavEntries(items: CtxItem[], open: number): NavEntry[] {
     subtext: item.subtext,
     disabled: item.disabled,
     children: item.children,
+    order: item.order,
     run: item.disabled ? undefined : item.action,
   });
 }
