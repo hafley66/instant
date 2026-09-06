@@ -651,8 +651,10 @@ pub async fn boop_turn_comments(
         .map_err(|error| error.to_string())?
 }
 
+/// Returns the row's `comment_id`: the fork verb takes that number, and the
+/// selection path has to hand it over without a round trip through the reads.
 #[tauri::command]
-pub async fn boop_turn_comment_upsert(comment: BoopTurnComment) -> Result<(), String> {
+pub async fn boop_turn_comment_upsert(comment: BoopTurnComment) -> Result<i64, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store_rw()?;
         let targets: Vec<(String, i64)> = comment
@@ -660,7 +662,7 @@ pub async fn boop_turn_comment_upsert(comment: BoopTurnComment) -> Result<(), St
             .iter()
             .map(|target| (target.session.clone(), target.turn))
             .collect();
-        store
+        let comment_id = store
             .turn_comment_upsert(&boop_store::ident::TurnCommentUpsert {
                 client_id: &comment.client_id,
                 kind: &comment.kind,
@@ -672,7 +674,7 @@ pub async fn boop_turn_comment_upsert(comment: BoopTurnComment) -> Result<(), St
                 ts: now_ms(),
             })
             .map_err(|error| error.to_string())?;
-        Ok(())
+        Ok(comment_id)
     })
     .await
     .map_err(|error| error.to_string())?

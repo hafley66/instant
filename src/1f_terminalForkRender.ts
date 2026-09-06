@@ -133,6 +133,26 @@ export function forkCommand(commentId: number, preset: string): string {
   return `boop beep fork ${commentId} --preset ${preset}`;
 }
 
+/// The presets a fork is offered on, off `boop config presets`.
+export const FORK_PRESETS = ["flash4", "pro4", "opus"] as const;
+export type ForkPreset = (typeof FORK_PRESETS)[number];
+
+/// A selection's own comment row id, keyed by what was selected rather than by
+/// the clock, so forking the same text twice reuses one comment row.
+export function selectionClientId(tabName: string, text: string, turnIds: string[]): string {
+  const seed = `${tabName}\u0000${turnIds.join(",")}\u0000${text}`;
+  let hash = 5381;
+  for (let index = 0; index < seed.length; index++) hash = ((hash * 33) ^ seed.charCodeAt(index)) >>> 0;
+  return `fork-selection:${hash.toString(36)}`;
+}
+
+/// `boop beep fork` prints `forked comment 47 -> lane fork-comment-47`; the
+/// toast names the lane it printed, or the one the branch rule predicts.
+export function forkSpawnStatus(commentId: number, preset: string, stdout: string): string {
+  const named = /->\s*lane\s+(\S+)/.exec(stdout);
+  return `${named ? named[1] : `fork-comment-${commentId}`} spawned, ${preset}`;
+}
+
 export type ForkTarget = { commentId: number; label: string };
 
 export function forkMenuTargets(entries: PlacedAnnotation[]): ForkTarget[] {

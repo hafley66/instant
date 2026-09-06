@@ -83,28 +83,40 @@ Why no live xterm and no row displacement, stated plainly:
   does exist is the pane-vs-pane one above.
 - Keystrokes into the lane are consequently not wired. The pane reads.
 
-## 5. Trigger: right-click the gutter mark
+## 5. Trigger: select text, right-click, pick a preset
 
-Chosen: **the mark's context menu**. The mark button's left click is already
-taken by "re-queue this slice with its note" (`TerminalTurnMarks.requeue`), and
-the gutter is 42 px wide with the checkbox at offset 42 and the mark at 60, so a
-second hover button has nowhere to sit without moving either. `contextmenu` on
-the same button is free, and `ctxmenu.ts` is already action-agnostic.
+The comment is not a step the reader takes. Selecting and right-clicking is.
+
+| step | what the user does | what the code does |
+|---|---|---|
+| 1 | drag over text in the terminal | xterm's own selection, or the pinned overlay on a pane whose app owns the mouse; `termSelectionText` reads whichever is live |
+| 2 | right-click anywhere on that terminal | `ctxItemsFor` adds `Fork selection → flash4 / pro4 / opus` beside "Ask about this" (presets in `FORK_PRESETS`, off `boop config presets`) |
+| 3 | pick one | `forkSelection(id, preset)`: snapshot the rows, write the comment (`kind: selection`, no note, client id hashed off the text so re-forking the same range reuses one row), stamp it sent, read back `comment_id`, run `boop beep fork <id> --preset <p>` in the tab cwd |
+| 4 | nothing | toast `fork-comment-47 spawned, flash4`; `contextSync.activate()` re-pulls and the fork header paints under the quoted turn |
 
 ```mermaid
 sequenceDiagram
   participant U as user
-  participant M as gutter mark
-  participant T as terminal.ts
-  participant B as boop
-  U->>M: right-click
-  M->>T: onMenu(event, entries)
-  T->>T: forkMenuTargets (drops commentId 0: never stored)
-  T->>U: menu "Fork "<note>" → flash4"
-  U->>T: pick
-  T->>B: run_click `boop beep fork <id> --preset flash4` in the tab cwd
-  T->>T: contextSync.activate() re-pulls; the fork paints next tick
+  participant C as ctxItemsFor
+  participant T as forkSelection
+  participant S as boop.db
+  participant B as boop beep fork
+  U->>C: select text, right-click
+  C->>U: Fork selection → flash4 | pro4 | opus
+  U->>T: pick flash4
+  T->>S: boop_turn_comment_upsert -> comment_id 47
+  T->>S: boop_turn_comments_sent
+  T->>B: boop beep fork 47 --preset flash4
+  B-->>U: toast "fork-comment-47 spawned, flash4"
+  T->>S: re-pull; the header paints on the next gutter tick
 ```
+
+`boop_turn_comment_upsert` used to return `()`; it now returns the row's
+`comment_id`, which `boop_store::ident::turn_comment_upsert` was already
+handing back and the command was discarding. That is the whole tauri change.
+
+The gutter mark's right-click menu stays as a second way in for a comment that
+already exists; it costs nothing and reuses the same `forkCommand`.
 
 ## 6. Files and commits
 
@@ -116,14 +128,16 @@ sequenceDiagram
 
 | file | change |
 |---|---|
-| `src-tauri/src/0_boop.rs` | `tmux` on `BoopTurnCommentFork`, `fork_pane_target`, one test |
+| `src-tauri/src/0_boop.rs` | `tmux` on `BoopTurnCommentFork`, `fork_pane_target`, `boop_turn_comment_upsert` returns `comment_id`, one test |
 | `src/1b_terminalContextSync.ts` | `tmux: string` on the wire type |
 | `src/0_forkRenderSettings.ts` | new: the boolean |
 | `src/1f_terminalForkRender.ts` | new: placement, header/body text, both shapes, capture poll, menu targets |
 | `src/1f_terminalForkRender.test.ts` | new: 22 tests |
 | `src/1e_terminalForkMarks.ts` | `FORK_PRESET` exported |
 | `src/1d_terminalTurnMarks.ts` | optional `onMenu` on the mark |
-| `src/terminal.ts` | constructs `TerminalForkRender`, wires the menu and `runFork`, disposes both |
+| `src/terminal.ts` | constructs `TerminalForkRender`, `forkSelection` (select -> comment -> fork), the mark menu, disposal |
+| `src/chrome.ts` | `Fork selection → <preset>` in the terminal right-click menu |
+| `src/1b_terminalContextSync.ts` | `sendSelection`: upsert, stamp sent, return the id |
 | `src/main.ts` | palette entry |
 | `src/styles.css` | `.term-fork*` for both shapes |
 
@@ -137,7 +151,7 @@ test result: ok. 68 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
 
 $ npx vitest run
  Test Files  90 passed (90)
-      Tests  501 passed (501)
+      Tests  505 passed (505)
 
 $ npx tsc --noEmit
 tsc exit=0
@@ -153,4 +167,4 @@ clippy was not run: instant carries 12 pre-existing errors there.
 | rows below a pane do not move | xterm owns its rows; displacing them means writing blank lines into the pty |
 | preset choice is fixed at `flash4` | `FORK_PRESET` is a constant; the menu could offer pro4/opus once the fork row carries the preset it ran with |
 | the fork row does not store its preset | the header prints `flash4` unconditionally, inherited from `1e_terminalForkMarks.ts` |
-| no visual check in the running app | gates are unit-level; the shapes have not been seen against a live lane |
+| no visual check in the running app | gates are unit-level; the shapes and the menu have not been seen against a live lane |
