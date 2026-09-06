@@ -283,7 +283,7 @@ describe("the submenu's search row and stars", () => {
     const favorites = Signal<string[]>([]);
     await openSub(groups(), favorites);
     const star = rowsOf(1)[2].querySelector<HTMLButtonElement>(".ctx-star")!;
-    star.click();
+    star.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
     expect(favorites.$()).toEqual(["opus"]);
     expect(rowsOf(1)[0].dataset.navId).toBe("fav:opus");
     expect(rowsOf(1)[0].querySelector(".ctx-label")!.textContent).toBe("claude: opus");
@@ -349,5 +349,59 @@ describe("the model, with no DOM at all", () => {
     model.moveFocus(1);
     model.activate();
     expect(ran).toEqual(["a:false"]);
+  });
+});
+
+describe("the star is reachable with a real pointer", () => {
+  const persistence = () => ({ order: Signal<NavMenuOrder>(empty_nav_order), favorites: Signal<string[]>([]) });
+  const press = (target: HTMLElement, type: string) =>
+    target.dispatchEvent(Object.assign(
+      new MouseEvent(type, { bubbles: true, clientX: 5, clientY: 5, button: 0 }),
+      { pointerId: 1 },
+    ));
+
+  async function openFork(persist: ReturnType<typeof persistence>) {
+    openNavMenu(10, 10, [{ id: "fork", label: "Fork selection", children: groups(), persist }]);
+    const owner = navMenuLevels()[0].querySelector<HTMLElement>('[data-nav-id="fork"]')!;
+    owner.dispatchEvent(new MouseEvent("mouseenter"));
+    await flush();
+  }
+
+  it("stars on the press, so a redraw between press and click cannot swallow it", async () => {
+    const persist = persistence();
+    await openFork(persist);
+    const row = navMenuLevels()[1].querySelector<HTMLElement>('[data-nav-id="opus"]')!;
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    const star = navMenuLevels()[1].querySelector<HTMLElement>('[data-nav-id="opus"] .ctx-star')!;
+    press(star, "pointerdown");
+    expect(persist.favorites.$()).toEqual(["opus"]);
+    expect(navMenuLevels()[1].querySelector('[data-nav-id="fav:opus"]')).toBeTruthy();
+  });
+
+  it("never runs the row it starred", async () => {
+    const ran: string[] = [];
+    const persist = persistence();
+    const withRun: NavGroup[] = [{ id: "claude", label: "claude", items: [
+      { id: "opus", label: "opus", run: () => ran.push("opus") },
+    ] }];
+    openNavMenu(10, 10, [{ id: "fork", label: "Fork selection", children: withRun, persist }]);
+    navMenuLevels()[0].querySelector<HTMLElement>('[data-nav-id="fork"]')!
+      .dispatchEvent(new MouseEvent("mouseenter"));
+    await flush();
+    const star = navMenuLevels()[1].querySelector<HTMLElement>('[data-nav-id="opus"] .ctx-star')!;
+    press(star, "pointerdown");
+    star.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(persist.favorites.$()).toEqual(["opus"]);
+    expect(ran).toEqual([]);
+  });
+
+  it("does not redraw the row the pointer is resting on when hover repeats", async () => {
+    const persist = persistence();
+    await openFork(persist);
+    const row = navMenuLevels()[1].querySelector<HTMLElement>('[data-nav-id="opus"]')!;
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    const settled = navMenuLevels()[1].querySelector<HTMLElement>('[data-nav-id="opus"]')!;
+    settled.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(navMenuLevels()[1].querySelector('[data-nav-id="opus"]')).toBe(settled);
   });
 });

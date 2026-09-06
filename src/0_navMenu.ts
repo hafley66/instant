@@ -379,6 +379,7 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
     closeTo,
     openSubmenu,
     setQuery(depth, query) {
+      if ((queries.$()[depth] ?? "") === query) return;
       queries.$({ ...queries.$(), [depth]: query });
       focused.$(null);
     },
@@ -388,6 +389,7 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
       return true;
     },
     focus(id) {
+      if (focused.$() === id) return;
       focused.$(id);
     },
     moveFocus(delta) {
@@ -581,11 +583,14 @@ export function renderNavMenu(model: NavMenuModel, host: HTMLElement = document.
       star.className = "ctx-star";
       star.dataset.favorite = String(row.favorite);
       star.textContent = row.favorite ? "★" : "☆";
-      star.addEventListener("pointerdown", (event) => event.stopPropagation());
-      star.addEventListener("click", (event) => {
+      // The star acts on the press, not the click: any emission between the
+      // two redraws the row, and the browser then fires no click on it.
+      star.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
+        event.preventDefault();
         model.toggleFavorite(depth, row.id);
       });
+      star.addEventListener("click", (event) => event.stopPropagation());
       element.appendChild(star);
     }
     element.addEventListener("mouseenter", () => {
