@@ -1594,58 +1594,18 @@ body[data-mode="dark"] .act-last.ok {
   margin: 3px 2px;
   border-top: 1px solid var(--frame);
 }
-/* The menu lives in the top layer so submenus clear xterm and dockview; the UA
-   popover rules would otherwise centre it and add their own box. */
+/* Skin half of the menu; the structural rules ship inside 0_navMenu.ts and are
+   injected once, so a host that takes the module as a package still gets them. */
 .ctx-menu:popover-open,
 .ctx-menu[popover] {
-  margin: 0;
-  inset: auto;
   padding: 2px;
-  overflow: visible;
   border: var(--frame-w) solid var(--frame);
   background: var(--panel-bg);
   color: var(--panel-fg);
 }
-.ctx-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.ctx-label { flex: 1; }
-.ctx-subtext { opacity: .6; font-size: 10px; }
-.ctx-arrow { opacity: .7; }
-.ctx-group {
-  padding: 4px 8px 2px;
-  opacity: .55;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  cursor: default;
-}
 .ctx-active { background: var(--row-active-bg); color: var(--row-active-fg); }
-.ctx-dragging { opacity: .6; outline: 1px dashed var(--frame); }
-.ctx-search { padding: 3px 4px 5px; }
-.ctx-search-input {
-  width: 100%;
-  padding: 2px 4px;
-  border: 1px solid var(--frame);
-  background: var(--term-bg, #fff);
-  color: inherit;
-  font: inherit;
-}
-.ctx-star {
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  opacity: 0;
-}
-.ctx-item:hover .ctx-star,
-.ctx-active .ctx-star,
-.ctx-star[data-favorite="true"] { opacity: .85; }
+.ctx-dragging { outline: 1px dashed var(--frame); }
+.ctx-search-input { border: 1px solid var(--frame); background: var(--term-bg, #fff); }
 
 /* ---- command palette (⌘P): centered fuzzy command list ---- */
 .cmdp-root {

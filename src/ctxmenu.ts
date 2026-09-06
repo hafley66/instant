@@ -7,9 +7,8 @@ import {
   type NavChildren,
   type NavEntry,
   type NavMenuOptions,
-  type NavMenuOrder,
+  type NavMenuPersistence,
 } from "./0_navMenu";
-import type { Signal as SignalOf } from "@hafley66/signals";
 
 export type CtxItem =
   | {
@@ -18,8 +17,7 @@ export type CtxItem =
       disabled?: boolean;
       subtext?: string;
       children?: NavChildren;
-      order?: SignalOf<NavMenuOrder>;
-      favorites?: SignalOf<string[]>;
+      persist?: NavMenuPersistence;
     }
   | { sep: true };
 
@@ -34,8 +32,7 @@ export function toNavEntries(items: CtxItem[], open: number): NavEntry[] {
     subtext: item.subtext,
     disabled: item.disabled,
     children: item.children,
-    order: item.order,
-    favorites: item.favorites,
+    persist: item.persist,
     run: item.disabled ? undefined : item.action,
   });
 }

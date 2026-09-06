@@ -1,6 +1,5 @@
+import { Signal } from "@hafley66/signals";
 import type { Signal as SignalOf } from "@hafley66/signals";
-import { setting } from "./0_persistedSetting";
-import { mergeOrder } from "./railOrder";
 import { fuzzyFilter } from "./fuzzy";
 
 /// One row. `children` opens a submenu of groups; a group's items never leave
@@ -13,11 +12,8 @@ export type NavItem = {
   run?: () => void;
   disabled?: boolean;
   children?: NavChildren;
-  /// The persisted order its submenu reorders into; without one the submenu
-  /// still opens, it just does not move.
-  order?: SignalOf<NavMenuOrder>;
-  /// The persisted favourite item ids its submenu pins to the top.
-  favorites?: SignalOf<NavMenuFavorites>;
+  /// Where this item's submenu keeps its order and favourites.
+  persist?: NavMenuPersistence;
 };
 
 /// Groups resolved when the submenu opens, so a caller may fetch them.
@@ -31,19 +27,100 @@ export type NavEntry = NavItem | NavSeparator;
 /// The user's order: group ids, then item ids per group. Ids the caller no
 /// longer offers are dropped on read; ids it added append.
 export type NavMenuOrder = { groups: string[]; items: Record<string, string[]> };
+export type NavMenuFavorites = string[];
 
 export const empty_nav_order: NavMenuOrder = { groups: [], items: {} };
 
-/// Item ids the user starred, in the order they are pinned.
-export type NavMenuFavorites = string[];
+/// Both persisted facts, injected: a host with its own storage passes its own
+/// signals and this module never names a storage key.
+export type NavMenuPersistence = {
+  order: SignalOf<NavMenuOrder>;
+  favorites: SignalOf<NavMenuFavorites>;
+};
+
+export function memoryPersistence(): NavMenuPersistence {
+  return { order: Signal<NavMenuOrder>(empty_nav_order), favorites: Signal<NavMenuFavorites>([]) };
+}
 
 /// A pinned row's id, so it never collides with its home row's id.
 export const fav_prefix = "fav:";
 export const favorites_group_id = "__favorites";
 export const favorites_group_label = "Favorites";
 
-/// A submenu longer than this gets a search row.
+/// A submenu longer than this opens with a search row.
 export const nav_search_after = 6;
+/// Press-and-hold before a move arms, so a plain click still picks the row.
+export const nav_hold_ms = 350;
+
+/// Ids the user ordered, then ids they have never seen, in offer order.
+export function mergeIds(order: string[] | undefined, offered: string[]): string[] {
+  const known = new Set(offered);
+  const kept = (order ?? []).filter((id) => known.has(id));
+  const seen = new Set(kept);
+  return [...kept, ...offered.filter((id) => !seen.has(id))];
+}
+
+/// `dragId` takes the slot `overId` holds. Inserting *before* the drop target
+/// after removing the drag would make a one-row downward drag a no-op.
+export function moveWithin(list: string[], dragId: string, overId: string): string[] {
+  const from = list.indexOf(dragId);
+  const to = list.indexOf(overId);
+  if (from < 0 || to < 0 || from === to) return list;
+  const next = list.slice();
+  next.splice(from, 1);
+  next.splice(to, 0, dragId);
+  return next;
+}
+
+export function isSeparator(entry: NavEntry): entry is NavSeparator {
+  return "sep" in entry;
+}
+
+export function navGroupOf(groups: NavGroup[], itemId: string): string | null {
+  for (const group of groups) if (group.items.some((item) => item.id === itemId)) return group.id;
+  return null;
+}
+
+/// Groups and their items in the user's order, appending anything new.
+export function orderedGroups(groups: NavGroup[], order: NavMenuOrder): NavGroup[] {
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  return mergeIds(order.groups, groups.map((group) => group.id)).flatMap((id) => {
+    const group = byId.get(id);
+    if (!group) return [];
+    const items = new Map(group.items.map((item) => [item.id, item]));
+    const ids = mergeIds(order.items[id], group.items.map((item) => item.id));
+    return [{ ...group, items: ids.flatMap((itemId) => {
+      const item = items.get(itemId);
+      return item ? [item] : [];
+    }) }];
+  });
+}
+
+/// An item moves only among its own group's items; a drop on a row of another
+/// group leaves the order untouched.
+export function moveNavItem(
+  groups: NavGroup[],
+  order: NavMenuOrder,
+  dragId: string,
+  overId: string,
+): NavMenuOrder {
+  const groupId = navGroupOf(groups, dragId);
+  if (!groupId || groupId !== navGroupOf(groups, overId)) return order;
+  const group = groups.find((candidate) => candidate.id === groupId);
+  if (!group) return order;
+  const current = mergeIds(order.items[groupId], group.items.map((item) => item.id));
+  return { ...order, items: { ...order.items, [groupId]: moveWithin(current, dragId, overId) } };
+}
+
+export function moveNavGroup(
+  groups: NavGroup[],
+  order: NavMenuOrder,
+  dragId: string,
+  overId: string,
+): NavMenuOrder {
+  const current = mergeIds(order.groups, groups.map((group) => group.id));
+  return { ...order, groups: moveWithin(current, dragId, overId) };
+}
 
 export function favoriteHomeId(id: string): string {
   return id.startsWith(fav_prefix) ? id.slice(fav_prefix.length) : id;
@@ -86,471 +163,616 @@ export function navItemCount(groups: NavGroup[]): number {
   return groups.reduce((total, group) => total + group.items.length, 0);
 }
 
-/// The persisted order under a key the caller names.
-export function navOrder(key: string): SignalOf<NavMenuOrder> {
-  return setting<NavMenuOrder>(key, empty_nav_order);
-}
-
-/// The persisted favourite ids under a key the caller names.
-export function navFavorites(key: string): SignalOf<NavMenuFavorites> {
-  return setting<NavMenuFavorites>(key, []);
-}
-
-/// `dragId` takes the slot `overId` holds. `railOrder.moveBefore` inserts
-/// before `overId` after removing the drag, which makes a one-row downward
-/// drag a no-op; a menu drag has to move on the first row crossed.
-export function moveWithin(list: string[], dragId: string, overId: string): string[] {
-  const from = list.indexOf(dragId);
-  const to = list.indexOf(overId);
-  if (from < 0 || to < 0 || from === to) return list;
-  const next = list.slice();
-  next.splice(from, 1);
-  next.splice(to, 0, dragId);
-  return next;
-}
-
-export function isSeparator(entry: NavEntry): entry is NavSeparator {
-  return "sep" in entry;
-}
-
-export function navGroupOf(groups: NavGroup[], itemId: string): string | null {
-  for (const group of groups) if (group.items.some((item) => item.id === itemId)) return group.id;
-  return null;
-}
-
-/// Groups and their items in the user's order, appending anything new.
-export function orderedGroups(groups: NavGroup[], order: NavMenuOrder): NavGroup[] {
-  const byId = new Map(groups.map((group) => [group.id, group]));
-  return mergeOrder(order.groups, groups.map((group) => group.id)).flatMap((id) => {
-    const group = byId.get(id);
-    if (!group) return [];
-    const items = new Map(group.items.map((item) => [item.id, item]));
-    const ids = mergeOrder(order.items[id], group.items.map((item) => item.id));
-    return [{ ...group, items: ids.flatMap((itemId) => {
-      const item = items.get(itemId);
-      return item ? [item] : [];
-    }) }];
-  });
-}
-
-/// An item moves only among its own group's items; a drop on a row of another
-/// group leaves the order untouched.
-export function moveNavItem(
-  groups: NavGroup[],
-  order: NavMenuOrder,
-  dragId: string,
-  overId: string,
-): NavMenuOrder {
-  const groupId = navGroupOf(groups, dragId);
-  if (!groupId || groupId !== navGroupOf(groups, overId)) return order;
-  const group = groups.find((candidate) => candidate.id === groupId);
-  if (!group) return order;
-  const current = mergeOrder(order.items[groupId], group.items.map((item) => item.id));
-  return { ...order, items: { ...order.items, [groupId]: moveWithin(current, dragId, overId) } };
-}
-
-export function moveNavGroup(
-  groups: NavGroup[],
-  order: NavMenuOrder,
-  dragId: string,
-  overId: string,
-): NavMenuOrder {
-  const current = mergeOrder(order.groups, groups.map((group) => group.id));
-  return { ...order, groups: moveWithin(current, dragId, overId) };
-}
-
-/// Press-and-hold before a move arms, so a plain click still picks the row.
-export const nav_hold_ms = 350;
-
-export type NavMenuOptions = {
-  order?: SignalOf<NavMenuOrder>;
-  favorites?: SignalOf<NavMenuFavorites>;
-  holdMs?: number;
-};
-
-type Level = {
-  root: HTMLElement;
+/// One open level: what it was opened from and what it offers. `groups` is
+/// null until a submenu's children resolve.
+export type NavLevelState = {
+  ownerId: string | null;
   entries: NavEntry[];
   groups: NavGroup[] | null;
-  owner: HTMLElement | null;
-  order: SignalOf<NavMenuOrder> | null;
-  favorites: SignalOf<NavMenuFavorites> | null;
-  query: string;
-  active: number;
+  persistence: NavMenuPersistence | null;
 };
 
-let levels: Level[] = [];
-let options: NavMenuOptions = {};
+export type NavRowView =
+  | { kind: "sep" }
+  | { kind: "search"; query: string }
+  | { kind: "group"; id: string; label: string; dragging: boolean }
+  | {
+      kind: "item";
+      id: string;
+      label: string;
+      subtext: string | null;
+      hasChildren: boolean;
+      disabled: boolean;
+      favorite: boolean | null;
+      focused: boolean;
+      dragging: boolean;
+    };
 
-function place(root: HTMLElement, x: number, y: number, flipTo?: number) {
-  root.style.visibility = "hidden";
-  root.style.left = "0px";
-  root.style.top = "0px";
-  const { width, height } = root.getBoundingClientRect();
-  const overflowsRight = x + width > window.innerWidth;
-  const left = overflowsRight ? Math.max(0, (flipTo ?? x) - width) : x;
-  const top = y + height > window.innerHeight ? Math.max(0, y - height) : y;
-  root.style.left = `${left}px`;
-  root.style.top = `${top}px`;
-  root.style.visibility = "visible";
+export type NavLevelView = { depth: number; ownerId: string | null; rows: NavRowView[] };
+export type NavMenuView = { open: boolean; x: number; y: number; levels: NavLevelView[] };
+
+export const closed_nav_view: NavMenuView = { open: false, x: 0, y: 0, levels: [] };
+
+export type NavDrag = { depth: number; id: string; kind: "item" | "group"; moved: boolean };
+
+/// Every visible fact of one level, as rows. Pure: the same inputs draw the
+/// same menu, whatever the DOM is doing.
+export function levelRows(
+  level: NavLevelState,
+  order: NavMenuOrder,
+  favorites: NavMenuFavorites,
+  query: string,
+  focusedId: string | null,
+  dragId: string | null,
+  searchAfter = nav_search_after,
+): NavRowView[] {
+  const itemRow = (item: NavItem, favorite: boolean | null): NavRowView => ({
+    kind: "item",
+    id: item.id,
+    label: item.label,
+    subtext: item.subtext ?? null,
+    hasChildren: !!item.children,
+    disabled: !!item.disabled,
+    favorite,
+    focused: item.id === focusedId,
+    dragging: item.id === dragId,
+  });
+  if (!level.groups) {
+    return level.entries.map((entry) =>
+      isSeparator(entry) ? { kind: "sep" } as NavRowView : itemRow(entry, null));
+  }
+  const pinned = withFavorites(orderedGroups(level.groups, order), favorites);
+  const rows: NavRowView[] = navItemCount(pinned) > searchAfter ? [{ kind: "search", query }] : [];
+  for (const group of filterGroups(pinned, query)) {
+    rows.push({ kind: "group", id: group.id, label: group.label, dragging: group.id === dragId });
+    for (const item of group.items) rows.push(itemRow(item, favorites.includes(favoriteHomeId(item.id))));
+  }
+  return rows;
 }
 
-function showLevel(root: HTMLElement) {
-  document.body.appendChild(root);
-  try {
-    (root as HTMLElement & { showPopover?: () => void }).showPopover?.();
-  } catch {
-    /* already open, or no popover support: the fixed position still holds */
-  }
+export type NavMenuOptions = {
+  persistence?: NavMenuPersistence;
+  holdMs?: number;
+  searchAfter?: number;
+};
+
+/// The menu as state: signals in, one derived view out, no DOM anywhere.
+export type NavMenuModel = {
+  view: SignalOf<NavMenuView>;
+  /// Read per open: a caller may pass its own hold on the call that opens.
+  holdMs: () => number;
+  open: (x: number, y: number, entries: NavEntry[], options?: NavMenuOptions) => void;
+  close: () => void;
+  closeTo: (depth: number) => void;
+  openSubmenu: (depth: number, itemId: string) => void;
+  setQuery: (depth: number, query: string) => void;
+  clearQuery: (depth: number) => boolean;
+  focus: (id: string | null) => void;
+  moveFocus: (delta: number) => void;
+  activate: () => void;
+  run: (depth: number, itemId: string) => void;
+  toggleFavorite: (depth: number, itemId: string) => void;
+  armDrag: (depth: number, id: string, kind: "item" | "group") => void;
+  dragOver: (overId: string) => void;
+  endDrag: () => void;
+  consumeDragClick: (id: string) => boolean;
+  itemAt: (depth: number, itemId: string) => NavItem | undefined;
+};
+
+export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
+  const at = Signal<{ x: number; y: number } | null>(null);
+  const stack = Signal<NavLevelState[]>([]);
+  const queries = Signal<Record<number, string>>({});
+  const focused = Signal<string | null>(null);
+  const drag = Signal<NavDrag | null>(null);
+  const dragClick = Signal<string | null>(null);
+  let options: NavMenuOptions = defaults;
+
+  const persistenceAt = (depth: number): NavMenuPersistence | null =>
+    stack.$()[depth]?.persistence ?? options.persistence ?? null;
+
+  const view = Signal<NavMenuView>(() => {
+    const point = at.$();
+    const open = stack.$();
+    const query = queries.$();
+    const focus = focused.$();
+    const dragging = drag.$();
+    if (!point || !open.length) return closed_nav_view;
+    return {
+      open: true,
+      x: point.x,
+      y: point.y,
+      levels: open.map((level, depth) => ({
+        depth,
+        ownerId: level.ownerId,
+        rows: levelRows(
+          level,
+          level.persistence?.order.$() ?? empty_nav_order,
+          level.persistence?.favorites.$() ?? [],
+          query[depth] ?? "",
+          focus,
+          dragging?.id ?? null,
+          options.searchAfter ?? nav_search_after,
+        ),
+      })),
+    };
+  });
+
+  const itemAt = (depth: number, itemId: string): NavItem | undefined => {
+    const level = stack.$()[depth];
+    if (!level) return undefined;
+    if (level.groups) {
+      for (const group of withFavorites(level.groups, level.persistence?.favorites.$() ?? [])) {
+        const hit = group.items.find((item) => item.id === itemId);
+        if (hit) return hit;
+      }
+      return undefined;
+    }
+    return level.entries.find((entry): entry is NavItem => !isSeparator(entry) && entry.id === itemId);
+  };
+
+  const close = () => {
+    at.$(null);
+    stack.$([]);
+    queries.$({});
+    focused.$(null);
+    drag.$(null);
+  };
+
+  const closeTo = (depth: number) => {
+    if (stack.$().length <= depth + 1) return;
+    stack.$(stack.$().slice(0, depth + 1));
+  };
+
+  const openSubmenu = (depth: number, itemId: string) => {
+    const item = itemAt(depth, itemId);
+    if (!item?.children) return;
+    if (stack.$()[depth + 1]?.ownerId === itemId) return;
+    closeTo(depth);
+    stack.$([...stack.$(), {
+      ownerId: itemId,
+      entries: [{ id: "__loading", label: "…", disabled: true }],
+      groups: null,
+      persistence: item.persist ?? options.persistence ?? null,
+    }]);
+    const opened = stack.$().length - 1;
+    const children = item.children;
+    const resolved = typeof children === "function"
+      ? Promise.resolve().then(children)
+      : Promise.resolve(children);
+    void resolved.catch(() => [] as NavGroup[]).then((groups) => {
+      const current = stack.$();
+      if (current[opened]?.ownerId !== itemId) return;
+      stack.$(current.map((level, at) => at === opened ? { ...level, groups } : level));
+    });
+  };
+
+  const run = (depth: number, itemId: string) => {
+    const item = itemAt(depth, itemId);
+    if (!item || item.disabled) return;
+    if (item.run) {
+      close();
+      item.run();
+      return;
+    }
+    if (item.children) openSubmenu(depth, itemId);
+  };
+
+  const focusableRows = (): Extract<NavRowView, { kind: "item" }>[] => {
+    const levels = view.$().levels;
+    const rows = levels[levels.length - 1]?.rows ?? [];
+    return rows.filter((row): row is Extract<NavRowView, { kind: "item" }> =>
+      row.kind === "item" && !row.disabled);
+  };
+
+  return {
+    view,
+    holdMs: () => options.holdMs ?? nav_hold_ms,
+    open(x, y, entries, opts = {}) {
+      close();
+      if (!entries.length) return;
+      options = { ...defaults, ...opts };
+      at.$({ x, y });
+      stack.$([{ ownerId: null, entries, groups: null, persistence: options.persistence ?? null }]);
+    },
+    close,
+    closeTo,
+    openSubmenu,
+    setQuery(depth, query) {
+      queries.$({ ...queries.$(), [depth]: query });
+      focused.$(null);
+    },
+    clearQuery(depth) {
+      if (!queries.$()[depth]) return false;
+      queries.$({ ...queries.$(), [depth]: "" });
+      return true;
+    },
+    focus(id) {
+      focused.$(id);
+    },
+    moveFocus(delta) {
+      const items = focusableRows();
+      if (!items.length) return;
+      const current = items.findIndex((row) => row.focused);
+      const next = current < 0
+        ? (delta > 0 ? 0 : items.length - 1)
+        : (current + delta + items.length) % items.length;
+      focused.$(items[next].id);
+    },
+    activate() {
+      const depth = stack.$().length - 1;
+      const id = focused.$();
+      if (depth >= 0 && id) run(depth, id);
+    },
+    run,
+    toggleFavorite(depth, itemId) {
+      const favorites = persistenceAt(depth)?.favorites;
+      if (!favorites) return;
+      favorites.$(toggleFavorite(favorites.$(), itemId));
+    },
+    armDrag(depth, id, kind) {
+      drag.$({ depth, id, kind, moved: false });
+    },
+    dragOver(overId) {
+      const current = drag.$();
+      if (!current || overId === current.id) return;
+      const level = stack.$()[current.depth];
+      const persistence = persistenceAt(current.depth);
+      if (!level?.groups || !persistence) return;
+      if (current.id.startsWith(fav_prefix)) {
+        if (!overId.startsWith(fav_prefix)) return;
+        const moved = moveWithin(
+          persistence.favorites.$(),
+          favoriteHomeId(current.id),
+          favoriteHomeId(overId),
+        );
+        if (moved === persistence.favorites.$()) return;
+        persistence.favorites.$(moved);
+        drag.$({ ...current, moved: true });
+        return;
+      }
+      const pinned = withFavorites(level.groups, persistence.favorites.$());
+      const next = current.kind === "group"
+        ? moveNavGroup(level.groups, persistence.order.$(), current.id, overId)
+        : moveNavItem(pinned, persistence.order.$(), current.id, overId);
+      if (next === persistence.order.$()) return;
+      persistence.order.$(next);
+      drag.$({ ...current, moved: true });
+    },
+    endDrag() {
+      const current = drag.$();
+      dragClick.$(current?.moved ? current.id : null);
+      if (current) drag.$(null);
+    },
+    consumeDragClick(id) {
+      if (dragClick.$() !== id) return false;
+      dragClick.$(null);
+      return true;
+    },
+    itemAt,
+  };
 }
 
-function removeLevel(level: Level) {
-  try {
-    (level.root as HTMLElement & { hidePopover?: () => void }).hidePopover?.();
-  } catch {
-    /* never shown */
-  }
-  level.root.remove();
+/// The module's own structural rules, injected once. Colours and the frame
+/// stay with the host's skin; nothing here names a palette.
+export const NAV_MENU_CSS = `
+.ctx-menu { position: fixed; }
+.ctx-menu[popover] { margin: 0; inset: auto; overflow: visible; }
+.ctx-item { display: flex; align-items: baseline; gap: 8px; }
+.ctx-label { flex: 1; }
+.ctx-subtext { opacity: .6; font-size: 10px; }
+.ctx-arrow { opacity: .7; }
+.ctx-group {
+  padding: 4px 8px 2px;
+  opacity: .55;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.ctx-dragging { opacity: .6; }
+.ctx-search { padding: 3px 4px 5px; }
+.ctx-search-input { width: 100%; padding: 2px 4px; color: inherit; font: inherit; }
+.ctx-star {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+}
+.ctx-item:hover .ctx-star,
+.ctx-active .ctx-star,
+.ctx-star[data-favorite="true"] { opacity: .85; }
+`;
+
+let cssInjected = false;
+
+export function injectNavMenuCss(doc: Document = document) {
+  if (cssInjected || doc.querySelector("style[data-nav-menu]")) return;
+  const style = doc.createElement("style");
+  style.dataset.navMenu = "";
+  style.textContent = NAV_MENU_CSS;
+  doc.head.appendChild(style);
+  cssInjected = true;
 }
 
-/// Close every level deeper than `depth`.
-function closeBelow(depth: number) {
-  while (levels.length > depth + 1) {
-    const level = levels.pop();
-    if (level) removeLevel(level);
-  }
+/// The DOM as a function of the view: every paint rebuilds the rows from the
+/// signal, and the only thing read back off an element is an id.
+export function renderNavMenu(model: NavMenuModel, host: HTMLElement = document.body) {
+  const roots: HTMLElement[] = [];
+  let hold: ReturnType<typeof setTimeout> | null = null;
+
+  const dropLevel = (root: HTMLElement) => {
+    try {
+      (root as HTMLElement & { hidePopover?: () => void }).hidePopover?.();
+    } catch {
+      /* never shown */
+    }
+    root.remove();
+  };
+
+  const place = (root: HTMLElement, x: number, y: number, flipTo?: number) => {
+    root.style.visibility = "hidden";
+    root.style.left = "0px";
+    root.style.top = "0px";
+    const { width, height } = root.getBoundingClientRect();
+    const left = x + width > window.innerWidth ? Math.max(0, (flipTo ?? x) - width) : x;
+    const top = y + height > window.innerHeight ? Math.max(0, y - height) : y;
+    root.style.left = `${left}px`;
+    root.style.top = `${top}px`;
+    root.style.visibility = "visible";
+  };
+
+  const rowElement = (row: NavRowView, depth: number): HTMLElement => {
+    if (row.kind === "sep") {
+      const separator = document.createElement("div");
+      separator.className = "ctx-sep";
+      return separator;
+    }
+    if (row.kind === "search") {
+      const wrap = document.createElement("div");
+      wrap.className = "ctx-search";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "ctx-search-input";
+      input.placeholder = "search";
+      input.value = row.query;
+      input.addEventListener("pointerdown", (event) => event.stopPropagation());
+      input.addEventListener("input", () => model.setQuery(depth, input.value));
+      wrap.appendChild(input);
+      return wrap;
+    }
+    if (row.kind === "group") {
+      const header = document.createElement("div");
+      header.className = "ctx-group" + (row.dragging ? " ctx-dragging" : "");
+      header.dataset.groupId = row.id;
+      header.textContent = row.label;
+      return header;
+    }
+    const element = document.createElement("div");
+    element.className = "ctx-item"
+      + (row.disabled ? " ctx-disabled" : "")
+      + (row.focused ? " ctx-active" : "")
+      + (row.dragging ? " ctx-dragging" : "");
+    element.dataset.navId = row.id;
+    element.setAttribute("role", "menuitem");
+    const label = document.createElement("span");
+    label.className = "ctx-label";
+    label.textContent = row.label;
+    element.appendChild(label);
+    if (row.subtext) {
+      const subtext = document.createElement("span");
+      subtext.className = "ctx-subtext";
+      subtext.textContent = row.subtext;
+      element.appendChild(subtext);
+    }
+    if (row.hasChildren) {
+      const arrow = document.createElement("span");
+      arrow.className = "ctx-arrow";
+      arrow.textContent = "▸";
+      element.appendChild(arrow);
+    }
+    if (row.favorite !== null) {
+      const star = document.createElement("button");
+      star.type = "button";
+      star.className = "ctx-star";
+      star.dataset.favorite = String(row.favorite);
+      star.textContent = row.favorite ? "★" : "☆";
+      star.addEventListener("pointerdown", (event) => event.stopPropagation());
+      star.addEventListener("click", (event) => {
+        event.stopPropagation();
+        model.toggleFavorite(depth, row.id);
+      });
+      element.appendChild(star);
+    }
+    element.addEventListener("mouseenter", () => {
+      model.focus(row.id);
+      if (row.hasChildren) model.openSubmenu(depth, row.id);
+      else model.closeTo(depth);
+    });
+    if (!row.disabled) {
+      element.addEventListener("click", () => {
+        if (model.consumeDragClick(row.id)) return;
+        model.run(depth, row.id);
+      });
+    }
+    return element;
+  };
+
+  const levelRoot = (depth: number): HTMLElement => {
+    const existing = roots[depth];
+    if (existing) return existing;
+    const root = document.createElement("div");
+    root.className = "ctx-menu";
+    root.setAttribute("role", "menu");
+    root.setAttribute("popover", "manual");
+    root.addEventListener("pointerdown", (event) => {
+      if ((event as PointerEvent).button !== 0) return;
+      const target = (event.target as HTMLElement).closest<HTMLElement>("[data-nav-id],[data-group-id]");
+      if (!target) return;
+      const groupId = target.dataset.groupId;
+      const id = groupId ?? target.dataset.navId!;
+      if (hold) clearTimeout(hold);
+      hold = setTimeout(() => model.armDrag(depth, id, groupId ? "group" : "item"), model.holdMs());
+    });
+    root.addEventListener("pointermove", (event) => {
+      const under = (document.elementFromPoint?.(
+        (event as PointerEvent).clientX,
+        (event as PointerEvent).clientY,
+      ) ?? event.target) as HTMLElement | null;
+      const target = under?.closest<HTMLElement>("[data-nav-id],[data-group-id]");
+      const id = target?.dataset.groupId ?? target?.dataset.navId;
+      if (id) model.dragOver(id);
+    });
+    const release = () => {
+      if (hold) clearTimeout(hold);
+      hold = null;
+      model.endDrag();
+    };
+    root.addEventListener("pointerup", release);
+    root.addEventListener("pointercancel", release);
+    host.appendChild(root);
+    try {
+      (root as HTMLElement & { showPopover?: () => void }).showPopover?.();
+    } catch {
+      /* no popover support: the fixed position still holds */
+    }
+    roots[depth] = root;
+    return root;
+  };
+
+  const paint = (view: NavMenuView) => {
+    injectNavMenuCss();
+    while (roots.length > view.levels.length) {
+      const root = roots.pop();
+      if (root) dropLevel(root);
+    }
+    if (!view.open) return;
+    for (const level of view.levels) {
+      const root = levelRoot(level.depth);
+      const open = root.querySelector<HTMLInputElement>(".ctx-search-input");
+      const caret = open && document.activeElement === open ? open.selectionStart : null;
+      root.textContent = "";
+      for (const row of level.rows) root.appendChild(rowElement(row, level.depth));
+      const input = root.querySelector<HTMLInputElement>(".ctx-search-input");
+      if (input && caret !== null) {
+        input.focus();
+        input.setSelectionRange(caret, caret);
+      }
+      if (level.depth === 0) {
+        place(root, view.x, view.y);
+        continue;
+      }
+      const owner = level.ownerId
+        ? roots[level.depth - 1]?.querySelector<HTMLElement>(`[data-nav-id="${CSS.escape(level.ownerId)}"]`)
+        : null;
+      const rect = owner?.getBoundingClientRect();
+      place(root, rect?.right ?? view.x, rect?.top ?? view.y, rect?.left);
+    }
+  };
+
+  const onOutside = (event: PointerEvent) => {
+    if (roots.some((root) => root.contains(event.target as Node))) return;
+    queueMicrotask(() => model.close());
+  };
+
+  const isTyping = (event: KeyboardEvent) =>
+    (event.target as HTMLElement | null)?.classList?.contains("ctx-search-input") === true;
+
+  const focusedRow = (view: NavMenuView, depth: number) =>
+    view.levels[depth]?.rows.find((row) => row.kind === "item" && row.focused);
+
+  const onKey = (event: KeyboardEvent) => {
+    const view = model.view.$();
+    if (!view.open) return;
+    const depth = view.levels.length - 1;
+    const stop = () => { event.preventDefault(); event.stopPropagation(); };
+    if (event.key === "Escape") { stop(); if (!model.clearQuery(depth)) model.close(); return; }
+    if (event.key === "ArrowDown") { stop(); model.moveFocus(1); return; }
+    if (event.key === "ArrowUp") { stop(); model.moveFocus(-1); return; }
+    if (event.key === "ArrowRight") {
+      const row = focusedRow(view, depth);
+      if (row?.kind === "item" && row.hasChildren) { stop(); model.openSubmenu(depth, row.id); }
+      return;
+    }
+    if (event.key === "ArrowLeft") { if (depth > 0) { stop(); model.closeTo(depth - 1); } return; }
+    if (event.key === "Enter") { stop(); model.activate(); return; }
+    if (event.key === "f" && !isTyping(event)) {
+      const row = focusedRow(view, depth);
+      if (row?.kind === "item" && row.favorite !== null) { stop(); model.toggleFavorite(depth, row.id); }
+    }
+  };
+
+  const dismiss = () => model.close();
+  document.addEventListener("pointerdown", onOutside, true);
+  document.addEventListener("keydown", onKey, true);
+  window.addEventListener("blur", dismiss);
+  window.addEventListener("resize", dismiss);
+  document.addEventListener("scroll", dismiss, true);
+  const subscription = model.view.$.subscribe(paint);
+
+  return {
+    roots,
+    dispose() {
+      subscription.unsubscribe();
+      document.removeEventListener("pointerdown", onOutside, true);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", dismiss);
+      window.removeEventListener("resize", dismiss);
+      document.removeEventListener("scroll", dismiss, true);
+      while (roots.length) {
+        const root = roots.pop();
+        if (root) dropLevel(root);
+      }
+    },
+  };
+}
+
+export type NavMenu = {
+  model: NavMenuModel;
+  open: (x: number, y: number, entries: NavEntry[], options?: NavMenuOptions) => void;
+  close: () => void;
+  levels: () => HTMLElement[];
+  dispose: () => void;
+};
+
+/// One menu: the model, the renderer bound to it, and the two calls a caller
+/// needs. A host that renders its own DOM uses `navMenuModel` alone.
+export function createNavMenu(options: NavMenuOptions = {}, host?: HTMLElement): NavMenu {
+  const model = navMenuModel(options);
+  const rendered = renderNavMenu(model, host);
+  return {
+    model,
+    open: model.open,
+    close: model.close,
+    levels: () => roots(rendered.roots),
+    dispose: rendered.dispose,
+  };
+}
+
+function roots(list: HTMLElement[]): HTMLElement[] {
+  return [...list];
+}
+
+let shared: NavMenu | null = null;
+
+function sharedMenu(): NavMenu {
+  shared ??= createNavMenu();
+  return shared;
+}
+
+export function openNavMenu(x: number, y: number, entries: NavEntry[], options: NavMenuOptions = {}) {
+  sharedMenu().open(x, y, entries, options);
 }
 
 export function closeNavMenu() {
-  while (levels.length) {
-    const level = levels.pop();
-    if (level) removeLevel(level);
-  }
-  document.removeEventListener("pointerdown", onOutside, true);
-  document.removeEventListener("keydown", onKey, true);
-  window.removeEventListener("blur", closeNavMenu);
-  window.removeEventListener("resize", closeNavMenu);
-  document.removeEventListener("scroll", closeNavMenu, true);
-}
-
-function onOutside(event: PointerEvent) {
-  const inside = levels.some((level) => level.root.contains(event.target as Node));
-  if (inside) return;
-  // The target stays connected until pointerdown dispatch finishes: a listener
-  // downstream compares its stacking order against a detached node otherwise.
-  queueMicrotask(() => closeNavMenu());
-}
-
-function rows(level: Level): HTMLElement[] {
-  return [...level.root.querySelectorAll<HTMLElement>(".ctx-item:not(.ctx-disabled)")];
-}
-
-function setActive(level: Level, index: number) {
-  const all = rows(level);
-  if (!all.length) return;
-  const next = (index + all.length) % all.length;
-  level.active = next;
-  for (const [at, row] of all.entries()) row.classList.toggle("ctx-active", at === next);
-  all[next].scrollIntoView?.({ block: "nearest" });
-}
-
-function activeRow(level: Level): HTMLElement | undefined {
-  return rows(level)[level.active];
-}
-
-function isTyping(event: KeyboardEvent): boolean {
-  return (event.target as HTMLElement | null)?.classList?.contains("ctx-search-input") === true;
-}
-
-function onKey(event: KeyboardEvent) {
-  const level = levels[levels.length - 1];
-  if (!level) return;
-  const stop = () => { event.preventDefault(); event.stopPropagation(); };
-  if (event.key === "Escape") {
-    stop();
-    if (level.query) {
-      level.query = "";
-      renderLevel(level);
-      return;
-    }
-    closeNavMenu();
-    return;
-  }
-  if (event.key === "f" && !isTyping(event) && level.favorites && level.groups) {
-    const row = activeRow(level);
-    const id = row?.dataset.navId;
-    if (id) {
-      stop();
-      level.favorites.$(toggleFavorite(level.favorites.$(), id));
-      renderLevel(level);
-    }
-    return;
-  }
-  if (event.key === "ArrowDown") { stop(); setActive(level, level.active + 1); return; }
-  if (event.key === "ArrowUp") { stop(); setActive(level, level.active < 0 ? -1 : level.active - 1); return; }
-  if (event.key === "ArrowRight") {
-    const row = activeRow(level);
-    if (row?.dataset.hasChildren === "true") { stop(); void openSubmenu(level, row); }
-    return;
-  }
-  if (event.key === "ArrowLeft") {
-    if (levels.length > 1) { stop(); closeBelow(levels.length - 2); }
-    return;
-  }
-  if (event.key === "Enter") {
-    const row = activeRow(level);
-    if (row) { stop(); row.click(); }
-  }
-}
-
-function starButton(item: NavItem, level: Level): HTMLElement {
-  const star = document.createElement("button");
-  star.type = "button";
-  star.className = "ctx-star";
-  const favorites = level.favorites;
-  const home = favoriteHomeId(item.id);
-  star.dataset.favorite = String(!!favorites?.$().includes(home));
-  star.textContent = star.dataset.favorite === "true" ? "★" : "☆";
-  star.addEventListener("pointerdown", (event) => event.stopPropagation());
-  star.addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (!favorites) return;
-    favorites.$(toggleFavorite(favorites.$(), home));
-    renderLevel(level);
-  });
-  return star;
-}
-
-function itemRow(item: NavItem, level: () => Level): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "ctx-item" + (item.disabled ? " ctx-disabled" : "");
-  row.dataset.navId = item.id;
-  row.setAttribute("role", "menuitem");
-  const label = document.createElement("span");
-  label.className = "ctx-label";
-  label.textContent = item.label;
-  row.appendChild(label);
-  if (item.subtext) {
-    const subtext = document.createElement("span");
-    subtext.className = "ctx-subtext";
-    subtext.textContent = item.subtext;
-    row.appendChild(subtext);
-  }
-  if (item.children) {
-    row.dataset.hasChildren = "true";
-    const arrow = document.createElement("span");
-    arrow.className = "ctx-arrow";
-    arrow.textContent = "▸";
-    row.appendChild(arrow);
-    row.addEventListener("mouseenter", () => void openSubmenu(level(), row));
-  } else {
-    row.addEventListener("mouseenter", () => closeBelow(levels.indexOf(level())));
-  }
-  if (level().favorites && level().groups) row.appendChild(starButton(item, level()));
-  if (!item.disabled) {
-    row.addEventListener("click", () => {
-      if (row.dataset.dragged === "true") { delete row.dataset.dragged; return; }
-      if (item.run) { closeNavMenu(); item.run(); return; }
-      if (item.children) void openSubmenu(level(), row);
-    });
-  }
-  return row;
-}
-
-function separatorRow(): HTMLElement {
-  const separator = document.createElement("div");
-  separator.className = "ctx-sep";
-  return separator;
-}
-
-function groupRow(group: NavGroup): HTMLElement {
-  const header = document.createElement("div");
-  header.className = "ctx-group";
-  header.dataset.groupId = group.id;
-  header.textContent = group.label;
-  return header;
-}
-
-/// A level's rows, rebuilt from the current order every time it renders, so a
-/// move lands the same way a reopen does.
-function searchRow(level: Level): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "ctx-search";
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "ctx-search-input";
-  input.placeholder = "search";
-  input.value = level.query;
-  input.addEventListener("pointerdown", (event) => event.stopPropagation());
-  input.addEventListener("input", () => {
-    level.query = input.value;
-    level.active = -1;
-    renderLevel(level);
-    const next = level.root.querySelector<HTMLInputElement>(".ctx-search-input");
-    next?.focus();
-    next?.setSelectionRange(next.value.length, next.value.length);
-  });
-  row.appendChild(input);
-  return row;
-}
-
-/// A level's rows, rebuilt from the current order, favourites and query every
-/// time it renders, so a move lands the same way a reopen does.
-function renderLevel(level: Level) {
-  level.root.textContent = "";
-  const index = () => level;
-  if (level.groups) {
-    const order = level.order?.$() ?? empty_nav_order;
-    const pinned = withFavorites(orderedGroups(level.groups, order), level.favorites?.$() ?? []);
-    if (navItemCount(pinned) > nav_search_after) level.root.appendChild(searchRow(level));
-    for (const group of filterGroups(pinned, level.query)) {
-      level.root.appendChild(groupRow(group));
-      for (const item of group.items) level.root.appendChild(itemRow(item, index));
-    }
-    return;
-  }
-  for (const entry of level.entries) {
-    level.root.appendChild(isSeparator(entry) ? separatorRow() : itemRow(entry, index));
-  }
-}
-
-function newLevel(
-  entries: NavEntry[],
-  groups: NavGroup[] | null,
-  owner: HTMLElement | null,
-  order: SignalOf<NavMenuOrder> | null,
-  favorites: SignalOf<NavMenuFavorites> | null,
-): Level {
-  const root = document.createElement("div");
-  root.className = "ctx-menu";
-  root.setAttribute("role", "menu");
-  root.setAttribute("popover", "manual");
-  const level: Level = { root, entries, groups, owner, order, favorites, query: "", active: -1 };
-  renderLevel(level);
-  wireHoldReorder(level);
-  return level;
-}
-
-async function resolveChildren(children: NavChildren): Promise<NavGroup[]> {
-  return typeof children === "function" ? await children() : children;
-}
-
-async function openSubmenu(parent: Level, row: HTMLElement) {
-  const depth = levels.indexOf(parent);
-  if (depth < 0) return;
-  closeBelow(depth);
-  const item = findItem(parent, row.dataset.navId ?? "");
-  if (!item?.children) return;
-  const rect = row.getBoundingClientRect();
-  const level = newLevel(
-    [{ id: "__loading", label: "…", disabled: true }],
-    null,
-    row,
-    item.order ?? options.order ?? null,
-    item.favorites ?? options.favorites ?? null,
-  );
-  levels.push(level);
-  showLevel(level.root);
-  place(level.root, rect.right, rect.top, rect.left);
-  const groups = await resolveChildren(item.children).catch(() => [] as NavGroup[]);
-  if (levels[levels.length - 1] !== level) return;
-  level.groups = groups;
-  renderLevel(level);
-  place(level.root, rect.right, rect.top, rect.left);
-}
-
-function findItem(level: Level, id: string): NavItem | undefined {
-  if (level.groups) {
-    for (const group of level.groups) {
-      const hit = group.items.find((item) => item.id === id);
-      if (hit) return hit;
-    }
-    return undefined;
-  }
-  return level.entries.find((entry): entry is NavItem => !isSeparator(entry) && entry.id === id);
-}
-
-/// Press and hold a row or a group header, then move: items reorder inside
-/// their own group, groups reorder among themselves, and the order persists.
-function wireHoldReorder(level: Level) {
-  level.root.addEventListener("pointerdown", (event) => {
-    const order = level.order;
-    if (!order || !level.groups || event.button !== 0) return;
-    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-nav-id],[data-group-id]");
-    if (!row) return;
-    const groupDrag = row.dataset.groupId != null;
-    const dragId = groupDrag ? row.dataset.groupId! : row.dataset.navId!;
-    let armed = false;
-    let working = order.$();
-    const hold = setTimeout(() => {
-      armed = true;
-      row.classList.add("ctx-dragging");
-      row.dataset.dragged = "true";
-      try {
-        row.setPointerCapture(event.pointerId);
-      } catch {
-        /* capture refused: the move still tracks by elementFromPoint */
-      }
-    }, options.holdMs ?? nav_hold_ms);
-
-    const onMove = (moved: PointerEvent) => {
-      if (!armed) return;
-      // Pointer capture keeps sending moves to the pressed row, so the row
-      // under the pointer is read by point; the target is the fallback.
-      const under = (document.elementFromPoint?.(moved.clientX, moved.clientY)
-        ?? moved.target) as HTMLElement | null;
-      const target = under?.closest<HTMLElement>(groupDrag ? "[data-group-id]" : "[data-nav-id]");
-      const overId = groupDrag ? target?.dataset.groupId : target?.dataset.navId;
-      if (!overId || overId === dragId || !level.groups) return;
-      if (dragId.startsWith(fav_prefix)) {
-        const favorites = level.favorites;
-        if (!favorites || !overId.startsWith(fav_prefix)) return;
-        const moved = moveWithin(favorites.$(), favoriteHomeId(dragId), favoriteHomeId(overId));
-        if (moved === favorites.$()) return;
-        favorites.$(moved);
-        renderLevel(level);
-        return;
-      }
-      const next = groupDrag
-        ? moveNavGroup(level.groups, working, dragId, overId)
-        : moveNavItem(level.groups, working, dragId, overId);
-      if (next === working) return;
-      working = next;
-      order.$(working);
-      renderLevel(level);
-    };
-    const onUp = () => {
-      clearTimeout(hold);
-      level.root.removeEventListener("pointermove", onMove);
-      level.root.removeEventListener("pointerup", onUp);
-      level.root.removeEventListener("pointercancel", onUp);
-      if (!armed) return;
-      row.classList.remove("ctx-dragging");
-      renderLevel(level);
-    };
-    level.root.addEventListener("pointermove", onMove);
-    level.root.addEventListener("pointerup", onUp);
-    level.root.addEventListener("pointercancel", onUp);
-  });
-}
-
-/// One menu at a time, at the pointer, flipped away from the window edges.
-export function openNavMenu(x: number, y: number, entries: NavEntry[], opts: NavMenuOptions = {}) {
-  closeNavMenu();
-  if (!entries.length) return;
-  options = opts;
-  const level = newLevel(entries, null, null, opts.order ?? null, opts.favorites ?? null);
-  levels = [level];
-  showLevel(level.root);
-  place(level.root, x, y);
-  document.addEventListener("pointerdown", onOutside, true);
-  document.addEventListener("keydown", onKey, true);
-  window.addEventListener("blur", closeNavMenu);
-  window.addEventListener("resize", closeNavMenu);
-  document.addEventListener("scroll", closeNavMenu, true);
+  shared?.close();
 }
 
 /// The open levels, for tests and for a caller that needs to know a menu is up.
 export function navMenuLevels(): HTMLElement[] {
-  return levels.map((level) => level.root);
+  return shared?.levels() ?? [];
 }

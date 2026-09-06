@@ -1,12 +1,11 @@
 import {
   favoriteHomeId,
-  navFavorites,
-  navOrder,
   orderedGroups,
   withFavorites,
   type NavGroup,
   type NavItem,
 } from "./0_navMenu";
+import { navMenuStore } from "./0_navMenuStore";
 import { forkRender } from "./0_forkRenderSettings";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
 import { commands, invoke } from "./generated/native";
@@ -23,10 +22,9 @@ export type BoopPreset = {
   default: boolean;
 };
 
-/// The user's own order of the preset submenu, groups and items alike.
-export const forkPresetOrder = navOrder("fork.presetOrder");
-/// The presets the user starred; they pin to the top of the submenu.
-export const forkPresetFavorites = navFavorites("fork.presetFavorites");
+/// The submenu's own order and starred presets: keys fork.presets.order and
+/// fork.presets.favorites.
+export const forkPresetStore = navMenuStore("fork.presets");
 
 /// A preset the config marks DEAD cannot spawn a lane.
 export function livePresets(presets: BoopPreset[]): BoopPreset[] {
@@ -89,8 +87,8 @@ export function resetForkPresetCache() {
 /// the last one used, else the first of whatever the last read cached.
 export function currentForkPreset(): string {
   const groups = withFavorites(
-    orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetOrder.$()),
-    forkPresetFavorites.$(),
+    orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetStore.order.$()),
+    forkPresetStore.favorites.$(),
   );
   return mainPreset(forkRender.lastPreset.$(), groups);
 }

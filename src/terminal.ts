@@ -20,13 +20,7 @@ import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
 import { forkCommand, forkMenuTargets, forkSpawnStatus, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
 import { forkRender } from "./0_forkRenderSettings";
-import {
-  currentForkPreset,
-  forkPresetFavorites,
-  forkPresetOrder,
-  forkPresets,
-  presetGroups,
-} from "./1g_forkPresetMenu";
+import { currentForkPreset, forkPresetStore, forkPresets, presetGroups } from "./1g_forkPresetMenu";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { clickRpc } from "./ipc/contract";
 import { TerminalWheelRouter } from "./0_terminalWheel";
@@ -1389,8 +1383,7 @@ export function forkSelectionItem(id: string): CtxItem {
     subtext: preset,
     action: () => void forkSelection(id, preset),
     children: async () => presetGroups(await forkPresets(), (name) => void forkSelection(id, name)),
-    order: forkPresetOrder,
-    favorites: forkPresetFavorites,
+    persist: forkPresetStore,
   };
 }
 

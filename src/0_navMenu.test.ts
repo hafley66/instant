@@ -11,7 +11,9 @@ import {
   favoriteHomeId,
   filterGroups,
   navGroupOf,
+  levelRows,
   navMenuLevels,
+  navMenuModel,
   openNavMenu,
   orderedGroups,
   toggleFavorite,
@@ -84,7 +86,7 @@ describe("the menu", () => {
     const rows = rowsOf(0);
     expect(rows.map((row) => row.dataset.navId)).toEqual(["fork", "copy"]);
     expect(rows[0].querySelector(".ctx-subtext")!.textContent).toBe("flash4");
-    expect(rows[0].dataset.hasChildren).toBe("true");
+    expect(rows[0].querySelector(".ctx-arrow")).toBeTruthy();
     expect(navMenuLevels()[0].querySelectorAll(".ctx-sep")).toHaveLength(1);
   });
 
@@ -144,7 +146,7 @@ describe("hold to reorder", () => {
 
   async function openSubmenu(order: SignalOf<NavMenuOrder>) {
     openNavMenu(10, 10, [{ id: "fork", label: "Fork selection", children: groups() }], {
-      order,
+      persistence: { order, favorites: Signal<string[]>([]) },
       holdMs: 10,
     });
     rowsOf(0)[0].dispatchEvent(new MouseEvent("mouseenter"));
@@ -155,11 +157,11 @@ describe("hold to reorder", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const order = Signal<NavMenuOrder>(empty_nav_order);
     await openSubmenu(order);
-    const [flash4, pro4] = rowsOf(1);
-    pointer("pointerdown", flash4);
+    pointer("pointerdown", rowsOf(1)[0]);
     vi.advanceTimersByTime(20);
-    pointer("pointermove", pro4);
-    pointer("pointerup", pro4);
+    // Arming repaints, so the row under the pointer is the freshly drawn one.
+    pointer("pointermove", rowsOf(1)[1]);
+    pointer("pointerup", rowsOf(1)[1]);
     expect(order.$().items.opencode).toEqual(["pro4", "flash4"]);
     expect(rowsOf(1).map((row) => row.dataset.navId)).toEqual(["pro4", "flash4", "opus"]);
     vi.useRealTimers();
@@ -181,11 +183,10 @@ describe("hold to reorder", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const order = Signal<NavMenuOrder>(empty_nav_order);
     await openSubmenu(order);
-    const rows = rowsOf(1);
-    pointer("pointerdown", rows[0]);
+    pointer("pointerdown", rowsOf(1)[0]);
     vi.advanceTimersByTime(20);
-    pointer("pointermove", rows[2]);
-    pointer("pointerup", rows[2]);
+    pointer("pointermove", rowsOf(1)[2]);
+    pointer("pointerup", rowsOf(1)[2]);
     expect(order.$()).toEqual(empty_nav_order);
     vi.useRealTimers();
   });
@@ -243,8 +244,7 @@ describe("the submenu's search row and stars", () => {
 
   async function openSub(children: NavGroup[], favorites = Signal<string[]>([])) {
     openNavMenu(10, 10, [{ id: "fork", label: "Fork", children }], {
-      order: Signal<NavMenuOrder>(empty_nav_order),
-      favorites,
+      persistence: { order: Signal<NavMenuOrder>(empty_nav_order), favorites },
     });
     rowsOf(0)[0].dispatchEvent(new MouseEvent("mouseenter"));
     await flush();
@@ -295,5 +295,59 @@ describe("the submenu's search row and stars", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
     expect(favorites.$()).toEqual(["flash4"]);
+  });
+});
+
+describe("the model, with no DOM at all", () => {
+  const persistence = () => ({ order: Signal<NavMenuOrder>(empty_nav_order), favorites: Signal<string[]>([]) });
+
+  it("draws one level's rows from state alone", () => {
+    const rows = levelRows(
+      { ownerId: "fork", entries: [], groups: groups(), persistence: null },
+      empty_nav_order,
+      ["opus"],
+      "",
+      "flash4",
+      null,
+    );
+    expect(rows.filter((row) => row.kind === "group").map((row) => row.kind === "group" && row.id))
+      .toEqual(["__favorites", "opencode", "claude"]);
+    const focused = rows.find((row) => row.kind === "item" && row.focused);
+    expect(focused?.kind === "item" && focused.id).toBe("flash4");
+    expect(rows.some((row) => row.kind === "search")).toBe(false);
+  });
+
+  it("moves through open, submenu, query and favourite as one derived view", async () => {
+    const persist = persistence();
+    const model = navMenuModel();
+    model.view.$.subscribe(() => {});
+    model.open(0, 0, [{ id: "fork", label: "Fork", children: groups(), persist }]);
+    expect(model.view.$().levels).toHaveLength(1);
+    model.openSubmenu(0, "fork");
+    await flush();
+    expect(model.view.$().levels).toHaveLength(2);
+    model.toggleFavorite(1, "opus");
+    expect(persist.favorites.$()).toEqual(["opus"]);
+    expect(model.view.$().levels[1].rows[0]).toMatchObject({ kind: "group", id: "__favorites" });
+    model.armDrag(1, "flash4", "item");
+    model.dragOver("pro4");
+    expect(persist.order.$().items.opencode).toEqual(["pro4", "flash4"]);
+    model.endDrag();
+    expect(model.consumeDragClick("flash4")).toBe(true);
+    model.close();
+    expect(model.view.$().open).toBe(false);
+  });
+
+  it("runs the focused row and closes before the action fires", () => {
+    const ran: string[] = [];
+    const model = navMenuModel();
+    model.view.$.subscribe(() => {});
+    model.open(0, 0, [
+      { id: "a", label: "A", run: () => ran.push(`a:${model.view.$().open}`) },
+      { id: "b", label: "B", run: () => ran.push("b") },
+    ]);
+    model.moveFocus(1);
+    model.activate();
+    expect(ran).toEqual(["a:false"]);
   });
 });
