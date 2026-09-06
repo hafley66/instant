@@ -22,6 +22,10 @@ browser events, file opens, session visits) into a searchable timeline.
 
 ## Features
 
+A complete, section-by-section inventory of every feature (palette commands,
+rail panels, terminal overlays, context menus, drops, tabs, settings, boop
+reads) is in [docs/FEATURES.md](docs/FEATURES.md). The highlights:
+
 - **Summon gesture** — double right-⌘ shows/hides the window at the cursor;
   menu-bar accessory app (no Dock tile, no Cmd-Tab entry).
 - **tmux-backed terminals** — each tab is a `tmux new-session -A` pty, so the
