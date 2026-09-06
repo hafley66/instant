@@ -5,7 +5,8 @@
 // in the invoke handler.
 
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ignore::WalkBuilder;
 use serde::Serialize;
@@ -365,6 +366,8 @@ fn mime_for(ext: &str) -> Option<&'static str> {
         "svg" => Some("image/svg+xml"),
         "ico" => Some("image/x-icon"),
         "avif" => Some("image/avif"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "heic" => Some("image/heic"),
         "pdf" => Some("application/pdf"),
         _ => None,
     }
@@ -449,6 +452,260 @@ fn read_text_blocking(path: String) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "not valid UTF-8".to_string())
 }
 
+
+// Dropped-image stash. macOS deletes the promise file behind a screenshot /
+// Photos / Mail drag the instant the drop finishes; copying beats every hop.
+
+/// One dropped path after the stash pass. `stashed: None` with a `reason` means
+/// the original was left alone (not an image, too big, unreadable).
+#[derive(Serialize, Clone)]
+pub struct StashedDrop {
+    source: String,
+    stashed: Option<String>,
+    bytes: u64,
+    reason: Option<String>,
+}
+
+// A dropped file over this is left alone: copying it costs more than the drop
+// is worth, and no agent takes a 200 MB image off the pasteboard anyway.
+const MAX_STASH: u64 = 200 * 1024 * 1024;
+
+// Mirrors IMAGE_EXTS in src/core.ts. Extension is the first test; magic bytes
+// cover a promise file whose suffix is wrong or missing.
+const STASH_IMAGE_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif", "tif", "tiff", "heic",
+];
+
+// Same source path dropped twice inside this window returns the same copy, so a
+// second window seeing the same native event cannot double-copy a 100 MB photo.
+const DEDUPE_WINDOW: Duration = Duration::from_secs(2);
+
+// (source path, stashed path, when). Pruned on every call; only ever holds the
+// handful of paths from the last drop.
+static RECENT_STASH: Mutex<Vec<(String, String, SystemTime)>> = Mutex::new(Vec::new());
+
+/// Copy every dropped image to `~/.agent/drops`. Never fails as a whole: an
+/// unstashable path comes back with a reason and the caller keeps the original.
+#[tauri::command]
+pub async fn stash_drop(paths: Vec<String>) -> Vec<StashedDrop> {
+    let sources = paths.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stash_drop_blocking(paths, &stash_dir(), SystemTime::now())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        sources
+            .into_iter()
+            .map(|source| refused(source, 0, e.to_string()))
+            .collect()
+    })
+}
+
+fn stash_drop_blocking(paths: Vec<String>, dir: &Path, now: SystemTime) -> Vec<StashedDrop> {
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        if let Some(hit) = recent_stash(&path, now) {
+            let bytes = std::fs::metadata(&hit).map(|m| m.len()).unwrap_or(0);
+            out.push(StashedDrop {
+                source: path,
+                stashed: Some(hit),
+                bytes,
+                reason: None,
+            });
+            continue;
+        }
+        let drop = stash_one(Path::new(&path), dir, now);
+        if let Some(stashed) = drop.stashed.as_deref() {
+            remember_stash(&drop.source, stashed, now);
+        }
+        out.push(drop);
+    }
+    out
+}
+
+/// The stashed copy of `source` from a drop less than `DEDUPE_WINDOW` ago, if
+/// that copy is still on disk.
+fn recent_stash(source: &str, now: SystemTime) -> Option<String> {
+    let mut recent = RECENT_STASH.lock().ok()?;
+    recent.retain(|(_, _, at)| {
+        now.duration_since(*at)
+            .map(|age| age < DEDUPE_WINDOW)
+            .unwrap_or(false)
+    });
+    recent
+        .iter()
+        .find(|(src, stashed, _)| src == source && Path::new(stashed).exists())
+        .map(|(_, stashed, _)| stashed.clone())
+}
+
+fn remember_stash(source: &str, stashed: &str, now: SystemTime) {
+    if let Ok(mut recent) = RECENT_STASH.lock() {
+        recent.push((source.to_string(), stashed.to_string(), now));
+    }
+}
+
+/// Where stashed drops live. `~/.agent/drops`, created on first drop.
+fn stash_dir() -> PathBuf {
+    resolve(Some("~/.agent/drops".to_string()))
+}
+
+fn refused(source: String, bytes: u64, reason: impl Into<String>) -> StashedDrop {
+    StashedDrop {
+        source,
+        stashed: None,
+        bytes,
+        reason: Some(reason.into()),
+    }
+}
+
+fn stash_one(source: &Path, dir: &Path, now: SystemTime) -> StashedDrop {
+    let source_str = source.to_string_lossy().into_owned();
+    let meta = match std::fs::metadata(source) {
+        Ok(meta) => meta,
+        // Already gone: the promise file beat us. Nothing to copy, and the
+        // caller still gets to see which path evaporated.
+        Err(e) => return refused(source_str, 0, e.to_string()),
+    };
+    if !meta.is_file() {
+        return refused(source_str, 0, "not a file");
+    }
+    let bytes = meta.len();
+    let ext = ext_of(source, false);
+    if !STASH_IMAGE_EXTS.contains(&ext.as_str()) && !head_is_image(source) {
+        return refused(source_str, bytes, "not an image");
+    }
+    if bytes > MAX_STASH {
+        return refused(
+            source_str,
+            bytes,
+            format!("{bytes} bytes is over the {MAX_STASH} byte stash limit"),
+        );
+    }
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        return refused(source_str, bytes, format!("{}: {e}", dir.display()));
+    }
+    let dest = match free_name(dir, &stash_name(source, now)) {
+        Some(dest) => dest,
+        None => return refused(source_str, bytes, "no free name in the stash dir"),
+    };
+    match std::fs::copy(source, &dest) {
+        Ok(_) => StashedDrop {
+            source: source_str,
+            stashed: Some(dest.to_string_lossy().into_owned()),
+            bytes,
+            reason: None,
+        },
+        Err(e) => refused(source_str, bytes, format!("{}: {e}", dest.display())),
+    }
+}
+
+/// `<YYYYMMDD-HHMMSS>-<sanitized basename>`, local time, so the stash dir sorts
+/// chronologically and a file keeps the name its author gave it.
+fn stash_name(source: &Path, now: SystemTime) -> String {
+    let base = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    format!("{}-{}", local_stamp(now), sanitize_name(&base))
+}
+
+/// Keep letters, digits, dot, dash and underscore; everything else (spaces,
+/// slashes, colons a screenshot name is full of) becomes one dash.
+fn sanitize_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches(|c| c == '-' || c == '.');
+    if trimmed.is_empty() {
+        "drop".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// First unused name: `name`, then `name-2`, … with the suffix ahead of the
+/// extension, which is what `boop beep paste` reads to pick a pasteboard class.
+fn free_name(dir: &Path, name: &str) -> Option<PathBuf> {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return Some(candidate);
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem, format!(".{ext}")),
+        _ => (name, String::new()),
+    };
+    (2..1000)
+        .map(|n| dir.join(format!("{stem}-{n}{ext}")))
+        .find(|p| !p.exists())
+}
+
+fn local_stamp(now: SystemTime) -> String {
+    let secs = now
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // localtime_r fills `tm` in the machine's zone; a null return leaves the
+    // zeroed struct, which still yields a well-formed (if wrong) stamp.
+    unsafe { libc::localtime_r(&secs, &mut tm) };
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    )
+}
+
+/// Image signatures, for a promise file whose name says nothing.
+fn head_is_image(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 16];
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut filled = 0;
+    while filled < head.len() {
+        match f.read(&mut head[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(_) => return false,
+        }
+    }
+    is_image_magic(&head[..filled])
+}
+
+fn is_image_magic(head: &[u8]) -> bool {
+    let starts = |sig: &[u8]| head.len() >= sig.len() && &head[..sig.len()] == sig;
+    if starts(b"\x89PNG\r\n\x1a\n")            // png
+        || starts(b"\xff\xd8\xff")             // jpeg
+        || starts(b"GIF87a")
+        || starts(b"GIF89a")
+        || starts(b"BM")                       // bmp
+        || starts(b"II*\0")                    // tiff, little endian
+        || starts(b"MM\0*")                    // tiff, big endian
+    {
+        return true;
+    }
+    if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP" {
+        return true;
+    }
+    // ISO base media: heic/heif/avif all sit behind an `ftyp` box brand.
+    head.len() >= 12
+        && &head[4..8] == b"ftyp"
+        && matches!(
+            &head[8..12],
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1" | b"heif" | b"avif"
+        )
+}
+
 // Minimal base64 (standard alphabet) — avoids pulling a crate for one use.
 fn base64(data: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -474,4 +731,136 @@ fn base64(data: &[u8]) -> String {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Each test owns a fresh dir under the system temp dir; nothing here touches
+    // the real ~/.agent/drops.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "instant-stash-{}-{name}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+        fn write(&self, name: &str, bytes: &[u8]) -> PathBuf {
+            let p = self.0.join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, bytes).unwrap();
+            p
+        }
+        fn sub(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    fn at(secs: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn stashes_an_image_named_like_one() {
+        let s = Scratch::new("ext");
+        let src = s.write("Screenshot 2026-09-05 at 11.40.58 PM.png", PNG);
+        let dir = s.sub("drops");
+        let out = stash_one(&src, &dir, at(1_757_000_000));
+        let stashed = out.stashed.expect("image is stashed");
+        assert_eq!(out.reason, None);
+        assert_eq!(out.bytes, PNG.len() as u64);
+        assert_eq!(std::fs::read(&stashed).unwrap(), PNG);
+        let name = Path::new(&stashed).file_name().unwrap().to_str().unwrap();
+        assert!(name.ends_with("-Screenshot-2026-09-05-at-11.40.58-PM.png"), "{name}");
+        // The copy outlives the original, which is what the drop race destroys.
+        std::fs::remove_file(&src).unwrap();
+        assert!(Path::new(&stashed).exists());
+    }
+
+    #[test]
+    fn stashes_an_image_whose_extension_lies() {
+        let s = Scratch::new("magic");
+        let src = s.write("promise-file", PNG);
+        let dir = s.sub("drops");
+        let out = stash_one(&src, &dir, at(1_757_000_000));
+        assert!(out.stashed.is_some(), "magic bytes carry it: {:?}", out.reason);
+    }
+
+    #[test]
+    fn leaves_a_non_image_alone() {
+        let s = Scratch::new("text");
+        let src = s.write("notes.txt", b"plain text, no signature");
+        let dir = s.sub("drops");
+        let out = stash_one(&src, &dir, at(1_757_000_000));
+        assert_eq!(out.stashed, None);
+        assert_eq!(out.reason.as_deref(), Some("not an image"));
+        assert!(!dir.exists(), "no stash dir for a file we never copy");
+    }
+
+    #[test]
+    fn refuses_an_image_over_the_limit() {
+        let s = Scratch::new("big");
+        let src = s.write("huge.png", PNG);
+        let dir = s.sub("drops");
+        // Sparse file: no 200 MB written, but metadata reports the length.
+        let f = std::fs::OpenOptions::new().write(true).open(&src).unwrap();
+        f.set_len(MAX_STASH + 1).unwrap();
+        drop(f);
+        let out = stash_one(&src, &dir, at(1_757_000_000));
+        assert_eq!(out.stashed, None);
+        assert_eq!(out.bytes, MAX_STASH + 1);
+        assert!(out.reason.unwrap().contains("stash limit"));
+    }
+
+    #[test]
+    fn a_second_drop_of_the_same_name_gets_a_suffix() {
+        let s = Scratch::new("collide");
+        let a = s.write("shot.png", PNG);
+        let b = s.write("other/shot.png", PNG);
+        let dir = s.sub("drops");
+        let first = stash_one(&a, &dir, at(1_757_000_000)).stashed.unwrap();
+        let second = stash_one(&b, &dir, at(1_757_000_000)).stashed.unwrap();
+        assert_ne!(first, second);
+        assert!(first.ends_with("-shot.png"), "{first}");
+        assert!(second.ends_with("-shot-2.png"), "{second}");
+    }
+
+    #[test]
+    fn the_same_source_twice_inside_the_window_yields_one_copy() {
+        let s = Scratch::new("dedupe");
+        let src = s.write("dup.png", PNG);
+        let dir = s.sub("drops");
+        let src = src.to_string_lossy().into_owned();
+        let now = at(1_757_000_100);
+        let first = stash_drop_blocking(vec![src.clone()], &dir, now);
+        let again = stash_drop_blocking(vec![src], &dir, now + Duration::from_millis(300));
+        assert_eq!(first[0].stashed, again[0].stashed);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn magic_table_covers_the_formats_a_drag_produces() {
+        assert!(is_image_magic(b"\xff\xd8\xff\xe0"));
+        assert!(is_image_magic(b"GIF89a\0\0\0\0\0\0"));
+        assert!(is_image_magic(b"RIFF\0\0\0\0WEBP"));
+        assert!(is_image_magic(b"\0\0\0\x18ftypheic"));
+        assert!(is_image_magic(b"II*\0\0\0\0\0\0\0\0\0"));
+        assert!(!is_image_magic(b"#!/bin/sh\n\0\0\0"));
+        assert!(!is_image_magic(b""));
+    }
 }

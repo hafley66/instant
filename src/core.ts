@@ -91,7 +91,7 @@ export function flashStatus(msg: string) {
 
 // ---- files: glyphs + language table shared by the tree and previews ----
 export const IMAGE_EXTS = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif",
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif", "tif", "tiff", "heic",
 ]);
 
 // Glyph for a filesystem row in the unified tree (folder / image / file).

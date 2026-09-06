@@ -60,6 +60,7 @@ export type CommandName =
   | "read_text"
   | "save_text"
   | "delete_file"
+  | "stash_drop"
   | "fs_watch_claim"
   | "fs_watch_release"
   | "harness_session"
@@ -210,6 +211,7 @@ export namespace commands {
     export const readText = "read_text";
     export const saveText = "save_text";
     export const deleteFile = "delete_file";
+    export const stashDrop = "stash_drop";
     export const fsWatchClaim = "fs_watch_claim";
     export const fsWatchRelease = "fs_watch_release";
   }

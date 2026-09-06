@@ -1128,6 +1128,7 @@ pub fn run() {
             fs::read_image,
             fs::save_text,
             fs::delete_file,
+            fs::stash_drop,
             fs::read_text,
             refresolve::resolve_ref,
             refresolve::clear_ref_index,

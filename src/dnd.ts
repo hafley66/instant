@@ -7,7 +7,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
-import { activeId, pathArg } from "./core";
+import { activeId, pathArg, IMAGE_EXTS, logLine, flashStatus } from "./core";
+import {
+  dropPath,
+  dropLogLine,
+  isImagePath,
+  pasteFailure,
+  unstashed,
+  type StashedDrop,
+} from "./0_dropStash";
 import { tabs, pasteToActive } from "./terminal";
 import { cancelHide } from "./capture";
 import { addScope } from "./sprefa";
@@ -69,12 +77,16 @@ export async function wireOsDrop() {
   // Catcher covers us exactly, so its drop position (physical px, window-origin)
   // maps 1:1 onto ours. Over the sprefa scope tray → add file scope; otherwise
   // paste the paths into the active terminal.
-  await listen<{ paths: string[]; position: { x: number; y: number } }>(
+  await listen<{
+    paths: string[];
+    position: { x: number; y: number };
+    drops?: StashedDrop[];
+  }>(
     "os-file-drop",
     (e) => {
       dismiss();
       cancelHide();
-      const { paths, position } = e.payload;
+      const { paths, position, drops } = e.payload;
       if (!paths.length) return;
       const dpr = window.devicePixelRatio || 1;
       const over = document.elementFromPoint(position.x / dpr, position.y / dpr);
@@ -84,34 +96,49 @@ export async function wireOsDrop() {
       }
       const id = activeId();
       if (!id) return;
-      void dropIntoTerminal(id, paths);
+      void dropIntoTerminal(id, paths, drops);
     },
   );
 
   await listen("os-file-drop-cancel", dismiss);
 }
 
-const IMAGE_EXT = /\.(png|jpe?g|gif|tiff?|bmp)$/i;
-
 // A dropped image goes through `boop beep paste`: boop puts the file on the
 // OS pasteboard and presses the pane's paste key, so claude and codex take it
 // as a picture, the same as a hand paste. Everything else, and any image boop
-// cannot deliver, is typed as a quoted path. boop owns every byte that
-// touches tmux or the OS; this file only names the pane.
-export async function dropIntoTerminal(id: string, paths: string[]): Promise<void> {
+// cannot deliver, is typed as a quoted path. `paths` are the stashed copies, so
+// a typed path still resolves after macOS deleted the original.
+export async function dropIntoTerminal(
+  id: string,
+  paths: string[],
+  drops: StashedDrop[] = [],
+): Promise<void> {
   const tab = tabs.get(id);
   const target = tab?.tmuxTarget;
-  const images = target ? paths.filter((path) => IMAGE_EXT.test(path)) : [];
-  const typed: string[] = paths.filter((path) => !images.includes(path));
-  for (const image of images) {
+  const byPath = new Map(drops.map((drop) => [dropPath(drop), drop]));
+  const typed: string[] = [];
+  for (const path of paths) {
+    const drop = byPath.get(path) ?? unstashed(path);
+    if (!target || !isImagePath(path, IMAGE_EXTS)) {
+      typed.push(path);
+      logLine(dropLogLine(drop, "typed"));
+      continue;
+    }
+    let failure = "";
     try {
-      await clickRpc.runClick({
-        command: `boop beep paste --pane ${pathArg(target!)} ${pathArg(image)}`,
+      const out = await clickRpc.runClick({
+        command: `boop beep paste --pane ${pathArg(target)} ${pathArg(path)} 2>&1`,
         cwd: "",
       });
-    } catch {
-      typed.push(image);
+      failure = pasteFailure(out);
+    } catch (e) {
+      failure = String(e);
     }
+    if (failure) {
+      typed.push(path);
+      flashStatus(`paste failed: ${failure}`);
+    }
+    logLine(dropLogLine(drop, failure ? `typed after paste failed: ${failure}` : "pasted"));
   }
   if (typed.length) pasteToActive(typed.map(pathArg).join(" ") + " ");
   tab?.term.focus();

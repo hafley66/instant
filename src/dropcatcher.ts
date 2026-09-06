@@ -9,6 +9,8 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { STASH_DROP_COMMAND, dropPath, unstashed, type StashedDrop } from "./0_dropStash";
 
 const win = getCurrentWindow();
 let idleTimer: number | undefined;
@@ -32,11 +34,17 @@ const keepAlive = () => {
   idleTimer = window.setTimeout(() => void cancelDrop(), 1000);
 };
 
+// macOS deletes the promise file behind a screenshot-thumbnail / Photos / Mail
+// drag as soon as the drop completes, so the copy happens here, ahead of the emit.
+const stash = (paths: string[]): Promise<StashedDrop[]> =>
+  invoke<StashedDrop[]>(STASH_DROP_COMMAND, { paths }).catch(() => paths.map(unstashed));
+
 getCurrentWebview().onDragDropEvent(async (e) => {
   const p = e.payload;
   if (p.type === "drop") {
     clearIdle();
-    await emit("os-file-drop", { paths: p.paths, position: p.position });
+    const drops = await stash(p.paths);
+    await emit("os-file-drop", { paths: drops.map(dropPath), position: p.position, drops });
     await win.hide();
   } else if (p.type === "leave") {
     // Drag left the app without dropping; re-arm the main window and step aside.
