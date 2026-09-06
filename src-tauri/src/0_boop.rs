@@ -522,6 +522,44 @@ pub struct BoopTurnCommentFork {
     pub tmux: String,
 }
 
+/// One row of `boop config presets`: a named harness+model+effort the fork verb
+/// spawns a lane from.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BoopPreset {
+    pub name: String,
+    pub harness: String,
+    pub model: String,
+    pub effort: Option<String>,
+    pub variant: Option<String>,
+    pub bin: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub default: bool,
+}
+
+pub fn parse_presets(json: &str) -> Result<Vec<BoopPreset>, String> {
+    serde_json::from_str(json).map_err(|error| error.to_string())
+}
+
+fn read_presets() -> Result<Vec<BoopPreset>, String> {
+    let output = std::process::Command::new("boop")
+        .args(["config", "presets", "--format", "json"])
+        .env("PATH", crate::pty::path_env())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    parse_presets(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[tauri::command]
+pub async fn boop_config_presets() -> Result<Vec<BoopPreset>, String> {
+    tauri::async_runtime::spawn_blocking(read_presets)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 /// The tmux target a fork's child pane attaches to. A lane registers its target
 /// in `agent_route.tmux`; before it does, the lane name is the session name the
 /// spawner asked for, so it is the fallback rather than an empty pane.
@@ -873,6 +911,25 @@ pub async fn boop_locate_turns(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The menu groups by harness and skips DEAD rows, so those three fields
+    /// have to survive the wire exactly as `boop config presets` prints them.
+    #[test]
+    fn presets_parse_from_the_boop_json_shape() {
+        let rows = parse_presets(
+            r#"[{"name":"flash4","harness":"opencode",
+                 "model":"openrouter/deepseek/deepseek-v4-flash-0731","effort":null,
+                 "variant":null,"bin":null,"status":"ok *","default":true},
+                {"name":"opus","harness":"claude","model":"claude-opus-5","effort":"high",
+                 "variant":null,"bin":null,"status":"ok","default":false}]"#,
+        )
+        .expect("presets");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].harness, "opencode");
+        assert!(rows[0].default);
+        assert_eq!(rows[1].effort.as_deref(), Some("high"));
+        assert!(parse_presets("not json").is_err());
+    }
 
     /// A lane that has not registered a tmux target yet still names a session
     /// the child pane can attach to, so the pane shape never binds to "".

@@ -20,7 +20,8 @@ import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
 import { forkCommand, forkMenuTargets, forkSpawnStatus, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
 import { forkRender } from "./0_forkRenderSettings";
-import { showContextMenu } from "./ctxmenu";
+import { currentForkPreset, forkPresetOrder, forkPresets, presetGroups } from "./1g_forkPresetMenu";
+import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { clickRpc } from "./ipc/contract";
 import { TerminalWheelRouter } from "./0_terminalWheel";
 import { TerminalPinnedSelection } from "./0_terminalPinnedSelection";
@@ -1363,12 +1364,27 @@ export async function forkSelection(id: string, preset: string) {
     flashStatus("fork: the selection did not store");
     return;
   }
+  forkRender.lastPreset.$(preset);
   const out = await clickRpc.runClick({
     command: forkCommand(commentId, preset),
     cwd: tabMetaById(id)?.cwd ?? "",
   }).catch(() => "");
   flashStatus(forkSpawnStatus(commentId, preset, out));
   tab.contextSync.activate();
+}
+
+/// The Fork row: its subtext names the preset a plain click runs, its submenu
+/// carries every preset grouped by harness, reorderable and persisted.
+export function forkSelectionItem(id: string): CtxItem {
+  void forkPresets();
+  const preset = currentForkPreset();
+  return {
+    label: "Fork selection",
+    subtext: preset,
+    action: () => void forkSelection(id, preset),
+    children: async () => presetGroups(await forkPresets(), (name) => void forkSelection(id, name)),
+    order: forkPresetOrder,
+  };
 }
 
 // Write text into a terminal's pty (path or selection, space-terminated so the

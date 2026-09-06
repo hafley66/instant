@@ -1,88 +1,57 @@
 // Windows-XP-style right-click menu. The webview's native context menu is
-// suppressed; we render our own #ctx-menu, styled per skin via tokens (XP =
-// classic raised white menu, blue hover). The contextual item list is built by
-// the caller (main.ts owns the actions), so this module stays action-agnostic.
+// suppressed; the rows are rendered by 0_navMenu.ts (submenus, keyboard,
+// hold-to-reorder) under the same .ctx-menu class names the skins style.
+import {
+  closeNavMenu,
+  openNavMenu,
+  type NavChildren,
+  type NavEntry,
+  type NavMenuOptions,
+  type NavMenuOrder,
+} from "./0_navMenu";
+import type { Signal as SignalOf } from "@hafley66/signals";
 
 export type CtxItem =
-  | { label: string; action: () => void; disabled?: boolean }
+  | {
+      label: string;
+      action: () => void;
+      disabled?: boolean;
+      subtext?: string;
+      children?: NavChildren;
+      order?: SignalOf<NavMenuOrder>;
+    }
   | { sep: true };
 
-let openMenu: HTMLElement | null = null;
+let seq = 0;
 
-function dismiss() {
-  openMenu?.remove();
-  openMenu = null;
-  document.removeEventListener("pointerdown", onOutside, true);
-  window.removeEventListener("blur", dismiss);
-  window.removeEventListener("resize", dismiss);
-  document.removeEventListener("scroll", dismiss, true);
-}
-
-function onOutside(e: PointerEvent) {
-  const menu = openMenu;
-  if (!menu || menu.contains(e.target as Node)) return;
-  // Keep the event target connected until pointerdown dispatch completes.
-  // react-resizable-panels compares the target's stacking order with every
-  // nearby resize handle in its document-level listener; synchronously
-  // removing the menu here leaves that listener with a detached target.
-  queueMicrotask(() => {
-    if (openMenu === menu) dismiss();
+/// `CtxItem` carries no ids and the menu keys rows by one, so a stable-per-open
+/// id is minted here.
+export function toNavEntries(items: CtxItem[], open: number): NavEntry[] {
+  return items.map((item, index) => "sep" in item ? item : {
+    id: `ctx:${open}:${index}`,
+    label: item.label,
+    subtext: item.subtext,
+    disabled: item.disabled,
+    children: item.children,
+    order: item.order,
+    run: item.disabled ? undefined : item.action,
   });
 }
 
-// Render the menu at (x,y), flipping near the right/bottom edge so it stays
-// on-screen. Dismisses on outside click, Esc, scroll, blur, or resize.
-export function showContextMenu(x: number, y: number, items: CtxItem[]): void {
-  dismiss();
-  if (items.length === 0) return;
-
-  const menu = document.createElement("div");
-  menu.className = "ctx-menu";
-  for (const item of items) {
-    if ("sep" in item) {
-      const s = document.createElement("div");
-      s.className = "ctx-sep";
-      menu.appendChild(s);
-      continue;
-    }
-    const row = document.createElement("div");
-    row.className = "ctx-item" + (item.disabled ? " ctx-disabled" : "");
-    row.textContent = item.label;
-    if (!item.disabled) {
-      row.onclick = () => {
-        dismiss();
-        item.action();
-      };
-    }
-    menu.appendChild(row);
-  }
-
-  // Off-screen measure, then clamp/flip into the viewport.
-  menu.style.visibility = "hidden";
-  document.body.appendChild(menu);
-  const { width, height } = menu.getBoundingClientRect();
-  const left = x + width > window.innerWidth ? Math.max(0, x - width) : x;
-  const top = y + height > window.innerHeight ? Math.max(0, y - height) : y;
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-  menu.style.visibility = "visible";
-
-  openMenu = menu;
-  document.addEventListener("pointerdown", onOutside, true);
-  window.addEventListener("blur", dismiss);
-  window.addEventListener("resize", dismiss);
-  document.addEventListener("scroll", dismiss, true);
+/// Render the menu at (x,y), flipping near the right/bottom edge so it stays
+/// on-screen. Dismisses on outside click, Esc, scroll, blur, or resize.
+export function showContextMenu(x: number, y: number, items: CtxItem[], options: NavMenuOptions = {}): void {
+  openNavMenu(x, y, toNavEntries(items, ++seq), options);
 }
 
 // Suppress the native menu and render ours; `itemsFor` maps the event target to
-// the contextual item list. Esc also dismisses.
+// the contextual item list. Esc dismisses inside 0_navMenu's key handler.
 export function wireContextMenu(itemsFor: (target: HTMLElement) => CtxItem[]): void {
   document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
     showContextMenu(e.clientX, e.clientY, itemsFor(e.target as HTMLElement));
   });
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") dismiss();
-  });
 }
+
+export { closeNavMenu as dismissContextMenu };

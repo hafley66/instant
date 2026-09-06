@@ -1594,6 +1594,37 @@ body[data-mode="dark"] .act-last.ok {
   margin: 3px 2px;
   border-top: 1px solid var(--frame);
 }
+/* The menu lives in the top layer so submenus clear xterm and dockview; the UA
+   popover rules would otherwise centre it and add their own box. */
+.ctx-menu:popover-open,
+.ctx-menu[popover] {
+  margin: 0;
+  inset: auto;
+  padding: 2px;
+  overflow: visible;
+  border: var(--frame-w) solid var(--frame);
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+}
+.ctx-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ctx-label { flex: 1; }
+.ctx-subtext { opacity: .6; font-size: 10px; }
+.ctx-arrow { opacity: .7; }
+.ctx-group {
+  padding: 4px 8px 2px;
+  opacity: .55;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.ctx-active { background: var(--row-active-bg); color: var(--row-active-fg); }
+.ctx-dragging { opacity: .6; outline: 1px dashed var(--frame); }
 
 /* ---- command palette (⌘P): centered fuzzy command list ---- */
 .cmdp-root {
