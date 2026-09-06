@@ -495,12 +495,12 @@ export const NAV_MENU_CSS = `
 .ctx-menu[popover] { margin: 0; inset: auto; overflow: visible; }
 .ctx-item { display: flex; align-items: baseline; gap: 8px; }
 .ctx-label { flex: 1; }
-.ctx-subtext { opacity: .6; font-size: 10px; }
+.ctx-subtext { opacity: .6; font-size: 12px; }
 .ctx-arrow { opacity: .7; }
 .ctx-group {
   padding: 4px 8px 2px;
   opacity: .55;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -508,9 +508,16 @@ export const NAV_MENU_CSS = `
 }
 .ctx-dragging { opacity: .6; }
 .ctx-search { padding: 3px 4px 5px; }
-.ctx-search-input { width: 100%; padding: 2px 4px; color: inherit; font: inherit; }
+.ctx-search-input { width: 100%; padding: 8px 10px; color: inherit; font: inherit; box-sizing: border-box; }
 .ctx-star {
-  padding: 0 2px;
+  padding: 0 10px;
+  min-width: 36px;
+  min-height: 34px;
+  font-size: 18px;
+  margin: -8px -14px -8px auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: inherit;

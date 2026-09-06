@@ -1564,17 +1564,20 @@ body[data-mode="dark"] .act-last.ok {
 .ctx-menu {
   position: fixed;
   z-index: 9999;
-  min-width: 160px;
-  padding: 2px;
+  min-width: 260px;
+  padding: 4px;
   background: var(--panel-bg);
   color: var(--panel-fg);
   border: var(--frame-w) solid var(--frame);
   box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.35);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.4;
   user-select: none;
 }
 .ctx-item {
-  padding: 3px 22px;
+  padding: 8px 14px 8px 22px;
+  min-height: 34px;
+  box-sizing: border-box;
   cursor: default;
   white-space: nowrap;
 }
@@ -1598,7 +1601,7 @@ body[data-mode="dark"] .act-last.ok {
    injected once, so a host that takes the module as a package still gets them. */
 .ctx-menu:popover-open,
 .ctx-menu[popover] {
-  padding: 2px;
+  padding: 4px;
   border: var(--frame-w) solid var(--frame);
   background: var(--panel-bg);
   color: var(--panel-fg);
