@@ -1,0 +1,81 @@
+<!doctype html><meta charset="utf-8"><title>fork draw shapes</title>
+<style>
+:root{--bg:#0f1115;--fg:#cdd3de;--dim:#6b7280;--acc:#7dd3fc;--quote:#fbbf24;--box:#1c2230;--line:#2b3445}
+body{margin:0;background:#090a0d;color:var(--fg);font:13px/1.5 ui-monospace,Menlo,monospace;display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:24px}
+h2{font:600 13px ui-monospace;color:var(--acc);margin:0 0 8px}
+.term{background:var(--bg);border:1px solid var(--line);height:520px;overflow:auto;position:relative}
+.row{display:flex;height:20px;white-space:pre}
+.gut{width:34px;flex:none;color:var(--dim);text-align:right;padding-right:8px;user-select:none}
+.mark{color:var(--quote);cursor:pointer}
+.quote{text-decoration:underline;text-decoration-color:var(--quote);text-underline-offset:4px}
+.user{color:#a7f3d0}.dim{color:var(--dim)}
+/* A: overlay */
+.overlay{position:absolute;left:34px;right:8px;background:var(--box);border:1px solid var(--acc);border-radius:3px;padding:0 8px;white-space:pre;cursor:pointer;z-index:2;box-shadow:0 6px 18px #0009}
+.overlay .hdr{color:var(--acc)}
+.overlay .body{display:none;color:var(--fg)}
+.overlay.open .body{display:block}
+/* D: child pane */
+.child{position:absolute;left:calc(34px + 4ch);right:8px;background:#05070a;border:1px solid #34d399;border-radius:3px;white-space:pre;z-index:2;padding:4px 8px}
+.child .title{color:#34d399;border-bottom:1px solid var(--line);margin-bottom:4px}
+.child .cur{background:#cdd3de;color:#000}
+.spacer{height:0}
+.cap{color:var(--dim);margin:6px 0 0;white-space:pre-wrap}
+</style>
+<section>
+<h2>A. DOM overlay (click the header)</h2>
+<div class="term" id="a"></div>
+<p class="cap">One row per fork, painted on the mark row + 1 like the annotation marks. Collapsed = header only. Expanded = same element grows and covers the rows under it until collapsed. Rows below never move; hit-testing stays by buffer row. Content = last assistant turn of the fork lane's session, wrapped to cols.</p>
+</section>
+<section>
+<h2>D. child xterm pane, bound to tmux fork-comment-26</h2>
+<div class="term" id="d"></div>
+<p class="cap">A second terminal panel absolutely placed inside the parent's scroll container at the mark row, indented by the gutter. Rows below are pushed down by a spacer the row geometry knows about. Live output, keystrokes go to the lane when focused. Scrolls with the parent.</p>
+</section>
+<script>
+const turn=[
+ ["3074","user","> can you move the door budget into deliver_hail so every caller gets it"],
+ ["3075","","assistant: The budget lives in door_gate today and only the drain calls it."],
+ ["3076","","I will move it into deliver_hail_budgeted so the supervisor's parent hail,"],
+ ["3077","","boop beep, and the drain all pass through one gate."],
+ ["3078","q","  crates/boop-proc/src/deliver.rs:323 door_gate -> deliver_hail_budgeted"],
+ ["3079","q","  crates/boop-store/src/bus.rs:128 held_messages excludes door rows"],
+ ["3080","","Then the six untaken rows stop re-pushing every 5 s."],
+ ["3081","user","> ok do it"],
+ ["3082","","assistant: Editing deliver.rs..."],
+ ["3083","","  tool Edit crates/boop-proc/src/deliver.rs"],
+ ["3084","","  tool Bash cargo test -p boop-proc"],
+ ["3085","","test result: ok. 143 passed"],
+];
+function rows(host,after){
+ turn.forEach(([n,k,t],i)=>{
+  const r=document.createElement('div');r.className='row';
+  const g=document.createElement('span');g.className='gut';g.textContent=n;
+  if(k==='q'&&n==='3078'){g.innerHTML='<span class="mark" title="note: fork this into a lane">✎</span> '+n}
+  const s=document.createElement('span');s.textContent=t;
+  if(k==='q')s.className='quote';if(k==='user')s.className='user';
+  r.append(g,s);host.append(r);
+  if(n==='3079')after(r);
+ });
+}
+// A
+rows(document.getElementById('a'),r=>{
+ const o=document.createElement('div');o.className='overlay';
+ o.style.top=(r.offsetTop+20)+'px';
+ o.innerHTML='<div class="hdr">▸ fork-comment-26  flash4  done rc=0  1m12s</div><div class="body">│ Moved the budget into deliver_hail_budgeted; every caller (drain, boop beep,\n│ supervise::deliver_outbound) now stamps to_timestamp on a door push. Schema v26\n│ backfills the six rows. cargo test -p boop-proc: 143 passed.\n│ commit eb3c8b8 on fork/comment-26\n└ [open lane]  [merge]  [dismiss]</div>';
+ o.onclick=()=>{o.classList.toggle('open');o.querySelector('.hdr').textContent=(o.classList.contains('open')?'▾':'▸')+' fork-comment-26  flash4  done rc=0  1m12s'};
+ r.after(o);
+});
+// D
+rows(document.getElementById('d'),r=>{
+ const sp=document.createElement('div');sp.className='spacer';sp.style.height='150px';
+ const c=document.createElement('div');c.className='child';c.style.top=(r.offsetTop+20)+'px';c.style.height='140px';
+ c.innerHTML='<div class="title">tmux fork-comment-26 · opencode flash4 · running</div>'+
+ '<div>&gt; brief: ~/.agent/mail/forks/comment-26.md</div>'+
+ '<div class="dim">  reading crates/boop-proc/src/deliver.rs</div>'+
+ '<div class="dim">  edit deliver.rs +105 -3</div>'+
+ '<div>  cargo test -p boop-proc ... 143 passed</div>'+
+ '<div>  git commit -m "boop: the delivery ladder stamps a row"</div>'+
+ '<div><span class="cur"> </span></div>';
+ r.after(sp);sp.after(c);
+});
+</script>
