@@ -10,9 +10,7 @@ import "./0_stfuButton.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
 import { listenNativeEvent } from "./reactive/nativeTransport";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { homeDir } from "@tauri-apps/api/path";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { runtimePorts } from "./reactive/ports";
 // CSS Anchor Positioning isn't in WebKit yet (Tauri = WKWebView); this shims
 // `anchor-name`/`position-anchor`/`anchor()`/`position-area` so tooltips and
 // menus can be authored in native CSS. No-ops where the browser supports it.
@@ -229,7 +227,7 @@ async function main() {
     });
   }
   // Resolve the home dir once so tildify() can stay synchronous during render.
-  setHomeDir(await homeDir().catch(() => ""));
+  setHomeDir(await runtimePorts.homeDir().catch(() => ""));
   await refreshConfig();
   // On theme flip, re-render open file/diff previews so syntax colors track.
   initPreviewThemeSync();
@@ -295,7 +293,7 @@ async function main() {
     readImage: (path) => invoke<string>("read_image", { path }),
     listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
     openHref: openDocumentHrefInInstant,
-    openPath,
+    openPath: runtimePorts.openPath,
     watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
     FileTree,
     PanZoomViewport,
@@ -456,7 +454,7 @@ async function main() {
   // Esc hides the popover — unless the command palette is open, where Esc just
   // closes the palette (handled on its own input, which stops propagation).
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !isPaletteOpen() && !isJumpOpen()) getCurrentWindow().hide();
+    if (e.key === "Escape" && !isPaletteOpen() && !isJumpOpen()) void runtimePorts.window.hide();
   });
 
   // Central keymap: binds the command table on the window. The focused-terminal
@@ -508,9 +506,9 @@ async function main() {
 
   // Click-outside dismiss: hide when the window loses focus. Gated on a prior
   // focus so it doesn't self-hide at launch, and suppressed during screenshot.
-  const win = getCurrentWindow();
+  const win = runtimePorts.window;
   let everFocused = false;
-  await win.onFocusChanged(({ payload: focused }) => {
+  await win.onFocusChanged((focused) => {
     if (focused) {
       everFocused = true;
       cancelHide();
@@ -520,7 +518,7 @@ async function main() {
       // Defer so a drag-in (which blurs us) can land; a drag-enter cancels it.
       // Kept short so tab-away/click-out dismiss feels instant.
       cancelHide();
-      scheduleHide(() => win.hide(), 120);
+      scheduleHide(() => void win.hide(), 120);
     }
   });
 }

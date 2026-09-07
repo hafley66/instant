@@ -3,10 +3,8 @@
 // fires a DOM dragenter here but exposes no file paths. On that dragenter we
 // raise the `dropcatcher` window — the one surface WITH the native handler — over
 // our exact bounds, let it read the absolute paths, and route them.
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { listen } from "@tauri-apps/api/event";
-import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+import { runtimePorts } from "./reactive/ports";
+import { listenNativeEvent } from "./reactive/nativeTransport";
 import { activeId, pathArg, IMAGE_EXTS, logLine, flashStatus } from "./core";
 import {
   dropPath,
@@ -30,8 +28,8 @@ let dropWatchdog: number | undefined;
 let dragGeneration = 0;
 
 export async function wireOsDrop() {
-  const main = getCurrentWindow();
-  const catcher = await WebviewWindow.getByLabel("dropcatcher");
+  const main = runtimePorts.window;
+  const catcher = await runtimePorts.findWindow("dropcatcher");
   if (!catcher) return;
 
   const standDown = () => {
@@ -56,8 +54,8 @@ export async function wireOsDrop() {
     const pos = await main.outerPosition();
     const size = await main.outerSize();
     if (!draggingIn || generation !== dragGeneration) return;
-    await catcher.setPosition(new PhysicalPosition(pos.x, pos.y));
-    await catcher.setSize(new PhysicalSize(size.width, size.height));
+    await catcher.setPosition(pos.x, pos.y);
+    await catcher.setSize(size.width, size.height);
     if (!draggingIn || generation !== dragGeneration) return;
     await catcher.show();
     if (!draggingIn || generation !== dragGeneration) {
@@ -77,7 +75,7 @@ export async function wireOsDrop() {
   // Catcher covers us exactly, so its drop position (physical px, window-origin)
   // maps 1:1 onto ours. Over the sprefa scope tray → add file scope; otherwise
   // paste the paths into the active terminal.
-  await listen<{
+  await listenNativeEvent<{
     paths: string[];
     position: { x: number; y: number };
     drops?: StashedDrop[];
@@ -100,7 +98,7 @@ export async function wireOsDrop() {
     },
   );
 
-  await listen("os-file-drop-cancel", dismiss);
+  await listenNativeEvent("os-file-drop-cancel", () => dismiss());
 }
 
 // A dropped image goes through `boop beep paste`: boop puts the file on the

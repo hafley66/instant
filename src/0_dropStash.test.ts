@@ -7,10 +7,10 @@ const flashed: string[] = [];
 const focus = vi.fn();
 const openTabs = new Map<string, unknown>();
 
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({}) }));
-vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: async () => null } }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
-vi.mock("@tauri-apps/api/dpi", () => ({ PhysicalPosition: class {}, PhysicalSize: class {} }));
+vi.mock("./reactive/nativeTransport", () => ({ listenNativeEvent: vi.fn() }));
+vi.mock("./reactive/ports", () => ({
+  runtimePorts: { window: {}, findWindow: async () => null },
+}));
 vi.mock("./terminal", () => ({
   tabs: openTabs,
   pasteToActive: (data: string) => written.push(data),
