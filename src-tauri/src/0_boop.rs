@@ -810,6 +810,37 @@ pub async fn boop_favorite_toggle(turn: BoopTurn, note: Option<String>) -> Resul
     .map_err(|error| error.to_string())?
 }
 
+fn read_note_tags() -> Result<Vec<String>, String> {
+    let store = open_store_ro()?;
+    let mut statement = store
+        .connection()
+        .prepare(
+            "SELECT note, MAX(ts) FROM (
+               SELECT note, created_ts AS ts FROM agent_favorite
+                WHERE note IS NOT NULL AND note != ''
+               UNION ALL
+               SELECT note, updated_ts AS ts FROM agent_turn_comment
+                WHERE note IS NOT NULL AND note != ''
+             ) GROUP BY note ORDER BY 2 DESC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+/// Every distinct non-empty note across favorites and turn comments, most
+/// recently used first. The note prompt offers these back as tags, so the same
+/// word gets typed once and picked thereafter.
+#[tauri::command]
+pub async fn boop_note_tags() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(read_note_tags)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 /// One rendered row range, already joined across wrapped screen lines by the
 /// frontend, since only xterm knows which rows continue which.
 #[derive(Clone, Debug, Deserialize)]

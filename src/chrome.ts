@@ -19,6 +19,7 @@ import { captureToPrompt, openSendPicker } from "./capture";
 import {
   favoriteBoopTurn,
   isBoopTurnFav,
+  noteTags,
 } from "./favorites";
 import { inScope, toggleScope } from "./sprefa";
 import { openTabAtPwd } from "./tabs";
@@ -341,7 +342,9 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
         label: `${isBoopTurnFav(projectedTurn) ? "✓" : "★"} ${preview.slice(0, 60)}${preview.length > 60 ? "…" : ""}`,
         action: async () => {
           if (isBoopTurnFav(projectedTurn)) return void favoriteBoopTurn(projectedTurn);
-          const note = await askText("note for this favorite");
+          const note = await askText("note or tag for this favorite", "", {
+            suggestions: await noteTags(),
+          });
           void favoriteBoopTurn(projectedTurn, note ?? "");
         },
       });

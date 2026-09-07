@@ -7,6 +7,7 @@ import { activeGroupEl } from "./reactdock";
 import { invoke } from "./generated/native";
 import { terminalFontCss } from "./0_terminalFonts";
 import { settings } from "./0_settings";
+import { fuzzyFilter } from "./fuzzy";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -195,10 +196,28 @@ export function showError(label: string, err: unknown) {
   console.error(label, err);
 }
 
+/// Options for `askText`. Both are optional; the two-arg call is unchanged.
+export type AskTextOptions = {
+  /// Existing values offered under the input, fuzzy-filtered by what is typed.
+  suggestions?: string[];
+  /// Rows shown when nothing is typed; default 8.
+  limit?: number;
+};
+
 // Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
 // so reuse the command-palette overlay styling for a real input. Resolves to the
-// trimmed value, or null on Esc / backdrop click / empty.
-export function askText(placeholder: string, initial = ""): Promise<string | null> {
+// trimmed value, or null on Esc / backdrop click / empty. With `suggestions` the
+// box grows a palette-styled list of the values already in use: ↑/↓ highlight a
+// row (nothing highlighted = the text you typed), Tab fills the input with the
+// highlighted row without committing, Enter takes the highlighted row or the
+// typed text, a click takes the row it lands on.
+export function askText(
+  placeholder: string,
+  initial = "",
+  options: AskTextOptions = {},
+): Promise<string | null> {
+  const suggestions = options.suggestions ?? [];
+  const limit = options.limit ?? 8;
   return new Promise((resolve) => {
     const root = document.createElement("div");
     root.className = "cmdp-root";
@@ -211,7 +230,37 @@ export function askText(placeholder: string, initial = ""): Promise<string | nul
     input.value = initial;
     input.spellcheck = false;
     box.appendChild(input);
+    const list = document.createElement("div");
+    list.className = "cmdp-list";
+    if (suggestions.length) box.appendChild(list);
     root.appendChild(box);
+
+    // -1 = no row highlighted, i.e. Enter commits whatever is typed.
+    let active = -1;
+    let shown: string[] = [];
+
+    function render() {
+      const q = input.value.trim();
+      shown = (q ? fuzzyFilter(q, suggestions, (s) => s) : suggestions).slice(0, limit);
+      if (active >= shown.length) active = shown.length - 1;
+      list.replaceChildren();
+      shown.forEach((value, i) => {
+        const row = document.createElement("div");
+        row.className = "cmdp-item" + (i === active ? " cmdp-active" : "");
+        const name = document.createElement("span");
+        name.className = "cmdp-label";
+        name.textContent = value;
+        row.appendChild(name);
+        row.onmousemove = () => {
+          if (active === i) return;
+          active = i;
+          render();
+        };
+        row.onclick = () => close(value);
+        list.appendChild(row);
+      });
+    }
+
     const close = (val: string | null) => {
       root.remove();
       resolve(val);
@@ -219,17 +268,33 @@ export function askText(placeholder: string, initial = ""): Promise<string | nul
     root.addEventListener("pointerdown", (e) => {
       if (e.target === root) close(null);
     });
+    input.addEventListener("input", () => {
+      active = -1;
+      render();
+    });
     input.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
-        close(input.value.trim() || null);
+        close(active >= 0 ? shown[active] : input.value.trim() || null);
       } else if (e.key === "Escape") {
         e.preventDefault();
         close(null);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        active = active + 1 >= shown.length ? -1 : active + 1;
+        render();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        active = active - 1 < -1 ? shown.length - 1 : active - 1;
+        render();
+      } else if (e.key === "Tab" && active >= 0) {
+        e.preventDefault();
+        input.value = shown[active];
       }
     });
     document.body.appendChild(root);
+    render();
     queueMicrotask(() => {
       input.focus();
       input.select();

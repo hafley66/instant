@@ -72,6 +72,7 @@ export type CommandName =
   | "boop_favorite_add"
   | "boop_favorites"
   | "boop_favorite_toggle"
+  | "boop_note_tags"
   | "boop_turn_comments"
   | "boop_turn_comment_upsert"
   | "boop_turn_comment_delete"
@@ -229,6 +230,7 @@ export namespace commands {
     export const boopFavoriteAdd = "boop_favorite_add";
     export const boopFavorites = "boop_favorites";
     export const boopFavoriteToggle = "boop_favorite_toggle";
+    export const boopNoteTags = "boop_note_tags";
     export const boopTurnComments = "boop_turn_comments";
     export const boopTurnCommentUpsert = "boop_turn_comment_upsert";
     export const boopTurnCommentDelete = "boop_turn_comment_delete";

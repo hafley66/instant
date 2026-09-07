@@ -73,7 +73,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns } from "./favorites";
+import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, noteTags, sessionsForTab, warmTurns } from "./favorites";
 import {
   selectProjectionTurns,
   TerminalTurnVisibilityV2,
@@ -1378,7 +1378,9 @@ export async function forkSelection(id: string, preset: string, note?: string) {
 /// Ask for the note with askText("ask for the fork lane"), then fork. Esc or
 /// empty forks with no note (today's behaviour), never cancels the fork.
 export async function forkSelectionWithNote(id: string, preset: string): Promise<void> {
-  const note = await askText(`fork -> ${preset}: what should the lane do?`);
+  const note = await askText(`fork -> ${preset}: what should the lane do?`, "", {
+    suggestions: await noteTags(),
+  });
   await forkSelection(id, preset, note ?? undefined);
 }
 

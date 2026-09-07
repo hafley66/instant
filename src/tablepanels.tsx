@@ -881,6 +881,7 @@ export interface FavTreeRow {
   // turn
   role?: string;
   preview?: string;
+  note?: string; // the tag typed when the turn was favorited (searchable)
   fav?: Fav; // the underlying fav (copy/locate/remove payload)
   boopFav?: BoopFavorite;
   children?: FavTreeRow[];
@@ -1008,15 +1009,16 @@ const FAV_COLUMNS: TreeColumn<FavTreeRow>[] = [
   { id: "actions", header: "", noRowClick: true, cell: (r) => <FavActionsCell row={r} /> },
 ];
 
-// Search predicate: match editor/label/role/preview/cwd substring. A session row
+// Search predicate: match editor/label/role/preview/note/cwd substring. A session row
 // is kept when it or any child turn matches (filterFromLeafRows keeps ancestors).
-function favFilter(r: FavTreeRow, q: string): boolean {
+export function favFilter(r: FavTreeRow, q: string): boolean {
   const s = q.toLowerCase();
   return (
     r.label.toLowerCase().includes(s) ||
     r.editor.toLowerCase().includes(s) ||
     (r.role?.toLowerCase().includes(s) ?? false) ||
     (r.preview?.toLowerCase().includes(s) ?? false) ||
+    (r.note?.toLowerCase().includes(s) ?? false) ||
     (r.cwd?.toLowerCase().includes(s) ?? false)
   );
 }
