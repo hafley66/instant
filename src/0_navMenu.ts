@@ -503,8 +503,10 @@ export function placeMenu(
 /// The module's own structural rules, injected once. Colours and the frame
 /// stay with the host's skin; nothing here names a palette.
 export const NAV_MENU_CSS = `
-.ctx-menu { position: fixed; overflow: auto; }
-.ctx-menu[popover] { margin: 0; inset: auto; overflow: auto; }
+/* border-box: a skin's padding and frame count against the cap, or the last
+   rows sit past the viewport edge with no scrollbar. */
+.ctx-menu { position: fixed; box-sizing: border-box; overflow: auto; }
+.ctx-menu[popover] { margin: 0; inset: auto; box-sizing: border-box; overflow: auto; }
 .ctx-item { display: flex; align-items: baseline; gap: 8px; }
 .ctx-label { flex: 1; }
 .ctx-subtext { opacity: .6; font-size: 12px; }

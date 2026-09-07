@@ -399,6 +399,22 @@ describe("a level that outgrows the viewport", () => {
     await openSub(30);
     expect(level(1).style.maxHeight).toBe("752px");
     expect(level(1).style.top).toBe("8px");
+    expect(level(1).style.overflowY).toBe("auto");
+    expect(level(0).style.maxHeight).toBe("");
+    expect(level(0).style.overflowY).toBe("");
+    measured.restore();
+  });
+
+  it("stays open when a level scrolls and closes on a scroll anywhere else", async () => {
+    const measured = stubMeasure();
+    await openSub(30);
+    const row = rowsOf(1)[9];
+    await act(async () => { row.dispatchEvent(new Event("scroll")); });
+    expect(navMenuLevels()).toHaveLength(2);
+    await act(async () => { level(1).dispatchEvent(new Event("scroll")); });
+    expect(navMenuLevels()).toHaveLength(2);
+    await act(async () => { document.body.dispatchEvent(new Event("scroll")); });
+    expect(navMenuLevels()).toHaveLength(0);
     measured.restore();
   });
 

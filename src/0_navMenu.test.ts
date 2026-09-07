@@ -205,8 +205,13 @@ describe("the injected css", () => {
     expect(rule).toContain("background: var(--panel-bg)");
   });
 
-  it("lets a capped level scroll rather than spill its rows", () => {
+  it("lets a capped level scroll its own rows, padding and frame inside the cap", () => {
+    const rules = NAV_MENU_CSS.split("\n").filter((line) => line.startsWith(".ctx-menu"));
     expect(NAV_MENU_CSS).not.toContain("overflow: visible");
-    expect(NAV_MENU_CSS).toContain(".ctx-menu { position: fixed; overflow: auto; }");
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) {
+      expect(rule).toContain("overflow: auto");
+      expect(rule).toContain("box-sizing: border-box");
+    }
   });
 });

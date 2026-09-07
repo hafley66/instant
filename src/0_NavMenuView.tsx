@@ -125,6 +125,7 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
     element.style.left = "0px";
     element.style.top = "0px";
     element.style.maxHeight = "";
+    element.style.overflowY = "";
     const rect = level.depth === 0 ? null : ownerRect(level.depth, level.ownerId);
     const size = element.getBoundingClientRect();
     const { left, top, maxHeight } = placeMenu(
@@ -135,7 +136,10 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
     );
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
+    /// Inline, so no skin rule on `.ctx-menu[popover]` outranks it and leaves
+    /// the capped level clipped with no way to scroll.
     element.style.maxHeight = maxHeight === null ? "" : `${maxHeight}px`;
+    element.style.overflowY = maxHeight === null ? "" : "auto";
     element.style.visibility = "visible";
   }, [measuredAt, level.depth, x, y]);
 
@@ -233,18 +237,25 @@ export const NavMenu = SignalReact(function NavMenu({ model, registry, onRowRend
       if (elements.current.some((element) => element?.contains(event.target as Node))) return;
       queueMicrotask(() => model.close());
     };
+    /// A capped level scrolls its own rows, and a scroll fires on the capture
+    /// path: dismissing on that would close the menu on the first wheel tick.
+    const onScroll = (event: Event) => {
+      const target = event.target as Node | null;
+      if (target && elements.current.some((element) => element?.contains(target))) return;
+      model.close();
+    };
     const dismiss = () => model.close();
     document.addEventListener("pointerdown", onOutside, true);
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("blur", dismiss);
     window.addEventListener("resize", dismiss);
-    document.addEventListener("scroll", dismiss, true);
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("pointerdown", onOutside, true);
       document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("blur", dismiss);
       window.removeEventListener("resize", dismiss);
-      document.removeEventListener("scroll", dismiss, true);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [model]);
 
