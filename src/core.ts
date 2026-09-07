@@ -7,7 +7,6 @@ import { activeGroupEl } from "./reactdock";
 import { invoke } from "./generated/native";
 import { terminalFontCss } from "./0_terminalFonts";
 import { settings } from "./0_settings";
-import { fuzzyFilter } from "./fuzzy";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -196,28 +195,35 @@ export function showError(label: string, err: unknown) {
   console.error(label, err);
 }
 
-/// Options for `askText`. Both are optional; the two-arg call is unchanged.
+/// Options for `askText`. All three are optional; the two-arg call is unchanged.
 export type AskTextOptions = {
-  /// Existing values offered under the input, fuzzy-filtered by what is typed.
-  suggestions?: string[];
-  /// Rows shown when nothing is typed; default 8.
+  /// Rows for the current input: called with "" on open and on every change; may be async.
+  suggest?: (query: string) => string[] | Promise<string[]>;
+  /// Rows shown at once; default 8.
   limit?: number;
+  /// When true a picked row is appended to the input as "<existing>, <tag>" instead of replacing it,
+  /// so one prompt sets several tags; Enter with no active row commits the whole text.
+  multi?: boolean;
 };
 
-// Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
-// so reuse the command-palette overlay styling for a real input. Resolves to the
-// trimmed value, or null on Esc / backdrop click / empty. With `suggestions` the
-// box grows a palette-styled list of the values already in use: ↑/↓ highlight a
-// row (nothing highlighted = the text you typed), Tab fills the input with the
-// highlighted row without committing, Enter takes the highlighted row or the
-// typed text, a click takes the row it lands on.
+/// The last comma-separated fragment of the input: what a tag search reads, so
+/// "perf, ru" looks up "ru" and leaves the tag already typed alone.
+export const askTextFragment = (text: string) => (text.split(",").pop() ?? "").trim();
+
+/// The text a prompt commits: the trailing separator a multi pick leaves behind
+/// is not part of the answer.
+export const askTextCommit = (text: string) => text.replace(/[\s,]+$/, "").trim();
+
+/// window.prompt() is a no-op in the Tauri WKWebview, so the command-palette
+/// overlay is the input: null on Esc, backdrop click or empty, else the text.
 export function askText(
   placeholder: string,
   initial = "",
   options: AskTextOptions = {},
 ): Promise<string | null> {
-  const suggestions = options.suggestions ?? [];
+  const suggest = options.suggest;
   const limit = options.limit ?? 8;
+  const multi = options.multi ?? false;
   return new Promise((resolve) => {
     const root = document.createElement("div");
     root.className = "cmdp-root";
@@ -232,17 +238,26 @@ export function askText(
     box.appendChild(input);
     const list = document.createElement("div");
     list.className = "cmdp-list";
-    if (suggestions.length) box.appendChild(list);
+    if (suggest) box.appendChild(list);
     root.appendChild(box);
 
     // -1 = no row highlighted, i.e. Enter commits whatever is typed.
     let active = -1;
     let shown: string[] = [];
+    // Every read carries its number; a slow earlier answer is dropped, never painted.
+    let issued = 0;
+
+    async function refresh() {
+      if (!suggest) return;
+      const seq = ++issued;
+      const rows = await Promise.resolve(suggest(askTextFragment(input.value))).catch(() => [] as string[]);
+      if (seq !== issued) return;
+      shown = rows.slice(0, limit);
+      if (active >= shown.length) active = shown.length - 1;
+      render();
+    }
 
     function render() {
-      const q = input.value.trim();
-      shown = (q ? fuzzyFilter(q, suggestions, (s) => s) : suggestions).slice(0, limit);
-      if (active >= shown.length) active = shown.length - 1;
       list.replaceChildren();
       shown.forEach((value, i) => {
         const row = document.createElement("div");
@@ -256,9 +271,20 @@ export function askText(
           active = i;
           render();
         };
-        row.onclick = () => close(value);
+        row.onclick = () => pick(value, false);
         list.appendChild(row);
       });
+    }
+
+    /// Take one row: in multi it lands in the input and the prompt stays open
+    /// (`commit` then closes on the whole text), otherwise it is the answer.
+    function pick(value: string, commit: boolean) {
+      if (!multi) return close(value);
+      const head = askTextCommit(input.value);
+      input.value = (head ? `${head}, ` : "") + value + ", ";
+      if (commit) return close(askTextCommit(input.value) || null);
+      active = -1;
+      void refresh();
     }
 
     const close = (val: string | null) => {
@@ -270,13 +296,14 @@ export function askText(
     });
     input.addEventListener("input", () => {
       active = -1;
-      render();
+      void refresh();
     });
     input.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
-        close(active >= 0 ? shown[active] : input.value.trim() || null);
+        if (active >= 0) pick(shown[active], true);
+        else close(askTextCommit(input.value) || null);
       } else if (e.key === "Escape") {
         e.preventDefault();
         close(null);
@@ -290,11 +317,12 @@ export function askText(
         render();
       } else if (e.key === "Tab" && active >= 0) {
         e.preventDefault();
-        input.value = shown[active];
+        if (multi) pick(shown[active], false);
+        else input.value = shown[active];
       }
     });
     document.body.appendChild(root);
-    render();
+    void refresh();
     queueMicrotask(() => {
       input.focus();
       input.select();

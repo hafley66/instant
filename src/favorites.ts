@@ -7,7 +7,7 @@ import { store, type AiMessage, type Fav } from "./state";
 import { addPreviewPanel } from "./reactdock";
 import { registerPlugin } from "./plugin";
 import { FavoritesPanelV2, setFavoritesPanel, type FavTreeRow } from "./tablepanels";
-import { escapeHtml, baseName, flashStatus } from "./core";
+import { escapeHtml, baseName, flashStatus, askText } from "./core";
 import { previewInsts } from "./preview";
 import { tabs, tabMetaById, tabCwds } from "./terminal";
 import { openWorktree, resumeLaunch, sessionsForWorktree } from "./worktrees";
@@ -16,6 +16,10 @@ import { boundSessionFirst, type ResolvedSession } from "./0a_terminalSessionCan
 import type { BoopTurn } from "./0_terminalTurnVisibility";
 import type { BoopFavorite } from "./00a_terminalIntersection";
 import { settings } from "./0_settings";
+
+/// A favorite row as `boop_favorites` sends it today: the shared type predates
+/// the tag column the panel reads.
+type TaggedFavorite = BoopFavorite & { tags?: string[] };
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
@@ -183,17 +187,40 @@ export async function boopCandidateTurns(harness: HarnessId): Promise<BoopTurn[]
 
 export async function favoriteBoopTurn(turn: BoopTurn, note?: string): Promise<void> {
   const wasFavorite = isBoopTurnFav(turn);
-  await invoke<BoopFavorite[]>("boop_favorite_toggle", { turn, note: note ?? "" }).then((favorites) => {
+  const source = `turn:${turn.session}:${turn.turn}`;
+  await invoke<BoopFavorite[]>("boop_favorite_toggle", { turn, note: note ?? "" }).then(async (favorites) => {
     boopFavorites = favorites;
     store.set({ aiFavs: [...store.get().aiFavs] });
+    if (!wasFavorite && note?.trim()) {
+      await applyTags(note, source);
+      // The row the toggle just wrote wears its own id; both sources answer
+      // `boop_tags_for`, so a favorite is findable by turn and by favorite.
+      const written = favorites.find((favorite) => favorite.source === source);
+      if (written) await applyTags(note, `favorite:${written.favorite_id}`);
+    }
     flashStatus(wasFavorite ? "unfavorited Boop turn" : `★ favorited ${turn.role} turn ${turn.turn}`);
   }, (error) => console.error("boop_favorite_toggle", error));
 }
 
-/// Notes already in use, for the prompt's suggestion list. One read per prompt;
-/// a failed read just means the prompt offers nothing.
-export async function noteTags(): Promise<string[]> {
-  return invoke<string[]>("boop_note_tags").catch(() => [] as string[]);
+/// One tag row: the recent list and the search both hand these back.
+export type BoopTag = { tag: string; createdTs: number; lastUsedTs: number; uses: number };
+
+/// The rows a tag prompt offers: the recent five when nothing is typed, a
+/// tag-table search when something is. No message body is read either way.
+export const tagSuggest = (query: string) => query.trim()
+  ? invoke<BoopTag[]>("boop_tags_search", { query, limit: 8 }).then((rows) => rows.map((row) => row.tag)).catch(() => [] as string[])
+  : invoke<BoopTag[]>("boop_tags_recent", { limit: 5 }).then((rows) => rows.map((row) => row.tag)).catch(() => [] as string[]);
+
+/// Ask for tags with the shared prompt; returns the raw text, or null on cancel.
+export function askTags(placeholder: string): Promise<string | null> {
+  return askText(placeholder, "", { suggest: tagSuggest, multi: true });
+}
+
+/// Hang every tag in `note` on one source and hand back the spellings the store
+/// kept. The note text lands wherever its caller stores it; tags are additive.
+export async function applyTags(note: string, source: string): Promise<string[]> {
+  if (!note.trim()) return [];
+  return invoke<string[]>("boop_tags_apply", { note, source }).catch(() => [] as string[]);
 }
 
 export function isBoopTurnFav(turn: Pick<BoopTurn, "session" | "turn">): boolean {
@@ -417,7 +444,9 @@ function favTreeRows(): FavTreeRow[] {
         starredAt: favorite.created_ts * 1000,
         role: "turn",
         preview: favorite.body.replace(/\s+/g, " ").slice(0, 120),
-        note: favorite.note,
+        // An untyped favorite still reads as its tags, which is what the panel
+        // filter searches; `boop_favorites` fills them per row.
+        note: favorite.note || (favorite as TaggedFavorite).tags?.join(", ") || undefined,
         boopFav: favorite,
       })),
     });

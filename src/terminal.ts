@@ -34,7 +34,6 @@ import {
   showError,
   sanitizePaste,
   escapeHtml,
-  askText,
   THEMES,
   termFontFamily,
 } from "./core";
@@ -73,7 +72,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, noteTags, sessionsForTab, warmTurns } from "./favorites";
+import { applyTags, askTags, boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns } from "./favorites";
 import {
   selectProjectionTurns,
   TerminalTurnVisibilityV2,
@@ -1343,12 +1342,12 @@ function selectionRows(tab: Tab): readonly [number, number] {
     : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
 }
 
-/// Select text, right-click, pick a preset: the comment row the fork verb keys
-/// off is written here, sent, and forked in one step the reader never sees.
-export async function forkSelection(id: string, preset: string, note?: string) {
+/// Store the live selection as a comment row and hand back its id. The fork
+/// verb and the tag row both key off that row, so both walk this path.
+export async function commentForSelection(id: string, note?: string): Promise<number | null> {
   const tab = tabs.get(id);
   const text = termSelectionText(id);
-  if (!tab?.contextQueue || !tab.contextSync || !text) return;
+  if (!tab?.contextQueue || !tab.contextSync || !text) return null;
   const rows = selectionRows(tab);
   const snapshot = tab.contextQueue.snapshotFor(text, rows[0], rows[1]);
   tab.pinnedSelection?.clear();
@@ -1361,11 +1360,20 @@ export async function forkSelection(id: string, preset: string, note?: string) {
     enabled: true,
     note: note?.trim() || undefined,
   };
-  const commentId = await tab.contextSync.sendSelection(item);
+  return (await tab.contextSync.sendSelection(item)) || null;
+}
+
+/// Select text, right-click, pick a preset: the comment row the fork verb keys
+/// off is written here, sent, and forked in one step the reader never sees.
+export async function forkSelection(id: string, preset: string, note?: string) {
+  const tab = tabs.get(id);
+  if (!tab?.contextQueue || !tab.contextSync || !termSelectionText(id)) return;
+  const commentId = await commentForSelection(id, note);
   if (!commentId) {
     flashStatus("fork: the selection did not store");
     return;
   }
+  if (note?.trim()) void applyTags(note, `comment:${commentId}`);
   forkRender.lastPreset.$(preset);
   const out = await clickRpc.runClick({
     command: forkCommand(commentId, preset),
@@ -1375,12 +1383,10 @@ export async function forkSelection(id: string, preset: string, note?: string) {
   tab.contextSync.activate();
 }
 
-/// Ask for the note with askText("ask for the fork lane"), then fork. Esc or
-/// empty forks with no note (today's behaviour), never cancels the fork.
+/// Ask for the note with the shared tag prompt, then fork. Esc or empty forks
+/// with no note (today's behaviour), never cancels the fork.
 export async function forkSelectionWithNote(id: string, preset: string): Promise<void> {
-  const note = await askText(`fork -> ${preset}: what should the lane do?`, "", {
-    suggestions: await noteTags(),
-  });
+  const note = await askTags(`fork -> ${preset}: what should the lane do?`);
   await forkSelection(id, preset, note ?? undefined);
 }
 

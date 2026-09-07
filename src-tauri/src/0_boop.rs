@@ -53,6 +53,32 @@ pub struct BoopFavorite {
     created_ts: i64,
     bytes: i64,
     body: String,
+    /// The tags hanging on this row, filled by `read_favorites`; the favorites
+    /// query knows nothing about them, so the read defaults them to empty.
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// One tag row as a prompt reads it: the spelling plus the counters the recent
+/// list orders on.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoopTag {
+    pub tag: String,
+    pub created_ts: i64,
+    pub last_used_ts: i64,
+    pub uses: i64,
+}
+
+impl From<boop_store::Tag> for BoopTag {
+    fn from(row: boop_store::Tag) -> Self {
+        BoopTag {
+            tag: row.tag,
+            created_ts: row.created_ts,
+            last_used_ts: row.last_used_ts,
+            uses: row.uses,
+        }
+    }
 }
 
 fn boop_db_path() -> Result<PathBuf, String> {
@@ -764,9 +790,28 @@ fn read_favorites() -> Result<Vec<BoopFavorite>, String> {
     let rows = store
         .query_favorites(None)
         .map_err(|error| error.to_string())?;
-    rows.into_iter()
+    let mut favorites: Vec<BoopFavorite> = rows
+        .into_iter()
         .map(|row| serde_json::from_value(row).map_err(|error| error.to_string()))
-        .collect()
+        .collect::<Result<_, String>>()?;
+    // Two reads a row (118 rows today): a favorite wears tags under its own id
+    // from the backfill and under the turn it came from when the prompt applied
+    // them, and the panel wants both.
+    for favorite in favorites.iter_mut() {
+        let mut tags = store
+            .tags_for(&format!("favorite:{}", favorite.favorite_id))
+            .map_err(|error| error.to_string())?;
+        for tag in store
+            .tags_for(&favorite.source)
+            .map_err(|error| error.to_string())?
+        {
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        favorite.tags = tags;
+    }
+    Ok(favorites)
 }
 
 fn remove_favorite_source(source: &str) -> Result<(), String> {
@@ -810,35 +855,60 @@ pub async fn boop_favorite_toggle(turn: BoopTurn, note: Option<String>) -> Resul
     .map_err(|error| error.to_string())?
 }
 
-fn read_note_tags() -> Result<Vec<String>, String> {
-    let store = open_store_ro()?;
-    let mut statement = store
-        .connection()
-        .prepare(
-            "SELECT note, MAX(ts) FROM (
-               SELECT note, created_ts AS ts FROM agent_favorite
-                WHERE note IS NOT NULL AND note != ''
-               UNION ALL
-               SELECT note, updated_ts AS ts FROM agent_turn_comment
-                WHERE note IS NOT NULL AND note != ''
-             ) GROUP BY note ORDER BY 2 DESC",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+/// The tags a prompt offers when nothing is typed: most recently used first,
+/// five of them unless the caller asks for more.
+#[tauri::command]
+pub async fn boop_tags_recent(limit: Option<usize>) -> Result<Vec<BoopTag>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_ro()?;
+        let rows = store
+            .tags_recent(limit.unwrap_or(5))
+            .map_err(|error| error.to_string())?;
+        Ok(rows.into_iter().map(BoopTag::from).collect())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
-/// Every distinct non-empty note across favorites and turn comments, most
-/// recently used first. The note prompt offers these back as tags, so the same
-/// word gets typed once and picked thereafter.
+/// The tag column and nothing else. No note body and no message is read here,
+/// so typing into the prompt never walks a transcript.
 #[tauri::command]
-pub async fn boop_note_tags() -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(read_note_tags)
-        .await
-        .map_err(|error| error.to_string())?
+pub async fn boop_tags_search(query: String, limit: Option<usize>) -> Result<Vec<BoopTag>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_ro()?;
+        let rows = store
+            .tags_search(&query, limit.unwrap_or(20))
+            .map_err(|error| error.to_string())?;
+        Ok(rows.into_iter().map(BoopTag::from).collect())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Every tag in `note`, hung on one source, returned in the spelling the store
+/// keeps. The note text itself is stored by whoever asked for it; this is
+/// additive.
+#[tauri::command]
+pub async fn boop_tags_apply(note: String, source: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_rw()?;
+        store
+            .tags_apply_note(&note, &source, now_ms() as i64)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// The tags one source carries, oldest link first.
+#[tauri::command]
+pub async fn boop_tags_for(source: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store_ro()?;
+        store.tags_for(&source).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// One rendered row range, already joined across wrapped screen lines by the

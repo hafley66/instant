@@ -9,17 +9,18 @@ import { type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
-import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, askText } from "./core";
+import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, flashStatus } from "./core";
 
 export { askText } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
+import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, commentForSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
+  applyTags,
+  askTags,
   favoriteBoopTurn,
   isBoopTurnFav,
-  noteTags,
 } from "./favorites";
 import { inScope, toggleScope } from "./sprefa";
 import { openTabAtPwd } from "./tabs";
@@ -263,6 +264,29 @@ export const setLastCtxPoint = (x: number, y: number) => {
   lastCtxY = y;
 };
 
+/// Ask for tags and hang them on one source. The toast names what stuck, so a
+/// misspelling shows up as a tag nobody else wears.
+async function tagSource(source: string, placeholder: string): Promise<void> {
+  const note = await askTags(placeholder);
+  if (!note) return;
+  const applied = await applyTags(note, source);
+  flashStatus(applied.length ? `tagged ${applied.join(", ")}` : "no tag in that text");
+}
+
+/// Tag the live selection: it is stored as the same comment row the fork verb
+/// keys off, and the tags hang on that row.
+async function tagSelection(id: string): Promise<void> {
+  const note = await askTags("tags for this selection");
+  if (!note) return;
+  const commentId = await commentForSelection(id);
+  if (!commentId) {
+    flashStatus("tag: the selection did not store");
+    return;
+  }
+  const applied = await applyTags(note, `comment:${commentId}`);
+  flashStatus(applied.length ? `tagged ${applied.join(", ")}` : "no tag in that text");
+}
+
 // Contextual right-click items, keyed off what the click landed on. Row data is
 // recovered from the row's title attr (file rows carry the path, activity rows
 // the shot/url/text), so no per-row wiring is needed.
@@ -342,11 +366,13 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
         label: `${isBoopTurnFav(projectedTurn) ? "✓" : "★"} ${preview.slice(0, 60)}${preview.length > 60 ? "…" : ""}`,
         action: async () => {
           if (isBoopTurnFav(projectedTurn)) return void favoriteBoopTurn(projectedTurn);
-          const note = await askText("note or tag for this favorite", "", {
-            suggestions: await noteTags(),
-          });
+          const note = await askTags("note or tag for this favorite");
           void favoriteBoopTurn(projectedTurn, note ?? "");
         },
+      });
+      turnItems.push({
+        label: "Tag this turn…",
+        action: () => void tagSource(`turn:${projectedTurn.session}:${projectedTurn.turn}`, "tags for this turn"),
       });
       turnItems.push({ sep: true });
     } else if (meta) {
@@ -382,6 +408,10 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
         {
           label: "Copy selection",
           action: () => copy(termSelectionText(id)),
+        } satisfies CtxItem,
+        {
+          label: "Tag selection…",
+          action: () => void tagSelection(id),
         } satisfies CtxItem,
         // Forking takes the selection straight to a lane: the comment row the
         // fork verb keys off is written for the reader, never asked for.

@@ -4,10 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runClick = vi.fn<(args: { command: string; cwd: string }) => Promise<string>>();
 const sendSelection = vi.fn<(item: { note?: string }) => Promise<number>>();
 const askText = vi.fn<(placeholder: string) => Promise<string | null>>();
+const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>();
 const flashed: string[] = [];
 
 vi.mock("./ipc/contract", () => ({ clickRpc: { runClick: (a: never) => runClick(a) } }));
-vi.mock("./generated/native", () => ({ commands: { boop: {} }, invoke: vi.fn() }));
+vi.mock("./generated/native", () => ({ commands: { boop: {} }, invoke: (c: string, a?: unknown) => invoke(c, a) }));
 vi.mock("./state", () => ({ store: { get: () => ({ sessions: [], aiFavs: [] }), set: vi.fn() }, SAFE_BOOT: false }));
 vi.mock("./0_settings", () => ({
   settings: {
@@ -26,7 +27,6 @@ vi.mock("./core", () => ({
   showError: vi.fn(),
   sanitizePaste: (s: string) => s,
   escapeHtml: (s: string) => s,
-  askText: (p: string) => askText(p),
   THEMES: {},
   termFontFamily: () => "",
 }));
@@ -60,7 +60,11 @@ vi.mock("./overlay", () => ({ nudgeZoom: vi.fn(), resetZoom: vi.fn() }));
 vi.mock("./inlinePreview", () => ({ inlineSnippetHtml: vi.fn() }));
 vi.mock("./preview", () => ({ openPreviewPanel: vi.fn() }));
 vi.mock("./browser", () => ({ browserTabs: {} }));
-vi.mock("./favorites", () => ({ boopCandidateTurns: vi.fn(), boopTurnsForSession: vi.fn(), boopTurnsForTab: vi.fn(), invalidateBoopTurns: vi.fn(), noteTags: vi.fn(async () => []), sessionsForTab: vi.fn(), warmTurns: vi.fn() }));
+vi.mock("./favorites", () => ({
+  applyTags: (note: string, source: string) => invoke("boop_tags_apply", { note, source }),
+  askTags: (p: string) => askText(p),
+  boopCandidateTurns: vi.fn(), boopTurnsForSession: vi.fn(), boopTurnsForTab: vi.fn(), invalidateBoopTurns: vi.fn(), sessionsForTab: vi.fn(), warmTurns: vi.fn(),
+}));
 vi.mock("./0_terminalTurnVisibility", () => ({ selectProjectionTurns: vi.fn(), TerminalTurnVisibilityV2: class {} }));
 vi.mock("./00a_terminalIntersection", () => ({ NativeTmuxPane: class {}, XtermViewportAdapter: class {} }));
 vi.mock("./0_clickRouter", () => ({ CmdClickGestureTracker: class {} }));
@@ -97,6 +101,8 @@ beforeEach(() => {
   runClick.mockReset();
   sendSelection.mockReset();
   askText.mockReset();
+  invoke.mockReset();
+  invoke.mockResolvedValue([]);
   runClick.mockResolvedValue("forked comment 47 -> lane fork-comment-47");
   sendSelection.mockResolvedValue(47);
   askText.mockResolvedValue(null);
@@ -114,6 +120,18 @@ describe("forkSelection", () => {
   it("leaves the note undefined when none is given", async () => {
     await forkSelection("t1", "flash4");
     expect((sendSelection.mock.calls[0]![0] as { note?: string }).note).toBeUndefined();
+  });
+
+  it("hangs the note's tags on the stored comment", async () => {
+    await forkSelection("t1", "flash4", "perf, rust");
+    expect(invoke.mock.calls.filter(([cmd]) => cmd === "boop_tags_apply")).toEqual([
+      ["boop_tags_apply", { note: "perf, rust", source: "comment:47" }],
+    ]);
+  });
+
+  it("applies no tags when no note is given", async () => {
+    await forkSelection("t1", "flash4");
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "boop_tags_apply")).toBe(false);
   });
 });
 
