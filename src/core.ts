@@ -194,3 +194,45 @@ export function showError(label: string, err: unknown) {
   el.querySelector("pre")!.textContent = `[${label}] ${msg}`;
   console.error(label, err);
 }
+
+// Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
+// so reuse the command-palette overlay styling for a real input. Resolves to the
+// trimmed value, or null on Esc / backdrop click / empty.
+export function askText(placeholder: string, initial = ""): Promise<string | null> {
+  return new Promise((resolve) => {
+    const root = document.createElement("div");
+    root.className = "cmdp-root";
+    const box = document.createElement("div");
+    box.className = "cmdp-box";
+    const input = document.createElement("input");
+    input.className = "cmdp-input";
+    input.type = "text";
+    input.placeholder = placeholder;
+    input.value = initial;
+    input.spellcheck = false;
+    box.appendChild(input);
+    root.appendChild(box);
+    const close = (val: string | null) => {
+      root.remove();
+      resolve(val);
+    };
+    root.addEventListener("pointerdown", (e) => {
+      if (e.target === root) close(null);
+    });
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        close(input.value.trim() || null);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        close(null);
+      }
+    });
+    document.body.appendChild(root);
+    queueMicrotask(() => {
+      input.focus();
+      input.select();
+    });
+  });
+}

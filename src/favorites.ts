@@ -181,9 +181,9 @@ export async function boopCandidateTurns(harness: HarnessId): Promise<BoopTurn[]
   return read;
 }
 
-export async function favoriteBoopTurn(turn: BoopTurn): Promise<void> {
+export async function favoriteBoopTurn(turn: BoopTurn, note?: string): Promise<void> {
   const wasFavorite = isBoopTurnFav(turn);
-  await invoke<BoopFavorite[]>("boop_favorite_toggle", { turn }).then((favorites) => {
+  await invoke<BoopFavorite[]>("boop_favorite_toggle", { turn, note: note ?? "" }).then((favorites) => {
     boopFavorites = favorites;
     store.set({ aiFavs: [...store.get().aiFavs] });
     flashStatus(wasFavorite ? "unfavorited Boop turn" : `★ favorited ${turn.role} turn ${turn.turn}`);

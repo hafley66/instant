@@ -744,7 +744,7 @@ pub async fn boop_turn_comments_sent(client_ids: Vec<String>) -> Result<(), Stri
     .map_err(|error| error.to_string())?
 }
 
-fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
+fn add_favorite(turn: &BoopTurn, note: &str) -> Result<(), String> {
     let store = open_store_rw()?;
     let source = format!("turn:{}:{}", turn.session, turn.turn);
     let now = std::time::SystemTime::now()
@@ -754,7 +754,7 @@ fn add_favorite(turn: &BoopTurn) -> Result<(), String> {
     store
         // `BoopFavorite` reads `note` as a plain String, so `None` would write
         // a NULL that fails to deserialize back.
-        .favorite_add(&turn.said, Some(""), &source, now)
+        .favorite_add(&turn.said, Some(note), &source, now)
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -780,7 +780,7 @@ fn remove_favorite_source(source: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn boop_favorite_add(turn: BoopTurn) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || add_favorite(&turn))
+    tauri::async_runtime::spawn_blocking(move || add_favorite(&turn, ""))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -793,7 +793,7 @@ pub async fn boop_favorites() -> Result<Vec<BoopFavorite>, String> {
 }
 
 #[tauri::command]
-pub async fn boop_favorite_toggle(turn: BoopTurn) -> Result<Vec<BoopFavorite>, String> {
+pub async fn boop_favorite_toggle(turn: BoopTurn, note: Option<String>) -> Result<Vec<BoopFavorite>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let source = format!("turn:{}:{}", turn.session, turn.turn);
         if read_favorites()?
@@ -802,7 +802,7 @@ pub async fn boop_favorite_toggle(turn: BoopTurn) -> Result<Vec<BoopFavorite>, S
         {
             remove_favorite_source(&source)?;
         } else {
-            add_favorite(&turn)?;
+            add_favorite(&turn, note.as_deref().unwrap_or(""))?;
         }
         read_favorites()
     })
