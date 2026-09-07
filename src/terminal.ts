@@ -18,7 +18,7 @@ import { TerminalContextSync } from "./1b_terminalContextSync";
 import { TerminalHoverCheck } from "./1c_terminalHoverCheck";
 import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
 import { FORK_PRESET } from "./1e_terminalForkMarks";
-import { forkCommand, forkMenuTargets, forkSpawnStatus, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
+import { forkCommand, forkMenuTargets, forkedLane, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
 import { forkRender } from "./0_forkRenderSettings";
 import { currentForkPreset, forkPresetStore, forkPresets, presetGroups } from "./1g_forkPresetMenu";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
@@ -147,8 +147,30 @@ export function syncTurnDebugOverlays() {
 /// The fork verb runs in the tab's cwd, so the lane branches from the repo the
 /// pane stands in; the re-pull paints it on the next gutter tick.
 async function runFork(commentId: number, cwd: string, sync: TerminalContextSync) {
-  await clickRpc.runClick({ command: forkCommand(commentId, FORK_PRESET), cwd }).catch(() => "");
+  await spawnFork(commentId, FORK_PRESET, cwd);
   sync.activate();
+}
+
+/// One fork spawn, reported as it went: the lane name on success, the boop
+/// error (exit code, stderr) in the error panel on failure. Returns the lane
+/// name, or null when nothing spawned.
+export async function spawnFork(commentId: number, preset: string, cwd: string): Promise<string | null> {
+  let out = "";
+  try {
+    out = await clickRpc.runClick({ command: forkCommand(commentId, preset), cwd });
+  } catch (e) {
+    showError(`fork comment ${commentId} (${preset}) in ${cwd || "~"}`, e);
+    flashStatus(`fork failed: ${String(e).split("\n")[0]}`);
+    return null;
+  }
+  const lane = forkedLane(out);
+  if (!lane) {
+    showError(`fork comment ${commentId} (${preset}) in ${cwd || "~"}`, out.trim() || "boop printed nothing");
+    flashStatus(`fork failed: no lane in boop's answer`);
+    return null;
+  }
+  flashStatus(`${lane} spawned, ${preset}`);
+  return lane;
 }
 const inspectorTextCache = new Map<string, string>();
 
@@ -1375,11 +1397,7 @@ export async function forkSelection(id: string, preset: string, note?: string) {
   }
   if (note?.trim()) void applyTags(note, `comment:${commentId}`);
   forkRender.lastPreset.$(preset);
-  const out = await clickRpc.runClick({
-    command: forkCommand(commentId, preset),
-    cwd: tabMetaById(id)?.cwd ?? "",
-  }).catch(() => "");
-  flashStatus(forkSpawnStatus(commentId, preset, out));
+  await spawnFork(commentId, preset, tabMetaById(id)?.cwd ?? "");
   tab.contextSync.activate();
 }
 

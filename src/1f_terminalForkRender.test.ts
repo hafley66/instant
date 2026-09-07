@@ -13,7 +13,7 @@ import {
   forkBodyLines,
   forkCommand,
   forkHeaderText,
-  forkSpawnStatus,
+  forkedLane,
   selectionClientId,
   FORK_PRESETS,
   forkKey,
@@ -183,10 +183,10 @@ describe("the fork trigger", () => {
     expect(first.startsWith("fork-selection:")).toBe(true);
   });
 
-  it("names the lane the fork verb printed, and predicts it when it printed none", () => {
-    expect(forkSpawnStatus(47, "flash4", "brief /x.md\nforked comment 47 -> lane fork-comment-47\n"))
-      .toBe("fork-comment-47 spawned, flash4");
-    expect(forkSpawnStatus(47, "pro4", "")).toBe("fork-comment-47 spawned, pro4");
+  it("names the lane the fork verb printed, and null when it printed none", () => {
+    expect(forkedLane("brief /x.md\nforked comment 47 -> lane fork-comment-47\n")).toBe("fork-comment-47");
+    expect(forkedLane("")).toBeNull();
+    expect(forkedLane("Error: no git repo at /Users/x; pass --cwd <repo>")).toBeNull();
   });
 
   it("offers one target per stored comment, labelled by its note", () => {

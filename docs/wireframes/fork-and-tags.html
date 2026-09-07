@@ -1,0 +1,91 @@
+<!doctype html><meta charset="utf-8"><title>fork + tags flow</title>
+<style>
+body{font:13px/1.4 ui-monospace,monospace;margin:20px;max-width:960px;color:#111}
+h2{font-size:14px;margin:24px 0 6px}
+.row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.box{border:1px solid #333;padding:8px;min-width:170px;white-space:pre}
+.arrow{align-self:center}
+.bad{border-color:#c00;background:#fff3f3}
+.ok{border-color:#080;background:#f3fff3}
+table{border-collapse:collapse;margin-top:6px}td,th{border:1px solid #999;padding:3px 8px;text-align:left}
+small{color:#666}
+</style>
+
+<h2>1. what the tags-ui lane built (instant 02d10ff)</h2>
+<div class="row">
+<div class="box">right-click a turn
+─────────────────
+ ★ favorite
+ Tag this turn…      ← new
+ Fork ▸  flash4
+        pro4
+        opus</div>
+<div class="arrow">→</div>
+<div class="box">askTags prompt (one prompt for all four rows)
+┌──────────────────────────────┐
+│ fork -> flash4: what should  │
+│ the lane do?                 │
+│ > hmm▌                       │
+│  recent: dbsp, soopy, boop   │  ← 5 recent, then search
+│  Tab = add tag, Enter = go   │
+│  Esc = fork with no note     │
+└──────────────────────────────┘</div>
+</div>
+<div class="row" style="margin-top:8px">
+<div class="box">right-click a selection
+─────────────────
+ Copy selection
+ Tag selection…      ← new
+ Fork ▸ …</div>
+<div class="arrow">→</div>
+<div class="box">same askTags prompt</div>
+</div>
+<small>who uses the prompt: ★ favorite, Tag this turn…, Tag selection…, Fork ▸ preset. Same box, same recent-five, same multi-tag typing.</small>
+
+<h2>2. fork flow, and where yours died</h2>
+<div class="row">
+<div class="box ok">select text
+right-click
+Fork ▸ flash4</div><div class="arrow">→</div>
+<div class="box ok">askTags
+type "hmm"
+Enter</div><div class="arrow">→</div>
+<div class="box ok">comment row stored
+agent_turn_comment #59
+tab sprefa-7</div><div class="arrow">→</div>
+<div class="box bad">run_click
+cwd = tab cwd
+= ~/projects  (no .git)
+boop beep fork 59
+→ rc=1
+"no git repo at ~/projects"
+stderr dropped</div><div class="arrow">→</div>
+<div class="box bad">flash: "fork-comment-59
+spawned, flash4"
+(lie: stdout was empty)</div>
+</div>
+
+<h2>3. what should have happened (fork 58 and 59 spawned by hand from a repo)</h2>
+<div class="row">
+<div class="box ok">boop beep fork 59
+--preset flash4
+cwd instant</div><div class="arrow">→</div>
+<div class="box ok">worktree
+instant/.boop-worktrees/fork/comment-59
+branch fork/comment-59</div><div class="arrow">→</div>
+<div class="box ok">tmux fork-comment-59
+opencode flash4
+brief = quote + "hmm"</div><div class="arrow">→</div>
+<div class="box ok">on exit: hail to parent
+boop beep fork join 59
+boop beep fork diff 59</div>
+</div>
+
+<h2>4. defects</h2>
+<table>
+<tr><th>where</th><th>defect</th></tr>
+<tr><td>src/terminal.ts forkSelection</td><td>runClick().catch(() =&gt; "") then flash "spawned" regardless of rc or stdout</td></tr>
+<tr><td>src-tauri/src/lib.rs run_click_blocking</td><td>returns stdout only; exit status and stderr discarded</td></tr>
+<tr><td>src/terminal.ts forkSelection</td><td>cwd is the tab's cwd, no fallback to a repo; boop refuses non-repo cwd</td></tr>
+<tr><td>running app</td><td>tauri dev backend built 16:48, frontend HMR'd to 02d10ff; boop_tags_* commands absent until rebuild</td></tr>
+</table>

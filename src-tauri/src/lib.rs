@@ -692,6 +692,14 @@ fn run_click_blocking(command: String, cwd: String) -> Result<String, String> {
         s.truncate(CAP);
         s.push_str("\n… (truncated)");
     }
+    // A failed command is an error the caller sees, never an empty success:
+    // the exit code and the tail of stderr ride in the message.
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = stderr.lines().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
+        let code = out.status.code().map_or("signal".to_string(), |c| c.to_string());
+        return Err(format!("exit {code}: {}\n{}", tail.join("\n").trim(), s.trim()).trim().to_string());
+    }
     Ok(s)
 }
 

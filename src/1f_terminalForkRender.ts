@@ -148,9 +148,11 @@ export function selectionClientId(tabName: string, text: string, turnIds: string
 
 /// `boop beep fork` prints `forked comment 47 -> lane fork-comment-47`; the
 /// toast names the lane it printed, or the one the branch rule predicts.
-export function forkSpawnStatus(commentId: number, preset: string, stdout: string): string {
+/// The lane `boop beep fork` names in its last line, `forked comment N -> lane X`;
+/// null when the output carries no such line, which is a failed spawn.
+export function forkedLane(stdout: string): string | null {
   const named = /->\s*lane\s+(\S+)/.exec(stdout);
-  return `${named ? named[1] : `fork-comment-${commentId}`} spawned, ${preset}`;
+  return named ? named[1] : null;
 }
 
 export type ForkTarget = { commentId: number; label: string };
