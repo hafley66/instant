@@ -113,6 +113,7 @@ export type BoopFavorite = {
   created_ts: number;
   bytes: number;
   body: string;
+  tags?: string[];
 };
 
 export interface BoopConversation<TTurn> {

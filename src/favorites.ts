@@ -19,7 +19,6 @@ import { settings } from "./0_settings";
 
 /// A favorite row as `boop_favorites` sends it today: the shared type predates
 /// the tag column the panel reads.
-type TaggedFavorite = BoopFavorite & { tags?: string[] };
 
 // cwd keys the harness session lookup and the claude ledger path; the launch
 // command's first token hints the agent (but we don't require it — a folder can
@@ -446,7 +445,7 @@ function favTreeRows(): FavTreeRow[] {
         preview: favorite.body.replace(/\s+/g, " ").slice(0, 120),
         // An untyped favorite still reads as its tags, which is what the panel
         // filter searches; `boop_favorites` fills them per row.
-        note: favorite.note || (favorite as TaggedFavorite).tags?.join(", ") || undefined,
+        note: favorite.note || favorite.tags?.join(", ") || undefined,
         boopFav: favorite,
       })),
     });
