@@ -11,6 +11,7 @@ import {
   navGroupOf,
   levelRows,
   navMenuModel,
+  nav_viewport_margin,
   NAV_MENU_CSS,
   orderedGroups,
   placeMenu,
@@ -205,13 +206,13 @@ describe("the injected css", () => {
     expect(rule).toContain("background: var(--panel-bg)");
   });
 
-  it("lets a capped level scroll its own rows, padding and frame inside the cap", () => {
-    const rules = NAV_MENU_CSS.split("\n").filter((line) => line.startsWith(".ctx-menu"));
+  it("caps every level at the viewport and scrolls it one way only", () => {
     expect(NAV_MENU_CSS).not.toContain("overflow: visible");
-    expect(rules).toHaveLength(2);
-    for (const rule of rules) {
-      expect(rule).toContain("overflow: auto");
-      expect(rule).toContain("box-sizing: border-box");
-    }
+    expect(NAV_MENU_CSS).toContain(`max-height: calc(100vh - ${2 * nav_viewport_margin}px)`);
+    expect(NAV_MENU_CSS).toContain("max-height: calc(100vh - 16px)");
+    expect(NAV_MENU_CSS).toContain("box-sizing: border-box");
+    expect(NAV_MENU_CSS).toContain("overflow-y: auto");
+    expect(NAV_MENU_CSS).toContain("overflow-x: hidden");
+    expect(NAV_MENU_CSS).toContain("scrollbar-gutter: stable");
   });
 });
