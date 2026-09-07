@@ -113,15 +113,21 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
     }
   }, []);
 
+  /// What the level measures at. A hover only restyles a row, so it must not
+  /// re-run the hide-measure-place dance: the placed level would jump under it.
+  const measuredAt = `${level.ownerId ?? ""}|${level.rows.length}|`
+    + level.rows.map((row) => row.kind === "search" ? row.query : "").join("");
+
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
     element.style.visibility = "hidden";
     element.style.left = "0px";
     element.style.top = "0px";
+    element.style.maxHeight = "";
     const rect = level.depth === 0 ? null : ownerRect(level.depth, level.ownerId);
     const size = element.getBoundingClientRect();
-    const { left, top } = placeMenu(
+    const { left, top, maxHeight } = placeMenu(
       size,
       { x: rect?.right ?? x, y: rect?.top ?? y },
       { width: window.innerWidth, height: window.innerHeight },
@@ -129,8 +135,9 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
     );
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
+    element.style.maxHeight = maxHeight === null ? "" : `${maxHeight}px`;
     element.style.visibility = "visible";
-  });
+  }, [measuredAt, level.depth, x, y]);
 
   return (
     <div

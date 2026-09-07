@@ -472,31 +472,39 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
   };
 }
 
-/// Where a menu box lands: at the point, flipped away from the right or the
-/// bottom edge. `flipTo` is the owner's right edge, so a submenu that overflows
-/// right lands with its own right edge on the owner's right edge, overlaying the
-/// parent instead of sitting to its left. Overlaying keeps the submenu (a
-/// top-layer popover) under the pointer, so crossing the parent's rows does not
-/// yank the hover away.
+/// Breathing room kept between a level and every viewport edge.
+export const nav_viewport_margin = 8;
+
+/// `maxHeight` is null while the level fits; a taller one is capped and scrolls
+/// its own rows.
+export type Placement = { left: number; top: number; maxHeight: number | null };
+
+/// Slides up only as far as it must, so a submenu stays beside its owner row;
+/// overflowing right it lands its right edge on `flipTo`, the owner's right edge.
 export function placeMenu(
   size: { width: number; height: number },
   point: { x: number; y: number },
   viewport: { width: number; height: number },
   flipTo?: number,
-): { left: number; top: number } {
+  margin = nav_viewport_margin,
+): Placement {
+  const room = viewport.height - 2 * margin;
+  const maxHeight = size.height > room ? room : null;
+  const height = maxHeight ?? size.height;
   return {
     left: point.x + size.width > viewport.width
       ? Math.max(0, (flipTo ?? point.x) - size.width)
       : point.x,
-    top: point.y + size.height > viewport.height ? Math.max(0, point.y - size.height) : point.y,
+    top: Math.max(margin, Math.min(point.y, viewport.height - margin - height)),
+    maxHeight,
   };
 }
 
 /// The module's own structural rules, injected once. Colours and the frame
 /// stay with the host's skin; nothing here names a palette.
 export const NAV_MENU_CSS = `
-.ctx-menu { position: fixed; }
-.ctx-menu[popover] { margin: 0; inset: auto; overflow: visible; }
+.ctx-menu { position: fixed; overflow: auto; }
+.ctx-menu[popover] { margin: 0; inset: auto; overflow: auto; }
 .ctx-item { display: flex; align-items: baseline; gap: 8px; }
 .ctx-label { flex: 1; }
 .ctx-subtext { opacity: .6; font-size: 12px; }
@@ -511,7 +519,8 @@ export const NAV_MENU_CSS = `
   cursor: default;
 }
 .ctx-dragging { opacity: .6; }
-.ctx-search { padding: 3px 4px 5px; }
+/* Sticky: a capped level scrolls its rows and the query stays typeable. */
+.ctx-search { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); padding: 3px 4px 5px; }
 .ctx-search-input { width: 100%; padding: 8px 10px; color: inherit; font: inherit; box-sizing: border-box; }
 .ctx-star {
   padding: 0 10px;

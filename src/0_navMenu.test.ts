@@ -11,6 +11,7 @@ import {
   navGroupOf,
   levelRows,
   navMenuModel,
+  NAV_MENU_CSS,
   orderedGroups,
   placeMenu,
   toggleFavorite,
@@ -71,15 +72,32 @@ describe("placeMenu", () => {
   const viewport = { width: 1000, height: 1000 };
 
   it("stays at the point when the menu fits right", () => {
-    expect(placeMenu(size, { x: 0, y: 0 }, viewport, 50)).toEqual({ left: 0, top: 0 });
+    expect(placeMenu(size, { x: 0, y: 0 }, viewport, 50)).toEqual({ left: 0, top: 8, maxHeight: null });
   });
 
   it("puts its right edge on the owner's right edge when it overflows right", () => {
-    expect(placeMenu(size, { x: 950, y: 0 }, viewport, 960)).toEqual({ left: 860, top: 0 });
+    expect(placeMenu(size, { x: 950, y: 0 }, viewport, 960)).toEqual({ left: 860, top: 8, maxHeight: null });
   });
 
   it("clamps to zero instead of going negative", () => {
-    expect(placeMenu(size, { x: 950, y: 0 }, viewport, 40)).toEqual({ left: 0, top: 0 });
+    expect(placeMenu(size, { x: 950, y: 0 }, viewport, 40)).toEqual({ left: 0, top: 8, maxHeight: null });
+  });
+
+  const tall = { width: 100, height: 600 };
+  const screen = { width: 1000, height: 800 };
+
+  it("stays at the point when the menu fits below it", () => {
+    expect(placeMenu({ width: 100, height: 200 }, { x: 0, y: 100 }, screen))
+      .toEqual({ left: 0, top: 100, maxHeight: null });
+  });
+
+  it("slides up only as far as it must instead of flipping over the point", () => {
+    expect(placeMenu(tall, { x: 0, y: 500 }, screen)).toEqual({ left: 0, top: 192, maxHeight: null });
+  });
+
+  it("caps a menu taller than the viewport so its rows scroll inside it", () => {
+    expect(placeMenu({ width: 100, height: 1200 }, { x: 0, y: 500 }, screen))
+      .toEqual({ left: 0, top: 8, maxHeight: 784 });
   });
 });
 
@@ -176,5 +194,19 @@ describe("the model, with no DOM at all", () => {
     model.moveFocus(1);
     model.activate();
     expect(ran).toEqual(["a:false"]);
+  });
+});
+
+describe("the injected css", () => {
+  it("holds the search row still while a capped level scrolls under it", () => {
+    const rule = NAV_MENU_CSS.split("\n").find((line) => line.startsWith(".ctx-search {"))!;
+    expect(rule).toContain("position: sticky");
+    expect(rule).toContain("top: 0");
+    expect(rule).toContain("background: var(--panel-bg)");
+  });
+
+  it("lets a capped level scroll rather than spill its rows", () => {
+    expect(NAV_MENU_CSS).not.toContain("overflow: visible");
+    expect(NAV_MENU_CSS).toContain(".ctx-menu { position: fixed; overflow: auto; }");
   });
 });
