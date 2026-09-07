@@ -27,7 +27,8 @@ import { renderD2 } from "@hafley66/md";
 import { resolveD2Preview } from "./0_d2Preview";
 import { browserFileUrl } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
-import { openExternalUrl } from "./0_openExternal";
+import { openExternal, openExternalUrl } from "./0_openExternal";
+import { isKnownInstantKind, opensExternally } from "./0_externalKinds";
 import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
 import { shareReplay, type Subscription } from "rxjs";
 import { visibleFileWatch$ } from "./0_visibleFileWatch";
@@ -69,6 +70,17 @@ export function openPreviewPanel(
   renderPathInto(inst.el, path, line);
 }
 
+// read_text is the only file-read command (ipc/commands.json) and has no
+// byte-range form, so the NUL scan reads the head of the decoded text.
+async function looksBinary(path: string): Promise<boolean> {
+  try {
+    const text = await invoke<string>("read_text", { path });
+    return text.slice(0, 512).includes("\0");
+  } catch {
+    return false; // unreadable: fall through to the in-app routes
+  }
+}
+
 export async function openPathInInstant(path: string, line?: number): Promise<void> {
   const extension = path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
   // Command-click resolution has already located relative files. An
@@ -76,6 +88,17 @@ export async function openPathInInstant(path: string, line?: number): Promise<vo
   // which enumerates a directory merely to learn that a file is ENOTDIR.
   // This covers images, PDF, D2, Markdown, HTML, and ordinary source files.
   if (extension) {
+    // Kinds with no in-app viewer go straight to the OS default app.
+    if (opensExternally(path)) {
+      await openExternal(path);
+      return;
+    }
+    // An extension instant cannot render: a NUL byte in the head means
+    // binary content, which also belongs to the OS app.
+    if (!isKnownInstantKind(path) && (await looksBinary(path))) {
+      await openExternal(path);
+      return;
+    }
     const browserUrl = !line && browserFileUrl(path, getHomeDir());
     if (browserUrl) {
       const { openBrowserTab } = await import("./browser");
