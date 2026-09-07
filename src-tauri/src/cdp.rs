@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
@@ -25,10 +25,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::State;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::Message;
+
+use crate::host::Host;
+use crate::services::Services;
 
 const CHROME: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -115,7 +118,7 @@ fn real_chrome_dir() -> Option<PathBuf> {
 /// signed-in session; same machine + user means Chrome's Keychain key still
 /// decrypts them. Uses APFS copy-on-write (`cp -c`) so it's near-instant and
 /// adds no real disk, regardless of profile size.
-fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
+fn ensure_profile(dest: &Path) -> Result<(), String> {
     if dest.join("Default").exists() {
         return Ok(()); // already cloned
     }
@@ -147,7 +150,7 @@ fn ensure_profile(dest: &PathBuf) -> Result<(), String> {
 /// Remove session-restore artifacts so the headless instance starts blank
 /// instead of reopening the user's real tabs. Run before every launch (the
 /// running engine rewrites these as it lives).
-fn clear_session(profile: &PathBuf) {
+fn clear_session(profile: &Path) {
     let d = profile.join("Default");
     for f in [
         "Current Session",
@@ -278,19 +281,16 @@ fn wait_devtools(secs: u64) -> Result<(), String> {
 }
 
 /// Launch the shared Chrome if it isn't already running.
-fn ensure_engine(app: &AppHandle) -> Result<(), String> {
+fn ensure_engine(host: &dyn Host, engine: &ChromeEngine) -> Result<(), String> {
     // Already up? (our child this session, or a leftover on the port)
-    {
-        let eng = app.state::<ChromeEngine>();
-        if eng.0.lock().unwrap().is_some() {
-            return Ok(());
-        }
+    if engine.0.lock().unwrap().is_some() {
+        return Ok(());
     }
     if http_get("/json/version").is_ok() {
         return Ok(()); // someone's already serving the port
     }
 
-    let profile = crate::state_dir(app)?.join("cdp-chrome");
+    let profile = crate::host::state_dir(host)?.join("cdp-chrome");
     ensure_profile(&profile)?;
     clear_session(&profile); // don't restore the user's real tabs each launch
 
@@ -318,18 +318,13 @@ fn ensure_engine(app: &AppHandle) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("launch chrome: {e}"))?;
 
-    let eng = app.state::<ChromeEngine>();
-    *eng.0.lock().unwrap() = Some(child);
+    *engine.0.lock().unwrap() = Some(child);
     wait_devtools(15)
 }
 
 /// Kill the shared Chrome (called on app exit).
-pub fn kill_engine(app: &AppHandle) {
-    let child = {
-        let eng = app.state::<ChromeEngine>();
-        let taken = eng.0.lock().unwrap().take();
-        taken
-    };
+pub fn kill_engine(services: &Services) {
+    let child = services.chrome_engine.0.lock().unwrap().take();
     if let Some(mut c) = child {
         let _ = c.kill();
     }
@@ -374,10 +369,10 @@ fn is_timeout(e: &tungstenite::Error) -> bool {
 /// launch, DevTools wait, ws connect) runs on a worker thread so the Tauri main
 /// thread never blocks — non-async commands run on the main thread, and blocking
 /// it spins the whole UI. Frames/errors arrive later via events.
-#[tauri::command]
-pub fn cdp_open(
-    app: AppHandle,
-    store: State<CdpStore>,
+#[allow(clippy::too_many_arguments)]
+pub fn cdp_open_impl(
+    host: Arc<dyn Host>,
+    services: Arc<Services>,
     id: String,
     url: String,
     width: u32,
@@ -385,20 +380,23 @@ pub fn cdp_open(
     dpr: f64,
     quality: u8,
 ) -> Result<(), String> {
-    if store.0.lock().unwrap().contains_key(&id) {
+    if services.cdp.0.lock().unwrap().contains_key(&id) {
         return Ok(());
     }
     std::thread::spawn(move || {
-        if let Err(e) = attach(app.clone(), id.clone(), url, width, height, dpr, quality) {
-            let _ = app.emit("cdp-error", json!({ "id": id, "error": e }));
+        if let Err(e) = attach(host.clone(), services.clone(), id.clone(), url, width, height, dpr, quality)
+        {
+            let _ = host.emit("cdp-error", json!({ "id": id, "error": e }));
         }
     });
     Ok(())
 }
 
 /// Blocking attach, run off the main thread by cdp_open.
+#[allow(clippy::too_many_arguments)]
 fn attach(
-    app: AppHandle,
+    host: Arc<dyn Host>,
+    services: Arc<Services>,
     id: String,
     url: String,
     width: u32,
@@ -406,8 +404,8 @@ fn attach(
     dpr: f64,
     quality: u8,
 ) -> Result<(), String> {
-    ensure_engine(&app)?;
-    let store = app.state::<CdpStore>();
+    ensure_engine(&*host, &services.chrome_engine)?;
+    let store = &services.cdp;
     if store.0.lock().unwrap().contains_key(&id) {
         return Ok(());
     }
@@ -465,7 +463,7 @@ fn attach(
     );
     let _ = boot_id; // (silence move warnings)
 
-    let app2 = app.clone();
+    let host2 = host.clone();
     let id2 = id.clone();
     let stop2 = stop.clone();
     std::thread::spawn(move || {
@@ -491,12 +489,12 @@ fn attach(
                         {
                             let c = v["params"]["payload"].as_str().unwrap_or("default");
                             let _ =
-                                app2.emit("cdp-cursor", json!({ "id": id2.clone(), "cursor": c }));
+                                host2.emit("cdp-cursor", json!({ "id": id2.clone(), "cursor": c }));
                         } else if v["method"] == "Runtime.bindingCalled"
                             && v["params"]["name"] == "__cdpCopy"
                         {
                             let t = v["params"]["payload"].as_str().unwrap_or("");
-                            let _ = app2.emit("cdp-copy", json!({ "id": id2.clone(), "text": t }));
+                            let _ = host2.emit("cdp-copy", json!({ "id": id2.clone(), "text": t }));
                         } else if v["method"] == "Page.frameNavigated"
                             && v["params"]["frame"]["parentId"].is_null()
                         {
@@ -504,23 +502,23 @@ fn attach(
                             // form submit). parentId null = top frame.
                             if let Some(u) = v["params"]["frame"]["url"].as_str() {
                                 let _ =
-                                    app2.emit("cdp-url", json!({ "id": id2.clone(), "url": u }));
+                                    host2.emit("cdp-url", json!({ "id": id2.clone(), "url": u }));
                             }
                         } else if v["method"] == "Page.navigatedWithinDocument" {
                             // SPA / history.pushState same-document navigation.
                             if let Some(u) = v["params"]["url"].as_str() {
                                 let _ =
-                                    app2.emit("cdp-url", json!({ "id": id2.clone(), "url": u }));
+                                    host2.emit("cdp-url", json!({ "id": id2.clone(), "url": u }));
                             }
                         } else if v["method"] == "Page.screencastFrame" {
                             let data = v["params"]["data"].as_str().unwrap_or("");
                             let session = v["params"]["sessionId"].clone();
-                            let _ = app2.emit(
+                            let _ = host2.emit(
                                 "cdp-frame",
-                                FrameEvent {
+                                json!(FrameEvent {
                                     id: id2.clone(),
                                     data: data.to_string(),
-                                },
+                                }),
                             );
                             // Ack so Chrome keeps sending frames.
                             let _ = ws.send(Message::Text(
@@ -558,12 +556,21 @@ fn attach(
 /// Generic CDP command pump for a tab (frontend builds Input.dispatch*, etc.).
 #[tauri::command]
 pub fn cdp_send(
-    store: State<CdpStore>,
+    services: State<Arc<Services>>,
     id: String,
     method: String,
     params: Value,
 ) -> Result<(), String> {
-    let map = store.0.lock().unwrap();
+    cdp_send_impl(&services, id, method, params)
+}
+
+pub fn cdp_send_impl(
+    services: &Services,
+    id: String,
+    method: String,
+    params: Value,
+) -> Result<(), String> {
+    let map = services.cdp.0.lock().unwrap();
     let tab = map.get(&id).ok_or("no such cdp tab")?;
     let n = tab.next_id.fetch_add(1, Ordering::Relaxed);
     let msg = json!({ "id": n, "method": method, "params": params }).to_string();
@@ -572,14 +579,25 @@ pub fn cdp_send(
 
 #[tauri::command]
 pub fn cdp_resize(
-    store: State<CdpStore>,
+    services: State<Arc<Services>>,
     id: String,
     width: u32,
     height: u32,
     dpr: f64,
     quality: u8,
 ) -> Result<(), String> {
-    let map = store.0.lock().unwrap();
+    cdp_resize_impl(&services, id, width, height, dpr, quality)
+}
+
+pub fn cdp_resize_impl(
+    services: &Services,
+    id: String,
+    width: u32,
+    height: u32,
+    dpr: f64,
+    quality: u8,
+) -> Result<(), String> {
+    let map = services.cdp.0.lock().unwrap();
     let tab = map.get(&id).ok_or("no such cdp tab")?;
     let send = |method: &str, params: Value| {
         let n = tab.next_id.fetch_add(1, Ordering::Relaxed);
@@ -601,43 +619,51 @@ pub fn cdp_resize(
 }
 
 #[tauri::command]
-pub fn cdp_navigate(store: State<CdpStore>, id: String, url: String) -> Result<(), String> {
-    cdp_send(store, id, "Page.navigate".into(), json!({ "url": url }))
+pub fn cdp_navigate(services: State<Arc<Services>>, id: String, url: String) -> Result<(), String> {
+    cdp_navigate_impl(&services, id, url)
+}
+
+pub fn cdp_navigate_impl(services: &Services, id: String, url: String) -> Result<(), String> {
+    cdp_send_impl(services, id, "Page.navigate".into(), json!({ "url": url }))
 }
 
 /// True when the shared Chrome engine is up: either our child is alive this
 /// session, or something is already answering the DevTools port. The engine is
 /// spawned lazily on first cdp_open, so `false` means "idle", not "broken".
 #[tauri::command]
-pub async fn cdp_status(app: AppHandle) -> bool {
+pub async fn cdp_status(services: State<'_, Arc<Services>>) -> Result<bool, String> {
+    let services = (*services).clone();
     // Poll-loop command: the engine-mutex peek is cheap, but `http_get` is a
     // blocking TCP round-trip; both hop off the main thread together.
-    tauri::async_runtime::spawn_blocking(move || {
-        {
-            let eng = app.state::<ChromeEngine>();
-            if eng.0.lock().unwrap().is_some() {
-                return true;
-            }
-        }
-        http_get("/json/version").is_ok()
-    })
-    .await
-    .unwrap_or(false)
+    tauri::async_runtime::spawn_blocking(move || cdp_status_impl(&services))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub fn cdp_status_impl(services: &Services) -> bool {
+    if services.chrome_engine.0.lock().unwrap().is_some() {
+        return true;
+    }
+    http_get("/json/version").is_ok()
 }
 
 #[tauri::command]
-pub fn cdp_close(app: AppHandle, store: State<CdpStore>, id: String) {
+pub fn cdp_close(services: State<Arc<Services>>, id: String) {
+    cdp_close_impl(&services, id);
+}
+
+pub fn cdp_close_impl(services: &Services, id: String) {
     // Setting stop makes the reader thread close its ws and exit promptly. The
     // /json/close HTTP call can block (DevTools is occasionally slow to answer),
     // so run it on a worker thread — this command runs on the Tauri main thread
     // and blocking it freezes the whole UI (the "spinning beachball" on close).
-    if let Some(tab) = store.0.lock().unwrap().remove(&id) {
+    if let Some(tab) = services.cdp.0.lock().unwrap().remove(&id) {
         tab.stop.store(true, Ordering::Relaxed);
         let target_id = tab.target_id;
         std::thread::spawn(move || {
             let _ = http_get(&format!("/json/close/{}", target_id));
         });
-        let _ = app; // engine stays up for other tabs
+        // engine stays up for other tabs
     }
 }
 // todo(boundary): isolate Chrome discovery HTTP and WebSocket traffic behind a CDP transport

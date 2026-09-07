@@ -12,10 +12,12 @@ use std::sync::{Arc, Mutex};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 
+use crate::host::Host;
 use crate::kitty::{KittyScanner, ScanOut};
-use crate::pty_events::{PtyData, PtyEvents};
+use crate::pty_events::PtyData;
+use crate::services::Services;
 
 // GUI apps don't inherit the login shell PATH, so tmux/claude/opencode won't be
 // found without this. Prepend the usual homebrew + system locations.
@@ -571,12 +573,10 @@ pub fn reap_orphan_graphics() {
 /// graphics), sets TERM=xterm-kitty, and runs the pty reader through the kitty
 /// graphics proxy. `cell_w`/`cell_h` are device pixels per terminal cell so the
 /// pty reports a real pixel size to graphics apps.
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn open_session(
-    app: AppHandle,
-    store: State<'_, PtyStore>,
-    events: State<'_, PtyEvents>,
+pub fn open_session_impl(
+    host: Arc<dyn Host>,
+    services: Arc<Services>,
     id: String,
     name: String,
     tmux_target: Option<String>,
@@ -592,13 +592,13 @@ pub async fn open_session(
     let graphics = graphics.unwrap_or(false);
     {
         // Already wired up for this tab; just resize and bail.
-        let map = store.0.lock().unwrap();
+        let map = services.pty.0.lock().unwrap();
         if map.contains_key(&id) {
             drop(map);
             if !graphics && !direct_pty_mode() {
                 enable_mouse(tmux_target.as_deref().unwrap_or(&name), None);
             }
-            return resize_pty(store, id, cols, rows, cell_w, cell_h);
+            return resize_pty_impl(&services, id, cols, rows, cell_w, cell_h);
         }
     }
     // A viewer tab only watches an existing lane; `new-session -A` on a dead
@@ -719,7 +719,7 @@ pub async fn open_session(
         pair.master.take_writer().map_err(|e| e.to_string())?,
     ));
 
-    store.0.lock().unwrap().insert(
+    services.pty.0.lock().unwrap().insert(
         id.clone(),
         PtyHandle {
             name: name.clone(),
@@ -740,7 +740,8 @@ pub async fn open_session(
     }
 
     // Reader thread: pump pty -> bounded event queue until EOF (session detached/killed).
-    let events = events.inner().sender();
+    let events = services.pty_events.sender();
+    let host2 = host.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         // Bytes left over when a multibyte UTF-8 char straddles a read boundary;
@@ -786,9 +787,9 @@ pub async fn open_session(
                                 });
                             }
                             ScanOut::Graphics(g) => {
-                                let _ = app.emit(
+                                let _ = host2.emit(
                                     "pty-graphics",
-                                    GraphicsEvent {
+                                    serde_json::to_value(&GraphicsEvent {
                                         id: id.clone(),
                                         action: g.action,
                                         img_id: g.id,
@@ -800,7 +801,8 @@ pub async fn open_session(
                                         no_scroll: g.no_scroll,
                                         delete: g.delete,
                                         rgba_b64: STANDARD.encode(&g.rgba),
-                                    },
+                                    })
+                                    .unwrap_or(serde_json::Value::Null),
                                 );
                             }
                             ScanOut::Reply(bytes) => {
@@ -820,8 +822,12 @@ pub async fn open_session(
 }
 
 #[tauri::command]
-pub fn write_pty(store: State<PtyStore>, id: String, data: String) -> Result<(), String> {
-    let map = store.0.lock().unwrap();
+pub fn write_pty(services: State<Arc<Services>>, id: String, data: String) -> Result<(), String> {
+    write_pty_impl(&services, id, data)
+}
+
+pub fn write_pty_impl(services: &Services, id: String, data: String) -> Result<(), String> {
+    let map = services.pty.0.lock().unwrap();
     if let Some(h) = map.get(&id) {
         let mut w = h.writer.lock().unwrap();
         w.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
@@ -832,7 +838,18 @@ pub fn write_pty(store: State<PtyStore>, id: String, data: String) -> Result<(),
 
 #[tauri::command]
 pub fn resize_pty(
-    store: State<PtyStore>,
+    services: State<Arc<Services>>,
+    id: String,
+    cols: u16,
+    rows: u16,
+    cell_w: Option<u16>,
+    cell_h: Option<u16>,
+) -> Result<(), String> {
+    resize_pty_impl(&services, id, cols, rows, cell_w, cell_h)
+}
+
+pub fn resize_pty_impl(
+    services: &Services,
     id: String,
     cols: u16,
     rows: u16,
@@ -840,7 +857,7 @@ pub fn resize_pty(
     cell_h: Option<u16>,
 ) -> Result<(), String> {
     let (pixel_width, pixel_height) = pixel_dims(cols, rows, cell_w, cell_h);
-    let map = store.0.lock().unwrap();
+    let map = services.pty.0.lock().unwrap();
     if let Some(h) = map.get(&id) {
         h.master
             .resize(PtySize {
@@ -858,8 +875,12 @@ pub fn resize_pty(
 /// running; a direct-spawn graphics child (awrit) is killed so it can't orphan
 /// and hold its single-instance profile lock.
 #[tauri::command]
-pub fn close_pty(store: State<PtyStore>, id: String) {
-    if let Some(mut h) = store.0.lock().unwrap().remove(&id) {
+pub fn close_pty(services: State<Arc<Services>>, id: String) {
+    close_pty_impl(&services, id);
+}
+
+pub fn close_pty_impl(services: &Services, id: String) {
+    if let Some(mut h) = services.pty.0.lock().unwrap().remove(&id) {
         if let Some(mut child) = h.child.take() {
             let _ = child.kill();
         }
@@ -907,9 +928,13 @@ pub async fn tmux_buffer() -> Result<String, String> {
 
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
 #[tauri::command]
-pub async fn kill_session(store: State<'_, PtyStore>, name: String) -> Result<(), String> {
+pub async fn kill_session(services: State<'_, Arc<Services>>, name: String) -> Result<(), String> {
+    kill_session_impl(&services, name)
+}
+
+pub fn kill_session_impl(services: &Services, name: String) -> Result<(), String> {
     if direct_pty_mode() {
-        let mut map = store.0.lock().unwrap();
+        let mut map = services.pty.0.lock().unwrap();
         let id = map
             .iter()
             .find(|(_, h)| h.name == name)
@@ -928,7 +953,7 @@ pub async fn kill_session(store: State<'_, PtyStore>, name: String) -> Result<()
         .env("PATH", path_env())
         .status()
         .map_err(|e| e.to_string())?;
-    store.0.lock().unwrap().remove(&format!("s:{name}"));
+    services.pty.0.lock().unwrap().remove(&format!("s:{name}"));
     Ok(())
 }
 

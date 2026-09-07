@@ -20,9 +20,11 @@ use core_graphics::window::{
     kCGWindowListOptionOnScreenOnly, kCGWindowOwnerName,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::State;
 
-use crate::activity::{self, ActivityDb};
+use crate::activity;
+use crate::host::Host;
+use crate::services::Services;
 
 // macOS TCC probes. CGPreflight* reports whether we already hold the grant;
 // CGRequest* adds instant to the list and prompts, returning the post-prompt
@@ -68,11 +70,15 @@ pub struct CaptureStatus {
 }
 
 #[tauri::command]
-pub fn capture_permissions(tap: State<TapActive>) -> CapturePerms {
+pub fn capture_permissions(services: State<Arc<Services>>) -> CapturePerms {
+    capture_permissions_impl(&services)
+}
+
+pub fn capture_permissions_impl(services: &Services) -> CapturePerms {
     CapturePerms {
         screen_recording: unsafe { CGPreflightScreenCaptureAccess() },
         accessibility: unsafe { AXIsProcessTrusted() },
-        tap_active: tap.0.load(Ordering::Relaxed),
+        tap_active: services.tap_active.0.load(Ordering::Relaxed),
         tap_expected: std::env::var("INSTANT_NO_GLOBALS").is_err(),
     }
 }
@@ -87,25 +93,26 @@ pub fn capture_request_screen() -> bool {
 
 /// Take one shot for `kind`, store it, emit the row. Best-effort: any failure
 /// (no permission, dir error, screencapture nonzero) silently no-ops.
-pub fn take(app: AppHandle, kind: &str) {
+pub fn take(host: Arc<dyn Host>, services: Arc<Services>, kind: &str) {
     let ts = activity::now_ms();
     // Emit the outcome of this gesture so the panel can show "shot saved" or the
     // precise skip reason instead of nothing happening.
     let status = |ok: bool, reason: &str| {
-        let _ = app.emit(
+        let _ = host.emit(
             "capture-status",
-            CaptureStatus {
+            serde_json::to_value(&CaptureStatus {
                 kind: kind.to_string(),
                 ok,
                 reason: reason.to_string(),
                 ts,
-            },
+            })
+            .unwrap_or(serde_json::Value::Null),
         );
     };
 
     // Don't record our own clicks: skip while the instant window is focused.
     // Not counted as a filter — interacting with the app just isn't an event.
-    if app.state::<WindowFocused>().0.load(Ordering::Relaxed) {
+    if services.window_focused.0.load(Ordering::Relaxed) {
         status(false, "instant window focused");
         return;
     }
@@ -113,15 +120,15 @@ pub fn take(app: AppHandle, kind: &str) {
     // Observation filter: never even screenshot while an excluded app is front.
     let app_name = frontmost_app();
     {
-        let cfg = app.state::<crate::config::ConfigState>();
+        let cfg = &services.config;
         if cfg.config.lock().unwrap().app_excluded(&app_name) {
-            crate::config::note_excluded(&cfg);
+            crate::config::note_excluded(cfg);
             status(false, &format!("{app_name} excluded"));
             return;
         }
     }
 
-    let Ok(data_dir) = crate::state_dir(&app) else {
+    let Ok(data_dir) = crate::host::state_dir(&*host) else {
         status(false, "no app data dir");
         return;
     };
@@ -144,14 +151,17 @@ pub fn take(app: AppHandle, kind: &str) {
     }
 
     let shot_str = shot.to_string_lossy().into_owned();
-    let db = app.state::<ActivityDb>();
+    let db = &services.activity;
     let row = {
         let conn = db.0.lock().unwrap();
         activity::insert_row(&conn, ts, "os", kind, &app_name, "", "", "", &shot_str)
     };
     match row {
         Ok(ev) => {
-            let _ = app.emit("activity-added", &ev);
+            let _ = host.emit(
+                "activity-added",
+                serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null),
+            );
             status(true, &app_name);
         }
         Err(e) => status(false, &format!("db error: {e}")),

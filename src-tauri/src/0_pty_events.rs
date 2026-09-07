@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::State;
+
+use crate::host::Host;
+use crate::services::Services;
 
 const QUEUE_CAPACITY: usize = 256;
 const MAX_BATCH_CHUNKS: usize = 256;
@@ -59,7 +62,7 @@ impl Default for PtyEvents {
 }
 
 impl PtyEvents {
-    pub fn start(&self, app: AppHandle) {
+    pub fn start(&self, host: Arc<dyn Host>) {
         let Some(receiver) = self.receiver.lock().unwrap().take() else {
             return;
         };
@@ -70,7 +73,10 @@ impl PtyEvents {
                 counters
                     .chunks
                     .fetch_add(chunks.len() as u64, Ordering::Relaxed);
-                let _ = app.emit("pty-data-batch", PtyDataBatch { chunks });
+                let _ = host.emit(
+                    "pty-data-batch",
+                    serde_json::to_value(&PtyDataBatch { chunks }).unwrap_or(serde_json::Value::Null),
+                );
             });
         });
     }
@@ -137,8 +143,12 @@ fn run_batches(
 }
 
 #[tauri::command]
-pub fn pty_event_stats(events: tauri::State<'_, PtyEvents>) -> PtyEventStats {
-    events.stats()
+pub fn pty_event_stats(services: State<'_, Arc<Services>>) -> PtyEventStats {
+    pty_event_stats_impl(&services)
+}
+
+pub fn pty_event_stats_impl(services: &Services) -> PtyEventStats {
+    services.pty_events.stats()
 }
 
 #[cfg(test)]

@@ -11,10 +11,12 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+use crate::services::Services;
 
 fn default_terminal_fonts() -> Vec<String> {
     [
@@ -207,20 +209,41 @@ pub fn note_excluded(state: &ConfigState) {
 
 // api(http GET /api/v1/config): config_get
 #[tauri::command]
-pub fn config_get(state: State<ConfigState>) -> ConfigView {
-    view(&state)
+pub fn config_get(services: State<Arc<Services>>) -> ConfigView {
+    config_get_impl(&services)
+}
+
+pub fn config_get_impl(services: &Services) -> ConfigView {
+    view(&services.config)
 }
 
 /// Replace the rule lists, persist to config.json, return the fresh view.
 // api(http PUT /api/v1/config): config_set
 #[tauri::command]
 pub async fn config_set(
-    state: State<'_, ConfigState>,
+    services: State<'_, Arc<Services>>,
     exclude_sites: Vec<String>,
     exclude_files: Vec<String>,
     exclude_apps: Vec<String>,
     terminal_fonts: Vec<String>,
 ) -> Result<ConfigView, String> {
+    config_set_impl(
+        &services,
+        exclude_sites,
+        exclude_files,
+        exclude_apps,
+        terminal_fonts,
+    )
+}
+
+pub fn config_set_impl(
+    services: &Services,
+    exclude_sites: Vec<String>,
+    exclude_files: Vec<String>,
+    exclude_apps: Vec<String>,
+    terminal_fonts: Vec<String>,
+) -> Result<ConfigView, String> {
+    let state = &services.config;
     let next = AppConfig {
         exclude_sites,
         exclude_files,
@@ -233,23 +256,33 @@ pub async fn config_set(
         source: "file".into(),
         error: None,
     };
-    Ok(view(&state))
+    Ok(view(state))
 }
 
 /// Re-read config.json from disk (for external edits).
 // api(http POST /api/v1/config/reload): config_reload
 #[tauri::command]
-pub async fn config_reload(state: State<'_, ConfigState>) -> Result<ConfigView, String> {
+pub async fn config_reload(services: State<'_, Arc<Services>>) -> Result<ConfigView, String> {
+    config_reload_impl(&services)
+}
+
+pub fn config_reload_impl(services: &Services) -> Result<ConfigView, String> {
+    let state = &services.config;
     let (cfg, status) = read_or_default(&state.path);
     *state.config.lock().unwrap() = cfg;
     *state.status.lock().unwrap() = status;
-    Ok(view(&state))
+    Ok(view(state))
 }
 
 /// Open config.json in the default editor.
 // api(shell): config_open
 #[tauri::command]
-pub async fn config_open(state: State<'_, ConfigState>) -> Result<(), String> {
+pub async fn config_open(services: State<'_, Arc<Services>>) -> Result<(), String> {
+    config_open_impl(&services)
+}
+
+pub fn config_open_impl(services: &Services) -> Result<(), String> {
+    let state = &services.config;
     if !state.path.exists() {
         let cfg = state.config.lock().unwrap().clone();
         write_file(&state.path, &cfg).map_err(|e| e.to_string())?;

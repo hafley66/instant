@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
+
+use crate::host::Host;
+use crate::services::Services;
 
 pub struct FsWatchClaims(pub Mutex<HashMap<String, RecommendedWatcher>>);
 
@@ -32,10 +35,9 @@ fn event_matches(event: &Event, target: &Path, target_is_dir: bool) -> bool {
     })
 }
 
-#[tauri::command]
-pub fn fs_watch_claim(
-    app: AppHandle,
-    state: State<FsWatchClaims>,
+pub fn fs_watch_claim_impl(
+    host: Arc<dyn Host>,
+    services: &Services,
     claim_id: String,
     path: String,
     recursive: Option<bool>,
@@ -63,7 +65,10 @@ pub fn fs_watch_claim(
             path: callback_target.to_string_lossy().into_owned(),
             kind: format!("{:?}", event.kind),
         };
-        let _ = app.emit("fs-watch", payload);
+        let _ = host.emit(
+            "fs-watch",
+            serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null),
+        );
     })
     .map_err(|error| error.to_string())?;
     let mode = if target_is_dir && recursive.unwrap_or(false) {
@@ -74,7 +79,8 @@ pub fn fs_watch_claim(
     watcher
         .watch(&watch_root, mode)
         .map_err(|error| format!("{}: {error}", watch_root.display()))?;
-    state
+    services
+        .fs_watch
         .0
         .lock()
         .map_err(|_| "filesystem watch claims lock poisoned".to_string())?
@@ -83,8 +89,13 @@ pub fn fs_watch_claim(
 }
 
 #[tauri::command]
-pub fn fs_watch_release(state: State<FsWatchClaims>, claim_id: String) -> Result<(), String> {
-    state
+pub fn fs_watch_release(services: State<Arc<Services>>, claim_id: String) -> Result<(), String> {
+    fs_watch_release_impl(&services, claim_id)
+}
+
+pub fn fs_watch_release_impl(services: &Services, claim_id: String) -> Result<(), String> {
+    services
+        .fs_watch
         .0
         .lock()
         .map_err(|_| "filesystem watch claims lock poisoned".to_string())?

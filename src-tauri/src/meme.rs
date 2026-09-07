@@ -105,8 +105,7 @@ fn run_brew_install() -> Result<String, String> {
 /// cdp.rs/activity.rs for the plain `std::thread::spawn` version of this same
 /// "don't block other invokes" rule) keep working while this one runs.
 #[tauri::command]
-pub async fn install_imagemagick(app: tauri::AppHandle) -> Result<String, String> {
-    let _ = &app; // no progress events today; kept for signature parity/future use
+pub async fn install_imagemagick() -> Result<String, String> {
     if INSTALLING.swap(true, Ordering::SeqCst) {
         return Err("already installing".to_string());
     }
@@ -150,6 +149,7 @@ fn command_display(args: &[String]) -> String {
 /// complete arguments including input/output paths. We do not validate paths
 /// beyond making sure the binary exists.
 #[tauri::command]
+#[allow(dead_code)] // unregistered experimental command; kept for the serve-bin lane
 pub async fn magick_run(args: Vec<String>) -> Result<MagickResult, String> {
     tauri::async_runtime::spawn_blocking(move || magick_run_blocking(args))
         .await
@@ -366,7 +366,7 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => {
             let mut out = Vec::with_capacity(buf.len() / 3 * 4);
-            for c in buf.chunks_exact(3) {
+            for c in buf.as_chunks::<3>().0 {
                 out.extend_from_slice(c);
                 out.push(255);
             }
