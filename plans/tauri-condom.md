@@ -151,3 +151,21 @@ pnpm exec tsc --noEmit -p .
 pnpm exec vitest run
 pnpm exec playwright test -c playwright.real.config.ts   # boots instant-serve, drives index.html in Chromium, writes artifacts/real/*.png
 ```
+
+## 10. Status (2026-09-07, integration/tauri-condom)
+
+| piece | state | receipt |
+| --- | --- | --- |
+| host-trait, ws-transport, serve-bin | merged on the integration branch | `ccfdb26` |
+| real tier, fork verb | green cold, both cases | `artifacts/real/fork-05-toast.png`, `forkfail-06-failure.png` |
+| shared edges | `e2e-real/0_real.ts`; port, socket, data dir from env | `INSTANT_REAL_PORT`, `INSTANT_REAL_SOCKET`, `INSTANT_SERVE_DATA`, `INSTANT_SERVE_BIN`, `INSTANT_SERVE_REUSE` |
+| fork cwd | `liveCwd` re-reads tmux before every spawn | `src/terminal.ts` `liveCwd` |
+| port lanes (glm53) | `feature/real-term-basics`, `real-term-hover`, `real-term-diagrams`, `real-cmdclick-previews`, `real-panels-live` | briefs in `plans/briefs/real-*.md`, ports 47801 to 47805 |
+| shell lane (glm53) | `feature/tauri-shell` | `plans/briefs/tauri-shell.md` |
+| out of scope until called | `e2e/0_rules-extension.spec.ts` (Chrome extension), `e2e-live/boop-four-agent-shells.live.ts` (spawns paid lanes), `e2e-live/1_terminal-cast.live.ts`, `2_agent-tui.live.ts` (tui-test and llmock replay) | |
+
+Real-tier facts the lanes rely on:
+- The sessions panel is a dockview tab in the terminal's group; while it shows, the terminal host has zero width. `#sessions-toggle` carries `active` while open.
+- The session table is React (`tablepanels.tsx`): rows are `tr` with `.s-name` and `.s-pwd`. The `li.session` list in `worktrees.ts` is dormant.
+- A Playwright test timeout restarts the worker; `afterAll` then runs early and kills the socket's sessions, so the next test's `openTab` sees none. Keep per-test work under the timeout.
+- `instant-serve` keeps a tab's pty across page reloads (`open_session_impl` resizes and bails on a known id); a browser tab closing detaches nothing, same as hiding the Tauri window.
