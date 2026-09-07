@@ -9,7 +9,9 @@ import { type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
 import { type CtxItem } from "./ctxmenu";
-import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg } from "./core";
+import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, askText } from "./core";
+
+export { askText } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
 import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
@@ -156,48 +158,6 @@ export function syncInlineStructured() {
   button.classList.toggle("active", settings.inlineStructuredSelectors.$());
   button.setAttribute("aria-pressed", String(settings.inlineStructuredSelectors.$()));
   syncInlineStructuredSelectors();
-}
-
-// Minimal async text prompt. window.prompt() is a no-op in the Tauri WKWebview,
-// so reuse the command-palette overlay styling for a real input. Resolves to the
-// trimmed value, or null on Esc / backdrop click / empty.
-export function askText(placeholder: string, initial = ""): Promise<string | null> {
-  return new Promise((resolve) => {
-    const root = document.createElement("div");
-    root.className = "cmdp-root";
-    const box = document.createElement("div");
-    box.className = "cmdp-box";
-    const input = document.createElement("input");
-    input.className = "cmdp-input";
-    input.type = "text";
-    input.placeholder = placeholder;
-    input.value = initial;
-    input.spellcheck = false;
-    box.appendChild(input);
-    root.appendChild(box);
-    const close = (val: string | null) => {
-      root.remove();
-      resolve(val);
-    };
-    root.addEventListener("pointerdown", (e) => {
-      if (e.target === root) close(null);
-    });
-    input.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Enter") {
-        e.preventDefault();
-        close(input.value.trim() || null);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        close(null);
-      }
-    });
-    document.body.appendChild(root);
-    queueMicrotask(() => {
-      input.focus();
-      input.select();
-    });
-  });
 }
 
 // Window edge/corner grips. decorations:false means macOS gives no native
@@ -379,7 +339,11 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
       });
       turnItems.push({
         label: `${isBoopTurnFav(projectedTurn) ? "✓" : "★"} ${preview.slice(0, 60)}${preview.length > 60 ? "…" : ""}`,
-        action: () => void favoriteBoopTurn(projectedTurn),
+        action: async () => {
+          if (isBoopTurnFav(projectedTurn)) return void favoriteBoopTurn(projectedTurn);
+          const note = await askText("note for this favorite");
+          void favoriteBoopTurn(projectedTurn, note ?? "");
+        },
       });
       turnItems.push({ sep: true });
     } else if (meta) {

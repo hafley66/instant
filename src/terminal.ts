@@ -34,6 +34,7 @@ import {
   showError,
   sanitizePaste,
   escapeHtml,
+  askText,
   THEMES,
   termFontFamily,
 } from "./core";
@@ -1344,7 +1345,7 @@ function selectionRows(tab: Tab): readonly [number, number] {
 
 /// Select text, right-click, pick a preset: the comment row the fork verb keys
 /// off is written here, sent, and forked in one step the reader never sees.
-export async function forkSelection(id: string, preset: string) {
+export async function forkSelection(id: string, preset: string, note?: string) {
   const tab = tabs.get(id);
   const text = termSelectionText(id);
   if (!tab?.contextQueue || !tab.contextSync || !text) return;
@@ -1358,6 +1359,7 @@ export async function forkSelection(id: string, preset: string) {
     text: snapshot.text,
     turnIds: snapshot.turnIds,
     enabled: true,
+    note: note?.trim() || undefined,
   };
   const commentId = await tab.contextSync.sendSelection(item);
   if (!commentId) {
@@ -1373,6 +1375,13 @@ export async function forkSelection(id: string, preset: string) {
   tab.contextSync.activate();
 }
 
+/// Ask for the note with askText("ask for the fork lane"), then fork. Esc or
+/// empty forks with no note (today's behaviour), never cancels the fork.
+export async function forkSelectionWithNote(id: string, preset: string): Promise<void> {
+  const note = await askText(`fork -> ${preset}: what should the lane do?`);
+  await forkSelection(id, preset, note ?? undefined);
+}
+
 /// The Fork row: its subtext names the preset a plain click runs, its submenu
 /// carries every preset grouped by harness, reorderable and persisted.
 export function forkSelectionItem(id: string): CtxItem {
@@ -1381,8 +1390,8 @@ export function forkSelectionItem(id: string): CtxItem {
   return {
     label: "Fork selection",
     subtext: preset,
-    action: () => void forkSelection(id, preset),
-    children: async () => presetGroups(await forkPresets(), (name) => void forkSelection(id, name)),
+    action: () => void forkSelectionWithNote(id, preset),
+    children: async () => presetGroups(await forkPresets(), (name) => void forkSelectionWithNote(id, name)),
     persist: forkPresetStore,
   };
 }
