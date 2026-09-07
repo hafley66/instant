@@ -1146,6 +1146,7 @@ pub fn run() {
             boop::boop_favorite_add,
             boop::boop_favorites,
             boop::boop_favorite_toggle,
+            boop::boop_note_tags,
             boop::boop_turn_comments,
             boop::boop_turn_comment_upsert,
             boop::boop_turn_comment_delete,

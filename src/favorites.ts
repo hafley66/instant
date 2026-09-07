@@ -190,6 +190,12 @@ export async function favoriteBoopTurn(turn: BoopTurn, note?: string): Promise<v
   }, (error) => console.error("boop_favorite_toggle", error));
 }
 
+/// Notes already in use, for the prompt's suggestion list. One read per prompt;
+/// a failed read just means the prompt offers nothing.
+export async function noteTags(): Promise<string[]> {
+  return invoke<string[]>("boop_note_tags").catch(() => [] as string[]);
+}
+
 export function isBoopTurnFav(turn: Pick<BoopTurn, "session" | "turn">): boolean {
   return boopFavorites.some((favorite) => favorite.source === `turn:${turn.session}:${turn.turn}`);
 }
@@ -411,6 +417,7 @@ function favTreeRows(): FavTreeRow[] {
         starredAt: favorite.created_ts * 1000,
         role: "turn",
         preview: favorite.body.replace(/\s+/g, " ").slice(0, 120),
+        note: favorite.note,
         boopFav: favorite,
       })),
     });

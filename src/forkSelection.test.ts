@@ -60,7 +60,7 @@ vi.mock("./overlay", () => ({ nudgeZoom: vi.fn(), resetZoom: vi.fn() }));
 vi.mock("./inlinePreview", () => ({ inlineSnippetHtml: vi.fn() }));
 vi.mock("./preview", () => ({ openPreviewPanel: vi.fn() }));
 vi.mock("./browser", () => ({ browserTabs: {} }));
-vi.mock("./favorites", () => ({ boopCandidateTurns: vi.fn(), boopTurnsForSession: vi.fn(), boopTurnsForTab: vi.fn(), invalidateBoopTurns: vi.fn(), sessionsForTab: vi.fn(), warmTurns: vi.fn() }));
+vi.mock("./favorites", () => ({ boopCandidateTurns: vi.fn(), boopTurnsForSession: vi.fn(), boopTurnsForTab: vi.fn(), invalidateBoopTurns: vi.fn(), noteTags: vi.fn(async () => []), sessionsForTab: vi.fn(), warmTurns: vi.fn() }));
 vi.mock("./0_terminalTurnVisibility", () => ({ selectProjectionTurns: vi.fn(), TerminalTurnVisibilityV2: class {} }));
 vi.mock("./00a_terminalIntersection", () => ({ NativeTmuxPane: class {}, XtermViewportAdapter: class {} }));
 vi.mock("./0_clickRouter", () => ({ CmdClickGestureTracker: class {} }));
