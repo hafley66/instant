@@ -103,6 +103,7 @@ type LevelProps = {
 const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
   const { model, level, x, y, bind, ownerRect, insideDeeper, onRowRender } = props;
   const root = useRef<HTMLDivElement | null>(null);
+  const frame = useRef<number | null>(null);
 
   useEffect(() => {
     const element = root.current as (HTMLElement & { showPopover?: () => void }) | null;
@@ -119,28 +120,37 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
     + level.rows.map((row) => row.kind === "search" ? row.query : "").join("");
 
   useLayoutEffect(() => {
-    const element = root.current;
-    if (!element) return;
-    element.style.visibility = "hidden";
-    element.style.left = "0px";
-    element.style.top = "0px";
-    element.style.maxHeight = "";
-    element.style.overflowY = "";
-    const rect = level.depth === 0 ? null : ownerRect(level.depth, level.ownerId);
-    const size = element.getBoundingClientRect();
-    const { left, top, maxHeight } = placeMenu(
-      size,
-      { x: rect?.right ?? x, y: rect?.top ?? y },
-      { width: window.innerWidth, height: window.innerHeight },
-      rect?.right,
-    );
-    element.style.left = `${left}px`;
-    element.style.top = `${top}px`;
-    /// Inline, so no skin rule on `.ctx-menu[popover]` outranks it and leaves
-    /// the capped level clipped with no way to scroll.
-    element.style.maxHeight = maxHeight === null ? "" : `${maxHeight}px`;
-    element.style.overflowY = maxHeight === null ? "" : "auto";
-    element.style.visibility = "visible";
+    /// `scrollHeight` is the height the rows want; the box is capped by CSS, so
+    /// its rect reads the cap and would anchor the level to a height it is not.
+    const place = () => {
+      const element = root.current;
+      if (!element) return;
+      element.style.visibility = "hidden";
+      element.style.left = "0px";
+      element.style.top = "0px";
+      const rect = level.depth === 0 ? null : ownerRect(level.depth, level.ownerId);
+      const box = element.getBoundingClientRect();
+      /// offset minus client is the frame the skin drew, whatever its width, and
+      /// `scrollHeight` stops at the padding box.
+      const border = element.offsetHeight - element.clientHeight;
+      const { left, top } = placeMenu(
+        { width: box.width, height: element.scrollHeight + border },
+        { x: rect?.right ?? x, y: rect?.top ?? y },
+        { width: window.innerWidth, height: window.innerHeight },
+        rect?.right,
+      );
+      element.style.left = `${left}px`;
+      element.style.top = `${top}px`;
+      element.style.visibility = "visible";
+    };
+    place();
+    /// The popover joins the top layer in its own effect, so this first
+    /// measurement can precede that paint: take one more on the next frame.
+    frame.current = requestAnimationFrame(() => { frame.current = null; place(); });
+    return () => {
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+      frame.current = null;
+    };
   }, [measuredAt, level.depth, x, y]);
 
   return (

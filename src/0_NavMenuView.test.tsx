@@ -362,27 +362,48 @@ describe("a level that outgrows the viewport", () => {
   }) as DOMRect;
 
   /// jsdom measures every box at zero, so the level reports what the screenshots
-  /// had: 34px a row, under an owner row 500px down a 768px window.
+  /// had: 34px a row, under an owner row 500px down a 768px window. Only
+  /// `scrollHeight` carries it; the rect stays one row tall, the way a capped
+  /// box or one measured before its paint reads.
   function stubMeasure() {
     const original = Element.prototype.getBoundingClientRect;
+    const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight")!;
     const seen = { measures: 0 };
+    const rowsIn = (element: Element) => element.querySelectorAll(".ctx-item").length * 34;
     Element.prototype.getBoundingClientRect = function (this: Element) {
       if (this.classList.contains("ctx-menu")) {
         seen.measures += 1;
-        return rect({ width: 200, height: this.querySelectorAll(".ctx-item").length * 34 });
+        return rect({ width: 200, height: 34 });
       }
       if (this instanceof HTMLElement && this.dataset.navId) {
         return rect({ top: 500, bottom: 534, left: 40, right: 240, width: 200, height: 34 });
       }
       return original.call(this);
     };
-    return { seen, restore: () => { Element.prototype.getBoundingClientRect = original; } };
+    Object.defineProperty(Element.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: Element) { return this.classList.contains("ctx-menu") ? rowsIn(this) : 0; },
+    });
+    return {
+      seen,
+      restore: () => {
+        Element.prototype.getBoundingClientRect = original;
+        Object.defineProperty(Element.prototype, "scrollHeight", scrollHeight);
+      },
+    };
   }
+
+  /// One frame, so the placement the effect schedules for the top layer's paint
+  /// has run before a test reads the position.
+  const frame = () => act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
 
   async function openSub(count: number) {
     await open([{ id: "fork", label: "Fork", children: many(count) }]);
     await hover(rowsOf(0)[0]);
     await settle();
+    await frame();
   }
 
   it("slides up beside its owner row instead of flipping to the top", async () => {
@@ -394,14 +415,39 @@ describe("a level that outgrows the viewport", () => {
     measured.restore();
   });
 
-  it("caps a level taller than the window and scrolls its rows", async () => {
+  it("leaves the cap to the stylesheet and writes no height of its own", async () => {
     const measured = stubMeasure();
     await openSub(30);
-    expect(level(1).style.maxHeight).toBe("752px");
     expect(level(1).style.top).toBe("8px");
-    expect(level(1).style.overflowY).toBe("auto");
-    expect(level(0).style.maxHeight).toBe("");
-    expect(level(0).style.overflowY).toBe("");
+    for (const element of navMenuLevels()) {
+      expect(element.style.maxHeight).toBe("");
+      expect(element.style.overflowY).toBe("");
+      expect(element.style.height).toBe("");
+    }
+    measured.restore();
+  });
+
+  it("places the level again when its rows land, and never on a hover", async () => {
+    const measured = stubMeasure();
+    let land = (_: NavGroup[]) => {};
+    const pending = new Promise<NavGroup[]>((resolve) => { land = resolve; });
+    await open([{ id: "fork", label: "Fork", children: () => pending }]);
+    await hover(rowsOf(0)[0]);
+    const mounted = measured.seen.measures;
+    await frame();
+    expect(measured.seen.measures).toBeGreaterThan(mounted);
+    expect(rowsOf(1)).toHaveLength(1);
+    const loading = { top: level(1).style.top, placements: measured.seen.measures };
+    await act(async () => { land(many(30)); await pending; });
+    await frame();
+    expect(rowsOf(1)).toHaveLength(30);
+    expect(measured.seen.measures).toBeGreaterThan(loading.placements);
+    expect(level(1).style.top).not.toBe(loading.top);
+    expect(level(1).style.top).toBe("8px");
+    const settled = measured.seen.measures;
+    await hover(rowsOf(1)[5]);
+    await frame();
+    expect(measured.seen.measures).toBe(settled);
     measured.restore();
   });
 
@@ -425,6 +471,7 @@ describe("a level that outgrows the viewport", () => {
     const measures = measured.seen.measures;
     await hover(rowsOf(1)[3]);
     await hover(rowsOf(1)[7]);
+    await frame();
     expect(rowsOf(1)[7].classList.contains("ctx-active")).toBe(true);
     expect({ top: level(1).style.top, left: level(1).style.left }).toEqual(placed);
     expect(measured.seen.measures).toBe(measures);

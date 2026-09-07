@@ -503,10 +503,18 @@ export function placeMenu(
 /// The module's own structural rules, injected once. Colours and the frame
 /// stay with the host's skin; nothing here names a palette.
 export const NAV_MENU_CSS = `
-/* border-box: a skin's padding and frame count against the cap, or the last
-   rows sit past the viewport edge with no scrollbar. */
-.ctx-menu { position: fixed; box-sizing: border-box; overflow: auto; }
-.ctx-menu[popover] { margin: 0; inset: auto; box-sizing: border-box; overflow: auto; }
+/* The cap is a rule, not a measurement: no level outgrows the viewport whatever
+   the placement pass measured. border-box keeps a skin's padding and frame
+   inside it; the stable gutter keeps the scrollbar off the rows. */
+.ctx-menu {
+  position: fixed;
+  box-sizing: border-box;
+  max-height: calc(100vh - ${2 * nav_viewport_margin}px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+.ctx-menu[popover] { margin: 0; inset: auto; }
 .ctx-item { display: flex; align-items: baseline; gap: 8px; }
 .ctx-label { flex: 1; }
 .ctx-subtext { opacity: .6; font-size: 12px; }
