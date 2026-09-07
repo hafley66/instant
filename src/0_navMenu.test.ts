@@ -12,6 +12,7 @@ import {
   levelRows,
   navMenuModel,
   orderedGroups,
+  placeMenu,
   toggleFavorite,
   withFavorites,
   type NavGroup,
@@ -64,6 +65,23 @@ describe("order", () => {
 });
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("placeMenu", () => {
+  const size = { width: 100, height: 40 };
+  const viewport = { width: 1000, height: 1000 };
+
+  it("stays at the point when the menu fits right", () => {
+    expect(placeMenu(size, { x: 0, y: 0 }, viewport, 50)).toEqual({ left: 0, top: 0 });
+  });
+
+  it("puts its right edge on the owner's right edge when it overflows right", () => {
+    expect(placeMenu(size, { x: 950, y: 0 }, viewport, 960)).toEqual({ left: 860, top: 0 });
+  });
+
+  it("clamps to zero instead of going negative", () => {
+    expect(placeMenu(size, { x: 950, y: 0 }, viewport, 40)).toEqual({ left: 0, top: 0 });
+  });
+});
 
 describe("favorites", () => {
   it("pins a starred item to a top group titled by its home group", () => {

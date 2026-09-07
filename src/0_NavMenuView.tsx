@@ -1,4 +1,5 @@
-import { memo, useEffect, useLayoutEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { SignalReact } from "@hafley66/signals/react";
 import {
@@ -17,13 +18,16 @@ export type NavRowRender = (id: string) => void;
 type RowProps = {
   model: NavMenuModel;
   depth: number;
+  /// True when the pointer, given the mouse event, is inside a level deeper
+  /// than `depth`. A leaf row must then leave that level alone.
+  insideDeeper: (depth: number, event: ReactMouseEvent) => boolean;
   onRowRender?: NavRowRender;
 } & Extract<NavRowView, { kind: "item" }>;
 
 /// One row, memoised on its own props: a favourite toggle rewrites one row's
 /// props and React leaves every other row's DOM alone.
 const NavRow = memo(SignalReact(function NavRow(props: RowProps) {
-  const { model, depth, onRowRender, id, label, subtext, hasChildren, disabled, favorite } = props;
+  const { model, depth, insideDeeper, onRowRender, id, label, subtext, hasChildren, disabled, favorite } = props;
   onRowRender?.(id);
   return (
     <div
@@ -33,8 +37,9 @@ const NavRow = memo(SignalReact(function NavRow(props: RowProps) {
         + (props.dragging ? " ctx-dragging" : "")}
       data-nav-id={id}
       role="menuitem"
-      onMouseEnter={() => {
+      onMouseEnter={(event) => {
         model.focus(id);
+        if (insideDeeper(depth, event)) return;
         if (hasChildren) model.openSubmenu(depth, id);
         else model.closeTo(depth);
       }}
@@ -89,13 +94,14 @@ type LevelProps = {
   y: number;
   bind: (depth: number, element: HTMLElement | null) => void;
   ownerRect: (depth: number, ownerId: string | null) => DOMRect | null;
+  insideDeeper: (depth: number, event: ReactMouseEvent) => boolean;
   onRowRender?: NavRowRender;
 };
 
 /// One popover per level: the top layer keeps a submenu clear of xterm and of
 /// dockview, and the position is measured after the rows land.
 const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
-  const { model, level, x, y, bind, ownerRect, onRowRender } = props;
+  const { model, level, x, y, bind, ownerRect, insideDeeper, onRowRender } = props;
   const root = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -119,7 +125,7 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
       size,
       { x: rect?.right ?? x, y: rect?.top ?? y },
       { width: window.innerWidth, height: window.innerHeight },
-      rect?.left,
+      rect?.right,
     );
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
@@ -168,7 +174,7 @@ const NavLevel = SignalReact(function NavLevel(props: LevelProps) {
           );
         }
         return (
-          <NavRow key={row.id} model={model} depth={level.depth} onRowRender={onRowRender} {...row} />
+          <NavRow key={row.id} model={model} depth={level.depth} insideDeeper={insideDeeper} onRowRender={onRowRender} {...row} />
         );
       })}
     </div>
@@ -249,6 +255,12 @@ export const NavMenu = SignalReact(function NavMenu({ model, registry, onRowRend
     return owner?.getBoundingClientRect() ?? null;
   };
 
+  const insideDeeper = useCallback((depth: number, event: ReactMouseEvent) => {
+    const under = document.elementFromPoint?.(event.clientX, event.clientY) as Element | null;
+    if (!under) return false;
+    return elements.current.slice(depth + 1).some((element) => element?.contains(under));
+  }, []);
+
   if (!view.open) {
     elements.current = [];
     if (registry) registry.length = 0;
@@ -266,6 +278,7 @@ export const NavMenu = SignalReact(function NavMenu({ model, registry, onRowRend
           y={view.y}
           bind={bind}
           ownerRect={ownerRect}
+          insideDeeper={insideDeeper}
           onRowRender={onRowRender}
         />
       ))}

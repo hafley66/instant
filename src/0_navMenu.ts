@@ -473,7 +473,11 @@ export function navMenuModel(defaults: NavMenuOptions = {}): NavMenuModel {
 }
 
 /// Where a menu box lands: at the point, flipped away from the right or the
-/// bottom edge, and for a submenu flipped to the left of its owner row.
+/// bottom edge. `flipTo` is the owner's right edge, so a submenu that overflows
+/// right lands with its own right edge on the owner's right edge, overlaying the
+/// parent instead of sitting to its left. Overlaying keeps the submenu (a
+/// top-layer popover) under the pointer, so crossing the parent's rows does not
+/// yank the hover away.
 export function placeMenu(
   size: { width: number; height: number },
   point: { x: number; y: number },

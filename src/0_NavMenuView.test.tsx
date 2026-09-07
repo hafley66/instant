@@ -60,6 +60,14 @@ const level = (depth: number) => navMenuLevels()[depth];
 const rowsOf = (depth: number) => [...level(depth).querySelectorAll<HTMLElement>(".ctx-item")];
 const idsOf = (depth: number) => rowsOf(depth).map((row) => row.dataset.navId);
 
+const stubFromPoint = (returnValue: Element) => {
+  const original = (document as unknown as { elementFromPoint?: Document["elementFromPoint"] }).elementFromPoint;
+  (document as unknown as { elementFromPoint?: Document["elementFromPoint"] }).elementFromPoint = () => returnValue;
+  return () => {
+    (document as unknown as { elementFromPoint?: Document["elementFromPoint"] }).elementFromPoint = original;
+  };
+};
+
 afterEach(async () => { await act(async () => { closeNavMenu(); }); });
 
 describe("the menu, rendered by React", () => {
@@ -256,6 +264,38 @@ describe("the submenu's search row and stars", () => {
     await hover(row);
     await hover(rowsOf(1)[0]);
     expect(rowsOf(1)[0]).toBe(row);
+  });
+});
+
+describe("the submenu flipped over its parent", () => {
+  it("keeps the open deeper level when the pointer is inside it", async () => {
+    await open([
+      { id: "fork", label: "Fork", children: groups() },
+      { id: "copy", label: "Copy", run: () => {} },
+    ]);
+    await hover(rowsOf(0)[0]);
+    await settle();
+    expect(navMenuLevels()).toHaveLength(2);
+    const submenu = level(1);
+    const restore = stubFromPoint(submenu);
+    await hover(rowsOf(0)[1]);
+    expect(navMenuLevels()).toHaveLength(2);
+    restore();
+  });
+
+  it("closes the deeper level when the pointer rests on the parent leaf row", async () => {
+    await open([
+      { id: "fork", label: "Fork", children: groups() },
+      { id: "copy", label: "Copy", run: () => {} },
+    ]);
+    await hover(rowsOf(0)[0]);
+    await settle();
+    expect(navMenuLevels()).toHaveLength(2);
+    const leaf = rowsOf(0)[1];
+    const restore = stubFromPoint(leaf);
+    await hover(leaf);
+    expect(navMenuLevels()).toHaveLength(1);
+    restore();
   });
 });
 
