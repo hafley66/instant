@@ -348,3 +348,70 @@ describe("persistence stays injected", () => {
     expect(order.$()).toEqual(empty_nav_order);
   });
 });
+
+describe("a level that outgrows the viewport", () => {
+  const many = (count: number): NavGroup[] => [
+    { id: "opencode", label: "opencode", items: Array.from({ length: count }, (_, at) => ({
+      id: `o${at}`, label: `preset-${at}`,
+    })) },
+  ];
+
+  const rect = (values: Partial<DOMRect>): DOMRect => ({
+    x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0,
+    toJSON: () => ({}), ...values,
+  }) as DOMRect;
+
+  /// jsdom measures every box at zero, so the level reports what the screenshots
+  /// had: 34px a row, under an owner row 500px down a 768px window.
+  function stubMeasure() {
+    const original = Element.prototype.getBoundingClientRect;
+    const seen = { measures: 0 };
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains("ctx-menu")) {
+        seen.measures += 1;
+        return rect({ width: 200, height: this.querySelectorAll(".ctx-item").length * 34 });
+      }
+      if (this instanceof HTMLElement && this.dataset.navId) {
+        return rect({ top: 500, bottom: 534, left: 40, right: 240, width: 200, height: 34 });
+      }
+      return original.call(this);
+    };
+    return { seen, restore: () => { Element.prototype.getBoundingClientRect = original; } };
+  }
+
+  async function openSub(count: number) {
+    await open([{ id: "fork", label: "Fork", children: many(count) }]);
+    await hover(rowsOf(0)[0]);
+    await settle();
+  }
+
+  it("slides up beside its owner row instead of flipping to the top", async () => {
+    const measured = stubMeasure();
+    await openSub(15);
+    expect(level(1).style.top).toBe("250px");
+    expect(level(1).style.left).toBe("240px");
+    expect(level(1).style.maxHeight).toBe("");
+    measured.restore();
+  });
+
+  it("caps a level taller than the window and scrolls its rows", async () => {
+    const measured = stubMeasure();
+    await openSub(30);
+    expect(level(1).style.maxHeight).toBe("752px");
+    expect(level(1).style.top).toBe("8px");
+    measured.restore();
+  });
+
+  it("holds its place when the pointer walks its rows", async () => {
+    const measured = stubMeasure();
+    await openSub(15);
+    const placed = { top: level(1).style.top, left: level(1).style.left };
+    const measures = measured.seen.measures;
+    await hover(rowsOf(1)[3]);
+    await hover(rowsOf(1)[7]);
+    expect(rowsOf(1)[7].classList.contains("ctx-active")).toBe(true);
+    expect({ top: level(1).style.top, left: level(1).style.left }).toEqual(placed);
+    expect(measured.seen.measures).toBe(measures);
+    measured.restore();
+  });
+});
