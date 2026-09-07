@@ -28,6 +28,7 @@ mod sprefa_plugin;
 mod workspace;
 mod worktrees;
 mod services;
+pub mod serve;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
