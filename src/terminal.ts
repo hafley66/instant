@@ -144,6 +144,14 @@ export function syncTurnDebugOverlays() {
   for (const tab of tabs.values()) applyTurnDebugOverlay(tab);
 }
 
+/// The pane's cwd as tmux reports it now. The store's copy refreshes only when
+/// the sessions panel shows or a tab opens, so a `cd` typed since then would
+/// otherwise send the fork to the old directory.
+async function liveCwd(id: string): Promise<string> {
+  await refreshSessions();
+  return tabMetaById(id)?.cwd ?? "";
+}
+
 /// The fork verb runs in the tab's cwd, so the lane branches from the repo the
 /// pane stands in; the re-pull paints it on the next gutter tick.
 async function runFork(commentId: number, cwd: string, sync: TerminalContextSync) {
@@ -811,7 +819,7 @@ export function openTab(
     contextSync.forks,
     (event, entries) => showContextMenu(event.clientX, event.clientY, forkMenuTargets(entries).map((target) => ({
       label: `Fork "${target.label}" → ${FORK_PRESET}`,
-      action: () => void runFork(target.commentId, tabMetaById(id)?.cwd ?? "", contextSync),
+      action: () => void liveCwd(id).then((cwd) => runFork(target.commentId, cwd, contextSync)),
     }))),
   );
   const forkPaint = !contextQueue || !turnMarks ? undefined : new TerminalForkRender(contextQueue, {
@@ -1397,7 +1405,7 @@ export async function forkSelection(id: string, preset: string, note?: string) {
   }
   if (note?.trim()) void applyTags(note, `comment:${commentId}`);
   forkRender.lastPreset.$(preset);
-  await spawnFork(commentId, preset, tabMetaById(id)?.cwd ?? "");
+  await spawnFork(commentId, preset, await liveCwd(id));
   tab.contextSync.activate();
 }
 

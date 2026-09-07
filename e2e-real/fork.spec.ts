@@ -5,7 +5,7 @@
 // made, and a PNG at every step under artifacts/real/.
 import { expect, test, type Page } from "@playwright/test";
 import { spawnSync } from "node:child_process";
-import { BOOP, boot, cell, killAllSessions, menuRow, openTab, root, settleCwd, shot, sql, tmuxHasDefault, toast, typeLine } from "./0_real";
+import { BOOP, boot, cell, killAllSessions, menuRow, openTab, root, shot, sql, tmuxHasDefault, toast, typeLine } from "./0_real";
 
 async function forkFlow(page: Page, word: string, note: string, tag: string): Promise<void> {
   const at = await cell(page, 0, 3);
@@ -36,9 +36,9 @@ test("a word in a repo tab forks on flash4 with a note, and the app names the la
   const word = `forkproof${Date.now().toString(36)}`;
   await boot(page);
   const session = await openTab(page);
+  // No panel refresh between the cd and the fork: the fork reads the live pane cwd.
   typeLine(session, `cd ${root}`);
   await page.waitForTimeout(800);
-  await settleCwd(page, session, "condom");
   typeLine(session, `clear; echo ${word}`);
   await page.waitForTimeout(1_500);
   await shot(page, "fork-01-tab");
@@ -67,7 +67,6 @@ test("a word in a tab outside any repo fails in the open: toast and error panel 
   const session = await openTab(page);
   typeLine(session, "cd /private/tmp");
   await page.waitForTimeout(800);
-  await settleCwd(page, session, "/private/tmp");
   typeLine(session, `clear; echo ${word}`);
   await page.waitForTimeout(1_500);
 
