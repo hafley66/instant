@@ -136,6 +136,49 @@ export async function toast(page: Page): Promise<string> {
   return (await el.textContent()) ?? "";
 }
 
+// real-term-hover lane additions (kept at the end; other lanes append below).
+
+/// First pane row holding `marker`, -1 when absent. Row 0 is the top of the
+/// visible screen, so the number feeds straight into `cell`.
+export const findRow = (session: string, marker: string): number =>
+  paneScreen(session).findIndex((line) => line.includes(marker));
+
+/// The tab's harness badge flips only after the store's tmux sweep sees the
+/// pane's foreground process, so a stub harness launch is awaited, not assumed.
+export async function waitForHarness(page: Page, id: string): Promise<void> {
+  await expect
+    .poll(() => page.locator(`.term-host[data-harness="${id}"]`).count(), {
+      timeout: 30_000,
+      message: `harness ${id} never detected`,
+    })
+    .toBeGreaterThan(0);
+}
+
+/// A stub codex pane writes no transcript, so the spec seeds the one turn in
+/// boop's sqlite whose `said` it also cats to the screen.
+const seededTurns: string[] = [];
+export function seedTurn(session: string, turn: number, said: string): void {
+  const quote = said.replace(/'/g, "''");
+  sql(`insert into dict_session(value) values ('${session}')`);
+  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+      values ((select id from dict_session where value='${session}'),
+              (select id from dict_harness where value='codex'),
+              null, ${Date.now()})`);
+  sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+      values ((select id from dict_session where value='${session}'), ${turn}, ${Date.now()},
+              (select id from dict_role where value='assistant'), '${quote}', null)`);
+  seededTurns.push(session);
+}
+
+export function dropSeededTurns(): void {
+  for (const session of seededTurns) {
+    sql(`delete from agent_turn where session_id=(select id from dict_session where value='${session}')`);
+    sql(`delete from agent_session where session_id=(select id from dict_session where value='${session}')`);
+    sql(`delete from dict_session where value='${session}'`);
+  }
+  seededTurns.length = 0;
+}
+
 // lane real-term-basics
 // The codex-pane prelude in printf %b form: alternate screen plus mouse tracking.
 export const MOUSE_PANE = "\\033[?1049h\\033[?1006h\\033[?1000h\\033[?1002h";
@@ -292,3 +335,90 @@ export const serveLog = (): string => {
     return "";
   }
 };
+
+// ---- lane: real-term-hover (context queue ports) ----
+
+/// A pane on a session named once per test: bash with no prompt and no tty
+/// echo, then one `cat` of the bytes the spec wants on screen. The pane holds
+/// those lines and nothing else, so the row tmux reports is the row xterm
+/// paints. `prelude` carries escape bytes (mouse tracking, alternate screen)
+/// through `printf %b` before the body.
+export async function silentSessionPane(
+  page: Page,
+  cwd: string,
+  body: string,
+  marker: string,
+  prelude = "",
+): Promise<string> {
+  const session = await openSessionTab(page, cwd);
+  typeLine(session, "bash --norc --noprofile");
+  await page.waitForTimeout(600);
+  typeLine(session, "PS1=; stty -echo");
+  await page.waitForTimeout(400);
+  const file = path.join(cwd, `pane-${Math.random().toString(36).slice(2, 8)}.txt`);
+  fs.writeFileSync(file, body);
+  typeLine(session, prelude ? `clear; printf '%b' '${prelude}'; cat ${file}` : `clear; cat ${file}`);
+  await expect.poll(() => paneScreen(session).join("\n"), {
+    timeout: 20_000,
+    message: `pane ${session} never showed ${JSON.stringify(marker)}`,
+  }).toContain(marker);
+  await page.waitForTimeout(400);
+  return session;
+}
+
+/// Queue rows live in boop's sqlite and reload onto a tab of the same name, so
+/// a test drops its own rows rather than leaving them for the next reader.
+export function dropTabComments(tab: string): void {
+  sql(`delete from agent_turn_comment_target where comment_id in
+       (select comment_id from agent_turn_comment where tab_name='${tab}')`);
+  sql(`delete from agent_turn_comment where tab_name='${tab}'`);
+}
+
+/// Cell height in viewport pixels of the visible terminal host, read from the
+/// same measure element xterm sizes its rows with.
+export async function cellHeight(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0)!;
+    return host.querySelector(".xterm-char-measure-element")!.getBoundingClientRect().height;
+  });
+}
+
+/// The tmux pane id of a session's active pane, `%NN`.
+export const paneId = (session: string): string =>
+  tmux(["display-message", "-p", "-t", `${session}:`, "#{pane_id}"]).trim();
+
+const boundRoutes: string[] = [];
+
+/// Bind a pane to a seeded boop session the way a lane registration does: the
+/// app asks boop which session stands in the pane, and boop answers from its
+/// route table. Without the binding the pane is unbound and the turn
+/// projection has nothing to place. Rows are dropped by `dropPaneSessions`.
+export function bindPaneSession(session: string, harness = "codex"): void {
+  const route = `e2e-real-${session}`;
+  const pane = paneId(session);
+  const held = sql(`select route from agent_route where tmux='${pane}' limit 1`);
+  if (held) throw new Error(`pane ${pane} is already bound to route ${held}; burn ids first`);
+  sql(`insert or replace into agent_route(route, kind, harness, tmux, session_id, registered_at)
+       values ('${route}', 'lane', '${harness}', '${pane}', '${session}',
+               strftime('%Y-%m-%d %H:%M:%f000', 'now'))`);
+  boundRoutes.push(route);
+}
+
+/// tmux hands out pane ids per server from %0 up, and boop keys its lane
+/// bindings by the bare pane id with no server in it, so a pane on the app's
+/// private socket lands on an id a lane on the default socket already holds.
+/// Probe panes burn ids until the next one tmux will hand out is free.
+export function burnClaimedPaneIds(): void {
+  for (let i = 0; i < 40; i += 1) {
+    const probe = `paneprobe${i}`;
+    tmux(["new-session", "-d", "-s", probe]);
+    const next = `%${Number(paneId(probe).slice(1)) + 1}`;
+    tmux(["kill-session", "-t", `=${probe}`]);
+    if (sql(`select count(*) from agent_route where tmux='${next}'`) === "0") return;
+  }
+}
+
+export function dropPaneSessions(): void {
+  for (const route of boundRoutes) sql(`delete from agent_route where route='${route}'`);
+  boundRoutes.length = 0;
+}
