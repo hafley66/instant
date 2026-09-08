@@ -424,6 +424,10 @@ export class TerminalTurnVisibilityV2 {
       return;
     }
     if (this.disposed || this.frame) return;
+    // A hidden terminal keeps its lease (its pane may still be writing) but
+    // performs no scan; the next clock tick or viewport event after it shows
+    // again schedules one. Thirty open tabs then cost one tab's scans.
+    if (this.viewport.visible?.() === false) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       this.scanning = true;

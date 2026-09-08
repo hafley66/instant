@@ -1,25 +1,27 @@
 #!/bin/bash
 # The one way to run the real tier. One playwright stack at a time on this
 # machine (lock), niced, one spec file per invocation, boop's fork verb stubbed,
-# and a swap guard so a starved box refuses the run instead of paging to death.
+# and a memory guard so a starved box refuses the run instead of paging to death.
 #
 #   scripts/real-test.sh e2e-real/fork.spec.ts [more playwright args]
 #
 # env: INSTANT_REAL_PORT (47790), INSTANT_REAL_SOCKET (instant-real-e2e),
-#      INSTANT_SERVE_BIN, INSTANT_REAL_FORCE=1 skips the swap guard,
-#      INSTANT_REAL_MIN_SWAP_MB (1000).
+#      INSTANT_SERVE_BIN, INSTANT_REAL_FORCE=1 skips the memory guard,
+#      INSTANT_REAL_MIN_MEM_PCT (30): kern.memorystatus_level, the kernel's
+#      system-wide free memory percentage, counts reclaimable pages and does not
+#      move when macOS resizes its swap files, unlike vm.swapusage.
 set -eu
 cd "$(dirname "$0")/.."
 [ $# -ge 1 ] || { echo "usage: scripts/real-test.sh <spec.ts> [playwright args]" >&2; exit 2; }
 port="${INSTANT_REAL_PORT:-47790}"
 socket="${INSTANT_REAL_SOCKET:-instant-real-e2e}"
 lock="/tmp/instant-real-test.lock"
-min_swap="${INSTANT_REAL_MIN_SWAP_MB:-1000}"
+min_mem="${INSTANT_REAL_MIN_MEM_PCT:-30}"
 
 if [ -z "${INSTANT_REAL_FORCE:-}" ]; then
-  free_mb=$(sysctl -n vm.swapusage | sed -E 's/.*free = ([0-9.]+)M.*/\1/' | cut -d. -f1)
-  if [ "${free_mb:-0}" -lt "$min_swap" ]; then
-    echo "real-test: swap free ${free_mb}M is under ${min_swap}M; refusing to start a browser (INSTANT_REAL_FORCE=1 overrides)" >&2
+  level=$(sysctl -n kern.memorystatus_level 2>/dev/null || echo 100)
+  if [ "${level:-0}" -lt "$min_mem" ]; then
+    echo "real-test: memory free level ${level}% is under ${min_mem}%; refusing to start a browser (INSTANT_REAL_FORCE=1 overrides)" >&2
     exit 3
   fi
 fi
