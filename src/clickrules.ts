@@ -7,13 +7,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { clickRpc } from "./ipc/contract";
 import { DEFAULT_CLICK_RULES, type ClickRule } from "./state";
 import { addPreviewPanel } from "./reactdock";
-import { escapeHtml, shQuote } from "./core";
+import { escapeHtml, flashStatus, shQuote } from "./core";
 import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
 import { getFocusedTermId, tabMetaById } from "./terminal";
 import { splitLineRef, tokenAtColumn } from "./termTokens";
 import { looksLikePath, resolveRef } from "./refResolve";
 import { RefChoicesPanel } from "./refChoicesPanel";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
+import { launcherOf } from "./0_clickLaunchers";
 import { settings } from "./0_settings";
 
 const clickRules = (): ClickRule[] => settings.clickRules.$() ?? DEFAULT_CLICK_RULES;
@@ -92,6 +93,7 @@ export async function runClickRule(token: string, cwd: string): Promise<boolean>
   const rule = clickRuleFor(token);
   if (!rule) return false;
   const command = rule.command.replace(/\$1/g, () => shQuote(token));
+  const launcher = launcherOf(rule.command);
   let out = "";
   try {
     out = await clickRpc.runClick({ command, cwd });
@@ -100,6 +102,13 @@ export async function runClickRule(token: string, cwd: string): Promise<boolean>
     // an empty result, which the panel names below, and not an error line.
     const text = String(e);
     out = /exit 1:\s*$/.test(text.trim()) ? "" : text;
+  }
+  // A launcher that printed nothing did its job in another app: a URL is in
+  // the browser now, a path is in the editor. An empty tab here would only
+  // cover what just came forward.
+  if (launcher && !out.trim()) {
+    flashStatus(`${launcher} ${token}`);
+    return true;
   }
   // Silence is the one answer a ⌘-click must never give: an empty result still
   // opens the panel, naming the command that found nothing.
