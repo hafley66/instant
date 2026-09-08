@@ -30,14 +30,121 @@ mod worktrees;
 mod services;
 pub mod serve;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
+use core_foundation::runloop::CFRunLoop;
+use core_graphics::event::{
+    CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+    CallbackResult,
+};
 use mouse_position::mouse_position::Mouse;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+
+// Two right-clicks closer than this count as a double-right-click summon gesture.
+const DOUBLE_RIGHT_MS: u64 = 350;
+// Two right-⌘ taps closer than this count as a double-right-⌘ summon. Modifier
+// taps run a touch slower than mouse clicks, so the window is a bit wider.
+const DOUBLE_RCMD_MS: u64 = 400;
+// IOKit device-dependent flag bit for the RIGHT command key (NX_DEVICERCMDKEYMASK).
+// Present in HID-tap event flags, so it isolates right ⌘ from left ⌘.
+const RCMD_BIT: u64 = 0x10;
+
+/// The summon gestures' clock: the previous right-click and the previous
+/// right-⌘ press edge. Nothing else about input is read or kept.
+#[derive(Default)]
+struct SummonGesture {
+    last_right_down: Option<Instant>,
+    right_cmd_down: bool,
+    last_right_cmd: Option<Instant>,
+}
+
+fn is_double(previous: &mut Option<Instant>, window_ms: u64) -> bool {
+    let now = Instant::now();
+    let double = previous
+        .map(|t| now.duration_since(t) < Duration::from_millis(window_ms))
+        .unwrap_or(false);
+    // A hit resets the clock so a triple never counts as two doubles.
+    *previous = if double { None } else { Some(now) };
+    double
+}
+
+/// A listen-only HID event tap on its own thread that watches two events,
+/// right mouse down and modifier flag changes, for the two summon gestures:
+/// double right-click and double right-⌘. Every event passes through untouched.
+/// macOS disables a tap whose callback stalls; the loop re-creates it.
+fn spawn_summon_tap(app: AppHandle) {
+    std::thread::spawn(move || {
+        // A slow tap callback delays every click systemwide on a loaded machine.
+        unsafe {
+            libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
+        }
+        let gesture = Mutex::new(SummonGesture::default());
+        let alive = AtomicBool::new(false);
+        loop {
+            let created = CGEventTap::with_enabled(
+                CGEventTapLocation::HID,
+                CGEventTapPlacement::HeadInsertEventTap,
+                CGEventTapOptions::ListenOnly,
+                vec![CGEventType::RightMouseDown, CGEventType::FlagsChanged],
+                |_proxy, ty, event| {
+                    let mut g = gesture.lock().unwrap();
+                    match ty {
+                        CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
+                            alive.store(false, Ordering::Relaxed);
+                            CFRunLoop::get_current().stop();
+                        }
+                        CGEventType::RightMouseDown => {
+                            if is_double(&mut g.last_right_down, DOUBLE_RIGHT_MS) {
+                                log_event(&app, "INFO", "double_right_click_detected", serde_json::json!({}));
+                                let handle = app.clone();
+                                let _ = app.run_on_main_thread(move || toggle_window(&handle));
+                            }
+                        }
+                        CGEventType::FlagsChanged => {
+                            // Right ⌘ carries its own device bit, so this stays
+                            // unambiguous while left ⌘ is held. Only the press edge
+                            // counts.
+                            let rcmd = event.get_flags().bits() & RCMD_BIT != 0;
+                            if rcmd && !g.right_cmd_down && is_double(&mut g.last_right_cmd, DOUBLE_RCMD_MS) {
+                                log_event(&app, "INFO", "double_right_command_detected", serde_json::json!({}));
+                                let handle = app.clone();
+                                let _ = app.run_on_main_thread(move || toggle_window(&handle));
+                            }
+                            g.right_cmd_down = rcmd;
+                        }
+                        _ => {}
+                    }
+                    CallbackResult::Keep
+                },
+                || {
+                    alive.store(true, Ordering::Relaxed);
+                    log_event(&app, "INFO", "summon_tap_active", serde_json::json!({}));
+                    CFRunLoop::run_current()
+                },
+            );
+            if created.is_err() {
+                log_event(
+                    &app,
+                    "ERROR",
+                    "summon_tap_create_failed",
+                    serde_json::json!({ "reason": "grant Accessibility / Input Monitoring permission" }),
+                );
+                eprintln!("summon gestures disabled: event tap creation failed (grant Accessibility / Input Monitoring permission)");
+                return;
+            }
+            if alive.load(Ordering::Relaxed) {
+                log_event(&app, "WARN", "summon_tap_runloop_ended", serde_json::json!({}));
+                return;
+            }
+            log_event(&app, "WARN", "summon_tap_disabled", serde_json::json!({}));
+        }
+    });
+}
 
 // The app that was frontmost when we last summoned the overlay. On dismiss we
 // reactivate it so focus lands back where the user was (e.g. Chrome) instead of
@@ -752,8 +859,10 @@ pub fn run() {
 
             if skip_shared_globals {
                 eprintln!(
-                    "isolated globals: skipping tray icon, showing the main window on launch instead"
+                    "isolated globals: skipping tray icon and the summon gestures, showing the main window on launch instead"
                 );
+            } else {
+                spawn_summon_tap(app.handle().clone());
             }
 
             // Track focus on our own window for the front's focus-driven state.
