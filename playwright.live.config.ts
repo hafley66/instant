@@ -14,7 +14,7 @@ export default defineConfig({
   },
   webServer: {
     command: "corepack pnpm@10.12.4 run dev --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173/e2e-paint.html",
+    url: "http://127.0.0.1:4173/index.html",
     reuseExistingServer: true,
     timeout: 30_000,
   },
