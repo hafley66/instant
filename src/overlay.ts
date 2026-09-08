@@ -2,9 +2,7 @@
 // controller: coexist with another app (VSCode) using built-in window APIs only —
 // a "follow" mode that shows/hides as overlayTarget gains/loses focus, a faded
 // (dimmed) look, a keyboard click-through toggle, and a compact "mini" layout.
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { runtimePorts } from "./reactive/ports";
 import { store } from "./state";
 import { flashStatus } from "./core";
 import { overlaySizeTransition } from "./0_overlaySize";
@@ -17,7 +15,7 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
 export const ZOOM_STEP = 0.1;
 export function applyZoom() {
-  getCurrentWebview().setZoom(settings.zoom.$()).catch(console.error);
+  runtimePorts.webview.setZoom(settings.zoom.$()).catch(console.error);
 }
 export function nudgeZoom(delta: number) {
   const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(settings.zoom.$() + delta).toFixed(2)));
@@ -33,8 +31,8 @@ export function resetZoom() {
 // No non-activating NSPanel (needs a native crate), so show() does activate us —
 // but follow keys off frontmostApp, so the instant focus moves to a third app we
 // hide again.
-const OVERLAY_NORMAL = new LogicalSize(820, 540); // matches tauri.conf default
-const OVERLAY_MINI = new LogicalSize(440, 360);
+const OVERLAY_NORMAL = { width: 820, height: 540 }; // matches tauri.conf default
+const OVERLAY_MINI = { width: 440, height: 360 };
 let overlayMiniApplied: boolean | null = null;
 let overlayClickThrough = false;
 
@@ -44,13 +42,18 @@ export function applyOverlay() {
   const app = document.getElementById("app");
   app?.classList.toggle("overlay-faded", overlay.fade.$());
   app?.classList.toggle("mini", mini);
-  const win = getCurrentWindow();
+  const win = runtimePorts.window;
   // A normal-mode boot keeps the native restored size. Persisted mini mode and
   // later user toggles still apply their authored sizes.
   const sizeTransition = overlaySizeTransition(overlayMiniApplied, mini);
   overlayMiniApplied = mini;
   if (sizeTransition)
-    win.setSize(sizeTransition === "mini" ? OVERLAY_MINI : OVERLAY_NORMAL).catch(() => {});
+    win
+      .setSize(
+        sizeTransition === "mini" ? OVERLAY_MINI.width : OVERLAY_NORMAL.width,
+        sizeTransition === "mini" ? OVERLAY_MINI.height : OVERLAY_NORMAL.height,
+      )
+      .catch(() => {});
   // Ride along over the target's desktop across Spaces while an overlay is active.
   win.setVisibleOnAllWorkspaces(mode !== "off").catch(() => {});
   // Follow: mirror the target's focus (self-focus is filtered from frontmostApp).
@@ -89,6 +92,6 @@ export function cycleOverlayMode() {
 // off, so it toggles by key by design.
 export async function toggleClickThrough() {
   overlayClickThrough = !overlayClickThrough;
-  await getCurrentWindow().setIgnoreCursorEvents(overlayClickThrough).catch(() => {});
+  await runtimePorts.window.setIgnoreCursorEvents(overlayClickThrough).catch(() => {});
   flashStatus(overlayClickThrough ? "click-through on" : "click-through off");
 }

@@ -2,7 +2,7 @@
 // the "send to terminal" picker, and the deferred blur-to-hide timer (shared
 // with the OS-drop machinery, since showing a catcher/crosshair blurs us).
 import { invoke } from "./generated/native";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { runtimePorts } from "./reactive/ports";
 import { activeId } from "./core";
 import { tabs, sendTextToTab, recentTabs } from "./terminal";
 import { settings } from "./0_settings";
@@ -33,17 +33,16 @@ export function scheduleHide(fn: () => void, ms: number) {
 // before returning; the blur guard stays up briefly so the focus settling after
 // show() doesn't trip click-outside-to-hide.
 async function captureRegion(): Promise<string | null> {
-  const win = getCurrentWindow();
   capturing = true;
-  await win.hide();
+  await runtimePorts.window.hide();
   let path: string | null = null;
   try {
     path = await invoke<string>("screenshot");
   } catch (e) {
     console.error("screenshot:", e);
   }
-  await win.show();
-  await win.setFocus();
+  await runtimePorts.window.show();
+  await runtimePorts.window.setFocus();
   setTimeout(() => (capturing = false), 300);
   return path;
 }

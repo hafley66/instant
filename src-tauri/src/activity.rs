@@ -24,8 +24,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::State;
 use tiny_http::{Header, Method, Response, Server};
+
+use crate::host::Host;
+use crate::services::Services;
 
 pub const INGEST_PORT: u16 = 8787;
 const RETAIN_DAYS: i64 = 7;
@@ -320,7 +323,7 @@ fn with_cors<R: Read>(resp: Response<R>) -> Response<R> {
 
 /// Run the ingest server on its own thread until the process exits. Each POST
 /// writes a `source='browser'` row and emits `activity-added`.
-pub fn spawn_server(app: AppHandle) {
+pub fn spawn_server(host: Arc<dyn Host>, services: Arc<Services>) {
     std::thread::spawn(move || {
         let server = match Server::http(("127.0.0.1", INGEST_PORT)) {
             Ok(s) => s,
@@ -341,7 +344,7 @@ pub fn spawn_server(app: AppHandle) {
                 // Rules the extension fetches each tick; instant is the source of
                 // truth. `{ "rules": [...] }` (matches the extension's ServerConfig).
                 (Method::Get, "/config") => {
-                    let rules = app.state::<RulesState>();
+                    let rules = &services.rules;
                     let list = rules.rules.lock().unwrap();
                     let revision = rules.revision.load(Ordering::Relaxed);
                     let body =
@@ -355,7 +358,7 @@ pub fn spawn_server(app: AppHandle) {
                     let _ = req.as_reader().read_to_string(&mut body);
                     match serde_json::from_str::<WatcherHeartbeat>(&body) {
                         Ok(h) => {
-                            let status = app.state::<WatcherState>();
+                            let status = &services.watcher;
                             *status.0.lock().unwrap() = WatcherStatus {
                                 last_heartbeat: now_ms(),
                                 config_revision: h.revision,
@@ -372,16 +375,16 @@ pub fn spawn_server(app: AppHandle) {
                 // jsonp-parses this into a `dom_match` rel, symmetric with how
                 // ghcacher pulls the GitHub API (path A of the DOM-as-rel plan).
                 (Method::Get, "/matches") => {
-                    let db = app.state::<ActivityDb>();
-                    let body = collect_matches(&db)
+                    let db = &services.activity;
+                    let body = collect_matches(db)
                         .unwrap_or_else(|e| serde_json::json!({ "error": e }).to_string());
                     let resp = Response::from_string(body)
                         .with_header(header(b"Content-Type", b"application/json"));
                     let _ = req.respond(with_cors(resp));
                 }
                 (Method::Get, "/diagnostics") => {
-                    let db = app.state::<ActivityDb>();
-                    let body = collect_network_diagnostics(&db)
+                    let db = &services.activity;
+                    let body = collect_network_diagnostics(db)
                         .unwrap_or_else(|e| serde_json::json!({ "error": e }).to_string());
                     let resp = Response::from_string(body)
                         .with_header(header(b"Content-Type", b"application/json"));
@@ -408,7 +411,7 @@ pub fn spawn_server(app: AppHandle) {
                                 // browser activity below, but must not discard
                                 // the rule's requested output.
                                 let text = serde_json::to_string(&m).unwrap_or_default();
-                                let db = app.state::<ActivityDb>();
+                                let db = &services.activity;
                                 let row = {
                                     let conn = db.0.lock().unwrap();
                                     insert_row(
@@ -427,8 +430,8 @@ pub fn spawn_server(app: AppHandle) {
                                     Ok(event) => {
                                         // The unified timeline row + a dedicated
                                         // event for the Rules panel's live feed.
-                                        let _ = app.emit("activity-added", &event);
-                                        let _ = app.emit("rule-match", &m);
+                                        let _ = host.emit("activity-added", serde_json::to_value(&event).unwrap_or(serde_json::Value::Null));
+                                        let _ = host.emit("rule-match", serde_json::to_value(&m).unwrap_or(serde_json::Value::Null));
                                         respond(req, 200, "ok");
                                     }
                                     Err(e) => respond(req, 500, &e.to_string()),
@@ -442,13 +445,13 @@ pub fn spawn_server(app: AppHandle) {
                         Ok(ev) if ev.source_type == "editor" => {
                             // VS Code extension: focus/cursor/save. Path + line
                             // + language id only, filtered like Files-panel rows.
-                            let cfg = app.state::<crate::config::ConfigState>();
+                            let cfg = &services.config;
                             if cfg.config.lock().unwrap().file_excluded(&ev.path) {
-                                crate::config::note_excluded(&cfg);
+                                crate::config::note_excluded(cfg);
                                 respond(req, 200, "filtered");
                                 continue;
                             }
-                            let db = app.state::<ActivityDb>();
+                            let db = &services.activity;
                             let text = match ev.line {
                                 Some(line) => line.to_string(),
                                 None => ev.language_id.clone(),
@@ -469,7 +472,7 @@ pub fn spawn_server(app: AppHandle) {
                             };
                             match row {
                                 Ok(event) => {
-                                    let _ = app.emit("activity-added", &event);
+                                    let _ = host.emit("activity-added", serde_json::to_value(&event).unwrap_or(serde_json::Value::Null));
                                     respond(req, 200, "ok");
                                 }
                                 Err(e) => respond(req, 500, &e.to_string()),
@@ -477,13 +480,13 @@ pub fn spawn_server(app: AppHandle) {
                         }
                         Ok(ev) => {
                             // Observation filter: drop excluded sites before recording.
-                            let cfg = app.state::<crate::config::ConfigState>();
+                            let cfg = &services.config;
                             if cfg.config.lock().unwrap().site_excluded(&ev.url) {
-                                crate::config::note_excluded(&cfg);
+                                crate::config::note_excluded(cfg);
                                 respond(req, 200, "filtered");
                                 continue;
                             }
-                            let db = app.state::<ActivityDb>();
+                            let db = &services.activity;
                             let row = {
                                 let conn = db.0.lock().unwrap();
                                 insert_row(
@@ -500,7 +503,7 @@ pub fn spawn_server(app: AppHandle) {
                             };
                             match row {
                                 Ok(event) => {
-                                    let _ = app.emit("activity-added", &event);
+                                    let _ = host.emit("activity-added", serde_json::to_value(&event).unwrap_or(serde_json::Value::Null));
                                     respond(req, 200, "ok");
                                 }
                                 Err(e) => respond(req, 500, &e.to_string()),
@@ -587,11 +590,19 @@ fn collect_network_diagnostics(db: &ActivityDb) -> Result<String, String> {
 /// filtered to one source.
 #[tauri::command]
 pub async fn activity_events(
-    db: State<'_, ActivityDb>,
+    services: State<'_, Arc<Services>>,
     limit: Option<i64>,
     source: Option<String>,
 ) -> Result<Vec<Event>, String> {
-    let conn = db.0.lock().unwrap();
+    activity_events_impl(&services, limit, source)
+}
+
+pub fn activity_events_impl(
+    services: &Services,
+    limit: Option<i64>,
+    source: Option<String>,
+) -> Result<Vec<Event>, String> {
+    let conn = services.activity.0.lock().unwrap();
     let lim = limit.unwrap_or(2000);
     let src = source.filter(|s| s != "all");
     let map = |r: &rusqlite::Row| {
@@ -638,10 +649,14 @@ pub async fn activity_events(
 }
 
 #[tauri::command]
-pub async fn activity_clear(db: State<'_, ActivityDb>) -> Result<(), String> {
+pub async fn activity_clear(services: State<'_, Arc<Services>>) -> Result<(), String> {
+    activity_clear_impl(&services)
+}
+
+pub fn activity_clear_impl(services: &Services) -> Result<(), String> {
     // Drop screenshot files first, then the rows.
     {
-        let conn = db.0.lock().unwrap();
+        let conn = services.activity.0.lock().unwrap();
         if let Ok(mut stmt) = conn.prepare("SELECT shot FROM events WHERE shot<>''") {
             if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
                 for shot in rows.flatten() {
@@ -657,56 +672,72 @@ pub async fn activity_clear(db: State<'_, ActivityDb>) -> Result<(), String> {
 
 /// Log a non-capture row (the Files panel logs `open` rows here so file
 /// references join the unified history).
-#[tauri::command]
-pub async fn activity_log(
-    db: State<'_, ActivityDb>,
-    cfg: State<'_, crate::config::ConfigState>,
-    app: AppHandle,
+pub fn activity_log_impl(
+    host: &dyn Host,
+    services: &Services,
     source: String,
     kind: String,
     title: String,
     text: String,
 ) -> Result<(), String> {
     // Observation filter: drop excluded file paths before recording.
-    if cfg.config.lock().unwrap().file_excluded(&text) {
-        crate::config::note_excluded(&cfg);
+    if services.config.config.lock().unwrap().file_excluded(&text) {
+        crate::config::note_excluded(&services.config);
         return Ok(());
     }
     let row = {
-        let conn = db.0.lock().unwrap();
+        let conn = services.activity.0.lock().unwrap();
         insert_row(&conn, now_ms(), &source, &kind, "", "", &title, &text, "")
     }
     .map_err(|e| e.to_string())?;
-    let _ = app.emit("activity-added", &row);
+    let _ = host.emit(
+        "activity-added",
+        serde_json::to_value(&row).unwrap_or(serde_json::Value::Null),
+    );
     Ok(())
 }
 
 /// The rule set the front end edits (Rules panel) and the extension fetches.
 #[tauri::command]
-pub fn rules_get(state: State<RulesState>) -> Vec<Rule> {
-    state.rules.lock().unwrap().clone()
+pub fn rules_get(services: State<Arc<Services>>) -> Vec<Rule> {
+    rules_get_impl(&services)
+}
+
+pub fn rules_get_impl(services: &Services) -> Vec<Rule> {
+    services.rules.rules.lock().unwrap().clone()
 }
 
 /// Replace the rule set, persist to rules.json, return the stored list. The
 /// extension picks the change up on its next /config tick (<= 1 min).
 #[tauri::command]
 pub async fn rules_set(
-    state: State<'_, RulesState>,
+    services: State<'_, Arc<Services>>,
     rules: Vec<Rule>,
 ) -> Result<Vec<Rule>, String> {
-    write_rules(&state.path, &rules).map_err(|e| e.to_string())?;
-    *state.rules.lock().unwrap() = rules.clone();
-    state.revision.fetch_add(1, Ordering::Relaxed);
+    rules_set_impl(&services, rules)
+}
+
+pub fn rules_set_impl(services: &Services, rules: Vec<Rule>) -> Result<Vec<Rule>, String> {
+    write_rules(&services.rules.path, &rules).map_err(|e| e.to_string())?;
+    *services.rules.rules.lock().unwrap() = rules.clone();
+    services.rules.revision.fetch_add(1, Ordering::Relaxed);
     Ok(rules)
 }
 
 #[tauri::command]
 pub async fn activity_rule_matches(
-    state: State<'_, ActivityDb>,
+    services: State<'_, Arc<Services>>,
+    limit: Option<i64>,
+) -> Result<Vec<RuleMatch>, String> {
+    activity_rule_matches_impl(&services, limit)
+}
+
+pub fn activity_rule_matches_impl(
+    services: &Services,
     limit: Option<i64>,
 ) -> Result<Vec<RuleMatch>, String> {
     let cap = limit.unwrap_or(100).clamp(1, 500);
-    let conn = state.0.lock().unwrap();
+    let conn = services.activity.0.lock().unwrap();
     let mut stmt = conn
         .prepare(
             "SELECT title, url, ts, text FROM events
@@ -739,19 +770,29 @@ pub async fn activity_rule_matches(
 }
 
 #[tauri::command]
-pub fn watcher_status(state: State<WatcherState>) -> WatcherStatus {
-    state.0.lock().unwrap().clone()
+pub fn watcher_status(services: State<Arc<Services>>) -> WatcherStatus {
+    watcher_status_impl(&services)
+}
+
+pub fn watcher_status_impl(services: &Services) -> WatcherStatus {
+    services.watcher.0.lock().unwrap().clone()
+}
+
+pub fn capture_set_enabled_impl(host: &dyn Host, services: &Services, on: bool) {
+    services.capture_enabled.0.store(on, std::sync::atomic::Ordering::Relaxed);
+    host.set_recording_indicator(on);
 }
 
 #[tauri::command]
-pub fn capture_set_enabled(app: AppHandle, state: State<CaptureEnabled>, on: bool) {
-    state.0.store(on, std::sync::atomic::Ordering::Relaxed);
-    crate::set_recording_indicator(&app, on);
+pub fn capture_enabled(services: State<Arc<Services>>) -> bool {
+    capture_enabled_impl(&services)
 }
 
-#[tauri::command]
-pub fn capture_enabled(state: State<CaptureEnabled>) -> bool {
-    state.0.load(std::sync::atomic::Ordering::Relaxed)
+pub fn capture_enabled_impl(services: &Services) -> bool {
+    services
+        .capture_enabled
+        .0
+        .load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(test)]

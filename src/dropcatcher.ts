@@ -6,13 +6,10 @@
 // with the handler off, it just can't read paths). Being always-on-top and
 // covering the main window, this catcher becomes the OS drop target, reads the
 // absolute paths the native handler provides, and emits them back to main.
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { emit } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { runtimePorts } from "./reactive/ports";
+import { invoke } from "./generated/native";
 import { STASH_DROP_COMMAND, dropPath, unstashed, type StashedDrop } from "./0_dropStash";
 
-const win = getCurrentWindow();
 let idleTimer: number | undefined;
 
 const clearIdle = () => {
@@ -22,8 +19,8 @@ const clearIdle = () => {
 
 const cancelDrop = async () => {
   clearIdle();
-  await emit("os-file-drop-cancel", {});
-  await win.hide();
+  await runtimePorts.emit("os-file-drop-cancel", {});
+  await runtimePorts.window.hide();
 };
 
 const keepAlive = () => {
@@ -39,13 +36,16 @@ const keepAlive = () => {
 const stash = (paths: string[]): Promise<StashedDrop[]> =>
   invoke<StashedDrop[]>(STASH_DROP_COMMAND, { paths }).catch(() => paths.map(unstashed));
 
-getCurrentWebview().onDragDropEvent(async (e) => {
-  const p = e.payload;
+void runtimePorts.webview.onDragDrop(async (p) => {
   if (p.type === "drop") {
     clearIdle();
     const drops = await stash(p.paths);
-    await emit("os-file-drop", { paths: drops.map(dropPath), position: p.position, drops });
-    await win.hide();
+    await runtimePorts.emit("os-file-drop", {
+      paths: drops.map(dropPath),
+      position: { x: p.position.x, y: p.position.y },
+      drops,
+    });
+    await runtimePorts.window.hide();
   } else if (p.type === "leave") {
     // Drag left the app without dropping; re-arm the main window and step aside.
     await cancelDrop();

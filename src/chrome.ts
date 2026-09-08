@@ -3,8 +3,7 @@
 // prompt, JS-driven window edge resize (macOS gives no native handles), and the
 // contextual right-click menu items.
 import { invoke } from "./generated/native";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
+import { runtimePorts } from "./reactive/ports";
 import { type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
 import { togglePanel, isOpen } from "./reactdock";
@@ -167,11 +166,12 @@ export function syncInlineStructured() {
 // drag_resize_window returns NotSupported for every direction), so we drive the
 // resize ourselves: capture the pointer, track the screen-space delta, and push
 // new size/position to the window. screenX/screenY are logical (CSS) px, which
-// is what LogicalSize/LogicalPosition expect — no scale-factor juggling needed.
+// is what the window ports' setSize/setPosition take — no scale-factor juggling
+// needed.
 const MIN_W = 420;
 const MIN_H = 320;
 export function wireWindowResize() {
-  const win = getCurrentWindow();
+  const win = runtimePorts.window;
   document.querySelectorAll<HTMLElement>(".rz").forEach((grip) => {
     const dir = grip.dataset.dir ?? "";
     grip.addEventListener("pointerdown", async (e) => {
@@ -211,7 +211,7 @@ export function wireWindowResize() {
         // pointer is still moving (especially North/NorthWest, which also
         // repositions the window). These are best-effort frame updates; an
         // unhandled rejection here used to surface as a resize error.
-        void win.setSize(new LogicalSize(w, h)).catch((err) => {
+        void win.setSize(w, h).catch((err) => {
           console.debug("window resize frame rejected", err);
           stop(ev.pointerId);
         });
@@ -221,7 +221,7 @@ export function wireWindowResize() {
         if (dir.includes("West") || dir.includes("North")) {
           const nx = dir.includes("West") ? ox + (ow - w) : ox;
           const ny = dir.includes("North") ? oy + (oh - h) : oy;
-          void win.setPosition(new LogicalPosition(nx, ny)).catch((err) => {
+          void win.setPosition(nx, ny).catch((err) => {
             console.debug("window reposition frame rejected", err);
             stop(ev.pointerId);
           });
@@ -487,9 +487,9 @@ export function wireChrome() {
   $("#actbar-toggle").onclick = () =>
     settings.sidebar.$(settings.sidebar.$() === "big" ? "compact" : "big");
 
-  $("#min-btn").onclick = () => getCurrentWindow().minimize();
-  $("#max-btn").onclick = () => getCurrentWindow().toggleMaximize();
-  $("#hide-btn").onclick = () => getCurrentWindow().hide();
+  $("#min-btn").onclick = () => void runtimePorts.window.minimize();
+  $("#max-btn").onclick = () => void runtimePorts.window.toggleMaximize();
+  $("#hide-btn").onclick = () => void runtimePorts.window.hide();
 
   // Own the drag region in JS instead of `data-tauri-drag-region`: that attribute
   // only matches the exact event target, so grabbing the caption text (a child)
@@ -509,12 +509,12 @@ export function wireChrome() {
     const me = e as MouseEvent;
     if (me.button !== 0 || onControls(me.target)) return;
     me.preventDefault(); // no caption text-selection / focus steal
-    if (me.detail === 1) getCurrentWindow().startDragging();
+    if (me.detail === 1) void runtimePorts.window.startDragging();
   });
   titleBar.addEventListener("dblclick", (e) => {
     const me = e as MouseEvent;
     if (me.button !== 0 || onControls(me.target)) return;
     me.preventDefault();
-    getCurrentWindow().toggleMaximize();
+    void runtimePorts.window.toggleMaximize();
   });
 }

@@ -9,6 +9,7 @@ mod config;
 mod favorites;
 mod fs;
 mod fs_watch;
+mod host;
 mod refresolve;
 mod harness;
 #[path = "0_harness_store.rs"]
@@ -26,6 +27,8 @@ mod pty;
 mod sprefa_plugin;
 mod workspace;
 mod worktrees;
+mod services;
+pub mod serve;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -78,7 +81,13 @@ struct Gesture {
 
 // Throttled capture trigger: spawn the screenshot OFF the tap thread so input
 // latency isn't affected by screencapture's ~100-300ms.
-fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, kind: &str) {
+fn maybe_capture(
+    g: &mut Gesture,
+    enabled: &Arc<AtomicBool>,
+    host: &Arc<dyn crate::host::Host>,
+    services: &Arc<crate::services::Services>,
+    kind: &str,
+) {
     if !enabled.load(Ordering::Relaxed) {
         return;
     }
@@ -89,9 +98,10 @@ fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, ki
         }
     }
     g.last_capture = Some(now);
-    let app = app.clone();
+    let host = host.clone();
+    let services = services.clone();
     let kind = kind.to_string();
-    std::thread::spawn(move || capture::take(app, &kind));
+    std::thread::spawn(move || capture::take(host, services, &kind));
 }
 
 /// Global input tap on a dedicated thread running its own CFRunLoop. Handles the
@@ -101,7 +111,13 @@ fn maybe_capture(g: &mut Gesture, app: &AppHandle, enabled: &Arc<AtomicBool>, ki
 /// (click-state, keycode, flags) directly — NO TIS/TSM keycode translation — so
 /// the old rdev-on-a-background-thread crash does not recur. Needs Accessibility
 /// / Input Monitoring permission, same as the hotkey.
-fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<AtomicBool>) {
+fn spawn_input_taps(
+    app: AppHandle,
+    host: Arc<dyn crate::host::Host>,
+    services: Arc<crate::services::Services>,
+    enabled: Arc<AtomicBool>,
+    tap_active: Arc<AtomicBool>,
+) {
     std::thread::spawn(move || {
         log_event(
             &app,
@@ -180,20 +196,21 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<At
                         CGEventType::LeftMouseDragged => {
                             if !g.drag_active {
                                 g.drag_active = true; // leading edge of a drag burst
-                                maybe_capture(&mut g, &app, &enabled, "drag");
+                                maybe_capture(&mut g, &enabled, &host, &services, "drag");
                             }
                         }
                         CGEventType::LeftMouseUp => {
                             if g.drag_active {
                                 g.drag_active = false; // trailing edge
-                                maybe_capture(&mut g, &app, &enabled, "drag-end");
+                                maybe_capture(&mut g, &enabled, &host, &services, "drag-end");
                             } else {
                                 let cs = event
                                     .get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
                                 maybe_capture(
                                     &mut g,
-                                    &app,
                                     &enabled,
+                                    &host,
+                                    &services,
                                     if cs >= 2 { "dblclick" } else { "click" },
                                 );
                             }
@@ -246,8 +263,8 @@ fn spawn_input_taps(app: AppHandle, enabled: Arc<AtomicBool>, tap_active: Arc<At
                             if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
                                 // 8 = C, 9 = V (ANSI keycodes). Only these two — not a keylogger.
                                 match keycode {
-                                    8 => maybe_capture(&mut g, &app, &enabled, "copy"),
-                                    9 => maybe_capture(&mut g, &app, &enabled, "paste"),
+                                    8 => maybe_capture(&mut g, &enabled, &host, &services, "copy"),
+                                    9 => maybe_capture(&mut g, &enabled, &host, &services, "paste"),
                                     _ => {}
                                 }
                             }
@@ -834,6 +851,144 @@ fn screenshot_blocking() -> Result<String, String> {
     }
 }
 
+// ---- command wrappers (host-trait lane) --------------------------------
+// Each owned-file command whose body needs the AppHandle lives here as a thin
+// wrapper; the logic sits in a `*_impl(host: &dyn Host, services: &Services, …)`
+// in the owning module. State-only commands stay in their module.
+
+#[tauri::command]
+async fn fav_add(
+    app: AppHandle,
+    services: tauri::State<'_, Arc<services::Services>>,
+    msg: AiMessage,
+    cwd: String,
+) -> Result<Vec<favorites::Fav>, String> {
+    favorites::fav_add_impl(&host::TauriHost(app), &services, msg, cwd)
+}
+
+#[tauri::command]
+async fn fav_remove(
+    app: AppHandle,
+    services: tauri::State<'_, Arc<services::Services>>,
+    editor: String,
+    session_id: String,
+    message_id: String,
+) -> Result<Vec<favorites::Fav>, String> {
+    favorites::fav_remove_impl(&host::TauriHost(app), &services, editor, session_id, message_id)
+}
+
+#[tauri::command]
+async fn create_workspace(
+    app: AppHandle,
+    services: tauri::State<'_, Arc<services::Services>>,
+    repo: String,
+    branch: String,
+    agent: String,
+) -> Result<workspace::Workspace, String> {
+    workspace::create_workspace_impl(&host::TauriHost(app), &services, repo, branch, agent)
+}
+
+#[tauri::command]
+async fn remove_workspace(
+    app: AppHandle,
+    services: tauri::State<'_, Arc<services::Services>>,
+    id: String,
+    delete_tree: bool,
+) -> Result<(), String> {
+    workspace::remove_workspace_impl(&host::TauriHost(app), &services, id, delete_tree)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn cdp_open(
+    app: AppHandle,
+    services: tauri::State<Arc<services::Services>>,
+    id: String,
+    url: String,
+    width: u32,
+    height: u32,
+    dpr: f64,
+    quality: u8,
+) -> Result<(), String> {
+    let h: Arc<dyn host::Host> = Arc::new(host::TauriHost(app));
+    cdp::cdp_open_impl(h, (*services).clone(), id, url, width, height, dpr, quality)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn open_session(
+    app: AppHandle,
+    services: tauri::State<'_, Arc<services::Services>>,
+    id: String,
+    name: String,
+    tmux_target: Option<String>,
+    command: Option<String>,
+    cwd: Option<String>,
+    cols: u16,
+    rows: u16,
+    graphics: Option<bool>,
+    cell_w: Option<u16>,
+    cell_h: Option<u16>,
+    attach_only: Option<bool>,
+) -> Result<(), String> {
+    let h: Arc<dyn host::Host> = Arc::new(host::TauriHost(app));
+    pty::open_session_impl(
+        h,
+        (*services).clone(),
+        id,
+        name,
+        tmux_target,
+        command,
+        cwd,
+        cols,
+        rows,
+        graphics,
+        cell_w,
+        cell_h,
+        attach_only,
+    )
+}
+
+#[tauri::command]
+fn fs_watch_claim(
+    app: AppHandle,
+    services: tauri::State<Arc<services::Services>>,
+    claim_id: String,
+    path: String,
+    recursive: Option<bool>,
+) -> Result<(), String> {
+    let h: Arc<dyn host::Host> = Arc::new(host::TauriHost(app));
+    fs_watch::fs_watch_claim_impl(h, &services, claim_id, path, recursive)
+}
+
+#[tauri::command]
+async fn activity_log(
+    app: AppHandle,
+    services: tauri::State<'_, Arc<services::Services>>,
+    source: String,
+    kind: String,
+    title: String,
+    text: String,
+) -> Result<(), String> {
+    activity::activity_log_impl(&host::TauriHost(app), &services, source, kind, title, text)
+}
+
+#[tauri::command]
+fn capture_set_enabled(app: AppHandle, services: tauri::State<Arc<services::Services>>, on: bool) {
+    activity::capture_set_enabled_impl(&host::TauriHost(app), &services, on);
+}
+
+#[tauri::command]
+async fn resolve_ref(
+    app: AppHandle,
+    token: String,
+    cwd: String,
+    sessions: Option<Vec<String>>,
+) -> Result<refresolve::ResolveResult, String> {
+    let h = host::TauriHost(app);
+    refresolve::resolve_ref_impl(&h, token, cwd, sessions).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The daily driver owns Cmd+Alt+Space. An isolated dev instance uses
@@ -857,13 +1012,6 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
     builder
-        .manage(pty::PtyStore::default())
-        .manage(pty_events::PtyEvents::default())
-        .manage(cdp::CdpStore::default())
-        .manage(cdp::ChromeEngine::default())
-        .manage(workspace::Workspaces::default())
-        .manage(favorites::Favorites::default())
-        .manage(fs_watch::FsWatchClaims::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -896,30 +1044,40 @@ pub fn run() {
                     "debug_assertions": cfg!(debug_assertions),
                 }),
             );
-            app.state::<pty_events::PtyEvents>().start(app.handle().clone());
+            let data_dir = state_dir(app.handle())?;
+            let services = crate::services::Services::boot(&data_dir)?;
+            let services = Arc::new(services);
+            let host: Arc<dyn crate::host::Host> =
+                Arc::new(crate::host::TauriHost(app.handle().clone()));
+
+            services.pty_events.start(host.clone());
+            app.manage(services.clone());
             if !no_globals {
                 app.global_shortcut().register(summon)?;
             }
 
             // Capture flag, shared with the tap thread. Default OFF; the front
             // re-enables it on boot if the user had recording on.
-            let enabled = Arc::new(AtomicBool::new(false));
-            app.manage(activity::CaptureEnabled(enabled.clone()));
-            let tap_active = Arc::new(AtomicBool::new(false));
-            app.manage(capture::TapActive(tap_active.clone()));
+            let enabled = services.capture_enabled.0.clone();
+            let tap_active = services.tap_active.0.clone();
             if skip_shared_globals {
                 eprintln!(
                     "isolated globals: skipping tray icon and double-click/double-cmd \
                      summon gesture — showing the main window on launch instead"
                 );
             } else {
-                spawn_input_taps(app.handle().clone(), enabled, tap_active);
+                spawn_input_taps(
+                    app.handle().clone(),
+                    host.clone(),
+                    services.clone(),
+                    enabled,
+                    tap_active,
+                );
             }
 
             // Track focus on our own window so the capture worker can skip
             // gestures made inside instant (clicking rows/chips shouldn't record).
-            let focused = Arc::new(AtomicBool::new(false));
-            app.manage(capture::WindowFocused(focused.clone()));
+            let focused = services.window_focused.0.clone();
             if let Some(win) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
                 win.on_window_event(move |e| {
@@ -942,42 +1100,8 @@ pub fn run() {
             // to focus (e.g. raise/fade when VSCode comes forward).
             spawn_frontmost_watch(app.handle().clone());
 
-            // Hydrate the workspace registry from disk.
-            let loaded = workspace::load(app.handle());
-            *app.state::<workspace::Workspaces>().0.lock().unwrap() = loaded;
-
-            // Open (create) the favorited-AI-turns db.
-            favorites::init(app.handle());
-
-            // Unified activity store + localhost ingest endpoint for the extension.
-            // state_dir keeps dev and a prod build on separate dbs/config.
-            let data_dir = state_dir(app.handle())?;
-            let conn = activity::open(&data_dir.join("activity.db"))?;
-            app.manage(activity::ActivityDb(Mutex::new(conn)));
-
-            // Observation filters (config.json, created with empty lists if absent).
-            let cfg_path = data_dir.join("config.json");
-            let (cfg, status) = config::read_or_default(&cfg_path);
-            app.manage(config::ConfigState {
-                config: Mutex::new(cfg),
-                path: cfg_path,
-                status: Mutex::new(status),
-                excluded_count: std::sync::atomic::AtomicU64::new(0),
-            });
-
-            // Config-driven extension rules (rules.json, created empty if absent).
-            // Served at GET /config; edited via the Rules panel.
-            let rules_path = data_dir.join("rules.json");
-            let rules = activity::read_rules(&rules_path);
-            app.manage(activity::RulesState {
-                rules: Mutex::new(rules),
-                path: rules_path,
-                revision: std::sync::atomic::AtomicU64::new(1),
-            });
-            app.manage(activity::WatcherState(Mutex::new(activity::WatcherStatus::default())));
-
             if !skip_shared_globals {
-                activity::spawn_server(app.handle().clone());
+                activity::spawn_server(host.clone(), services.clone());
             }
             pty::reap_orphan_graphics(); // clean awrit orphans from a prior crash/restart
             cdp::reap_orphans(); // clean headless-Chrome orphans from a prior SIGTERM
@@ -1090,7 +1214,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             pty::list_sessions,
-            pty::open_session,
+            open_session,
             pty::write_pty,
             pty::resize_pty,
             pty::close_pty,
@@ -1100,15 +1224,15 @@ pub fn run() {
             pty::rename_session_window,
             pty::rogue_agent_sessions,
             pty_events::pty_event_stats,
-            cdp::cdp_open,
+            cdp_open,
             cdp::cdp_send,
             cdp::cdp_resize,
             cdp::cdp_navigate,
             cdp::cdp_close,
             cdp::cdp_status,
             workspace::list_workspaces,
-            workspace::create_workspace,
-            workspace::remove_workspace,
+            create_workspace,
+            remove_workspace,
             worktrees::scan_worktrees,
             worktrees::add_worktree,
             worktrees::git_diff,
@@ -1116,8 +1240,8 @@ pub fn run() {
             worktrees::worktree_at,
             activity::activity_events,
             activity::activity_clear,
-            activity::activity_log,
-            activity::capture_set_enabled,
+            activity_log,
+            capture_set_enabled,
             activity::capture_enabled,
             activity::rules_get,
             activity::rules_set,
@@ -1138,10 +1262,10 @@ pub fn run() {
             fs::delete_file,
             fs::stash_drop,
             fs::read_text,
-            refresolve::resolve_ref,
+            resolve_ref,
             refresolve::clear_ref_index,
             refresolve::read_git_blob,
-            fs_watch::fs_watch_claim,
+            fs_watch_claim,
             fs_watch::fs_watch_release,
             harness::harness_session,
             harness::harness_sessions,
@@ -1179,8 +1303,8 @@ pub fn run() {
             meme::install_imagemagick,
             meme::save_meme,
             meme::copy_meme_image,
-            favorites::fav_add,
-            favorites::fav_remove,
+            fav_add,
+            fav_remove,
             favorites::fav_list,
             // sprefa_* unregistered while the integration is disabled:
             // sprefa_plugin::commands::sprefa_schema,
@@ -1201,7 +1325,7 @@ pub fn run() {
             // Tear down the shared headless Chrome when the app exits so it
             // doesn't linger holding its profile/port.
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                cdp::kill_engine(app);
+                cdp::kill_engine(&app.state::<Arc<services::Services>>());
             }
         });
 }

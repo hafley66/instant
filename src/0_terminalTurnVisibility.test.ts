@@ -15,6 +15,43 @@ const turn = (turn: number, said: string): BoopTurn => ({
 });
 
 describe("terminal turn visibility v2", () => {
+  it("skips every scan while the viewport reports hidden, and scans again once it shows", async () => {
+    vi.useFakeTimers();
+    const changes = new Subject<{
+      kind: "write" | "scroll";
+      cols: number;
+      rows: number;
+      viewportY: number;
+      bufferLength: number;
+    }>();
+    let shown = false;
+    const viewport: XtermViewport = {
+      changes,
+      readVisibleLogicalLines: () => [],
+      bufferRowAtClientY: () => null,
+      dispose: () => {},
+      visible: () => shown,
+    };
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { cb(); return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const turns = vi.fn(async () => []);
+    const visibility = new TerminalTurnVisibilityV2(viewport, turns);
+    visibility.scan = vi.fn(async () => {});
+
+    // Hidden: a write, a scroll and a second of clock ticks schedule nothing.
+    changes.next({ kind: "scroll", cols: 120, rows: 40, viewportY: 4, bufferLength: 80 });
+    changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 4, bufferLength: 80 });
+    await vi.advanceTimersByTimeAsync(1_200);
+    expect(vi.mocked(visibility.scan).mock.calls.length).toBe(0);
+
+    // Shown: the lease from that write is still live, so the next tick scans.
+    shown = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(vi.mocked(visibility.scan).mock.calls.length).toBeGreaterThan(0);
+    visibility.dispose();
+    vi.useRealTimers();
+  });
+
   it("rescans immediately, polls each active second, then stops after five quiet seconds", async () => {
     vi.useFakeTimers();
     const changes = new Subject<{

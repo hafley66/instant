@@ -4,14 +4,17 @@
 // keyed by (editor, session_id, message_id). Separate from the harness stores
 // (which we only read) — this one is ours to write.
 
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::State;
 
 use boop_harness::transcript::Message as AiMessage;
+
+use crate::host::Host;
+use crate::services::Services;
 
 pub struct Favorites(pub Mutex<Option<rusqlite::Connection>>);
 impl Default for Favorites {
@@ -35,11 +38,11 @@ pub struct Fav {
     pub created: u64, // unix ms the favorite was saved
 }
 
-fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(crate::state_dir(app)?.join("favorites.db"))
+fn db_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("favorites.db")
 }
 
-const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS favorites (\
+pub const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS favorites (\
     editor TEXT NOT NULL, session_id TEXT NOT NULL, message_id TEXT NOT NULL, \
     role TEXT NOT NULL, ts INTEGER NOT NULL, seq INTEGER NOT NULL, \
     preview TEXT NOT NULL, text TEXT NOT NULL, locator TEXT NOT NULL, \
@@ -47,16 +50,13 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS favorites (\
     PRIMARY KEY (editor, session_id, message_id))";
 
 /// Open (and create) the favorites db once at startup, stashing the connection
-/// in app state. Idempotent table create.
-pub fn init(app: &AppHandle) {
-    let Ok(path) = db_path(app) else { return };
-    let Ok(conn) = rusqlite::Connection::open(path) else {
+/// in the Favorites handle. Idempotent table create.
+pub fn init(favorites: &Favorites, data_dir: &Path) {
+    let Ok(conn) = rusqlite::Connection::open(db_path(data_dir)) else {
         return;
     };
     let _ = conn.execute(SCHEMA, []);
-    if let Some(state) = app.try_state::<Favorites>() {
-        *state.0.lock().unwrap() = Some(conn);
-    }
+    *favorites.0.lock().unwrap() = Some(conn);
 }
 
 fn now_ms() -> u64 {
@@ -93,14 +93,13 @@ fn list(conn: &rusqlite::Connection) -> Vec<Fav> {
 
 /// Snapshot a ledger message as a favorite (upsert on its identity). Emits
 /// "favorites-changed" with the fresh list so any open panel re-renders.
-#[tauri::command]
-pub async fn fav_add(
-    app: AppHandle,
-    store: State<'_, Favorites>,
+pub fn fav_add_impl(
+    host: &dyn Host,
+    services: &Services,
     msg: AiMessage,
     cwd: String,
 ) -> Result<Vec<Fav>, String> {
-    let guard = store.0.lock().unwrap();
+    let guard = services.favorites.0.lock().unwrap();
     let conn = guard.as_ref().ok_or("favorites db not open")?;
     let editor = crate::ledger::editor_tag(msg.harness);
     conn.execute(
@@ -123,19 +122,21 @@ pub async fn fav_add(
     )
     .map_err(|e| e.to_string())?;
     let snapshot = list(conn);
-    let _ = app.emit("favorites-changed", &snapshot);
+    let _ = host.emit(
+        "favorites-changed",
+        serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null),
+    );
     Ok(snapshot)
 }
 
-#[tauri::command]
-pub async fn fav_remove(
-    app: AppHandle,
-    store: State<'_, Favorites>,
+pub fn fav_remove_impl(
+    host: &dyn Host,
+    services: &Services,
     editor: String,
     session_id: String,
     message_id: String,
 ) -> Result<Vec<Fav>, String> {
-    let guard = store.0.lock().unwrap();
+    let guard = services.favorites.0.lock().unwrap();
     let conn = guard.as_ref().ok_or("favorites db not open")?;
     conn.execute(
         "DELETE FROM favorites WHERE editor=?1 AND session_id=?2 AND message_id=?3",
@@ -143,13 +144,20 @@ pub async fn fav_remove(
     )
     .map_err(|e| e.to_string())?;
     let snapshot = list(conn);
-    let _ = app.emit("favorites-changed", &snapshot);
+    let _ = host.emit(
+        "favorites-changed",
+        serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null),
+    );
     Ok(snapshot)
 }
 
 #[tauri::command]
-pub async fn fav_list(store: State<'_, Favorites>) -> Result<Vec<Fav>, String> {
-    let guard = store.0.lock().unwrap();
+pub async fn fav_list(services: State<'_, Arc<Services>>) -> Result<Vec<Fav>, String> {
+    fav_list_impl(&services)
+}
+
+pub fn fav_list_impl(services: &Services) -> Result<Vec<Fav>, String> {
+    let guard = services.favorites.0.lock().unwrap();
     let conn = guard.as_ref().ok_or("favorites db not open")?;
     Ok(list(conn))
 }

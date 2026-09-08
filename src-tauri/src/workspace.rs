@@ -5,11 +5,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
+
+use crate::host::Host;
+use crate::services::Services;
 
 // GUI apps don't inherit the login PATH, so git/worktree tooling needs this.
 const EXTRA_PATH: &str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
@@ -27,25 +30,21 @@ pub struct Workspace {
 #[derive(Default)]
 pub struct Workspaces(pub Mutex<Vec<Workspace>>);
 
-fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(crate::state_dir(app)?.join("workspaces.json"))
+fn store_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("workspaces.json")
 }
 
 /// Read the persisted registry (empty on first run / parse error).
-pub fn load(app: &AppHandle) -> Vec<Workspace> {
-    let Ok(path) = store_path(app) else {
-        return Vec::new();
-    };
-    let Ok(bytes) = fs::read(path) else {
+pub fn load(data_dir: &Path) -> Vec<Workspace> {
+    let Ok(bytes) = fs::read(store_path(data_dir)) else {
         return Vec::new();
     };
     serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
-fn save(app: &AppHandle, list: &[Workspace]) -> Result<(), String> {
-    let path = store_path(app)?;
+fn save(data_dir: &Path, list: &[Workspace]) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(list).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    fs::write(store_path(data_dir), json).map_err(|e| e.to_string())
 }
 
 /// Run a git command in `repo`; Ok(stdout) on success, Err(stderr) on failure.
@@ -84,15 +83,18 @@ fn now() -> u64 {
 }
 
 #[tauri::command]
-pub fn list_workspaces(store: State<Workspaces>) -> Vec<Workspace> {
-    store.0.lock().unwrap().clone()
+pub fn list_workspaces(services: State<Arc<Services>>) -> Vec<Workspace> {
+    list_workspaces_impl(&services)
+}
+
+pub fn list_workspaces_impl(services: &Services) -> Vec<Workspace> {
+    services.workspaces.0.lock().unwrap().clone()
 }
 
 /// Create a worktree+branch off the repo's HEAD and register it.
-#[tauri::command]
-pub async fn create_workspace(
-    app: AppHandle,
-    store: State<'_, Workspaces>,
+pub fn create_workspace_impl(
+    host: &dyn Host,
+    services: &Services,
     repo: String,
     branch: String,
     agent: String,
@@ -125,26 +127,29 @@ pub async fn create_workspace(
         created: now(),
     };
 
+    let data_dir = crate::host::state_dir(host)?;
     let snapshot = {
-        let mut list = store.0.lock().unwrap();
+        let mut list = services.workspaces.0.lock().unwrap();
         list.retain(|w| w.id != ws.id);
         list.push(ws.clone());
-        save(&app, &list)?;
+        save(&data_dir, &list)?;
         list.clone()
     };
-    let _ = app.emit("workspaces-changed", snapshot);
+    let _ = host.emit(
+        "workspaces-changed",
+        serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null),
+    );
     Ok(ws)
 }
 
 /// Forget a Space; optionally remove its worktree from disk.
-#[tauri::command]
-pub async fn remove_workspace(
-    app: AppHandle,
-    store: State<'_, Workspaces>,
+pub fn remove_workspace_impl(
+    host: &dyn Host,
+    services: &Services,
     id: String,
     delete_tree: bool,
 ) -> Result<(), String> {
-    let target = store.0.lock().unwrap().iter().find(|w| w.id == id).cloned();
+    let target = services.workspaces.0.lock().unwrap().iter().find(|w| w.id == id).cloned();
     if let Some(ws) = target {
         if delete_tree {
             // Best-effort: a dirty worktree needs --force; ignore failures so the
@@ -155,12 +160,16 @@ pub async fn remove_workspace(
             );
         }
     }
+    let data_dir = crate::host::state_dir(host)?;
     let snapshot = {
-        let mut list = store.0.lock().unwrap();
+        let mut list = services.workspaces.0.lock().unwrap();
         list.retain(|w| w.id != id);
-        save(&app, &list)?;
+        save(&data_dir, &list)?;
         list.clone()
     };
-    let _ = app.emit("workspaces-changed", snapshot);
+    let _ = host.emit(
+        "workspaces-changed",
+        serde_json::to_value(&snapshot).unwrap_or(serde_json::Value::Null),
+    );
     Ok(())
 }

@@ -628,9 +628,8 @@ fn resolve_ref_with(
 
 /// Every ⌘-click resolution lands in instant.log as one `resolve_ref` event:
 /// what was asked, what the ledger offered, which rung answered, how long.
-#[tauri::command]
-pub async fn resolve_ref(
-    app: tauri::AppHandle,
+pub async fn resolve_ref_impl(
+    host: &dyn crate::host::Host,
     token: String,
     cwd: String,
     sessions: Option<Vec<String>>,
@@ -656,8 +655,8 @@ pub async fn resolve_ref(
         ResolveResult::Absent { repo, rev, .. } => ("absent", format!("{repo}@{rev}"), "", "", 0),
         ResolveResult::Miss => ("miss", String::new(), "", "", 0),
     };
-    crate::log_event(
-        &app,
+    crate::host::log_event(
+        host,
         "INFO",
         "resolve_ref",
         serde_json::json!({
