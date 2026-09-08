@@ -535,3 +535,39 @@ export function dropPaneSessions(): void {
   for (const route of boundRoutes) sql(`delete from agent_route where route='${route}'`);
   boundRoutes.length = 0;
 }
+
+// ---- lane: real-term-diagrams ----
+
+/// Several turns of one boop session, the shape an ingested transcript leaves
+/// in the store. `dropSeededTurns` removes every row again.
+export function seedTurnRows(
+  session: string,
+  turns: readonly { turn: number; role: string; said: string }[],
+  harness = "codex",
+): void {
+  sql(`insert into dict_session(value) values ('${session}')`);
+  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+      values ((select id from dict_session where value='${session}'),
+              (select id from dict_harness where value='${harness}'), null, ${Date.now()})`);
+  for (const row of turns) {
+    sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+        values ((select id from dict_session where value='${session}'), ${row.turn}, ${Date.now()},
+                (select id from dict_role where value='${row.role}'), '${row.said.replace(/'/g, "''")}', null)`);
+  }
+  seededTurns.push(session);
+}
+
+/// One more turn into a session `seedTurnRows` already made: the row a
+/// transcript ingest appends while the pane is on screen.
+export function appendTurnRow(session: string, turn: number, role: string, said: string): void {
+  sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+      values ((select id from dict_session where value='${session}'), ${turn}, ${Date.now()},
+              (select id from dict_role where value='${role}'), '${said.replace(/'/g, "''")}', null)`);
+}
+
+/// Scroll a pane's history the way the app's wheel router does: tmux copy-mode
+/// with auto-exit, then N lines up.
+export function scrollPaneUp(session: string, lines: number): void {
+  tmux(["copy-mode", "-e", "-t", `${session}:`]);
+  tmux(["send-keys", "-t", `${session}:`, "-X", "-N", String(lines), "scroll-up"]);
+}
