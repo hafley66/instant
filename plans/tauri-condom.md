@@ -160,6 +160,7 @@ pnpm exec playwright test -c playwright.real.config.ts   # boots instant-serve, 
 | real tier, fork verb | green cold, both cases | `artifacts/real/fork-05-toast.png`, `forkfail-06-failure.png` |
 | shared edges | `e2e-real/0_real.ts`; port, socket, data dir from env | `INSTANT_REAL_PORT`, `INSTANT_REAL_SOCKET`, `INSTANT_SERVE_DATA`, `INSTANT_SERVE_BIN`, `INSTANT_SERVE_REUSE` |
 | fork cwd | `liveCwd` re-reads tmux before every spawn | `src/terminal.ts` `liveCwd` |
+| resource cap | `scripts/real-test.sh`: machine lock, nice 15, swap floor, one worker, one renderer, `boop beep fork` stubbed (`e2e-real/stub-bin/boop`), leak sweep on exit | fork spec 2 passed in 11.8 s with zero lanes, zero leftover processes |
 | port lanes (glm53) | `feature/real-term-basics`, `real-term-hover`, `real-term-diagrams`, `real-cmdclick-previews`, `real-panels-live` | briefs in `plans/briefs/real-*.md`, ports 47801 to 47805 |
 | shell lane (glm53) | `feature/tauri-shell` | `plans/briefs/tauri-shell.md` |
 | out of scope until called | `e2e/0_rules-extension.spec.ts` (Chrome extension), `e2e-live/boop-four-agent-shells.live.ts` (spawns paid lanes), `e2e-live/1_terminal-cast.live.ts`, `2_agent-tui.live.ts` (tui-test and llmock replay) | |
