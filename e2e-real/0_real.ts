@@ -183,6 +183,7 @@ export async function closeTabs(page: Page): Promise<void> {
 export const paneCommand = (session: string, line: string): void => {
   tmux(["send-keys", "-t", `${session}:`, "C-u"]);
   typeLine(session, line);
+};
 
 // ---- lane: real-cmdclick-previews ----
 // instant-serve's data dir (mirrors playwright.real.config.ts); its instant.log is the receipt for opens the browser cannot do.
