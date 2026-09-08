@@ -16,6 +16,10 @@ export interface XtermViewport {
   readVisibleLogicalLines(): LogicalLine[];
   bufferRowAtClientY(clientY: number): number | null;
   dispose(): void;
+  /// Whether the terminal is laid out on screen right now. A projection whose
+  /// terminal sits in a hidden dockview panel, or in a window the OS has
+  /// hidden, has nothing to draw and skips its scans; absent, every scan runs.
+  visible?(): boolean;
 }
 
 export class XtermViewportAdapter implements XtermViewport {
@@ -40,6 +44,12 @@ export class XtermViewportAdapter implements XtermViewport {
       xtermEvent("scroll", (emit) => term.onScroll(emit)),
       xtermEvent("resize", (emit) => term.onResize(emit)),
     ).pipe(takeUntil(this.closed));
+  }
+
+  visible(): boolean {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
+    const element = this.term.element;
+    return !element || element.offsetParent !== null;
   }
 
   readVisibleLogicalLines(): LogicalLine[] {
@@ -97,7 +107,12 @@ export class NativeTmuxPane implements TmuxPane {
   }
 
   async session(): Promise<string | null> {
-    if (performance.now() - this.session_read_at < 1000) return this.session_id;
+    // A pane's session id changes only when a harness starts or ends in it.
+    // Once known it holds for five seconds; unknown, it is asked again after one,
+    // so a harness that just launched shows up within a second. Each ask costs
+    // a registry walk, an HTTP round trip to opencode and a codex subprocess.
+    const ttl = this.session_id ? 5_000 : 1_000;
+    if (performance.now() - this.session_read_at < ttl) return this.session_id;
     this.session_id = await invoke<string | null>("boop_mux_session", {
       target: this.target, socket: this.socket ?? null,
     }).catch(() => null);
