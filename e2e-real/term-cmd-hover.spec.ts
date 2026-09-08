@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { realpathSync } from "node:fs";
-import { boot, cell, findRow, killAllSessions, openTab, settleCwd, shot, typeLine } from "./0_real";
+import { boot, cell, closeTabs, findRow, killAllSessions, openSessionTab, shot, typeLine } from "./0_real";
 
 const LINE_UPDATE = "  Update(src/main.ts) then Read(src/preview.ts:214)";
 const LINE_BARE = "  edited MdPanel.tsx just now";
@@ -36,14 +36,14 @@ async function openRepoTerm(page: Page) {
   put("b/MdPanel.tsx", "export const B = 2;\n");
   put(".worktrees/terminal-inline-diagrams/playwright-report/index.html", "<html><body>report</body></html>\n");
   put("artifacts/v2-terminal-context-queue.png", PNG_BYTES);
-  put("artifacts/v2-terminal-graph.svg", SVG_TEXT);
+  put("artifacts/v2-terminal-context-graph.svg", SVG_TEXT);
   put("worktrees/terminal-context-queue-v2/README.md", "wrapped folder\n");
   execSync(`git init -q ${JSON.stringify(dir)}`);
   await boot(page);
-  const session = await openTab(page);
-  typeLine(session, `cd ${dir}`);
-  await page.waitForTimeout(800);
-  await settleCwd(page, session, "cmd-hover-");
+  // A tmux session named once per test, opened from the sessions panel: the
+  // backend keeps a dead pty wired to a name a later tab mints again, so no
+  // two tests share one.
+  const session = await openSessionTab(page, dir);
   return { dir, real: realpathSync(dir), session };
 }
 
@@ -75,6 +75,10 @@ const card = (page: Page) => page.locator(".term-inspector");
 
 test.afterEach(async ({ page }) => {
   await page.keyboard.up("Meta").catch(() => {});
+  // ⌘W drops each tab's pty, and the pane it drove is killed after it: a pile
+  // of live sessions makes the next ⌘T mint a name the backend already holds.
+  await closeTabs(page);
+  killAllSessions();
 });
 
 test.afterAll(() => {
@@ -188,10 +192,13 @@ test("⌘-click reconstructs a manually wrapped absolute folder without reposito
     "  context-queue-v2",
   ], "context-queue-v2");
 
-  // The joined token is a directory, so the receipt is the files tree the app
-  // roots at it, opened straight from the absolute path.
+  // Only the joined path exists, so the panel that opens names it: the click
+  // rebuilt the folder across the wrap without a repository search. The leaf
+  // carries no dot, and preview.ts:73 reads a dotless leaf as an extension, so
+  // the folder lands in the preview panel rather than the files tree.
   await cmdClick(page, await cell(page, 1, 8));
-  await expect(page.locator(".files-explorer").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".dv-default-tab", { hasText: "terminal-context-queue-v2" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".fs-preview .fs-preview-meta")).toContainText(folder);
   await shot(page, "cmd-hover-08-wrapped-folder");
 });
 
