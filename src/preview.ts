@@ -70,7 +70,11 @@ export function openPreviewPanel(
 }
 
 export async function openPathInInstant(path: string, line?: number): Promise<void> {
-  const extension = path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
+  const leaf = path.split("/").pop() ?? path;
+  // A dotless leaf (a folder such as `ipc`, or a Makefile) has no extension;
+  // splitting on "." would hand back the whole name and route a directory to
+  // the file preview, where it reads "Is a directory".
+  const extension = leaf.includes(".") ? leaf.split(".").pop()?.toLowerCase() ?? "" : "";
   // Command-click resolution has already located relative files. An
   // extension-bearing leaf can route immediately, avoiding list_dir(path),
   // which enumerates a directory merely to learn that a file is ENOTDIR.

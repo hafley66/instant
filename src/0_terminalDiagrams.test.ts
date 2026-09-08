@@ -22,6 +22,22 @@ function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): 
   } as unknown as Terminal;
 }
 
+describe("fences under tmux copy mode", () => {
+  it("keeps a fence whose opener or closer carries the copy-mode indicator", () => {
+    const terminal = terminalWithRows([
+      "```mermaid                                   [3/120]",
+      "graph LR; a --> b",
+      "```                                          [4/120]",
+    ]);
+    const fences = findDiagramFences(terminal);
+    expect(fences).toHaveLength(1);
+    expect(fences[0].language).toBe("mermaid");
+    expect(fences[0].code).toBe("graph LR; a --> b");
+    expect(fences[0].start).toBe(0);
+    expect(fences[0].end).toBe(2);
+  });
+});
+
 describe("stripped terminal diagrams", () => {
   it("captures rich D2 with internal blank rows and stops at assistant prose", () => {
     const terminal = terminalWithRows([

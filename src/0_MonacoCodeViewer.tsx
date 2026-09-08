@@ -87,7 +87,7 @@ function editorLifetime(host: HTMLElement, props: MonacoCodeViewerProps): Observ
         editorEvents.$({ type: "changed", id: props.id, version });
       });
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        void invoke("save_text", { path: props.path, text: model.getValue() })
+        void invoke("save_text", { path: props.path, contents: model.getValue() })
           .then(() => editorEvents.$({ type: "saved", id: props.id, version }))
           .catch((error) => editorEvents.$({ type: "error", id: props.id, error: String(error) }));
       });

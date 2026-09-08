@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Signal, type Signal as SignalValue } from "@hafley66/signals";
-import { createGrid, type Grid } from "@hafley66/grid";
+import { createDefaultGridState, createGrid, type Grid } from "@hafley66/grid";
 import { GridTree } from "@hafley66/grid/react";
 import { z } from "zod";
 import { invoke, type CommandName } from "../../generated/native";
@@ -66,6 +66,9 @@ function modelFor(rootPath: string, rootEntries: FsEntry[]): FileTreeModel {
     schema: gridRowSchema as z.ZodType<GridRow>,
     rows,
     mode: "client",
+    // The tree draws one page and has no pager; the grid's default page of 20
+    // rows cut a repo root off at its twentieth entry.
+    state: Signal(createDefaultGridState({ pagination: { pageIndex: 0, pageSize: 100_000 } })),
     getRowId: (row) => row.id,
     getSubRows: (row) => row.children,
     getRowCanExpand: (row) => row.kind === "dir" || (row.kind === "file" && isMarkdownPath(row.path)),

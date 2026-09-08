@@ -124,10 +124,12 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
   const found: DiagramFence[] = [];
   const occupied = new Set<number>();
   for (let index = 0; index < lines.length; index++) {
-    const open = lines[index].text.match(/^\s*(`{3,}|~{3,})\s*(mermaid|d2)\s*$/i);
+    // tmux paints its copy-mode indicator, `[12/340]`, into the right edge of
+    // the top row; a fence that lands there still reads as a fence.
+    const open = lines[index].text.match(/^\s*(`{3,}|~{3,})\s*(mermaid|d2)\s*(?:\[\d+\/\d+\])?\s*$/i);
     if (!open) continue;
     for (let closeIndex = index + 1; closeIndex < lines.length; closeIndex++) {
-      const close = lines[closeIndex].text.match(/^\s*(`{3,}|~{3,})\s*$/);
+      const close = lines[closeIndex].text.match(/^\s*(`{3,}|~{3,})\s*(?:\[\d+\/\d+\])?\s*$/);
       if (!close || close[1][0] !== open[1][0] || close[1].length < open[1].length) continue;
       found.push({
         language: open[2].toLowerCase() as DiagramLanguage,

@@ -171,7 +171,7 @@ test("a token that names no path falls through to ripgrep", async ({ page }) => 
 // defect src/preview.ts:73: a directory name carries no dot, so `split(".").pop()`
 // hands back the name itself as the extension and the folder opens as a file
 // preview reading "Is a directory (os error 21)". The Files tree never opens.
-test.fixme("a bare word that names exactly one folder resolves to it", async ({ page }) => {
+test("a bare word that names exactly one folder resolves to it", async ({ page }) => {
   await boot(page);
   const dir = mkRepo({ "src/mdview/MdPanel.tsx": "export {}\n", "README.md": "seed\n" }, "seed");
   dirs.push(dir);
@@ -205,7 +205,7 @@ test("a path only git holds opens its blob, naming the revision", async ({ page 
 // it finds nothing, run_click turns any nonzero exit into an error, and the
 // caller prints that error, so the panel reads "Error: exit 1:" and the empty
 // result line at src/clickrules.ts:103 is unreachable.
-test.fixme("a token that matches nothing still opens a panel saying so", async ({ page }) => {
+test("a token that matches nothing still opens a panel saying so", async ({ page }) => {
   await boot(page);
   const dir = mkRepo({ "README.md": "seed\n" }, "seed");
   dirs.push(dir);
