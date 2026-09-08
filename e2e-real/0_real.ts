@@ -125,3 +125,52 @@ export async function toast(page: Page): Promise<string> {
   await expect(el).toBeVisible({ timeout: 30_000 });
   return (await el.textContent()) ?? "";
 }
+
+// lane real-term-basics
+// The codex-pane prelude in printf %b form: alternate screen plus mouse tracking.
+export const MOUSE_PANE = "\\033[?1049h\\033[?1006h\\033[?1000h\\033[?1002h";
+
+// bash with prompt and tty echo silenced, so a printf paints the screen and
+// nothing else. The caller names a marker that must reach the pane first.
+export async function openSilentPane(page: Page, payload: string, marker: string): Promise<string> {
+  const session = await openTab(page);
+  typeLine(session, "bash --norc --noprofile");
+  await page.waitForTimeout(400);
+  typeLine(session, "PS1=; stty -echo");
+  await page.waitForTimeout(200);
+  typeLine(session, `printf '%b' '${payload}'`);
+  await expect.poll(() => paneScreen(session).join("\n"), {
+    timeout: 20_000,
+    message: `pane ${session} never showed ${JSON.stringify(marker)}`,
+  }).toContain(marker);
+  await page.waitForTimeout(300);
+  return session;
+}
+
+/// The system clipboard after the app's autocopy of a finished selection.
+export const clipboardText = (page: Page): Promise<string> =>
+  page.evaluate(() => navigator.clipboard.readText());
+
+/// ⌘W closes the active tab, and the app drops that tab's pty when it does.
+/// A test that leaves a tab open blocks the next test from minting a session of
+/// the same name, because the backend keeps `s:<name>` wired to the dead pty
+/// (src-tauri/src/pty.rs:596). Every spec closes its tabs before the tmux
+/// sessions are killed from outside.
+export async function closeTabs(page: Page): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    if ((await page.locator(".term-host").count().catch(() => 0)) === 0) return;
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW", metaKey: true, bubbles: true, cancelable: true }));
+    }).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+}
+
+/// A command typed into a pane after a drag. The app forwards mouse reports to
+/// the pty, and those bytes sit in the shell's line buffer, so Ctrl-U drops
+/// them before the command goes in. Receipt of the fix: the pane runs the
+/// command instead of answering "bash: 0: command not found".
+export const paneCommand = (session: string, line: string): void => {
+  tmux(["send-keys", "-t", `${session}:`, "C-u"]);
+  typeLine(session, line);
+};
