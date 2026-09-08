@@ -30,34 +30,14 @@ mod worktrees;
 mod services;
 pub mod serve;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
-use core_foundation::runloop::CFRunLoop;
-use core_graphics::event::{
-    CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventType, CallbackResult, EventField,
-};
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use mouse_position::mouse_position::Mouse;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
-
-// Two right-clicks closer than this count as a double-right-click summon gesture.
-const DOUBLE_RIGHT_MS: u128 = 350;
-// Two right-⌘ taps closer than this count as a double-right-cmd summon. Modifier
-// taps run a touch slower than mouse clicks, so the window is a bit wider.
-const DOUBLE_RCMD_MS: u128 = 400;
-// IOKit device-dependent flag bit for the RIGHT command key (NX_DEVICERCMDKEYMASK).
-// Present in HID-tap event flags, so it isolates right ⌘ from left ⌘.
-const RCMD_BIT: u64 = 0x10;
-// IOKit device-dependent flag bit for the RIGHT shift key (NX_DEVICERSHIFTKEYMASK).
-const RSHIFT_BIT: u64 = 0x04;
-// Global throttle between screen captures, across all gesture kinds.
-const MIN_GAP: Duration = Duration::from_millis(350);
 
 // The app that was frontmost when we last summoned the overlay. On dismiss we
 // reactivate it so focus lands back where the user was (e.g. Chrome) instead of
@@ -67,251 +47,6 @@ static PREV_APP: Mutex<Option<String>> = Mutex::new(None);
 // Serialize append/truncate cycles so concurrent frontend and native events
 // cannot reorder bytes or truncate a newer write.
 static LOG_LOCK: Mutex<()> = Mutex::new(());
-
-// Tap-thread gesture state (behind a Mutex, since with_enabled takes `impl Fn`).
-#[derive(Default)]
-struct Gesture {
-    last_capture: Option<Instant>,
-    drag_active: bool,
-    last_right_down: Option<Instant>,
-    // Right-⌘ double-tap summon: track press edges + the previous tap time.
-    right_cmd_down: bool,
-    last_right_cmd: Option<Instant>,
-}
-
-// Throttled capture trigger: spawn the screenshot OFF the tap thread so input
-// latency isn't affected by screencapture's ~100-300ms.
-fn maybe_capture(
-    g: &mut Gesture,
-    enabled: &Arc<AtomicBool>,
-    host: &Arc<dyn crate::host::Host>,
-    services: &Arc<crate::services::Services>,
-    kind: &str,
-) {
-    if !enabled.load(Ordering::Relaxed) {
-        return;
-    }
-    let now = Instant::now();
-    if let Some(t) = g.last_capture {
-        if now.duration_since(t) < MIN_GAP {
-            return;
-        }
-    }
-    g.last_capture = Some(now);
-    let host = host.clone();
-    let services = services.clone();
-    let kind = kind.to_string();
-    std::thread::spawn(move || capture::take(host, services, &kind));
-}
-
-/// Global input tap on a dedicated thread running its own CFRunLoop. Handles the
-/// double-right-click summon (unchanged) plus event-driven capture: drag edges,
-/// clicks/dbl-clicks, and Cmd+C / Cmd+V. Listen-only, so it never swallows input
-/// and the webview's own context menu still works. We read raw event fields
-/// (click-state, keycode, flags) directly — NO TIS/TSM keycode translation — so
-/// the old rdev-on-a-background-thread crash does not recur. Needs Accessibility
-/// / Input Monitoring permission, same as the hotkey.
-fn spawn_input_taps(
-    app: AppHandle,
-    host: Arc<dyn crate::host::Host>,
-    services: Arc<crate::services::Services>,
-    enabled: Arc<AtomicBool>,
-    tap_active: Arc<AtomicBool>,
-) {
-    std::thread::spawn(move || {
-        log_event(
-            &app,
-            "INFO",
-            "input_tap_thread_started",
-            serde_json::json!({}),
-        );
-        // This thread services a HID-level event tap: at default QoS a loaded
-        // machine schedules it behind other work, and a slow tap callback
-        // delays every keystroke and click systemwide. Pin user-interactive.
-        unsafe {
-            libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);
-        }
-        let g = Mutex::new(Gesture::default());
-        // Supervisor loop: macOS disables a tap whose callback stalls
-        // (TapDisabledByTimeout) or on user action (TapDisabledByUserInput).
-        // core-graphics 0.25 gives the callback no path to the tap's mach port
-        // (CGEventTapEnable is crate-private), so the callback marks the tap
-        // dead and stops its runloop, and this loop re-creates the tap.
-        loop {
-            log_event(
-                &app,
-                "INFO",
-                "input_tap_create_attempt",
-                serde_json::json!({}),
-            );
-            let res = CGEventTap::with_enabled(
-                CGEventTapLocation::HID,
-                CGEventTapPlacement::HeadInsertEventTap,
-                // Active (not ListenOnly) so the send-highlight combo can be dropped
-                // before the focused app turns it into its own paste. Every other
-                // event returns Keep, so pass-through is unchanged.
-                CGEventTapOptions::Default,
-                vec![
-                    CGEventType::RightMouseDown,
-                    CGEventType::LeftMouseDown,
-                    CGEventType::LeftMouseDragged,
-                    CGEventType::LeftMouseUp,
-                    CGEventType::KeyDown,
-                    CGEventType::FlagsChanged,
-                ],
-                |_proxy, ty, event| {
-                    let mut g = g.lock().unwrap();
-                    match ty {
-                        CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
-                            // Delivered regardless of the event mask. Mark the tap
-                            // dead and stop the runloop; the supervisor loop above
-                            // re-creates the tap.
-                            tap_active.store(false, Ordering::Relaxed);
-                            CFRunLoop::get_current().stop();
-                        }
-                        CGEventType::RightMouseDown => {
-                            let now = Instant::now();
-                            let is_double = g
-                                .last_right_down
-                                .map(|t| {
-                                    now.duration_since(t)
-                                        < Duration::from_millis(DOUBLE_RIGHT_MS as u64)
-                                })
-                                .unwrap_or(false);
-                            if is_double {
-                                log_event(
-                                    &app,
-                                    "INFO",
-                                    "double_right_click_detected",
-                                    serde_json::json!({ "window_ms": DOUBLE_RIGHT_MS }),
-                                );
-                                g.last_right_down = None; // reset so a triple isn't two doubles
-                                let handle = app.clone();
-                                let _ = app.run_on_main_thread(move || toggle_window(&handle));
-                            } else {
-                                g.last_right_down = Some(now);
-                            }
-                        }
-                        CGEventType::LeftMouseDown => g.drag_active = false,
-                        CGEventType::LeftMouseDragged => {
-                            if !g.drag_active {
-                                g.drag_active = true; // leading edge of a drag burst
-                                maybe_capture(&mut g, &enabled, &host, &services, "drag");
-                            }
-                        }
-                        CGEventType::LeftMouseUp => {
-                            if g.drag_active {
-                                g.drag_active = false; // trailing edge
-                                maybe_capture(&mut g, &enabled, &host, &services, "drag-end");
-                            } else {
-                                let cs = event
-                                    .get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
-                                maybe_capture(
-                                    &mut g,
-                                    &enabled,
-                                    &host,
-                                    &services,
-                                    if cs >= 2 { "dblclick" } else { "click" },
-                                );
-                            }
-                        }
-                        CGEventType::FlagsChanged => {
-                            // Right ⌘ has its own device bit, so this is unambiguous
-                            // even while left ⌘ is held. Act only on the press edge
-                            // (released -> pressed); a second tap within the window
-                            // summons. We read one modifier bit, not key content.
-                            let rcmd = event.get_flags().bits() & RCMD_BIT != 0;
-                            if rcmd && !g.right_cmd_down {
-                                let now = Instant::now();
-                                let is_double = g
-                                    .last_right_cmd
-                                    .map(|t| {
-                                        now.duration_since(t)
-                                            < Duration::from_millis(DOUBLE_RCMD_MS as u64)
-                                    })
-                                    .unwrap_or(false);
-                                if is_double {
-                                    log_event(
-                                        &app,
-                                        "INFO",
-                                        "double_right_command_detected",
-                                        serde_json::json!({ "window_ms": DOUBLE_RCMD_MS }),
-                                    );
-                                    g.last_right_cmd = None; // reset so a triple isn't two doubles
-                                    let handle = app.clone();
-                                    let _ = app.run_on_main_thread(move || toggle_window(&handle));
-                                } else {
-                                    g.last_right_cmd = Some(now);
-                                }
-                            }
-                            g.right_cmd_down = rcmd;
-                        }
-                        CGEventType::KeyDown => {
-                            let flags = event.get_flags().bits();
-                            let keycode =
-                                event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                            // Right-⌘ + Right-⇧ + V (keycode 9): grab the current
-                            // selection from the focused app and send it to the
-                            // active instant session. Right-side device bits isolate
-                            // this from the plain Cmd+V capture below. Drop the event
-                            // so the focused app doesn't also paste.
-                            if keycode == 9 && flags & RCMD_BIT != 0 && flags & RSHIFT_BIT != 0 {
-                                let handle = app.clone();
-                                std::thread::spawn(move || grab_and_send_selection(&handle));
-                                return CallbackResult::Drop;
-                            }
-                            if event.get_flags().contains(CGEventFlags::CGEventFlagCommand) {
-                                // 8 = C, 9 = V (ANSI keycodes). Only these two — not a keylogger.
-                                match keycode {
-                                    8 => maybe_capture(&mut g, &enabled, &host, &services, "copy"),
-                                    9 => maybe_capture(&mut g, &enabled, &host, &services, "paste"),
-                                    _ => {}
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    CallbackResult::Keep // passive: pass every event through unchanged
-                },
-                || {
-                    // Tap created OK; mark it live for the capture diagnostics, then
-                    // run its runloop (blocks this thread until the tap is disabled).
-                    tap_active.store(true, Ordering::Relaxed);
-                    log_event(&app, "INFO", "input_tap_active", serde_json::json!({}));
-                    CFRunLoop::run_current()
-                },
-            );
-            if res.is_err() {
-                tap_active.store(false, Ordering::Relaxed);
-                log_event(
-                    &app,
-                    "ERROR",
-                    "input_tap_create_failed",
-                    serde_json::json!({
-                        "reason": "grant Accessibility / Input Monitoring permission"
-                    }),
-                );
-                eprintln!(
-                    "input taps disabled: event tap creation failed \
-                 (grant Accessibility / Input Monitoring permission)"
-                );
-                return;
-            }
-            if tap_active.load(Ordering::Relaxed) {
-                // Runloop ended without a TapDisabled event; nothing to recover
-                // from, so don't spin re-creating taps.
-                log_event(
-                    &app,
-                    "WARN",
-                    "input_tap_runloop_ended",
-                    serde_json::json!({ "active": true }),
-                );
-                return;
-            }
-            log_event(&app, "WARN", "input_tap_disabled", serde_json::json!({}));
-        } // loop
-    });
-}
 
 /// Build a filled-circle tray icon in `color`, transparent outside the disc.
 fn dot_icon(color: [u8; 3]) -> tauri::image::Image<'static> {
@@ -345,43 +80,6 @@ pub fn set_recording_indicator(app: &AppHandle, on: bool) {
         let _ = tray.set_icon(app.default_window_icon().cloned());
     }
     let _ = tray.set_icon_as_template(false); // keep the red colored, not monochrome
-}
-
-/// Synthesize a ⌘C keystroke so the focused app copies its current selection to
-/// the pasteboard. Plain (left) Command flag, so it doesn't re-trigger the
-/// right-side send-highlight combo in our own tap.
-fn synth_copy() {
-    let Ok(src) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) else {
-        return;
-    };
-    const KC_C: u16 = 8;
-    if let Ok(ev) = CGEvent::new_keyboard_event(src.clone(), KC_C, true) {
-        ev.set_flags(CGEventFlags::CGEventFlagCommand);
-        ev.post(CGEventTapLocation::HID);
-    }
-    if let Ok(ev) = CGEvent::new_keyboard_event(src, KC_C, false) {
-        ev.set_flags(CGEventFlags::CGEventFlagCommand);
-        ev.post(CGEventTapLocation::HID);
-    }
-}
-
-fn read_clipboard() -> String {
-    std::process::Command::new("pbpaste")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default()
-}
-
-/// Copy the focused app's selection, then hand the text to the webview, which
-/// writes it into the active session. Runs off the tap thread (it sleeps for the
-/// copy to land). Overwrites the pasteboard, same as a manual ⌘C.
-fn grab_and_send_selection(app: &AppHandle) {
-    synth_copy();
-    std::thread::sleep(Duration::from_millis(120)); // let the copy reach the pasteboard
-    let text = read_clipboard();
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit("send-highlight-text", text);
-    }
 }
 
 /// While the overlay is up, let it join the OS app/window switcher; on hide,
@@ -1000,16 +698,12 @@ pub fn run() {
         Modifiers::SUPER | Modifiers::ALT
     };
     let summon = Shortcut::new(Some(summon_modifiers), Code::Space);
-    // Opt out of the process-wide singletons (tray icon, global Cmd+Alt+Space
-    // shortcut, and the double-right-click/double-right-⌘ summon gesture's
-    // CGEventTap) so a second instance — launched for dev/verification — doesn't
-    // fight the owner's always-running one over the same OS-level resources.
+    // Skip the tray icon and global shortcut so a second instance doesn't fight
+    // the owner's always-running one over the same OS-level resources.
     let no_globals = std::env::var("INSTANT_NO_GLOBALS").is_ok();
     let skip_shared_globals = no_globals || isolated;
 
     let builder = tauri::Builder::default();
-    #[cfg(all(debug_assertions, feature = "native-e2e"))]
-    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
     builder
         .plugin(tauri_plugin_opener::init())
@@ -1056,27 +750,13 @@ pub fn run() {
                 app.global_shortcut().register(summon)?;
             }
 
-            // Capture flag, shared with the tap thread. Default OFF; the front
-            // re-enables it on boot if the user had recording on.
-            let enabled = services.capture_enabled.0.clone();
-            let tap_active = services.tap_active.0.clone();
             if skip_shared_globals {
                 eprintln!(
-                    "isolated globals: skipping tray icon and double-click/double-cmd \
-                     summon gesture — showing the main window on launch instead"
-                );
-            } else {
-                spawn_input_taps(
-                    app.handle().clone(),
-                    host.clone(),
-                    services.clone(),
-                    enabled,
-                    tap_active,
+                    "isolated globals: skipping tray icon, showing the main window on launch instead"
                 );
             }
 
-            // Track focus on our own window so the capture worker can skip
-            // gestures made inside instant (clicking rows/chips shouldn't record).
+            // Track focus on our own window for the front's focus-driven state.
             let focused = services.window_focused.0.clone();
             if let Some(win) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
@@ -1116,7 +796,7 @@ pub fn run() {
             });
 
             if skip_shared_globals {
-                // No tray or summon gesture, so show directly. INSTANT_ISOLATED
+                // No tray, so show directly. INSTANT_ISOLATED
                 // still has its separate Cmd+Shift+Space global shortcut.
                 if let Some(win) = app.get_webview_window("main") {
                     let show_result = win.show();

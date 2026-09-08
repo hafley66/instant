@@ -1,14 +1,7 @@
-// Event-driven screen capture. The CGEventTap (lib.rs) calls `take` on its own
-// ephemeral thread for each throttled gesture (click / dblclick / drag-edge /
-// copy / paste). One full-screen PNG via `screencapture -x`, tagged with the
-// frontmost app, inserted into the unified activity store, then `activity-added`
-// so the timeline updates live.
-//
-// Needs Screen Recording permission (granted once, on the first shot). Capture
-// is OFF by default and gated by the CaptureEnabled flag checked before we get
-// here, so this only runs when the user has opted in.
+// TCC probes and the frontmost-app lookup shared by the shell (window summon,
+// frontmost watch) and the Activity panel. The CGEventTap is gone.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use core_foundation::base::{CFType, TCFType};
@@ -22,15 +15,10 @@ use core_graphics::window::{
 use serde::Serialize;
 use tauri::State;
 
-use crate::activity;
-use crate::host::Host;
 use crate::services::Services;
 
-// macOS TCC probes. CGPreflight* reports whether we already hold the grant;
-// CGRequest* adds instant to the list and prompts, returning the post-prompt
-// state. AXIsProcessTrusted is the Accessibility bit the CGEventTap needs to see
-// input. All three live in CoreGraphics, re-exported by the ApplicationServices
-// umbrella (which we link for AXIsProcessTrusted).
+// macOS TCC probes (ApplicationServices umbrella: AXIsProcessTrusted lives there).
+// CGPreflight = already held, CGRequest = prompt, AX = Accessibility.
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -39,17 +27,10 @@ extern "C" {
 }
 
 /// Whether the instant window is focused, kept current by the window focus
-/// event (lib.rs). The capture worker reads it to avoid screenshotting our own
-/// UI while you click around inside the app.
+/// event (lib.rs).
 pub struct WindowFocused(pub Arc<AtomicBool>);
 
-/// Whether the CGEventTap is live. Set true once the tap's runloop starts
-/// (lib.rs `spawn_input_taps`); stays false if tap creation failed for lack of
-/// Accessibility / Input Monitoring. Surfaced so the Activity panel can explain
-/// why no gestures are being captured.
-pub struct TapActive(pub Arc<AtomicBool>);
-
-/// TCC + tap state for the Activity panel's capture diagnostics.
+/// TCC state for the Activity panel's capture diagnostics.
 #[derive(Serialize)]
 pub struct CapturePerms {
     pub screen_recording: bool,
@@ -58,28 +39,18 @@ pub struct CapturePerms {
     pub tap_expected: bool,
 }
 
-/// Per-gesture outcome, emitted as `capture-status` so the panel can show the
-/// last result (a saved shot, or exactly why one was skipped). This is what
-/// turns the six silent no-ops below into something observable.
-#[derive(Serialize, Clone)]
-pub struct CaptureStatus {
-    pub kind: String,
-    pub ok: bool,
-    pub reason: String,
-    pub ts: i64,
-}
-
 #[tauri::command]
 pub fn capture_permissions(services: State<Arc<Services>>) -> CapturePerms {
     capture_permissions_impl(&services)
 }
 
-pub fn capture_permissions_impl(services: &Services) -> CapturePerms {
+pub fn capture_permissions_impl(_services: &Services) -> CapturePerms {
     CapturePerms {
         screen_recording: unsafe { CGPreflightScreenCaptureAccess() },
         accessibility: unsafe { AXIsProcessTrusted() },
-        tap_active: services.tap_active.0.load(Ordering::Relaxed),
-        tap_expected: std::env::var("INSTANT_NO_GLOBALS").is_err(),
+        // The CGEventTap is gone; the tap fields stay false for the old shape.
+        tap_active: false,
+        tap_expected: false,
     }
 }
 
@@ -89,83 +60,6 @@ pub fn capture_permissions_impl(services: &Services) -> CapturePerms {
 #[tauri::command]
 pub fn capture_request_screen() -> bool {
     unsafe { CGRequestScreenCaptureAccess() }
-}
-
-/// Take one shot for `kind`, store it, emit the row. Best-effort: any failure
-/// (no permission, dir error, screencapture nonzero) silently no-ops.
-pub fn take(host: Arc<dyn Host>, services: Arc<Services>, kind: &str) {
-    let ts = activity::now_ms();
-    // Emit the outcome of this gesture so the panel can show "shot saved" or the
-    // precise skip reason instead of nothing happening.
-    let status = |ok: bool, reason: &str| {
-        let _ = host.emit(
-            "capture-status",
-            serde_json::to_value(&CaptureStatus {
-                kind: kind.to_string(),
-                ok,
-                reason: reason.to_string(),
-                ts,
-            })
-            .unwrap_or(serde_json::Value::Null),
-        );
-    };
-
-    // Don't record our own clicks: skip while the instant window is focused.
-    // Not counted as a filter — interacting with the app just isn't an event.
-    if services.window_focused.0.load(Ordering::Relaxed) {
-        status(false, "instant window focused");
-        return;
-    }
-
-    // Observation filter: never even screenshot while an excluded app is front.
-    let app_name = frontmost_app();
-    {
-        let cfg = &services.config;
-        if cfg.config.lock().unwrap().app_excluded(&app_name) {
-            crate::config::note_excluded(cfg);
-            status(false, &format!("{app_name} excluded"));
-            return;
-        }
-    }
-
-    let Ok(data_dir) = crate::host::state_dir(&*host) else {
-        status(false, "no app data dir");
-        return;
-    };
-    let dir = data_dir.join("captures").join(day_string(ts));
-    if std::fs::create_dir_all(&dir).is_err() {
-        status(false, "capture dir create failed");
-        return;
-    }
-    let shot = dir.join(format!("{ts}-{kind}.png"));
-
-    // Absolute path: GUI apps don't get /usr/sbin in PATH. -x silent, no shutter
-    // sound; full main display.
-    let st = std::process::Command::new("/usr/sbin/screencapture")
-        .args(["-x", "-t", "png"])
-        .arg(&shot)
-        .status();
-    if st.map(|s| !s.success()).unwrap_or(true) || !shot.exists() {
-        status(false, "screen recording denied or capture failed");
-        return;
-    }
-
-    let shot_str = shot.to_string_lossy().into_owned();
-    let db = &services.activity;
-    let row = {
-        let conn = db.0.lock().unwrap();
-        activity::insert_row(&conn, ts, "os", kind, &app_name, "", "", "", &shot_str)
-    };
-    match row {
-        Ok(ev) => {
-            let _ = host.emit(
-                "activity-added",
-                serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null),
-            );
-            status(true, &app_name);
-        }
-        Err(e) => status(false, &format!("db error: {e}")),
-    }
 }
 
 /// Frontmost app name via CGWindowList. The on-screen window list is ordered
@@ -200,23 +94,4 @@ pub(crate) fn frontmost_app() -> String {
         }
     }
     String::new()
-}
-
-// UTC date bucket for the capture folder. Howard Hinnant's civil-from-days, so
-// no chrono dependency just to name a directory.
-fn day_string(ts_ms: i64) -> String {
-    let (y, m, d) = civil_from_days(ts_ms.div_euclid(86_400_000));
-    format!("{y:04}-{m:02}-{d:02}")
-}
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }

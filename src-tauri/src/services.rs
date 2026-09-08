@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use crate::activity::{ActivityDb, CaptureEnabled, RulesState, WatcherState};
-use crate::capture::{TapActive, WindowFocused};
+use crate::capture::WindowFocused;
 use crate::cdp::{CdpStore, ChromeEngine};
 use crate::config::ConfigState;
 use crate::favorites::Favorites;
@@ -25,7 +25,6 @@ pub struct Services {
     pub favorites: Favorites,
     pub fs_watch: FsWatchClaims,
     pub capture_enabled: CaptureEnabled,
-    pub tap_active: TapActive,
     pub window_focused: WindowFocused,
     pub activity: ActivityDb,
     pub config: ConfigState,
@@ -56,7 +55,6 @@ impl Services {
             favorites,
             fs_watch: FsWatchClaims::default(),
             capture_enabled: CaptureEnabled(Arc::new(AtomicBool::new(false))),
-            tap_active: TapActive(Arc::new(AtomicBool::new(false))),
             window_focused: WindowFocused(Arc::new(AtomicBool::new(false))),
             activity: ActivityDb(Mutex::new(conn)),
             config: ConfigState {
