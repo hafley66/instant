@@ -193,7 +193,6 @@ mod tests {
             favorites,
             fs_watch: Default::default(),
             capture_enabled: crate::activity::CaptureEnabled(Arc::new(AtomicBool::new(false))),
-            tap_active: crate::capture::TapActive(Arc::new(AtomicBool::new(false))),
             window_focused: crate::capture::WindowFocused(Arc::new(AtomicBool::new(false))),
             activity: crate::activity::ActivityDb(Mutex::new(
                 rusqlite::Connection::open_in_memory().unwrap(),
