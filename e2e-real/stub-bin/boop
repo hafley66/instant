@@ -1,0 +1,18 @@
+#!/bin/sh
+# Real-tier stand-in for boop. `beep fork` answers the way boop does and writes
+# the call to $INSTANT_FORK_STUB_LOG instead of opening a lane: no worktree, no
+# tmux session, no opencode process, no paid model. Every other verb goes to the
+# real binary in $REAL_BOOP. The wrapper scripts/real-test.sh puts this dir first
+# on PATH for instant-serve.
+if [ "$1" = "beep" ] && [ "$2" = "fork" ]; then
+  id="$3"
+  [ -n "$INSTANT_FORK_STUB_LOG" ] && printf '%s\t%s\n' "$PWD" "$*" >> "$INSTANT_FORK_STUB_LOG"
+  if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "Error: no git repo at $PWD; pass --cwd <repo>" >&2
+    exit 1
+  fi
+  echo "brief /dev/null"
+  echo "forked comment $id -> lane fork-comment-$id"
+  exit 0
+fi
+exec "${REAL_BOOP:-$HOME/.cargo/bin/boop}" "$@"

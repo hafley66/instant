@@ -21,10 +21,9 @@ node node_modules/vite/bin/vite.js build
 
 ## Run
 ```
-INSTANT_SERVE_BIN=/Users/chrishafley/.cache/cargo-target/feature-serve-bin/debug/instant-serve \
-INSTANT_REAL_PORT=<your port> INSTANT_REAL_SOCKET=<your socket> \
-npx playwright test -c playwright.real.config.ts e2e-real/<spec>.spec.ts
+INSTANT_REAL_PORT=<your port> INSTANT_REAL_SOCKET=<your socket> scripts/real-test.sh e2e-real/<spec>.spec.ts
 ```
+`scripts/real-test.sh` is the only way to start the tier. It takes a machine-wide lock (one browser stack on this box at a time, wait for it), runs niced, refuses to start when the kernel's free memory level (`sysctl kern.memorystatus_level`) is under 30%, puts `e2e-real/stub-bin` first on PATH so `boop beep fork` never opens a lane, a worktree, a tmux session or a model process, and on exit kills the server, the private tmux socket, and any `fork-comment-*` session that leaked onto the default socket. Never call `npx playwright test` directly. Never run two spec files in parallel. Never spawn a real boop lane from a test: a verb that would (fork, paste to a lane, `lane create`) gets a stub in `e2e-real/stub-bin` that logs the call, and the spec reads the log.
 Debug a single case with `--grep "<title>"`; `--trace on` plus `npx playwright show-trace` for a failing step. `tmux -L <your socket> list-sessions` and `capture-pane -p -t <session>:` show what the pane holds. Kill a stuck server with `pkill -f "instant-serve --port <your port>"` and `tmux -L <your socket> kill-server`.
 
 ## Style laws (comments, commit message)
@@ -32,7 +31,7 @@ No em dashes. No sycophancy. No negative parallelism (`not X, Y`). No one-word s
 
 ## Receipt (paste the real output into the commit body)
 ```
-INSTANT_SERVE_BIN=... INSTANT_REAL_PORT=<port> INSTANT_REAL_SOCKET=<socket> npx playwright test -c playwright.real.config.ts <your spec files> 2>&1 | grep -E "✓|✘|passed|failed|fixme|skipped"
+INSTANT_REAL_PORT=<port> INSTANT_REAL_SOCKET=<socket> scripts/real-test.sh e2e-real/<spec>.spec.ts 2>&1 | grep -E "✓|✘|passed|failed|fixme|skipped"
 ls artifacts/real/ | grep -E "<your spec prefixes>"
 git status --short e2e e2e-live e2e-real
 ```
