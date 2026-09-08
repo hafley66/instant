@@ -125,3 +125,46 @@ export async function toast(page: Page): Promise<string> {
   await expect(el).toBeVisible({ timeout: 30_000 });
   return (await el.textContent()) ?? "";
 }
+
+// real-term-hover lane additions (kept at the end; other lanes append below).
+
+/// First pane row holding `marker`, -1 when absent. Row 0 is the top of the
+/// visible screen, so the number feeds straight into `cell`.
+export const findRow = (session: string, marker: string): number =>
+  paneScreen(session).findIndex((line) => line.includes(marker));
+
+/// The tab's harness badge flips only after the store's tmux sweep sees the
+/// pane's foreground process, so a stub harness launch is awaited, not assumed.
+export async function waitForHarness(page: Page, id: string): Promise<void> {
+  await expect
+    .poll(() => page.locator(`.term-host[data-harness="${id}"]`).count(), {
+      timeout: 30_000,
+      message: `harness ${id} never detected`,
+    })
+    .toBeGreaterThan(0);
+}
+
+/// A stub codex pane writes no transcript, so the spec seeds the one turn in
+/// boop's sqlite whose `said` it also cats to the screen.
+const seededTurns: string[] = [];
+export function seedTurn(session: string, turn: number, said: string): void {
+  const quote = said.replace(/'/g, "''");
+  sql(`insert into dict_session(value) values ('${session}')`);
+  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+      values ((select id from dict_session where value='${session}'),
+              (select id from dict_harness where value='codex'),
+              null, ${Date.now()})`);
+  sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+      values ((select id from dict_session where value='${session}'), ${turn}, ${Date.now()},
+              (select id from dict_role where value='assistant'), '${quote}', null)`);
+  seededTurns.push(session);
+}
+
+export function dropSeededTurns(): void {
+  for (const session of seededTurns) {
+    sql(`delete from agent_turn where session_id=(select id from dict_session where value='${session}')`);
+    sql(`delete from agent_session where session_id=(select id from dict_session where value='${session}')`);
+    sql(`delete from dict_session where value='${session}'`);
+  }
+  seededTurns.length = 0;
+}
