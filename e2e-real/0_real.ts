@@ -227,6 +227,9 @@ export async function openSessionTab(page: Page, cwd: string): Promise<string> {
   await row.locator(".s-name").click();
   await expect(page.locator(".term-host .xterm-screen").last()).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(1_500);
+  // A tab opened from the panel carries no launch cwd; a ⌘-click reads the pane
+  // directory from `store.sessions[].paths`, which one more panel show fills.
+  await settleCwd(page, name, path.basename(cwd));
   return name;
 }
 
