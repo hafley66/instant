@@ -5,8 +5,8 @@
 import { expect, type Page } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
-import { mkdirSync, readFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -134,6 +134,119 @@ export async function toast(page: Page): Promise<string> {
   const el = page.locator(".app-toast.on");
   await expect(el).toBeVisible({ timeout: 30_000 });
   return (await el.textContent()) ?? "";
+}
+
+// ---- real-term-diagrams lane: transcript sandbox under the serve HOME ----
+export const SANDBOX_HOME = process.env.INSTANT_REAL_HOME ?? "/tmp/instant-real-c-home";
+
+const claudeProjectDir = (cwd: string): string =>
+  path.join(SANDBOX_HOME, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+
+/// A claude transcript under the sandbox home, discovered for `cwd`. Every
+/// record line should carry `cwd` so the session lists under the pane's dir.
+export function installClaudeSession(sessionId: string, cwd: string, lines: readonly string[]): string {
+  const file = path.join(claudeProjectDir(cwd), `${sessionId}.jsonl`);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${lines.join("\n")}\n`);
+  return file;
+}
+
+/// A codex transcript under the sandbox home; the session_meta head line is
+/// prepended so the reader lists the file instead of skipping it.
+export function installCodexSession(sessionId: string, cwd: string, lines: readonly string[]): string {
+  const day = new Date();
+  const dir = path.join(
+    SANDBOX_HOME, ".codex", "sessions",
+    String(day.getFullYear()), String(day.getMonth() + 1).padStart(2, "0"), String(day.getDate()).padStart(2, "0"),
+  );
+  const file = path.join(dir, `rollout-${day.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}-${sessionId}.jsonl`);
+  mkdirSync(dir, { recursive: true });
+  const meta = JSON.stringify({
+    timestamp: day.toISOString(),
+    type: "session_meta",
+    payload: { id: sessionId, cwd },
+  });
+  writeFileSync(file, [meta, ...lines].map((line) => `${line}\n`).join(""));
+  return file;
+}
+
+/// Rewrite every cwd the corpus carries so the session belongs to `cwd`.
+export function recwd(text: string, cwd: string): string {
+  return text.replaceAll('/"cwd":"/Users/dev/projects/sprefa"', `/"cwd":"${cwd}"`)
+    .replaceAll("/Users/dev/projects/sprefa", cwd);
+}
+
+const stubSource = `
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc, char **argv) {
+  if (argc > 1) {
+    int fd = open(argv[1], O_RDONLY);
+    if (fd >= 0) {
+      char buf[65536];
+      ssize_t n;
+      while ((n = read(fd, buf, sizeof buf)) > 0) write(1, buf, n);
+    }
+  }
+  if (argc > 2) {
+    int count = atoi(argv[2]);
+    for (int i = 0; i < count; i++) {
+      char line[64];
+      int len = snprintf(line, sizeof line, "\\rworking %d", i);
+      write(1, line, len);
+      usleep(60000);
+    }
+  }
+  for (;;) pause();
+}
+`;
+
+let stubDir: Promise<string> | null = null;
+/// `claude` / `codex` executables: print a bytes file, stream writes, then idle.
+export function stubHarnesses(): Promise<string> {
+  stubDir ??= new Promise((resolve, reject) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "instant-stub-"));
+    const src = path.join(dir, "stub.c");
+    writeFileSync(src, stubSource);
+    for (const name of ["claude", "codex"]) {
+      const built = spawnSync("cc", ["-o", path.join(dir, name), src]);
+      if (built.status !== 0) reject(new Error(`cc build ${name}: ${built.stderr}`));
+    }
+    resolve(dir);
+  });
+  return stubDir;
+}
+
+/// Clear the pane and hand it to the stub harness: the bytes file fills row 0
+/// down, `streamWrites` "\rworking N" chunks arrive 60ms apart when asked.
+export async function runStubHarness(
+  session: string,
+  name: "claude" | "codex",
+  bytesFile: string,
+  streamWrites = 0,
+): Promise<void> {
+  const dir = await stubHarnesses();
+  typeLine(session, `clear; PATH=${dir}:$PATH exec ${name} '${bytesFile}' ${streamWrites}`);
+}
+
+/// The turn-attribution debug overlay, switched on the way a user does it.
+export async function turnDebugOn(page: Page): Promise<void> {
+  const button = page.locator("#turn-debug-toggle");
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+}
+
+/// Unique turn ids the debug rows attribute the visible host to, sorted.
+export async function visibleTurnIds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0);
+    return [...(host?.querySelectorAll<HTMLElement>(".term-turn-debug-row[data-turn-id]:not([data-turn-id=''])") ?? [])]
+      .map((row) => row.dataset.turnId!)
+      .sort();
+  });
 }
 
 // real-term-hover lane additions (kept at the end; other lanes append below).
@@ -421,4 +534,40 @@ export function burnClaimedPaneIds(): void {
 export function dropPaneSessions(): void {
   for (const route of boundRoutes) sql(`delete from agent_route where route='${route}'`);
   boundRoutes.length = 0;
+}
+
+// ---- lane: real-term-diagrams ----
+
+/// Several turns of one boop session, the shape an ingested transcript leaves
+/// in the store. `dropSeededTurns` removes every row again.
+export function seedTurnRows(
+  session: string,
+  turns: readonly { turn: number; role: string; said: string }[],
+  harness = "codex",
+): void {
+  sql(`insert into dict_session(value) values ('${session}')`);
+  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+      values ((select id from dict_session where value='${session}'),
+              (select id from dict_harness where value='${harness}'), null, ${Date.now()})`);
+  for (const row of turns) {
+    sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+        values ((select id from dict_session where value='${session}'), ${row.turn}, ${Date.now()},
+                (select id from dict_role where value='${row.role}'), '${row.said.replace(/'/g, "''")}', null)`);
+  }
+  seededTurns.push(session);
+}
+
+/// One more turn into a session `seedTurnRows` already made: the row a
+/// transcript ingest appends while the pane is on screen.
+export function appendTurnRow(session: string, turn: number, role: string, said: string): void {
+  sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+      values ((select id from dict_session where value='${session}'), ${turn}, ${Date.now()},
+              (select id from dict_role where value='${role}'), '${said.replace(/'/g, "''")}', null)`);
+}
+
+/// Scroll a pane's history the way the app's wheel router does: tmux copy-mode
+/// with auto-exit, then N lines up.
+export function scrollPaneUp(session: string, lines: number): void {
+  tmux(["copy-mode", "-e", "-t", `${session}:`]);
+  tmux(["send-keys", "-t", `${session}:`, "-X", "-N", String(lines), "scroll-up"]);
 }
