@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { renderConversationTurns } from "../scripts/3_claudeConversationReplay";
 import {
   bindPaneSession, boot, burnClaimedPaneIds, cell, closeTabs, dropPaneSessions, dropSeededTurns,
-  dropTabComments, findRow, killAllSessions, screenRows, seedTurn, shot, silentSessionPane, typeLine,
+  dropTabComments, killAllSessions, screenRows, seedTurn, shot, silentSessionPane, tmux, typeLine,
 } from "./0_real";
 
 const TURN = 402;
@@ -117,7 +117,7 @@ async function settle(page: Page) {
   }, { timeout: 30_000, intervals: [200] }).toBe(`${(await sample(page)).expectedRows} | false`);
 }
 
-async function openFixture(page: Page): Promise<string> {
+async function openFixture(page: Page, historyLines = 0): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "ctx-check-"));
   dirs.push(dir);
   await boot(page);
@@ -130,7 +130,9 @@ async function openFixture(page: Page): Promise<string> {
   seedTurn(session, TURN, SAID);
   bindPaneSession(session);
   const body = join(dir, "turn.txt");
-  writeFileSync(body, BODY);
+  // `clear` drops the pane's tmux history, so a test that scrolls into history
+  // prints its own: lines pushed off the top are what the wheel scrolls back to.
+  writeFileSync(body, historyLines ? `${filler(historyLines, "history filler")}\n${BODY}` : BODY);
   typeLine(session, `clear; cat ${body}`);
   await expect.poll(() => (screenRows(page)).then((rows) => rows.join("\n")), { timeout: 20_000 })
     .toContain(PROSE_LINE);
@@ -165,14 +167,15 @@ test("every structured row carries a checkbox as soon as the projection lands", 
 });
 
 test("a scroll moves every checkbox by exactly the rows scrolled, hiding none", async ({ page }) => {
-  const session = await openFixture(page);
+  const session = await openFixture(page, 45);
   await settle(page);
   const before = await sample(page);
 
-  // A wheel over the pane routes to tmux, which scrolls the pane two lines
-  // into its history. Every 100 ms through the gesture the gutter is read.
-  const at = await cell(page, findRow(session, "alpha"), 4);
-  await page.mouse.move(at.x, at.y);
+  // The pane scrolls two lines into its history, the move a wheel makes: the
+  // app's wheel router hands the gesture to tmux copy-mode
+  // (src/0_terminalWheel.ts, src-tauri/src/pty.rs:895), and the same two tmux
+  // commands are issued here because a synthetic wheel never reaches xterm's
+  // own handler. Every 100 ms through the move the gutter is read.
   const trace = page.evaluate(() => new Promise<Array<{ hidden: boolean }>>((resolve) => {
     const samples: Array<{ hidden: boolean }> = [];
     const tick = setInterval(() => {
@@ -182,7 +185,8 @@ test("a scroll moves every checkbox by exactly the rows scrolled, hiding none", 
     }, 100);
     setTimeout(() => { clearInterval(tick); resolve(samples); }, 3_000);
   }));
-  await page.mouse.wheel(0, -2 * before.cellHeight);
+  tmux(["copy-mode", "-e", "-t", `${session}:`]);
+  tmux(["send-keys", "-t", `${session}:`, "-X", "-N", "2", "scroll-up"]);
   const samples = await trace;
 
   // The gutter never blanks, at any sample across the whole scroll.
@@ -197,7 +201,9 @@ test("a scroll moves every checkbox by exactly the rows scrolled, hiding none", 
   const landed = sortedTops(after);
   expect(landed).toHaveLength(wanted.length);
   for (let index = 0; index < wanted.length; index += 1) {
-    expect(landed[index]).toBeCloseTo(wanted[index] + shift, 0);
+    // One pixel of slack: a row top is rounded, and a box one row off would
+    // miss by a whole cell height.
+    expect(Math.abs(landed[index] - (wanted[index] + shift))).toBeLessThanOrEqual(1);
   }
   await shot(page, "ctx-check-02-scrolled");
 });
@@ -253,6 +259,8 @@ test("clicking a table row's checkbox queues that row", async ({ page }) => {
 test("the hover checkbox rides the same row geometry", async ({ page }) => {
   await openFixture(page);
   await settle(page);
+  // The row is read immediately before the pointer moves onto it, so a repaint
+  // between the two never leaves the test hovering a stale row.
   const state = await sample(page);
   const proseRow = state.lines.findIndex((text) => text.includes(PROSE_LINE));
   expect(proseRow).toBeGreaterThan(-1);
@@ -267,6 +275,9 @@ test("the hover checkbox rides the same row geometry", async ({ page }) => {
     const node = host.querySelector<HTMLElement>(".term-context-hover-check")!;
     return root.getBoundingClientRect().top + Number.parseFloat(node.style.top || "0");
   });
-  expect(top + state.cellHeight / 2).toBeCloseTo(point.y, 0);
+  // The pointer's y is rounded to a whole pixel, so the row centre it names
+  // and the box's own centre agree within one pixel; a box one row off would
+  // miss by a whole cell height.
+  expect(Math.abs(top + state.cellHeight / 2 - point.y)).toBeLessThanOrEqual(1);
   await shot(page, "ctx-check-06-hover");
 });
