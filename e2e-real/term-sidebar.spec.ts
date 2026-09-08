@@ -8,13 +8,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { boot, closeTabs, killAllSessions, openTab, settleCwd, shot, typeLine } from "./0_real";
 
-// The grid paints one page of 20 rows and offers no pager (defect noted in the
-// commit body), so the tree under test is a directory that fits on one page.
+// Thirty entries: the grid once painted a single page of 20 rows with no pager
+// and cut a repo root off at its twentieth entry, so the last file here is the
+// receipt that the whole listing shows.
 function makeTree(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "term-sidebar-"));
   mkdirSync(path.join(dir, "src"));
   writeFileSync(path.join(dir, "src", "main.ts"), "export const main = 1;\n");
   writeFileSync(path.join(dir, "README.md"), "# tree under test\n");
+  for (let i = 1; i <= 28; i++) writeFileSync(path.join(dir, `entry-${String(i).padStart(2, "0")}.txt`), `${i}\n`);
+  writeFileSync(path.join(dir, "zz-last.txt"), "last\n");
   return dir;
 }
 
@@ -44,6 +47,7 @@ test("terminal filesystem sidebar renders the cwd tree", async ({ page }) => {
   await expect(sidebar.locator(".file-tree-grid")).toBeVisible({ timeout: 10_000 });
   await expect(sidebar).toContainText("src");
   await expect(sidebar).toContainText("README.md");
+  await expect(sidebar).toContainText("zz-last.txt");
   // The tree lists the filesystem, so no turn column reaches it.
   await expect(sidebar).not.toContainText("Turns");
   await expect(sidebar).not.toContainText("Touched");

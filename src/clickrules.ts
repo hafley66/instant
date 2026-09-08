@@ -96,7 +96,10 @@ export async function runClickRule(token: string, cwd: string): Promise<boolean>
   try {
     out = await clickRpc.runClick({ command, cwd });
   } catch (e) {
-    out = String(e);
+    // rg and grep exit 1 for "no match" and print nothing on stderr. That is
+    // an empty result, which the panel names below, and not an error line.
+    const text = String(e);
+    out = /exit 1:\s*$/.test(text.trim()) ? "" : text;
   }
   // Silence is the one answer a ⌘-click must never give: an empty result still
   // opens the panel, naming the command that found nothing.
