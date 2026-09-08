@@ -24,10 +24,10 @@ importers:
         version: 0.0.3(vite@8.1.5)
       '@hafley66/md':
         specifier: 0.1.2
-        version: 0.1.2(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
+        version: 0.1.2(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
       '@hafley66/signals':
-        specifier: 0.1.1
-        version: 0.1.1(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.1-dev.1788884795413
+        version: 0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)
       '@oddbird/css-anchor-positioning':
         specifier: ^0.9.0
         version: 0.9.0
@@ -432,6 +432,17 @@ packages:
 
   '@hafley66/signals@0.1.1':
     resolution: {integrity: sha512-f3PMKywdn2H92BMFYpkGfszBMBizvfJIfPHtxNA0DJUAhOl5WqomxUNRfhARcyCrB8WLeAp1yFTFMOzrWVipSQ==}
+    peerDependencies:
+      react: '>=18.0.0'
+      vite: '>=5.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      vite:
+        optional: true
+
+  '@hafley66/signals@0.1.1-dev.1788884795413':
+    resolution: {integrity: sha512-nAiuYfyyH3+a9e8lnROSYSsGP1n6ePX60UnDXlWjPCaHQKq7vTaf4fpCRsPixTpBJibx96vQm/IDaYA2hMXcMQ==}
     peerDependencies:
       react: '>=18.0.0'
       vite: '>=5.0.0'
@@ -3024,9 +3035,9 @@ snapshots:
     transitivePeerDependencies:
       - vite
 
-  '@hafley66/md@0.1.2(@hafley66/signals@0.1.1(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
+  '@hafley66/md@0.1.2(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
     dependencies:
-      '@hafley66/signals': 0.1.1(react@19.2.7)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
       '@terrastruct/d2': 0.1.33
       dockview: 6.6.1(react@19.2.7)
@@ -3070,6 +3081,17 @@ snapshots:
       rxjs: 7.8.2
     optionalDependencies:
       react: 19.2.8
+      vite: 8.1.5
+
+  '@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)':
+    dependencies:
+      '@hafley66/path': 0.1.0
+      history: 5.3.0
+      immer: 10.2.0
+      lodash: 4.18.1
+      rxjs: 7.8.2
+    optionalDependencies:
+      react: 19.2.7
       vite: 8.1.5
 
   '@hafley66/virtualizations@0.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':

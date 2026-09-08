@@ -1,7 +1,8 @@
 // Boop rail panel: lane roster (master table) with the mail stream drawn by
 // @hafley66/marbler; a lane is a line, a mail is a dot, filtered = disabled.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "./generated/native";
+import { useSignal } from "@hafley66/signals/react";
+import { commandEndpoint, invoke } from "./generated/native";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { settings } from "./0_settings";
 import type { SortingState } from "@tanstack/react-table";
@@ -268,16 +269,24 @@ export function subtreeLive(node: GraphNode): boolean {
 }
 
 const BOOP_SORT: SortingState = [{ id: "updated", desc: true }];
+// The graph read walks the process table and tmux, so it polls slower than
+// the mail tail; a tick that lands mid-flight is dropped, never queued.
 const GRAPH_POLL_MS = 3000;
+const GRAPH_QUERY = commandEndpoint<SessionGraph>("boop_session_graph");
 
 const POLL_MS = 1000;
 // Full history on first paint; after that only the tail, merged in memory.
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 export function BoopPanelV2() {
-  const [graph, setGraph] = useState<SessionGraph | null>(null);
-  const [events, setEvents] = useState<BoopLaneEvent[]>([]);
   const sinceTs = useRef(Date.now() - LOOKBACK_MS);
+  const graphQuery = useMemo(
+    () => GRAPH_QUERY.createQuery({ historySinceMs: sinceTs.current }, { refetchInterval: GRAPH_POLL_MS }),
+    [],
+  );
+  const graphState = useSignal(graphQuery.$);
+  const graph = graphState.data ?? null;
+  const [events, setEvents] = useState<BoopLaneEvent[]>([]);
   const roots = useMemo(() => (graph ? buildGraphTree(graph, sinceTs.current) : []), [graph]);
   const nodes = useMemo(() => flattenTree(roots), [roots]);
   const lanes = useMemo(() => lanesOfNodes(nodes), [nodes]);
@@ -304,28 +313,16 @@ export function BoopPanelV2() {
         if (!stopped) setInvokeError(reason instanceof Error ? reason.message : String(reason));
       }
     };
-    // The graph read walks the process table and tmux, so it polls slower
-    // than the mail tail.
-    const refreshGraph = async () => {
-      try {
-        const next = await invoke<SessionGraph>("boop_session_graph", { historySinceMs: sinceTs.current });
-        if (stopped) return;
-        setInvokeError(null);
-        setGraph(next);
-      } catch (reason) {
-        if (!stopped) setInvokeError(reason instanceof Error ? reason.message : String(reason));
-      }
-    };
     void refresh();
-    void refreshGraph();
     const timer = window.setInterval(refresh, POLL_MS);
-    const graphTimer = window.setInterval(refreshGraph, GRAPH_POLL_MS);
     return () => {
       stopped = true;
       window.clearInterval(timer);
-      window.clearInterval(graphTimer);
     };
   }, []);
+  const storeError = invokeError ?? (graphState.isError
+    ? (graphState.error instanceof Error ? graphState.error.message : String(graphState.error))
+    : null);
 
   const rows = useMemo(() => toMarbleEvents(lanes, events), [lanes, events]);
   const stats = useMemo(() => laneStats(rows), [rows]);
@@ -424,8 +421,8 @@ export function BoopPanelV2() {
         {lanes.length === 0 && (
           <div className="empty-help">
             <h3>boop: no agents in the window</h3>
-            {invokeError ? (
-              <p className="act-warn">store read failed: {invokeError}</p>
+            {storeError ? (
+              <p className="act-warn">store read failed: {storeError}</p>
             ) : (
               <p>
                 Rows come from boop's session graph: every lane and harness
