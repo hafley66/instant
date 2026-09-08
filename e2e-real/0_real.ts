@@ -5,6 +5,7 @@
 import { expect, type Page } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,14 @@ export const shots = path.join(root, "artifacts", "real");
 export const PORT = Number(process.env.INSTANT_REAL_PORT ?? 47790);
 export const SOCKET = process.env.INSTANT_REAL_SOCKET ?? "instant-real-e2e";
 export const BOOP = process.env.BOOP_BIN ?? path.join(process.env.HOME ?? "", ".cargo/bin/boop");
+/// Where e2e-real/stub-bin/boop logs every `beep fork` call: one line per call,
+/// `<cwd>\t<args>`. The tier never opens a real lane.
+export const STUB_LOG = process.env.INSTANT_FORK_STUB_LOG ?? path.join(process.env.INSTANT_SERVE_DATA ?? `/tmp/${SOCKET}`, "fork-stub.log");
+export const forkCalls = (): { cwd: string; args: string }[] => {
+  let text = "";
+  try { text = readFileSync(STUB_LOG, "utf8"); } catch { return []; }
+  return text.split("\n").filter(Boolean).map((line) => { const [cwd, args] = line.split("\t"); return { cwd, args }; });
+};
 export const DB = path.join(process.env.HOME ?? "", ".agent/boop.db");
 
 export const sql = (q: string): string => {
