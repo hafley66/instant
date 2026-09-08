@@ -27,10 +27,10 @@ export default defineConfig({
     permissions: ["clipboard-read", "clipboard-write"],
     trace: "retain-on-failure",
     ...devices["Desktop Chrome"],
-    // One renderer, no GPU process, a capped V8 heap: the box this runs on has
+    // One renderer, GPU work inside the browser process, a capped V8 heap: the box this runs on has
     // 16 GB and a dev app, an editor and a browser already resident.
     launchOptions: {
-      args: ["--renderer-process-limit=1", "--disable-gpu", "--disable-dev-shm-usage", "--js-flags=--max-old-space-size=512"],
+      args: ["--renderer-process-limit=1", "--disable-gpu", "--in-process-gpu", "--disable-dev-shm-usage", "--js-flags=--max-old-space-size=384"],
     },
   },
   webServer: {
