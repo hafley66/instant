@@ -54,4 +54,7 @@ export INSTANT_REAL_STUB_PATH="$PWD/e2e-real/stub-bin"
 mkdir -p "/tmp/$socket"
 : > "$INSTANT_FORK_STUB_LOG"
 
-nice -n 15 npx playwright test -c playwright.real.config.ts --workers 1 "$@"
+# The playwright binary directly (no npm exec process) and a capped node heap
+# for the runner and its one worker.
+export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=256"
+nice -n 15 ./node_modules/.bin/playwright test -c playwright.real.config.ts --workers 1 "$@"
