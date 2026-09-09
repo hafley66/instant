@@ -11,6 +11,9 @@ vi.mock("./generated/native", () => ({
 }));
 
 import { orderedGroups, empty_nav_order, withFavorites } from "./0_navMenu";
+
+/// The built-in fallback the fork row lands on when nothing else names one.
+const FORK_FALLBACK = "flash4";
 import {
   forkPresets,
   livePresets,
@@ -91,6 +94,41 @@ describe("the preset the main row runs", () => {
     const pinned = withFavorites(presetGroups(rows(), () => {}), ["opus"]);
     expect(mainPreset("", pinned)).toBe("opus");
     expect(mainPreset("pro4", pinned)).toBe("pro4");
+  });
+});
+
+// The defect this pins: the row defaulted to the preset last picked in ANY
+// pane, so forking a claude conversation offered whatever an unrelated opencode
+// pane ran last. A fork continues one conversation; that conversation decides.
+describe("the preset the pane being forked decides", () => {
+  const groups = () => presetGroups(rows(), () => {});
+
+  it("repeats the pane's own preset over the last one picked elsewhere", () => {
+    expect(mainPreset("flash4", groups(), FORK_FALLBACK, { preset: "opus" })).toBe("opus");
+  });
+
+  it("ignores a stale preset the presets no longer carry", () => {
+    expect(mainPreset("flash4", groups(), FORK_FALLBACK, { preset: "retired" })).toBe("flash4");
+  });
+
+  it("takes the pane's own preset through a favourite's prefixed id", () => {
+    const pinned = withFavorites(groups(), ["opus"]);
+    expect(mainPreset("flash4", pinned, FORK_FALLBACK, { preset: "opus" })).toBe("opus");
+  });
+
+  it("falls to the first preset of the pane's harness when only that is known", () => {
+    expect(mainPreset("flash4", groups(), FORK_FALLBACK, { harness: "claude" })).toBe("opus");
+    expect(mainPreset("opus", groups(), FORK_FALLBACK, { harness: "opencode" })).toBe("flash4");
+  });
+
+  it("reads the harness group in the user's own order", () => {
+    const ordered = orderedGroups(groups(), { groups: [], items: { opencode: ["pro4"] } });
+    expect(mainPreset("opus", ordered, FORK_FALLBACK, { harness: "opencode" })).toBe("pro4");
+  });
+
+  it("keeps the old behaviour for a harness no preset covers", () => {
+    expect(mainPreset("flash4", groups(), FORK_FALLBACK, { harness: "kimi" })).toBe("flash4");
+    expect(mainPreset("", groups(), FORK_FALLBACK, { harness: null, preset: null })).toBe("flash4");
   });
 });
 

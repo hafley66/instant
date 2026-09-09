@@ -211,8 +211,18 @@ export const tagSuggest = (query: string) => query.trim()
   : invoke<BoopTag[]>("boop_tags_recent", { limit: 5 }).then((rows) => rows.map((row) => row.tag)).catch(() => [] as string[]);
 
 /// Ask for tags with the shared prompt; returns the raw text, or null on cancel.
+/// Tagging is repetitive: a picked row is appended and the prompt stays open, so
+/// one answer carries several tags.
 export function askTags(placeholder: string): Promise<string | null> {
   return askText(placeholder, "", { suggest: tagSuggest, multi: true });
+}
+
+/// Ask for a fork's note. Same input and same suggestions as `askTags`, and
+/// deliberately NOT the same picking: a fork names one thing to go do, so a
+/// picked row IS the answer and closes the prompt. Typing commits the typed
+/// text as before.
+export function askForkNote(placeholder: string): Promise<string | null> {
+  return askText(placeholder, "", { suggest: tagSuggest });
 }
 
 /// Hang every tag in `note` on one source and hand back the spellings the store

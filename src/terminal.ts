@@ -21,6 +21,7 @@ import { FORK_PRESET } from "./1e_terminalForkMarks";
 import { forkCommand, forkMenuTargets, forkedLane, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
 import { forkRender } from "./0_forkRenderSettings";
 import { currentForkPreset, forkPresetStore, forkPresets, presetGroups } from "./1g_forkPresetMenu";
+import { openForkPanel } from "./1h_forkPanel";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { clickRpc } from "./ipc/contract";
 import { TerminalWheelRouter } from "./0_terminalWheel";
@@ -72,7 +73,7 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { applyTags, askTags, boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns } from "./favorites";
+import { applyTags, askForkNote, boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns } from "./favorites";
 import {
   selectProjectionTurns,
   TerminalTurnVisibilityV2,
@@ -114,6 +115,10 @@ export type Tab = {
   pinnedSelection?: TerminalPinnedSelection;
   harness: HarnessObservation;
   outputTail: string;
+  /// Set when Instant spawned this pane as a fork lane: the preset it runs.
+  /// The fork menu reads it so a fork of a fork repeats its own conversation's
+  /// preset (1g_forkPresetMenu.mainPreset).
+  forkPreset?: string;
 };
 
 const structuredOverlaysEnabled = false;
@@ -155,7 +160,8 @@ async function liveCwd(id: string): Promise<string> {
 /// The fork verb runs in the tab's cwd, so the lane branches from the repo the
 /// pane stands in; the re-pull paints it on the next gutter tick.
 async function runFork(commentId: number, cwd: string, sync: TerminalContextSync) {
-  await spawnFork(commentId, FORK_PRESET, cwd);
+  const lane = await spawnFork(commentId, FORK_PRESET, cwd);
+  if (lane) openForkPanel(lane, FORK_PRESET);
   sync.activate();
 }
 
@@ -562,7 +568,7 @@ function wordSpanAt(id: string, clientX: number, clientY: number): { wide: strin
 // fall back to QUICK_CMD and the backend default (HOME).
 export function openTab(
   name: string,
-  opts: { command?: string | null; cwd?: string | null; graphics?: boolean; viewer?: boolean; tmuxTarget?: string } = {},
+  opts: { command?: string | null; cwd?: string | null; graphics?: boolean; viewer?: boolean; tmuxTarget?: string; split?: boolean } = {},
 ) {
   const id = sessionId(name);
   if (tabs.has(id)) {
@@ -1179,7 +1185,7 @@ export function openTab(
 
   // Hand the host element to dockview as a flat, draggable/splittable panel.
   // Adding it makes it active, which fires onTermActivate -> onTermShown.
-  addTermPanel(id, tabTitle(name), el);
+  addTermPanel(id, tabTitle(name), el, opts.split ? "right" : "within");
   activate(id);
   if (settings.pinnedTabs.$().length) reflowPinnedTabs();
 }
@@ -1405,14 +1411,15 @@ export async function forkSelection(id: string, preset: string, note?: string) {
   }
   if (note?.trim()) void applyTags(note, `comment:${commentId}`);
   forkRender.lastPreset.$(preset);
-  await spawnFork(commentId, preset, await liveCwd(id));
+  const lane = await spawnFork(commentId, preset, await liveCwd(id));
+  if (lane) openForkPanel(lane, preset);
   tab.contextSync.activate();
 }
 
 /// Ask for the note with the shared tag prompt, then fork. Esc or empty forks
 /// with no note (today's behaviour), never cancels the fork.
 export async function forkSelectionWithNote(id: string, preset: string): Promise<void> {
-  const note = await askTags(`fork -> ${preset}: what should the lane do?`);
+  const note = await askForkNote(`fork -> ${preset}: what should the lane do?`);
   await forkSelection(id, preset, note ?? undefined);
 }
 
@@ -1420,7 +1427,8 @@ export async function forkSelectionWithNote(id: string, preset: string): Promise
 /// carries every preset grouped by harness, reorderable and persisted.
 export function forkSelectionItem(id: string): CtxItem {
   void forkPresets();
-  const preset = currentForkPreset();
+  const tab = tabs.get(id);
+  const preset = currentForkPreset({ preset: tab?.forkPreset, harness: tab?.harness.id });
   return {
     label: "Fork selection",
     subtext: preset,

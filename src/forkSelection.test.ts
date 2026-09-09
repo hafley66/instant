@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runClick = vi.fn<(args: { command: string; cwd: string }) => Promise<string>>();
 const sendSelection = vi.fn<(item: { note?: string }) => Promise<number>>();
 const askText = vi.fn<(placeholder: string) => Promise<string | null>>();
+const openForkPanel = vi.fn<(lane: string, preset: string) => void>();
 const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>();
 const flashed: string[] = [];
 
@@ -62,7 +63,7 @@ vi.mock("./preview", () => ({ openPreviewPanel: vi.fn() }));
 vi.mock("./browser", () => ({ browserTabs: {} }));
 vi.mock("./favorites", () => ({
   applyTags: (note: string, source: string) => invoke("boop_tags_apply", { note, source }),
-  askTags: (p: string) => askText(p),
+  askForkNote: (p: string) => askText(p),
   boopCandidateTurns: vi.fn(), boopTurnsForSession: vi.fn(), boopTurnsForTab: vi.fn(), invalidateBoopTurns: vi.fn(), sessionsForTab: vi.fn(), warmTurns: vi.fn(),
 }));
 vi.mock("./0_terminalTurnVisibility", () => ({ selectProjectionTurns: vi.fn(), TerminalTurnVisibilityV2: class {} }));
@@ -74,6 +75,7 @@ vi.mock("./tabs", () => ({ tabTitle: vi.fn(), reflowPinnedTabs: vi.fn() }));
 vi.mock("./harness", () => ({ detectHarness: vi.fn(), trimOutputTail: vi.fn() }));
 vi.mock("./0_externalShells", () => ({ externalShellOpenSessionArgs: vi.fn(), externalViewerTarget: vi.fn(), viewerFailureAction: vi.fn(), viewerNeedsRetarget: vi.fn() }));
 vi.mock("./worktrees", () => ({ renderSessionActive: vi.fn(), refreshSessions: vi.fn() }));
+vi.mock("./1h_forkPanel", () => ({ openForkPanel: (lane: string, preset: string) => openForkPanel(lane, preset) }));
 
 const { forkSelection, forkSelectionWithNote, tabs } = await import("./terminal");
 
@@ -101,6 +103,7 @@ beforeEach(() => {
   runClick.mockReset();
   sendSelection.mockReset();
   askText.mockReset();
+  openForkPanel.mockReset();
   invoke.mockReset();
   invoke.mockResolvedValue([]);
   runClick.mockResolvedValue("forked comment 47 -> lane fork-comment-47");
@@ -132,6 +135,19 @@ describe("forkSelection", () => {
   it("applies no tags when no note is given", async () => {
     await forkSelection("t1", "flash4");
     expect(invoke.mock.calls.some(([cmd]) => cmd === "boop_tags_apply")).toBe(false);
+  });
+
+  // The defect this pins: a fork spawned its lane and drew nothing, so a fork
+  // that worked looked exactly like one that silently did not.
+  it("opens the spawned lane's own panel, carrying the preset it runs", async () => {
+    await forkSelection("t1", "flash4");
+    expect(openForkPanel.mock.calls).toEqual([["fork-comment-47", "flash4"]]);
+  });
+
+  it("opens no panel when boop named no lane", async () => {
+    runClick.mockResolvedValue("Error: no git repo at /x; pass --cwd <repo>");
+    await forkSelection("t1", "flash4");
+    expect(openForkPanel).not.toHaveBeenCalled();
   });
 });
 

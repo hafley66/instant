@@ -52,9 +52,30 @@ export function presetGroups(presets: BoopPreset[], run: (name: string) => void)
   return [...byHarness].map(([harness, items]) => ({ id: harness, label: harness, items }));
 }
 
-/// What the main row runs and names: the preset last picked here, else the
-/// first favourite, else the first in the user's order, else the default.
-export function mainPreset(lastPreset: string, groups: NavGroup[], fallback = FORK_PRESET): string {
+/// The conversation a fork is taken from. `preset` is set when Instant spawned
+/// that pane itself and knows the exact preset; `harness` is what the pane is
+/// observed to be running, which is all a hand-started session offers.
+export type ForkOrigin = { preset?: string | null; harness?: string | null };
+
+/// What the main row runs and names, most specific source first:
+///   1. the preset the forked-from conversation itself runs
+///   2. the first preset of that conversation's harness, in the user's order
+///   3. the preset last picked here
+///   4. the first favourite, else the first in the user's order
+///   5. the built-in default
+/// A fork continues the conversation it came from, so the pane outranks a
+/// preset last picked in some other pane.
+export function mainPreset(
+  lastPreset: string,
+  groups: NavGroup[],
+  fallback = FORK_PRESET,
+  origin: ForkOrigin = {},
+): string {
+  const known = new Set(groups.flatMap((group) => group.items.map((item) => favoriteHomeId(item.id))));
+  if (origin.preset && known.has(origin.preset)) return origin.preset;
+  const harness = origin.harness ? groups.find((group) => group.id === origin.harness) : undefined;
+  const first = harness?.items[0]?.id;
+  if (first) return favoriteHomeId(first);
   if (lastPreset) return lastPreset;
   return favoriteHomeId(groups[0]?.items[0]?.id ?? fallback);
 }
@@ -84,11 +105,12 @@ export function resetForkPresetCache() {
 }
 
 /// The preset a click on the main row runs, read without waiting on the store:
-/// the last one used, else the first of whatever the last read cached.
-export function currentForkPreset(): string {
+/// whatever `origin` names about the pane being forked, else the last one used,
+/// else the first of whatever the last read cached.
+export function currentForkPreset(origin: ForkOrigin = {}): string {
   const groups = withFavorites(
     orderedGroups(presetGroups(cachedForkPresets(), () => {}), forkPresetStore.order.$()),
     forkPresetStore.favorites.$(),
   );
-  return mainPreset(forkRender.lastPreset.$(), groups);
+  return mainPreset(forkRender.lastPreset.$(), groups, FORK_PRESET, origin);
 }

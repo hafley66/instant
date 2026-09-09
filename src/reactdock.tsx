@@ -473,7 +473,15 @@ const anchorPanel = (): string | undefined => {
   return firstTermPanel() ?? api?.panels[0]?.id;
 };
 
-export function addTermPanel(sid: string, title: string, el: HTMLElement) {
+/// `direction` says where the new panel lands relative to the panel the user
+/// last used: "within" is another tab in the same group (cmd+T), "right" is a
+/// split, so the new terminal and the one it came from are both on screen.
+export function addTermPanel(
+  sid: string,
+  title: string,
+  el: HTMLElement,
+  direction: "within" | "right" = "within",
+) {
   if (!api) return;
   const pid = TERM + sid;
   dynamicNodes.set(pid, el);
@@ -487,7 +495,7 @@ export function addTermPanel(sid: string, title: string, el: HTMLElement) {
   let position:
     | { referencePanel: string; direction: "within" | "right" }
     | undefined;
-  if (anchor) position = { referencePanel: anchor, direction: "within" };
+  if (anchor) position = { referencePanel: anchor, direction };
   const base = { id: pid, component: "terminal", params: { panelId: pid }, title };
   // A restored-but-corrupt layout can leave the anchor's group disposed, so
   // addPanel throws "resource already disposed" and the new tab never opens

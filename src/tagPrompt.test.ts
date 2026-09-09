@@ -23,7 +23,7 @@ vi.mock("./harness", () => ({ harnessAdapter: vi.fn(), harnessesForCommand: vi.f
 vi.mock("./0a_terminalSessionCandidates", () => ({ boundSessionFirst: vi.fn((s: unknown) => s) }));
 vi.mock("./0_settings", () => ({ settings: { resumeTabs: { $: () => ({}) }, active: { $: () => null } } }));
 
-const { applyTags, askTags, tagSuggest } = await import("./favorites");
+const { applyTags, askForkNote, askTags, tagSuggest } = await import("./favorites");
 
 beforeEach(() => {
   invoke.mockReset();
@@ -55,6 +55,24 @@ describe("askTags", () => {
     expect(await askTags("tags for this turn")).toBe("perf, rust");
     expect(askText.mock.calls[0]![0]).toBe("tags for this turn");
     expect(askText.mock.calls[0]![2]).toEqual({ suggest: tagSuggest, multi: true });
+  });
+});
+
+describe("askForkNote", () => {
+  // The defect this pins: the fork note reused askTags, so picking a suggestion
+  // appended it and left the prompt open for another. A fork names ONE thing to
+  // go do; picking a row is the answer.
+  it("opens the same prompt over the same source, single-select", async () => {
+    askText.mockResolvedValue("do the thing");
+    expect(await askForkNote("fork -> flash4: what should the lane do?")).toBe("do the thing");
+    expect(askText.mock.calls[0]![0]).toBe("fork -> flash4: what should the lane do?");
+    expect(askText.mock.calls[0]![2]).toEqual({ suggest: tagSuggest });
+  });
+
+  it("never asks for multi mode, which is what makes a pick repeat", async () => {
+    askText.mockResolvedValue(null);
+    await askForkNote("fork");
+    expect((askText.mock.calls[0]![2] as { multi?: boolean }).multi).toBeUndefined();
   });
 });
 
