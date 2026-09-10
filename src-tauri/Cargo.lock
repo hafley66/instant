@@ -368,7 +368,7 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.29.0",
  "tower",
  "tower-layer",
  "tower-service",
@@ -495,16 +495,21 @@ dependencies = [
  "boop-acp",
  "boop-store",
  "dirs 5.0.1",
+ "futures-util",
  "ignore",
  "libc",
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "time",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "tungstenite 0.26.2",
  "ureq",
  "url",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -2369,7 +2374,7 @@ dependencies = [
 
 [[package]]
 name = "instant"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2402,7 +2407,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tiny_http",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.29.0",
  "tower-http",
  "tungstenite 0.29.0",
 ]
@@ -4904,6 +4909,18 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.26.2",
+]
+
+[[package]]
+name = "tokio-tungstenite"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
@@ -5453,6 +5470,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb067e4cbd1ff067d1df46c9194b5de0e98efd2810bbc95c5d5e5f25a3231150"
 dependencies = [
  "cc",
+ "libc",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
  "libc",
 ]
 
