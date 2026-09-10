@@ -39,7 +39,7 @@ fn on_path(name: &str) -> bool {
 pub async fn tool_status() -> Vec<ToolStatus> {
     TOOLS
         .iter()
-        .map(|(name, purpose, install)| ToolStatus {
+        .map(|&(name, purpose, install)| ToolStatus {
             name,
             present: on_path(name),
             purpose,

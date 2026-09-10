@@ -1236,6 +1236,9 @@ mod tests {
             Capabilities, Harness, HarnessId, KnownSession, KnownSessions, LanePolicy, MailPolicy,
             ReadChunk, SessionRef, VariantSupport,
         };
+        // Not in boop-harness's root re-export list, unlike every other
+        // Capabilities field type; reached through the module instead.
+        use boop_harness::harness::{NativeBackendSupport, NativeSettingsSupport};
 
         static CAPS: Capabilities = Capabilities {
             bans_plan_family_models: false,
@@ -1245,6 +1248,8 @@ mod tests {
             image_paste_keys: None,
             native_tui_projector: false,
             wrapper_owns_alternate_screen: false,
+            native_backend: NativeBackendSupport::Unsupported,
+            native_settings: NativeSettingsSupport::Unsupported("candidate_for fixture"),
         };
 
         struct Scan(Vec<SessionRef>);
