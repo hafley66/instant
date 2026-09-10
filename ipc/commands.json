@@ -14,5 +14,6 @@
   "meme": ["make_slack_emoji", "magick_available", "install_imagemagick", "save_meme", "copy_meme_image"],
   "favorites": ["fav_add", "fav_remove", "fav_list"],
   "sprefa": ["sprefa_schema", "sprefa_ping", "sprefa_eval", "sprefa_query_sql", "sprefa_rel_source"],
+  "deps": ["tool_status"],
   "shell": ["screenshot", "open_target", "run_click", "log_append", "log_path", "log_reveal"]
 }

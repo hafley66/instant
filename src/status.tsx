@@ -4,6 +4,7 @@ import { SignalReact } from "@hafley66/signals/react";
 import { registerStatus, type StatusReport } from "./plugin";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { queryGhcacheSnapshot } from "./ghcacheSnapshot";
+import { probeToolGaps } from "./0_toolGaps";
 import { runtimePorts } from "./reactive/ports";
 import { sprefaRoot, statusRows, type StatusRow } from "./reactive/statusModel";
 
@@ -139,6 +140,14 @@ async function rogueProbe(): Promise<StatusReport> {
   return { state: "degraded", detail: `${rogue.length} off-tmux: ${detail}` };
 }
 
+// Same PATH probe the boot banner reads, re-run on the panel's poll so a
+// `brew install` mid-session clears without a restart.
+async function toolProbe(): Promise<StatusReport> {
+  const gaps = await probeToolGaps();
+  if (!gaps.missing.length) return { state: "up", detail: "git tmux rg" };
+  return { state: "down", detail: gaps.missing.map((t) => `${t.name}: ${t.install}`).join(" · ") };
+}
+
 let builtinDone = false;
 export function registerBuiltinStatus() {
   if (builtinDone) return;
@@ -152,4 +161,5 @@ export function registerBuiltinStatus() {
   registerStatus({ id: "tmux", label: "tmux sessions", check: tmuxProbe });
   registerStatus({ id: "cdp", label: "browser engine", check: cdpProbe });
   registerStatus({ id: "rogue", label: "rogue agent shells", check: rogueProbe });
+  registerStatus({ id: "tools", label: "external tools", check: toolProbe });
 }

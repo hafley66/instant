@@ -107,6 +107,7 @@ export type CommandName =
   | "sprefa_eval"
   | "sprefa_query_sql"
   | "sprefa_rel_source"
+  | "tool_status"
   | "screenshot"
   | "open_target"
   | "run_click"
@@ -283,6 +284,10 @@ export namespace commands {
     export const sprefaEval = "sprefa_eval";
     export const sprefaQuerySql = "sprefa_query_sql";
     export const sprefaRelSource = "sprefa_rel_source";
+  }
+
+  export namespace deps {
+    export const toolStatus = "tool_status";
   }
 
   export namespace shell {

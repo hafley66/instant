@@ -6,6 +6,7 @@ mod boop_tmux;
 mod capture;
 mod cdp;
 mod config;
+mod deps;
 mod favorites;
 mod fs;
 mod fs_watch;
@@ -1107,6 +1108,7 @@ pub fn run() {
             log_append,
             log_path,
             log_reveal,
+            deps::tool_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

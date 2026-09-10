@@ -52,7 +52,8 @@ import {
   addMdPanel,
   mdPanelId,
 } from "./reactdock";
-import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, logLine } from "./core";
+import { probeToolGaps, readDismissed, rememberDismissed, shouldNotify } from "./0_toolGaps";
+import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, showNotice, logLine } from "./core";
 import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore, openDocumentHrefInInstant } from "./preview";
 import { wireDomCmdClick } from "./clickrules";
 import {
@@ -521,6 +522,15 @@ async function main() {
       scheduleHide(() => void win.hide(), 120);
     }
   });
+
+  // Last, and unawaited: a missing rg must not delay the first paint. Silent on
+  // a healthy machine, and silent again once this gap set has been dismissed.
+  void probeToolGaps()
+    .then((gaps) => {
+      if (!shouldNotify(gaps.missing, readDismissed())) return;
+      showNotice(gaps.headline, gaps.lines.join("\n"), () => rememberDismissed(gaps.missing));
+    })
+    .catch((e) => logLine(`[toolGaps] ${String(e)}`));
 }
 
 // Mirror console.error to the on-disk log. Most invoke failures use

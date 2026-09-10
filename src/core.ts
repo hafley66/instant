@@ -329,3 +329,45 @@ export function askText(
     });
   });
 }
+
+// Amber sibling of showError for a boot notice that is not a failure: the app
+// runs, some shell-out feature will not. Dismissable (× or Escape), same log.
+function onNoticeEscape(e: KeyboardEvent) {
+  if (e.key === "Escape") hideNotice();
+}
+
+let noticeDismissed: (() => void) | undefined;
+
+export function hideNotice() {
+  document.getElementById("boot-notice")?.remove();
+  window.removeEventListener("keydown", onNoticeEscape, true);
+  const done = noticeDismissed;
+  noticeDismissed = undefined;
+  done?.();
+}
+
+// onDismiss fires on × and on Escape, never on re-show, so a caller can record
+// "the user has seen this one" without the banner deciding what that means.
+export function showNotice(label: string, body: string, onDismiss?: () => void) {
+  noticeDismissed = onDismiss;
+  logLine(`[${label}] ${body}`);
+  let el = document.getElementById("boot-notice");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "boot-notice";
+    el.style.cssText =
+      "position:fixed;left:8px;right:8px;top:8px;z-index:99998;max-height:45%;display:flex;gap:8px;padding:8px;background:#3a2c00;color:#ffcf5c;font:11px/1.5 Menlo,monospace;border:1px solid #ffcf5c;";
+    const pre = document.createElement("pre");
+    pre.style.cssText = "flex:1;margin:0;overflow:auto;white-space:pre-wrap;font:inherit;";
+    const close = document.createElement("button");
+    close.textContent = "×";
+    close.title = "dismiss (Esc)";
+    close.style.cssText =
+      "align-self:flex-start;background:none;border:1px solid #ffcf5c;color:#ffcf5c;font:inherit;cursor:pointer;padding:0 6px;";
+    close.addEventListener("click", hideNotice);
+    el.append(pre, close);
+    document.body.appendChild(el);
+    window.addEventListener("keydown", onNoticeEscape, true);
+  }
+  el.querySelector("pre")!.textContent = `[${label}] ${body}`;
+}
