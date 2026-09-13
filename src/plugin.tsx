@@ -40,6 +40,11 @@ export interface PanelDef {
   onDiscard?: (panelId: string) => void;
   onShow?: () => void;
   railChildren?: () => Promise<RailChild[]>; // child rows under the rail button (rail.ts refreshChildren)
+  // Rich content (a React component) rendered into the expandable rail child
+  // area under the panel's rail button, below any railChildren rows. rail.ts
+  // mounts it in its own React root and unmounts on every rebuild, so the
+  // component owns its state and polling without the rail re-rendering it.
+  railContent?: ComponentType;
 }
 
 export interface PanelInstanceDef {

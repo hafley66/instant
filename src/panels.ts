@@ -5,6 +5,7 @@
 import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
 import { BoopPanelV2 } from "./boopPanel";
+import { BoopSelectionPanel } from "./1_boopSelection";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { panic } from "./0_panicSettings";
 import { cdpPerf } from "./cdp";
@@ -73,6 +74,7 @@ export function registerBuiltin() {
         iconLabel: "tmux",
         html: "",
         component: TmuxPanelV2,
+        railContent: BoopSelectionPanel,
         onShow: () => { refreshSessions(); },
       },
       {

@@ -88,6 +88,7 @@ import { detectHarness, trimOutputTail, type HarnessObservation } from "./harnes
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import { renderSessionActive, refreshSessions } from "./worktrees";
 import { settings } from "./0_settings";
+import { boopFocusTarget, recordBoopFocus } from "./0_boopSelection";
 
 export type Tab = {
   id: string;
@@ -346,6 +347,12 @@ function logTabVisit(name: string) {
     title: name,
     text: `went to ${name}`,
   }).catch(() => {});
+  // A reached session is the Boop selection's recency signal. Suppress boot
+  // restore (this branch already returned) and background focus; the leaf pane
+  // target is preferred when the tab carries one. Output events are never wired
+  // here, so a chatty background session cannot bump its own recency.
+  const tab = tabs.get(sessionId(name));
+  recordBoopFocus(tab ? boopFocusTarget(tab) : name, Date.now(), replaying || document.hidden);
 }
 
 // Quick-start sessions launch their agent the first time the tmux session is created.
@@ -1070,6 +1077,11 @@ export function openTab(
   term.textarea?.addEventListener("focus", () => {
     focusedTermId = id;
     focusedTermAt = performance.now();
+    // Clicking into a terminal is a reach even when the dock already had it
+    // active (so logTabVisit deduped); recording here catches that. Restore and
+    // backgrounded windows are suppressed, and a paired dock-activation record
+    // is collapsed by the dedup window.
+    recordBoopFocus(boopFocusTarget({ name, tmuxTarget }), Date.now(), replaying || document.hidden);
     void tabs.get(id)?.syncTurns?.();
   });
   term.textarea?.addEventListener("blur", () => {

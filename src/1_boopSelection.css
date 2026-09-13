@@ -1,0 +1,110 @@
+/* Boop selection rail dropdown (1_boopSelection.tsx). Rendered inside
+   .actbar-children under the tmux rail button. Layout read: .actbar is
+   flex:none at 44px (compact) / ~148px (big), and .actbar/.body.window-body/
+   #workbench/#app.window set no overflow, so a wider child paints visibly over
+   #dock (which is position:relative, z-index:auto -- the z-index below wins).
+   The dropdown therefore keeps a readable fixed width and floats over the dock
+   rather than clipping to the rail. */
+.actbar-children {
+  overflow: visible;
+}
+
+.actbar-railcontent {
+  display: block;
+  flex: none;
+  align-self: flex-start;
+  width: 340px;
+  max-width: calc(100vw - 72px);
+  position: relative;
+  z-index: 30;
+}
+
+.bs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 6px 6px;
+  background: var(--panel-bg, var(--surface));
+  color: var(--panel-fg, inherit);
+  border: var(--frame-w, 1px) solid var(--frame);
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* The grid scrolls in its own window; the rail itself must not grow. */
+.bs-panel .tt-wrap {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.bs-panel .dtable {
+  font-size: 11px;
+}
+
+.bs-check {
+  margin: 0;
+  vertical-align: middle;
+}
+
+/* Session name is the open affordance: flatten the button so it reads as a
+   link inside the grid cell. */
+.bs-session {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--link, #0b61a4);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bs-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bs-body {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 11px;
+  resize: vertical;
+}
+
+.bs-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.bs-send {
+  flex: 1;
+  min-width: 0;
+}
+
+.bs-status,
+.bs-result,
+.bs-error {
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bs-status {
+  color: var(--muted-fg, #888);
+}
+
+.bs-result {
+  color: var(--ok-fg, #2f7d32);
+}
+
+.bs-error {
+  color: var(--err-fg, #b00020);
+}

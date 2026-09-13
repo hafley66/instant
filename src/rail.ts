@@ -10,6 +10,8 @@ import {
   type PanelDef,
   type RailChild,
 } from "./plugin";
+import { createElement, type ComponentType } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { readPluginState, savePluginState } from "./pluginState";
 import { settings } from "./0_settings";
 import { togglePanel } from "./reactdock";
@@ -49,9 +51,25 @@ const railKey = (s: RailState) => JSON.stringify(s);
 // decorate the (freshly replaced) buttons with outdated chevrons/rows.
 let rebuildSeq = 0;
 
+// React roots for PanelDef.railContent components. buildActivityRail() replaces
+// #actbar-panels wholesale, so every root must be unmounted before the rebuild
+// or React leaks the subtree (and its effects). Cleared and repopulated per
+// rebuild; refreshChildren only mounts after its sequence guard passes.
+let railContentRoots: Root[] = [];
+
+function unmountRailContentRoots(): void {
+  for (const root of railContentRoots) root.unmount();
+  railContentRoots = [];
+}
+
+function mountRailContent(root: Root): void {
+  railContentRoots.push(root);
+}
+
 function rebuild(): void {
   const state = readRailState();
   lastKey = railKey(state);
+  unmountRailContentRoots();
   const ids = resolveRailIds(railPanelIds(), state);
   const panels = ids.map(getPanel).filter((p): p is PanelDef => !!p);
   buildActivityRail(panels);
@@ -87,7 +105,8 @@ async function refreshChildren(seq: number): Promise<void> {
       : [];
     const kids = [...panelKids, ...providedKids];
     if (seq !== rebuildSeq) return; // a newer rebuild replaced the buttons
-    if (kids.length === 0) continue;
+    // A railContent provider (no child rows) still earns the chevron.
+    if (kids.length === 0 && !p.railContent) continue;
     const btn = document.getElementById(`${id}-toggle`);
     if (!btn) continue;
     const expanded = state.expanded.includes(id);
@@ -102,7 +121,7 @@ async function refreshChildren(seq: number): Promise<void> {
       rebuild();
     });
     btn.appendChild(exp);
-    if (expanded) renderChildren(id, kids);
+    if (expanded) renderChildren(id, kids, p.railContent);
   }
 }
 
@@ -110,7 +129,7 @@ async function refreshChildren(seq: number): Promise<void> {
 // wrapper is display:contents, so each row is a direct flex child of .actbar.
 // No data-panel attribute: wireDragReorder, panelButtonAt, and railMenuItems
 // all key on `[data-panel]`, so child buttons stay invisible to reorder/hide.
-function renderChildren(id: string, kids: RailChild[]): void {
+function renderChildren(id: string, kids: RailChild[], railContent?: ComponentType): void {
   const tip = document.getElementById(`rail-tip-${id}`);
   if (!tip) return;
   const host = document.createElement("span");
@@ -144,6 +163,16 @@ function renderChildren(id: string, kids: RailChild[]): void {
     host.appendChild(b);
   }
   tip.after(host);
+  // Rich content mounts into its own React root inside the child area. The root
+  // is tracked so the next rebuild unmounts it before the DOM is replaced.
+  if (railContent) {
+    const mount = document.createElement("span");
+    mount.className = "actbar-railcontent";
+    host.appendChild(mount);
+    const root = createRoot(mount);
+    mountRailContent(root);
+    root.render(createElement(railContent));
+  }
 }
 
 // pluginState is one shared bag (src/pluginState.ts); any plugin saving its
