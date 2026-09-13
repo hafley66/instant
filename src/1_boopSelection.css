@@ -3,47 +3,117 @@
    flex:none at 44px (compact) / ~148px (big), and .actbar/.body.window-body/
    #workbench/#app.window set no overflow, so a wider child paints visibly over
    #dock (which is position:relative, z-index:auto -- the z-index below wins).
-   The dropdown therefore keeps a readable fixed width and floats over the dock
+   The dropdown therefore keeps a readable width and floats over the dock
    rather than clipping to the rail. */
 .actbar-children {
   overflow: visible;
 }
 
+/* The span shrink-wraps the panel; the panel itself owns its persisted size
+   and is the `resize: both` target (see 1_boopSelection.tsx ResizeObserver). */
 .actbar-railcontent {
   display: block;
   flex: none;
   align-self: flex-start;
-  width: 340px;
+  width: auto;
   max-width: calc(100vw - 72px);
   position: relative;
   z-index: 30;
 }
 
+/* Whole dropdown: readable default size, bounded to the viewport, user
+   resizable in both axes. `overflow: hidden` is required for `resize` to
+   engage; the grid area inside carries its own scroll. */
 .bs-panel {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
-  padding: 4px 6px 6px;
+  min-height: 0;
+  position: relative;
+  box-sizing: border-box;
+  padding: 6px 8px 8px;
   background: var(--panel-bg, var(--surface));
   color: var(--panel-fg, inherit);
   border: var(--frame-w, 1px) solid var(--frame);
   box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
+  resize: both;
+  overflow: hidden;
+  min-width: 360px;
+  min-height: 220px;
+  max-width: calc(100vw - 72px);
+  max-height: calc(100vh - 120px);
 }
 
-/* The grid scrolls in its own window; the rail itself must not grow. */
-.bs-panel .tt-wrap {
-  max-height: 240px;
+/* Native grip lives in the panel's bottom-right; this is a quiet marker in the
+   action row so the affordance is discoverable. It never eats pointer events. */
+.bs-resize-hint {
+  flex: none;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--muted-fg, #888);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The grid scrolls in its own window and takes the space the composer leaves;
+   the panel itself must not grow with the rows. */
+.bs-panel > .tt-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
+/* Readable body type and row rhythm for the dropdown only (the shared 11px
+   default stays for every other grid). */
 .bs-panel .dtable {
-  font-size: 11px;
+  font-size: 13px;
 }
 
-.bs-check {
+.bs-panel .dtable th {
+  padding: 8px;
+}
+
+.bs-panel .dtable-row td {
+  padding: 7px 8px;
+  height: 32px;
+  box-sizing: border-box;
+  max-width: none;
+}
+
+/* The first (checkbox) cell centers its control; 20px box plus 2x8px td padding
+   is a 36px hit target. */
+.bs-panel .dtable-row td:first-child,
+.bs-panel .dtable th:first-child {
+  text-align: center;
+}
+
+/* xp.css sets `input[type=checkbox]{appearance:none;position:fixed;opacity:0}`
+   because it expects a paired <label>; this is a standalone input, so it was
+   literally invisible. Restore the native control with enough specificity
+   (0,2,1 beats the skin's 0,1,1) and an explicit >=20px box. */
+.bs-panel input.bs-check[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  position: static;
+  opacity: 1;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
   margin: 0;
+  cursor: pointer;
   vertical-align: middle;
+}
+
+.bs-panel input.bs-check[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--row-active-bg, #0b61a4);
+  outline-offset: 2px;
+}
+
+.bs-panel input.bs-check[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Session name is the open affordance: flatten the button so it reads as a
@@ -67,20 +137,24 @@
 .bs-compose {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  flex: none;
 }
 
 .bs-body {
   width: 100%;
   box-sizing: border-box;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
+  min-height: 44px;
+  max-height: 160px;
   resize: vertical;
+  overflow: auto;
 }
 
 .bs-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -92,7 +166,7 @@
 .bs-status,
 .bs-result,
 .bs-error {
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

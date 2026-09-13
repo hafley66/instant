@@ -4,9 +4,10 @@
 // area (rail.ts). Rows reuse the canonical TreeTable grid (AGENTS: no bespoke
 // lists). The component owns its polling; it never rewrites rail state, so a
 // data refresh never rebuilds the rail or clears the compose box.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { openTab } from "./terminal";
+import { readPluginState, savePluginState } from "./pluginState";
 import {
   clearSelection,
   formatRecentFocus,
@@ -41,7 +42,6 @@ const SEL_COLUMNS: TreeColumn<SelRow>[] = [
     id: "check",
     header: "",
     noRowClick: true,
-    size: 26,
     cell: (r) => (
       <input
         type="checkbox"
@@ -74,12 +74,43 @@ const SEL_COLUMNS: TreeColumn<SelRow>[] = [
     id: "focus",
     header: "focus",
     sortValue: (r) => r.lastFocusedAt ?? 0,
-    size: 60,
     cell: (r) => formatRecentFocus(r.lastFocusedAt, Date.now()),
   },
 ];
 
 const POLL_MS = 4000;
+
+// ---- persisted panel geometry ----
+
+// Own pluginState slice (never the rail's "rail" slice, so a resize cannot
+// trigger a rail rebuild), read through readPluginState/savePluginState. The
+// panel is the CSS `resize: both` target; a ResizeObserver writes back the size
+// the user dragged, so reopening the rail restores it. Sizes are clamped on
+// read in case the window shrank since the last write.
+const SIZE_PLUGIN_ID = "boopSelectionPanel";
+
+interface PanelSize {
+  width: number;
+  height: number;
+}
+
+const DEFAULT_SIZE: PanelSize = { width: 640, height: 480 };
+const MIN_WIDTH = 360;
+const MIN_HEIGHT = 220;
+
+// Room for the dock and a little margin, mirroring the CSS max-* bounds.
+function clampSize(size: Partial<PanelSize>): PanelSize {
+  const maxW = Math.max(MIN_WIDTH, window.innerWidth - 72);
+  const maxH = Math.max(MIN_HEIGHT, window.innerHeight - 120);
+  return {
+    width: Math.min(maxW, Math.max(MIN_WIDTH, size.width ?? DEFAULT_SIZE.width)),
+    height: Math.min(maxH, Math.max(MIN_HEIGHT, size.height ?? DEFAULT_SIZE.height)),
+  };
+}
+
+function readPanelSize(): PanelSize {
+  return clampSize(readPluginState<Partial<PanelSize>>(SIZE_PLUGIN_ID, DEFAULT_SIZE));
+}
 
 // Draft survives a rail rebuild: expanding an unrelated rail panel unmounts and
 // remounts this component (rail.ts replaces #actbar-panels wholesale), and an
@@ -102,6 +133,45 @@ export function BoopSelectionPanel() {
   // bump is discarded, so a slow poll cannot overwrite an optimistic selection.
   const mutationGen = useRef(0);
   const refreshQueued = useRef(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<PanelSize>(readPanelSize);
+  // Persist the latest dragged size, debounced so a drag writes once instead of
+  // per pointermove. The panel's own slice, so no sibling plugin state is touched.
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => savePluginState<PanelSize>(SIZE_PLUGIN_ID, size),
+      250,
+    );
+    return () => window.clearTimeout(timer);
+  }, [size]);
+  // The panel is the `resize: both` target, so the browser owns the drag math;
+  // this only observes the result. Equality guard stops an observer echo loop.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const width = el.offsetWidth;
+      const height = el.offsetHeight;
+      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Keyboard alternative to the mouse-only native resize grip: Alt+arrows nudge
+  // the panel, ignored while typing in the composer.
+  const onPanelKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!e.altKey) return;
+    if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+    const step = e.shiftKey ? 80 : 24;
+    let next: PanelSize | null = null;
+    if (e.key === "ArrowRight") next = { width: size.width + step, height: size.height };
+    else if (e.key === "ArrowLeft") next = { width: size.width - step, height: size.height };
+    else if (e.key === "ArrowDown") next = { width: size.width, height: size.height + step };
+    else if (e.key === "ArrowUp") next = { width: size.width, height: size.height - step };
+    if (!next) return;
+    e.preventDefault();
+    setSize(clampSize(next));
+  }, [size]);
 
   const setBody = useCallback((value: string) => {
     draftBody = value;
@@ -243,7 +313,13 @@ export function BoopSelectionPanel() {
   const composerBusy = sending || busyWrites > 0;
 
   return (
-    <div className="bs-panel">
+    <div
+      className="bs-panel"
+      ref={panelRef}
+      style={{ width: size.width, height: size.height }}
+      onKeyDown={onPanelKeyDown}
+      title="Alt+arrows or the bottom-right grip resize this panel"
+    >
       {error ? (
         <div className="bs-error" role="alert">
           {error}
@@ -282,6 +358,9 @@ export function BoopSelectionPanel() {
           <button type="button" className="bs-clear" disabled={composerBusy} onClick={clear}>
             Clear
           </button>
+          <span className="bs-resize-hint" aria-hidden="true">
+            ◢ resize
+          </span>
         </div>
         {result ? <div className="bs-result">{result}</div> : null}
         {sendError ? (
