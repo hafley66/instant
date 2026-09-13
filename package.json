@@ -94,6 +94,9 @@
       "@streamdown/code>shiki": "$shiki",
       "streamdown>marked": "$marked",
       "streamdown>mermaid": "$mermaid"
+    },
+    "patchedDependencies": {
+      "@hafley66/md@0.1.2": "patches/@hafley66__md@0.1.2.patch"
     }
   }
 }

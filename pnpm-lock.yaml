@@ -9,6 +9,11 @@ overrides:
   streamdown>marked: ^18.0.5
   streamdown>mermaid: ^11.16.0
 
+patchedDependencies:
+  '@hafley66/md@0.1.2':
+    hash: 32bb1840a1db7721d87432d53b7b872246bd5ff018471de65442976a7dc9bf51
+    path: patches/@hafley66__md@0.1.2.patch
+
 importers:
 
   .:
@@ -24,7 +29,7 @@ importers:
         version: 0.0.3(vite@8.1.5)
       '@hafley66/md':
         specifier: 0.1.2
-        version: 0.1.2(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
+        version: 0.1.2(patch_hash=32bb1840a1db7721d87432d53b7b872246bd5ff018471de65442976a7dc9bf51)(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
       '@hafley66/signals':
         specifier: 0.1.1-dev.1788884795413
         version: 0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)
@@ -3035,7 +3040,7 @@ snapshots:
     transitivePeerDependencies:
       - vite
 
-  '@hafley66/md@0.1.2(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
+  '@hafley66/md@0.1.2(patch_hash=32bb1840a1db7721d87432d53b7b872246bd5ff018471de65442976a7dc9bf51)(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
     dependencies:
       '@hafley66/signals': 0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
