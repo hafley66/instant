@@ -168,7 +168,7 @@ describe("the child pane's mirror", () => {
 
 describe("the fork trigger", () => {
   it("spells the verb boop already has", () => {
-    expect(forkCommand(26, "flash4")).toBe("boop beep fork 26 --preset flash4");
+    expect(forkCommand(26, "flash4")).toBe("boop beep fork 26 --preset flash4 --claude-tui");
   });
 
   it("offers the three presets the menu lists", () => {
