@@ -130,7 +130,7 @@ export function tailLines(capture: string, rows: number): string[] {
 /// `boop beep fork` is the one verb that opens a lane off a stored comment; a
 /// comment the store has never seen has id 0 and cannot be forked.
 export function forkCommand(commentId: number, preset: string): string {
-  return `boop beep fork ${commentId} --preset ${preset} --claude-tui`;
+  return `boop beep fork ${commentId} --preset ${preset} --interactive`;
 }
 
 /// The presets a fork is offered on, off `boop config presets`.
