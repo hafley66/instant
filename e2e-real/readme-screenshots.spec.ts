@@ -1,7 +1,7 @@
 // README capture: Chromium drives the built bundle served by instant-serve and
-// writes the PNGs under docs/screenshots. Every session, lane, and mail row is
-// a scratch fixture on a private tmux socket and a scratch boop sqlite store,
-// so a capture never touches the owner's store, default tmux server, or
+// writes the PNGs under docs/screenshots. Every session, turn, lane, and mail
+// row is a scratch fixture on a private tmux socket and a scratch boop sqlite
+// store, so a capture never touches the owner's store, default tmux server, or
 // desktop. Screens assert visible feature content; there are no timestamp
 // assertions. No model is called and nothing is really sent.
 //
@@ -57,7 +57,8 @@ function resetStore(): void {
        delete from agent_route;
        delete from agent_session;
        delete from agent_edge;
-       delete from agent_turn;`);
+       delete from agent_turn;
+       delete from agent_favorite;`);
 }
 
 function seedSchema(): void {
@@ -102,9 +103,22 @@ function seedMail(seed: { id: string; from: string; to: string; kind?: string; b
        values ('${seed.id}', 'bus', '${seed.from}', '${seed.to}', ${stamp}, '${seed.kind ?? "note"}', '${body}')`);
 }
 
+/// One turn the way an ingested transcript leaves it in boop's store.
+function seedTurn(session: string, turn: number, role: string, said: string, harness = "codex"): void {
+  sql(`insert or ignore into dict_session(value) values ('${session}')`);
+  sql(`insert or ignore into dict_harness(value) values ('${harness}')`);
+  sql(`insert or ignore into dict_role(value) values ('${role}')`);
+  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+       values ((select id from dict_session where value='${session}'),
+               (select id from dict_harness where value='${harness}'), null, ${Date.now()})`);
+  sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+       values ((select id from dict_session where value='${session}'), ${turn}, ${Date.now()},
+               (select id from dict_role where value='${role}'), '${said.replace(/'/g, "''")}', null)`);
+}
+
 // ---- scratch tmux sessions and panes ----
 
-const SESSIONS = ["readme-build", "readme-docs", "readme-review", "readme-api", "readme-hub"];
+const SESSIONS = ["turn", "docs", "review", "api", "hub"];
 
 function killSessions(): void {
   for (const session of SESSIONS) tmux(["kill-session", "-t", `=${session}`]);
@@ -121,6 +135,15 @@ function seedPane(session: string, route?: string): void {
     sql(`insert or replace into agent_route(route, kind, harness, tmux, registered_at)
          values ('${route}', 'coordinator', 'claude', '${pane}', strftime('%Y-%m-%d %H:%M:%f000','now'))`);
   }
+}
+
+/// Bind the pane to the boop session whose turns it shows, the way a lane
+/// registration binds one, so the app's own projection places the turn.
+function bindPane(session: string, route: string, harness = "codex"): void {
+  const pane = tmux(["display-message", "-p", "-t", `${session}:`, "#{pane_id}"]).stdout.trim();
+  sql(`insert or replace into agent_route(route, kind, harness, tmux, session_id, registered_at)
+       values ('${route}', 'lane', '${harness}', '${pane}', '${session}',
+               strftime('%Y-%m-%d %H:%M:%f000','now'))`);
 }
 
 // ---- page helpers ----
@@ -143,11 +166,27 @@ async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   await page.waitForFunction(() => document.fonts.status === "loaded");
 }
 
-async function screenText(page: Page): Promise<string> {
+async function screenRows(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0);
-    return [...(host?.querySelectorAll(".xterm-rows > div") ?? [])].map((d) => d.textContent ?? "").join("\n");
+    return [...(host?.querySelectorAll(".xterm-rows > div") ?? [])].map((d) => d.textContent ?? "");
   });
+}
+
+async function screenText(page: Page): Promise<string> {
+  return (await screenRows(page)).join("\n");
+}
+
+/// Viewport pixel at the centre of a terminal cell of the visible host, read
+/// from the measure element xterm sizes its rows with.
+async function cell(page: Page, row: number, col: number): Promise<{ x: number; y: number }> {
+  return page.evaluate(([r, c]) => {
+    const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0)!;
+    const box = host.querySelector(".xterm-screen")!.getBoundingClientRect();
+    const measure = host.querySelector(".xterm-char-measure-element")!.getBoundingClientRect();
+    const cellW = measure.width / 32;
+    return { x: Math.round(box.left + (c + 0.5) * cellW), y: Math.round(box.top + (r + 0.5) * measure.height) };
+  }, [row, col]);
 }
 
 function typeLine(session: string, line: string): void {
@@ -157,12 +196,43 @@ function typeLine(session: string, line: string): void {
 const tmuxTab = (page: Page) => page.locator(".dv-tab", { hasText: "tmux" }).first();
 
 /// Bring the sessions panel forward, then open one durable session by its row.
-/// `openTab` in the row handler is the product's own attach path.
+/// `openTab` in the row handler is the product's own attach path. The row is
+/// matched on the session-name cell, not the whole row, so a cwd that happens
+/// to contain the word cannot select the wrong session.
 async function openSession(page: Page, session: string): Promise<void> {
   await tmuxTab(page).click();
-  const row = page.locator(".dtable-row", { hasText: session }).first();
+  const row = page.locator(".dtable-row", { has: page.locator(".s-name", { hasText: new RegExp(`^${session}$`) }) }).first();
   await expect(row).toBeVisible({ timeout: 20_000 });
   await row.click();
+}
+
+async function turnDebugOn(page: Page): Promise<void> {
+  const button = page.locator("#turn-debug-toggle");
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+}
+
+async function turnDebugOff(page: Page): Promise<void> {
+  const button = page.locator("#turn-debug-toggle");
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+}
+
+/// Poll until the debug overlay attributes a visible row to one of the turn
+/// ids, proving the store projection has settled before the pointer is used.
+async function waitForTurn(page: Page, turnId: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0);
+          return [...(host?.querySelectorAll<HTMLElement>(".term-turn-debug-row[data-turn-id]") ?? [])]
+            .map((el) => el.dataset.turnId ?? "");
+        }),
+      { timeout: 30_000, message: `no row attributed to ${turnId}` },
+    )
+    .toContain(turnId);
 }
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -175,39 +245,93 @@ async function shotElement(page: Page, selector: string, name: string): Promise<
   await page.locator(selector).screenshot({ path: path.join(shots, `${name}.png`) });
 }
 
-// ---- fixtures ----
+// ---- the turn that carries both diagrams ----
 
-const diagramDoc = [
-  "instant session · build",
-  "=========================",
+const TURN_SESSION = "turn";
+const TURN_ID = 42;
+const D2_MARKER = "prompt -> terminal: type";
+const MERMAID_MARKER = "turn --> diagram";
+
+// What the harness prints for the turn: no backticks, the code under a bullet.
+const turnBody = [
+  "• Rendered inline from this turn's source.",
   "",
-  "Agent output renders diagrams inline, in the terminal it was printed to.",
+  "  direction: right",
+  `  ${D2_MARKER}`,
+  "  terminal -> diagram: render",
+  "  diagram -> favorites: star",
+  "",
+  // Blank rows let the overlay size the wide D2 graph past its four source
+  // rows; the allocator only borrows rows that are actually blank.
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "  flowchart LR",
+  `    ${MERMAID_MARKER}`,
+  "    diagram --> favorite",
+  "",
+].join("\n");
+
+// The same turn as the store holds it: the fences the harness stripped.
+const turnSaid = [
+  "Rendered inline from this turn's source.",
   "",
   "```d2",
-  "coordinator -> lane_a: spawn",
-  "coordinator -> lane_b: spawn",
-  "lane_a -> result: finish",
-  "lane_b -> result: finish",
+  "direction: right",
+  D2_MARKER,
+  "terminal -> diagram: render",
+  "diagram -> favorites: star",
   "```",
   "",
   "```mermaid",
   "flowchart LR",
-  "  prompt --> terminal",
-  "  terminal --> diagram",
+  `  ${MERMAID_MARKER}`,
+  "  diagram --> favorite",
   "```",
+].join("\n");
+
+const docsBody = [
+  "instant session · docs",
+  "======================",
   "",
-  "Diagrams are drawn over the exact rows the fence occupied, so scrollback",
-  "and turn attribution stay aligned with the terminal buffer.",
-  "",
-  "  session     agent       state",
-  "  ----------  ----------  -------",
-  "  build       claude      running",
-  "  docs        opencode    running",
-  "  review      shell       idle",
-  "",
-  "Next: open the Boop rail to choose which running TUIs receive a message.",
+  "$ just check",
+  "tsc --noEmit",
+  "0 errors",
   "",
 ].join("\n");
+
+const reviewBody = [
+  "instant session · review",
+  "========================",
+  "",
+  " src/1_boopSelection.tsx  | 18 +++++-----",
+  " src/0_boopSelection.ts   |  6 ++--",
+  "",
+  "3 files changed, 22 insertions(+), 11 deletions(-)",
+  "",
+  "$ _",
+  "",
+].join("\n");
+
+async function showTurn(page: Page): Promise<void> {
+  await openSession(page, TURN_SESSION);
+  await expect(page.locator(".term-host .xterm-screen:visible")).toBeVisible({ timeout: 20_000 });
+  const file = path.join(fixtures, "turn.txt");
+  fs.writeFileSync(file, turnBody);
+  typeLine(TURN_SESSION, "PS1=; stty -echo; clear; cat " + file);
+  await expect.poll(() => screenText(page), { timeout: 30_000 }).toContain(D2_MARKER);
+  await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible({ timeout: 30_000 });
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -218,12 +342,15 @@ test.beforeAll(async () => {
   resetStore();
   killSessions();
 
-  // Scene 1 (workspace) and scene 2 (selector) sessions.
-  seedPane("readme-build");
-  seedPane("readme-docs");
-  seedPane("readme-review");
-  seedPane("readme-api", "readme-lane-api");
-  seedPane("readme-hub", "readme-lane-hub");
+  seedPane("turn");
+  seedPane("docs");
+  seedPane("review");
+  seedPane("api", "lane-api");
+  seedPane("hub", "lane-hub");
+
+  // The turn both diagram and favorite scenes read, bound the way a lane is.
+  seedTurn(TURN_SESSION, TURN_ID, "assistant", turnSaid);
+  bindPane(TURN_SESSION, "turn-route");
 
   // The selector reads routes whose live panes boop resolves through the
   // private tmux server; wait for both scratch coordinators before the tests
@@ -233,7 +360,7 @@ test.beforeAll(async () => {
       timeout: 20_000,
       message: "scratch coordinator routes never resolved through boop",
     })
-    .toContain("readme-lane-hub");
+    .toContain("lane-hub");
 
   // Scene 3 (roster/mail) synthetic lanes.
   const now = Date.now();
@@ -251,33 +378,79 @@ test.afterAll(() => {
   killSessions();
 });
 
-test("1. workspace: durable tmux sessions render Mermaid and D2 inline", async ({ page }) => {
+test("1. workspace: inline D2 and Mermaid from a terminal turn", async ({ page }) => {
   await boot(page);
-  await openSession(page, "readme-docs");
-  await openSession(page, "readme-review");
-  await openSession(page, "readme-build");
-  await expect(page.locator(".term-host .xterm-screen:visible")).toBeVisible({ timeout: 20_000 });
-  await page.waitForTimeout(1_000);
+  await openSession(page, "docs");
+  fs.writeFileSync(path.join(fixtures, "docs.txt"), docsBody);
+  typeLine("docs", "PS1=; clear; cat " + path.join(fixtures, "docs.txt"));
+  await openSession(page, "review");
+  fs.writeFileSync(path.join(fixtures, "review.txt"), reviewBody);
+  typeLine("review", "PS1=; clear; cat " + path.join(fixtures, "review.txt"));
 
-  const doc = path.join(fixtures, "build.md");
-  fs.writeFileSync(doc, diagramDoc);
-  typeLine("readme-build", "PS1=; clear; cat " + doc);
-  await expect.poll(() => screenText(page), { timeout: 30_000 }).toContain("Agent output renders diagrams inline");
-
-  const diagrams = page.locator(".term-diagram");
-  await expect(diagrams).toHaveCount(2, { timeout: 30_000 });
-  await expect(page.locator('.term-diagram[data-language="d2"] > svg')).toBeVisible();
-  await expect(page.locator('.term-diagram[data-language="mermaid"] svg')).toBeVisible();
-  await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("coordinator");
-  await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("prompt");
-  await page.waitForTimeout(500);
-  await shot(page, "01-workspace-diagrams");
+  await showTurn(page);
+  await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("favorites");
+  await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("turn");
+  await expect(page.locator('.term-diagram[data-language="d2"]')).toHaveAttribute("data-diagram-locator", `boop:${TURN_SESSION}:${TURN_ID}`);
+  await page.waitForTimeout(700);
+  await shot(page, "01-turn-diagrams");
 });
 
-test("2. selector: check two open coordinator TUIs and send to the set", async ({ page }) => {
+test("2. favorite: right-click a turn into boop's favorites", async ({ page }) => {
   await boot(page);
-  await openSession(page, "readme-api");
-  await openSession(page, "readme-hub");
+  await showTurn(page);
+  await turnDebugOn(page);
+  await waitForTurn(page, `${TURN_SESSION}:${TURN_ID}`);
+  await turnDebugOff(page);
+
+  const rows = await screenRows(page);
+  const row = rows.findIndex((line) => line.includes(D2_MARKER));
+  expect(row, "the D2 source row is not on screen").toBeGreaterThan(-1);
+
+  // The context menu identifies the turn and offers the favorite action.
+  const at = await cell(page, row, 8);
+  await page.mouse.click(at.x, at.y, { button: "right" });
+  const menu = page.locator(".ctx-menu");
+  await expect(menu).toBeVisible({ timeout: 10_000 });
+  await expect(menu).toContainText(`Boop ${TURN_SESSION}:${TURN_ID} · assistant`);
+  await expect(menu).toContainText("Tag this turn");
+  const favRow = menu.locator("[data-nav-id]", { has: page.locator(".ctx-label", { hasText: "★" }) }).first();
+  await expect(favRow).toBeVisible();
+  await shot(page, "02-turn-favorite");
+
+  // Favorite it. The note prompt carries an empty answer, which is the plain
+  // star; the write goes through boop_favorite_toggle into the scratch store.
+  await favRow.click();
+  const prompt = page.locator(".cmdp-input");
+  await expect(prompt).toBeVisible({ timeout: 10_000 });
+  await prompt.press("Escape");
+
+  await expect
+    .poll(() => sql(`select count(*) from agent_favorite where source='turn:${TURN_SESSION}:${TURN_ID}'`), {
+      timeout: 15_000,
+      message: "the favorite never reached boop's scratch store",
+    })
+    .toBe("1");
+
+  // The Favorites panel reads boop_favorites, so the row must survive a reload
+  // and come back from the store rather than from page state.
+  await page.reload();
+  await expect(page.locator("#favorites-toggle")).toBeVisible({ timeout: 30_000 });
+  await page.locator("#favorites-toggle").click();
+  const favPanel = page.locator(".v2-panel", { has: page.locator(".spy-title", { hasText: "favorites" }) });
+  await expect(favPanel).toBeVisible({ timeout: 20_000 });
+  await expect(favPanel).toContainText(TURN_SESSION, { timeout: 20_000 });
+  // Fold the session group open so the stored turn preview is on screen.
+  const favGroup = favPanel.locator(".dtable-row", { hasText: TURN_SESSION }).first();
+  await favGroup.dblclick();
+  await expect(favPanel).toContainText("Rendered inline from this turn's source", { timeout: 10_000 });
+  await page.waitForTimeout(500);
+  await shotElement(page, ".v2-panel", "03-favorites-panel");
+});
+
+test("3. selector: check two open coordinator TUIs and send to the set", async ({ page }) => {
+  await boot(page);
+  await openSession(page, "api");
+  await openSession(page, "hub");
   await expect(page.locator(".term-host .xterm-screen:visible")).toBeVisible({ timeout: 20_000 });
 
   const exp = page.locator("#sessions-toggle .actbar-exp");
@@ -286,8 +459,8 @@ test("2. selector: check two open coordinator TUIs and send to the set", async (
   await expect(page.locator(".bs-panel")).toBeVisible({ timeout: 20_000 });
 
   await expect(page.locator(".bs-panel .dtable-row")).toHaveCount(2, { timeout: 25_000 });
-  await expect(page.locator(".bs-panel")).toContainText("readme-lane-api");
-  await expect(page.locator(".bs-panel")).toContainText("readme-lane-hub");
+  await expect(page.locator(".bs-panel")).toContainText("lane-api");
+  await expect(page.locator(".bs-panel")).toContainText("lane-hub");
 
   const boxes = page.locator(".bs-panel input.bs-check");
   await expect(boxes).toHaveCount(2);
@@ -298,10 +471,10 @@ test("2. selector: check two open coordinator TUIs and send to the set", async (
   await page.locator(".bs-panel .bs-body").fill("capture the selector frame");
   await expect(page.locator(".bs-panel .bs-send")).toHaveText(/\(2\)/);
   await page.waitForTimeout(300);
-  await shotElement(page, ".bs-panel", "02-boop-recipient-selector");
+  await shotElement(page, ".bs-panel", "04-boop-recipient-selector");
 });
 
-test("3. roster: Boop lane graph and mail stream over scratch lanes", async ({ page }) => {
+test("4. roster: Boop lane graph and mail stream over scratch lanes", async ({ page }) => {
   await boot(page);
   await page.locator("#boop-toggle").click();
   await expect(page.locator(".boop-panel")).toBeVisible({ timeout: 20_000 });
@@ -312,5 +485,5 @@ test("3. roster: Boop lane graph and mail stream over scratch lanes", async ({ p
   await expect(page.locator(".boop-panel")).toContainText("docs-lane");
   await expect(page.locator(".boop-panel")).not.toContainText("store read failed");
   await page.waitForTimeout(1_500);
-  await shotElement(page, ".boop-panel .boop-master", "03-boop-roster-mail");
+  await shotElement(page, ".boop-panel .boop-master", "05-boop-roster-mail");
 });

@@ -14,27 +14,40 @@ built-in activity recorder keeps a local timeline of what you touch.
 ## Screenshots
 
 Captures are the built bundle in Chromium against the real Rust backend, driven
-through the app's own paths with synthetic sessions, lanes, and mail. The summon
-gesture itself is macOS-only and is not pictured.
+through the app's own paths with synthetic sessions, turns, lanes, and mail. The
+summon gesture itself is macOS-only and is not pictured.
 
-**Durable tmux terminals, with agent diagrams rendered inline.** Three sessions
-are open as dock tabs; the active one shows a Markdown document whose Mermaid and
-D2 fences render as diagrams over the rows they came from.
+**Durable tmux terminals render agent diagrams inline.** Three sessions are open
+as dock tabs; the active one is a turn whose D2 and Mermaid fences render as
+diagrams over the exact rows the harness printed. The D2 graph is drawn to the
+right of its terminal turn, the Mermaid below it. Rustdoc rendering is not
+shipped yet.
 
-![Three durable tmux sessions open as tabs, with Mermaid and D2 diagrams rendered inline in the active terminal](docs/screenshots/01-workspace-diagrams.png)
+![Three durable tmux sessions open as tabs, with D2 and Mermaid diagrams rendered inline in the active terminal turn](docs/screenshots/01-turn-diagrams.png)
+
+**Right-click a turn to favorite it, backed by Boop.** The context menu names the
+Boop turn (`readme-turn:42 · assistant`) and offers the star. Favoriting writes
+through `boop_favorite_toggle` into boop's store.
+
+![Terminal context menu over a turn, showing the Boop turn label and the star favorite action](docs/screenshots/02-turn-favorite.png)
+
+**Favorites come back from the store.** After a reload, the Favorites panel lists
+the Boop-backed turn from `boop_favorites`, so the star survives the session.
+
+![Favorites panel listing the Boop turn group with the favorited turn preview](docs/screenshots/03-favorites-panel.png)
 
 **Pick the running TUIs a message goes to.** The tmux rail's Boop dropdown lists
 coordinator sessions that are open in the dock, each with a checkbox and a
 persisted selection. Two named coordinators are checked here and the send button
 counts the visible set.
 
-![Boop recipient selector listing two open coordinator sessions with both checkboxes checked](docs/screenshots/02-boop-recipient-selector.png)
+![Boop recipient selector listing two open coordinator sessions with both checkboxes checked](docs/screenshots/04-boop-recipient-selector.png)
 
 **Watch the Boop lane roster and mail.** The Boop panel nests lanes by who
 spawned whom and rolls up each lane's mail count, recency, and a per-lane mail
 waterfall.
 
-![Boop lane roster with nested lanes, mail counts, and a waterfall column](docs/screenshots/03-boop-roster-mail.png)
+![Boop lane roster with nested lanes, mail counts, and a waterfall column](docs/screenshots/05-boop-roster-mail.png)
 
 To regenerate the images, see [docs/screenshots/README.md](docs/screenshots/README.md).
 
@@ -47,13 +60,17 @@ To regenerate the images, see [docs/screenshots/README.md](docs/screenshots/READ
    keeps running when the window hides or the front end reloads. Tabs are
    draggable, splittable dockview panels; build columns by dragging.
 3. **Diagrams and previews.** Mermaid and D2 fences in agent output render inline
-   over the terminal, and a click opens a zoomable lightbox. ⌘-click a file path
-   in the output to open a preview tab: source in Monaco, rendered Markdown, or
-   an image or PDF.
-4. **Message running agents.** Open the tmux rail's Boop dropdown, tick the
+   over the terminal turn they came from, and a click opens a zoomable lightbox.
+   ⌘-click a file path in the output to open a preview tab: source in Monaco,
+   rendered Markdown, or an image or PDF.
+4. **Favorite turns.** Right-click a turn and pick the star. The favorite is keyed
+   by `session:turn` and written to boop's store, so it survives a reload and
+   shows up in the Favorites panel. `⌘⇧S` favorites the latest turn of the active
+   tab from the keyboard.
+5. **Message running agents.** Open the tmux rail's Boop dropdown, tick the
    coordinator TUIs you want, type a message, and send to that set. Recipients
    are live sessions the app owns through tmux, not a broad broadcast.
-5. **Watch Boop.** The Boop panel shows the lane roster and the mail stream over
+6. **Watch Boop.** The Boop panel shows the lane roster and the mail stream over
    boop's store, refreshed live.
 
 ## Features
