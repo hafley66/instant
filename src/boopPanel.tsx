@@ -6,7 +6,7 @@ import { commandEndpoint, invoke } from "./generated/native";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { settings } from "./0_settings";
 import type { ExpandedState, SortingState } from "@tanstack/react-table";
-import { createMarbler, MarblerPanel } from "@hafley66/marbler";
+import { createMarbler, MarblerPanel, reduceTimeViewport } from "@hafley66/marbler";
 import { buildGraphTree, flattenTree, activeOnlyTree, flattenExpandedTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
 import { boopRosterState } from "./0_boopPanelState";
 import {
@@ -270,10 +270,13 @@ export function BoopPanelV2() {
     : summaryAll;
 
   // Read-only viewport mirror for observability (tests and range display).
-  // Viewport edits stay in the marbler navigator's own gestures; the host does
-  // not reimplement the reducer. A follow/fit control bar needs marbler to
-  // export reduceTimeViewport (see the review report).
+  // Viewport edits go through the marbler reducer exactly as its own gestures
+  // do; follow and fit are the two states the navigator has no gesture for.
   const viewport = useSignal(marbler.current.viewport.$);
+  const hovered = useSignal(marbler.current.hoveredId.$);
+  const gesture = (g: Parameters<typeof reduceTimeViewport>[1]) => {
+    marbler.current.viewport.$(reduceTimeViewport(marbler.current.viewport.$(), g));
+  };
 
   return (
     <div className="v2-panel boop-panel">
@@ -346,9 +349,21 @@ export function BoopPanelV2() {
         data-follow={viewport.followLive ? "1" : "0"}
         data-visible={`${Math.round(viewport.visible[0])}:${Math.round(viewport.visible[1])}`}
         data-lanes={shown.length}
+        data-hovered={hovered ?? ""}
       >
         <div className="boop-timeline-controls">
           <span className="boop-tl-title">timeline</span>
+          <button
+            type="button"
+            className={viewport.followLive ? "boop-tl-btn active" : "boop-tl-btn"}
+            title="re-arm live tailing"
+            onClick={() => gesture({ type: "follow", enabled: !viewport.followLive })}
+          >
+            {viewport.followLive ? "following" : "follow"}
+          </button>
+          <button type="button" className="boop-tl-btn" title="fit the whole window" onClick={() => gesture({ type: "fit" })}>
+            fit
+          </button>
           <span className="boop-tl-hint">drag to scrub · ctrl+wheel to zoom · dblclick fits</span>
           {stamps.length === 0 && <span className="muted">no mail in window</span>}
         </div>
@@ -357,7 +372,7 @@ export function BoopPanelV2() {
             showing {shownRoot} + descendants ×
           </button>
         )}
-        <MarblerPanel model={marbler.current} embedded summary={summary} />
+        <MarblerPanel model={marbler.current} embedded summary={summary} navigatorMaxHeight={160} />
       </div>
     </div>
   );

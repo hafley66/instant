@@ -47,7 +47,21 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+.boop-tl-btn {
+  border: 1px solid var(--marbler-border, #3a414c);
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.boop-tl-btn.active {
+  background: #315d9d;
+  border-color: #315d9d;
+  color: #fff;
+}
 .boop-tl-hint {
   color: var(--marbler-muted, #848c98);
+  margin-left: auto;
 }
 

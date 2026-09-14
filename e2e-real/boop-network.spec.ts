@@ -370,24 +370,25 @@ test("timeline domain tracks mail activity and survives pan, refresh, and refocu
   const cx = nav!.x + nav!.width / 2;
   const cy = nav!.y + nav!.height / 2;
 
-  // Ctrl+wheel zoom shrinks the visible span and turns follow off.
+  // Ctrl+wheel zoom shrinks the visible interval and turns follow off. Await the
+  // span change rather than racing the React commit.
   await page.keyboard.down("Control");
   await page.mouse.move(cx, cy);
   await page.mouse.wheel(0, -120);
   await page.keyboard.up("Control");
   await expect(marbler).toHaveAttribute("data-follow", "0");
+  await expect.poll(async () => (await range()).span, { timeout: 10_000 }).toBeLessThan(before.span);
   const zoomed = await range();
-  expect(zoomed.span).toBeLessThan(before.span);
 
   // Scrub (drag) the zoomed navigator: the visible window moves within the
-  // domain. A full-domain window cannot pan, so this runs after the zoom.
+  // domain. A full-domain window cannot pan (clamped), so zoom runs first.
   await page.mouse.move(cx, cy);
   await page.mouse.down();
   await page.mouse.move(cx - 60, cy, { steps: 5 });
   await page.mouse.up();
   await expect(marbler).toHaveAttribute("data-follow", "0");
+  await expect.poll(async () => (await range()).start, { timeout: 10_000 }).not.toBe(zoomed.start);
   const panned = await range();
-  expect(panned.start).not.toBe(zoomed.start);
 
   // Refocus once to settle any layout work, then take the baseline the paused
   // viewport must hold.
@@ -397,16 +398,70 @@ test("timeline domain tracks mail activity and survives pan, refresh, and refocu
   await expect(page.locator(".boop-panel")).toBeVisible();
   await expect(marbler).toHaveAttribute("data-follow", "0", { timeout: 15_000 });
   const baseline = await range();
+  // The scrub moved and held through the refocus.
+  expect(baseline.start).toBe(panned.start);
 
-  // A confirmed fresh mail must not snap the window back to the live tail.
+  // A confirmed fresh mail (exactly two new frame dots: out on tl-root, in on
+  // tl-peer) must not snap the paused interval back to the live tail.
   const dotsBefore = await page.locator(".boop-master .boop-spark i").count();
   seedMail({ id: "tl-m3", from: "tl-root", to: "tl-peer", kind: "note", body: "after pan", ageSec: 1 });
   await expect
     .poll(async () => page.locator(".boop-master .boop-spark i").count(), { timeout: 15_000 })
-    .toBeGreaterThan(dotsBefore);
+    .toBe(dotsBefore + 2);
   const after = await range();
   expect(after).toEqual(baseline);
 
   await shot(page, "07-timeline-viewport");
+  expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
+});
+
+test("a dense navigator scrolls to its last lane and stays hit-testable", async ({ page }) => {
+  resetStore();
+  const base = Date.now();
+  for (let i = 1; i <= 40; i += 1) {
+    seedLane({
+      lane: `dense-${String(i).padStart(2, "0")}`,
+      cwd: `/tmp/e2e-net/dense-${i}`,
+      state: "live",
+      goal: `dense ${i}`,
+      // dense-40 is newest, so dense-01 sorts to the LAST navigator row.
+      spawnedTs: base - (40 - i) * 1000,
+    });
+  }
+  seedMail({ id: "dense-m1", from: "dense-01", to: "dense-40", kind: "note", body: "dense mail", ageSec: 30 });
+
+  const errors = await boot(page);
+  await openBoop(page);
+  const scroll = page.locator('[data-testid="navigator-scroll"]');
+  await expect(scroll).toBeVisible({ timeout: 30_000 });
+  await expect(marblerRows(page).first()).toBeVisible({ timeout: 30_000 });
+
+  // Bounded scroll container: natural canvas is taller than the viewport.
+  const metrics = await scroll.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+  expect(metrics.sh).toBeGreaterThan(metrics.ch);
+  const canvas = page.locator(".boop-marbler .time-navigator");
+  expect((await canvas.boundingBox())!.height).toBeGreaterThan(metrics.ch);
+
+  await scroll.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await expect.poll(async () => scroll.evaluate((el) => el.scrollTop), { timeout: 5_000 }).toBeGreaterThan(0);
+
+  // Last lane (dense-01, index 39) y = LANE_TOP + 39*14. laneLabels put the
+  // plot left edge at 190; the sole mail's dot sits at the domain start there.
+  const box = await canvas.boundingBox();
+  const wrap = await scroll.boundingBox();
+  const lastY = 10 + 39 * 14;
+  const x = box!.x + 190;
+  const y = box!.y + lastY;
+  expect(y).toBeGreaterThanOrEqual(wrap!.y);
+  expect(y).toBeLessThanOrEqual(wrap!.y + wrap!.height + 1);
+
+  // Hit testing follows the compressed/scroll coordinates: hovering the last
+  // lane's mark reports a hovered id.
+  await page.mouse.move(x, y);
+  await expect
+    .poll(async () => page.locator(".boop-marbler").getAttribute("data-hovered"), { timeout: 10_000 })
+    .toBeTruthy();
+
+  await shot(page, "08-dense-navigator");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
 });

@@ -96,7 +96,8 @@
       "streamdown>mermaid": "$mermaid"
     },
     "patchedDependencies": {
-      "@hafley66/md@0.1.2": "patches/@hafley66__md@0.1.2.patch"
+      "@hafley66/md@0.1.2": "patches/@hafley66__md@0.1.2.patch",
+      "@hafley66/marbler@0.0.3": "patches/@hafley66__marbler@0.0.3.patch"
     }
   }
 }
