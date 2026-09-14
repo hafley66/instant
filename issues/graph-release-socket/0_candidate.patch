@@ -1,0 +1,141 @@
+diff --git a/src-tauri/src/0_boop.rs b/src-tauri/src/0_boop.rs
+index eb721bfa..2de33dbf 100644
+--- a/src-tauri/src/0_boop.rs
++++ b/src-tauri/src/0_boop.rs
+@@ -1246,10 +1246,12 @@ mod tests {
+             variant: VariantSupport::None,
+             mail: MailPolicy::Door,
+             image_paste_keys: None,
++            interrupt_keys: None,
+             native_tui_projector: false,
+             wrapper_owns_alternate_screen: false,
+             native_backend: NativeBackendSupport::Unsupported,
+             native_settings: NativeSettingsSupport::Unsupported("candidate_for fixture"),
++            registry_names_processes: false,
+         };
+ 
+         struct Scan(Vec<SessionRef>);
+@@ -1261,6 +1263,12 @@ mod tests {
+             fn capabilities(&self) -> &'static Capabilities {
+                 &CAPS
+             }
++            fn mock_tui_launch(
++                &self,
++                _: &boop_harness::harness::mock_tui::MockTuiContext<'_>,
++            ) -> anyhow::Result<boop_harness::harness::mock_tui::MockTuiLaunch> {
++                anyhow::bail!("candidate_for fixture has no mock launch")
++            }
+             fn sessions(&self) -> anyhow::Result<Vec<SessionRef>> {
+                 Ok(self.0.clone())
+             }
+@@ -1520,9 +1528,10 @@ fn read_session_graph(
+         messages.extend(boop_store::bus::parse_box(&path));
+     }
+     let processes = boop_store::proc::SysinfoSnapshot::capture().map_err(|error| error.to_string())?;
+-    // Liveness must probe the same tmux server as every other serve path, so a
+-    // private INSTANT_TMUX_SOCKET is honored instead of the default server.
+-    let tmux_socket = crate::pty::configured_tmux_socket();
++    // Liveness must probe the same tmux server the app's own panes live on, so
++    // a private INSTANT_TMUX_SOCKET is honored and a release build's default
++    // `instant-prod` server is used instead of boop-mux's default-server probe.
++    let tmux_socket = crate::pty::effective_tmux_socket();
+     load_agent_session_graph_with_runtime(
+         &store,
+         AgentSessionGraphQuery {
+diff --git a/src-tauri/src/pty.rs b/src-tauri/src/pty.rs
+index 4f1461e9..fc0f9070 100644
+--- a/src-tauri/src/pty.rs
++++ b/src-tauri/src/pty.rs
+@@ -116,23 +116,36 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
+     // cells with underscores before those bytes ever reach xterm. Force UTF-8
+     // on every client, including clients attaching to an already-live server.
+     c.arg("-u");
+-    let configured_socket = socket.map(str::to_owned).or_else(configured_tmux_socket);
+-    if !cfg!(debug_assertions) && configured_socket.is_none() {
+-        c.args(["-L", "instant-prod"]);
+-    }
+-    if let Some(socket) = configured_socket {
++    if let Some(socket) = socket.map(str::to_owned).or_else(effective_tmux_socket) {
+         c.args(["-L", &socket]);
+     }
+     c
+ }
+ 
+-/// The tmux server `INSTANT_TMUX_SOCKET` names, if any. The offline graph read
+-/// hands this to `Multiplexer::target_alive`, so a fixture or prod server is
+-/// probed by the same socket every other serve path uses.
++/// The tmux server `INSTANT_TMUX_SOCKET` names, if any, without the release
++/// default. Most callers want `effective_tmux_socket`; this raw read is here for
++/// code that must distinguish "explicitly configured" from "the app default".
+ pub(crate) fn configured_tmux_socket() -> Option<String> {
+     std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty())
+ }
+ 
++/// The release-only tmux server. A prod build is launched by macOS without a
++/// login shell and keeps its panes off the default socket so a `tauri dev`
++/// instance (or the user's own terminal) is untouched. Defined once so readers
++/// of liveness and writers of panes can never name different servers.
++pub(crate) const DEFAULT_PROD_TMUX_SOCKET: &str = "instant-prod";
++
++/// The server this process's tmux panes actually live on: the configured
++/// `INSTANT_TMUX_SOCKET`, else the release default. A reader that probes
++/// liveness (the offline session graph) must pass this to boop-mux's
++/// `Multiplexer`, not the raw env value: in a release build with no env the raw
++/// value is `None` and boop-mux then probes the *default* server, so every one
++/// of the app's own `instant-prod` panes reads as dead.
++pub(crate) fn effective_tmux_socket() -> Option<String> {
++    configured_tmux_socket()
++        .or_else(|| (!cfg!(debug_assertions)).then(|| DEFAULT_PROD_TMUX_SOCKET.to_string()))
++}
++
+ pub(crate) fn tmux_cmd() -> std::process::Command {
+     tmux_cmd_for_socket(None)
+ }
+@@ -671,10 +684,7 @@ pub fn open_session_impl(
+         // Match tmux_cmd's socket so the pty's own server is the same one all the
+         // management commands talk to (prod = private socket; dev = default).
+         c.arg("-u");
+-        let configured_socket = std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty());
+-        if !cfg!(debug_assertions) && configured_socket.is_none() {
+-            c.args(["-L", "instant-prod"]);
+-        }
++        let configured_socket = effective_tmux_socket();
+         if let Some(socket) = configured_socket {
+             c.args(["-L", &socket]);
+         }
+@@ -1115,6 +1125,35 @@ mod tests {
+         }
+     }
+ 
++    // effective_tmux_socket is what the session-graph liveness probe receives.
++    // A configured socket always wins; with none, a debug build must stay on the
++    // default server (matching boop-mux) and a release build must resolve to the
++    // same `instant-prod` server its pty writes to.
++    #[test]
++    fn effective_tmux_socket_prefers_config_and_falls_back_for_release() {
++        let saved = std::env::var("INSTANT_TMUX_SOCKET").ok();
++
++        std::env::set_var("INSTANT_TMUX_SOCKET", "instant-dev-test");
++        assert_eq!(effective_tmux_socket().as_deref(), Some("instant-dev-test"));
++
++        std::env::remove_var("INSTANT_TMUX_SOCKET");
++        assert_eq!(configured_tmux_socket(), None);
++        if cfg!(debug_assertions) {
++            assert_eq!(effective_tmux_socket(), None, "debug keeps the default server");
++        } else {
++            assert_eq!(
++                effective_tmux_socket().as_deref(),
++                Some(DEFAULT_PROD_TMUX_SOCKET),
++                "release probes the same private server its pty writes to"
++            );
++        }
++
++        match saved {
++            Some(value) => std::env::set_var("INSTANT_TMUX_SOCKET", value),
++            None => std::env::remove_var("INSTANT_TMUX_SOCKET"),
++        }
++    }
++
+     #[test]
+     fn pixel_dims_multiplies_cell_size_by_grid() {
+         assert_eq!(pixel_dims(80, 24, Some(8), Some(16)), (640, 384));
