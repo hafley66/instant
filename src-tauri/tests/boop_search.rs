@@ -109,6 +109,7 @@ fn fts_query_and_snippet_shapes() {
     let s = snippet(&long, "needle");
     assert!(s.starts_with('…') && s.ends_with('…'));
     assert!(s.contains("NEEDLE"));
+    assert!(s.find("NEEDLE").unwrap() <= 45, "match sits near the snippet head: {s}");
     assert_eq!(snippet("short text", "zzz"), "short text");
 }
 

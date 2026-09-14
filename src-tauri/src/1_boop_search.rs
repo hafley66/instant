@@ -11,7 +11,8 @@ use tauri::AppHandle;
 const INDEX_FILE: &str = "boop-search.db";
 const SESSIONS_PER_TX: usize = 200;
 const SAID_CAP_CHARS: usize = 20_000;
-const SNIPPET_RADIUS: usize = 160;
+const SNIPPET_LEAD: usize = 40;
+const SNIPPET_TAIL: usize = 260;
 
 /// Bytes a SQLite URI filename cannot carry raw; `/` passes through.
 const URI_PATH: &AsciiSet = &CONTROLS.add(b' ').add(b'?').add(b'#').add(b'%');
@@ -219,16 +220,16 @@ fn first_term(raw: &str) -> Option<String> {
         .find(|term| !term.is_empty())
 }
 
-/// One-line window around the first case-folded occurrence of `term`, or the
-/// head of the text when the fold hid the match.
+/// A window opening 40 chars before the first case-folded occurrence of `term`
+/// so the match sits inside the visible column; head of text when not found.
 pub fn snippet(said: &str, term: &str) -> String {
     let lower = said.to_lowercase();
     let at = lower.find(term).unwrap_or(0);
-    let mut start = at.saturating_sub(SNIPPET_RADIUS);
+    let mut start = at.saturating_sub(SNIPPET_LEAD);
     while start > 0 && !said.is_char_boundary(start) {
         start -= 1;
     }
-    let mut end = (at + term.len() + SNIPPET_RADIUS).min(said.len());
+    let mut end = (at + term.len() + SNIPPET_TAIL).min(said.len());
     while end < said.len() && !said.is_char_boundary(end) {
         end += 1;
     }
