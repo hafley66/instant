@@ -493,6 +493,44 @@ test("renders a stripped Claude timeline while Boop has no matching visible turn
   await shot(page, "diagrams-11-timeline");
 });
 
+test("renders an opencode assistant timeline whose fence and label the TUI stripped", async ({ page }) => {
+  // The opencode TUI drops a fenced code block's backticks and language label,
+  // leaving the diagram body at a Markdown indent under the message margin. With
+  // no matching Boop turn the projection contributes nothing, so the pane's own
+  // rows are the only source. The bound turn is unrelated prose, which keeps the
+  // cwd-wide candidate fallback from matching some other session's timeline.
+  const body = [
+    "     The zorbulon migration runs in three phases.",
+    "",
+    "     timeline",
+    "         title zorbulon migration roadmap",
+    "         Q1 : harvest the quux and strand the old pipeline",
+    "         Q2 : align the frobnicator with the zorbulon schema",
+    "         Q3 : ship zorbulon v2 behind the compatibility flag",
+    "",
+    "     Nothing else is in scope this quarter.",
+    "",
+  ].join("\n");
+  const dir = scratch();
+  await boot(page);
+  burnClaimedPaneIds();
+  const session = await silentSessionPane(page, dir, "diagram fixture ready\n", "diagram fixture ready");
+  seedTurnRows(session, [{ turn: 741, role: "assistant", said: "Unrelated prose that names no diagram at all." }]);
+  bindPaneSession(session);
+  const file = join(dir, "opencode-turn.txt");
+  writeFileSync(file, body);
+  typeLine(session, `clear; cat ${file}`);
+  await expect.poll(() => paneScreen(session).join("\n"), { timeout: 20_000, message: "pane never showed the timeline" })
+    .toContain("Q3 : ship zorbulon v2");
+  await page.waitForTimeout(1_000);
+
+  const timeline = page.locator('.term-diagram[data-language="mermaid"]');
+  await expect(timeline.locator("svg")).toBeVisible({ timeout: 30_000 });
+  await expect(timeline).toContainText("zorbulon migration roadmap");
+  await expect(timeline).toContainText("Q3");
+  await shot(page, "diagrams-11b-opencode-timeline");
+});
+
 test("opens a viewport-tall D2 target and retains clicked source entries", async ({ page }) => {
   const d2Lines = Array.from({ length: 28 }, (_, index) => `node_${index} -> node_${index + 1}: step ${index + 1}`);
   const body = [

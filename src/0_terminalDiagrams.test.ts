@@ -109,6 +109,33 @@ describe("stripped terminal diagrams", () => {
     expect(fences[1].end).toBe(12);
     expect(fences[1].code).toContain("LINKED_EXECUTORS");
   });
+
+  it("infers an opencode assistant timeline whose fence and label the TUI stripped", () => {
+    // The opencode TUI paints an assistant code block with no backticks and no
+    // language label, so the only origin left is the diagram keyword that opens
+    // the body. The block stays bounded by the blank rows around it.
+    const terminal = terminalWithRows([
+      "     The zorbulon migration runs in three phases.",
+      "",
+      "     timeline",
+      "         title zorbulon migration roadmap",
+      "         Q1 : harvest the quux",
+      "         Q2 : align the frobnicator",
+      "         Q3 : ship zorbulon v2",
+      "",
+      "     Nothing else is in scope this quarter.",
+    ]);
+
+    const fences = findDiagramFences(terminal);
+    expect(fences).toHaveLength(1);
+    expect(fences[0].language).toBe("mermaid");
+    expect(fences[0].inferred).toBe(true);
+    expect(fences[0].stripped).toBeUndefined();
+    expect(fences[0].start).toBe(2);
+    expect(fences[0].end).toBe(6);
+    expect(fences[0].code).toContain("title zorbulon migration roadmap");
+    expect(fences[0].code).not.toContain("Nothing else is in scope");
+  });
 });
 
 describe("Mermaid rendering", () => {

@@ -557,12 +557,24 @@ export class TerminalDiagramOverlay {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
-    const direct = findDiagramFences(this.term).filter((fence) =>
-      !fence.inferred && !(fence.stripped && this.projection?.scanning));
     const projected = this.projection?.visible.flatMap((turn) => turn.regions
       .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
         (region.kind === "mermaid" || region.kind === "d2") && projectedDiagramIsCurrent(this.term, region))
       .map((region) => this.fenceFor(region))) ?? [];
+    // The opencode TUI strips a fenced code block's backticks and its language
+    // label, leaving an indented `timeline`/`flowchart` body with no origin row.
+    // That shape is content-inferred, so it paints from the pane only where the
+    // turn ledger cannot supply the same block: an unbound pane, or a projection
+    // whose source rows no longer match. A current ledger region wins, keeping
+    // its turn locator. D2 arrow inference stays excluded; only a mermaid start
+    // keyword is specific enough to read as a diagram without a fence.
+    const direct = findDiagramFences(this.term).filter((fence) => {
+      if (fence.stripped && this.projection?.scanning) return false;
+      if (!fence.inferred) return true;
+      if (fence.language !== "mermaid") return false;
+      return !projected.some((region) =>
+        region.language === fence.language && region.start <= fence.end && fence.start <= region.end);
+    });
     // Explicit terminal fences stay available while the ledger is empty or
     // unable to locate its source; mergeLocatedDiagrams arbitrates overlap.
     const visibleFences = mergeLocatedDiagrams(direct, projected).filter(
@@ -637,9 +649,13 @@ export class TerminalDiagramOverlay {
       }
     }));
     if (generation !== this.generation) return;
+    // A content-inferred block that fails to parse is prose that happened to
+    // open with a diagram keyword, so it drops silently rather than pinning an
+    // error box on the pane. Only an explicit or ledger-backed failure retries.
+    const drawable = rendered.filter((entry) => !(entry.error && entry.fence.inferred));
     // An errored render stays unpinned so idle rescans and the retry timer
     // keep attempting it; a success pins and resets the backoff.
-    if (rendered.some((entry) => entry.error)) this.scheduleRetry();
+    if (drawable.some((entry) => entry.error)) this.scheduleRetry();
     else {
       this.lastPaintedFingerprint = fingerprint;
       this.clearRetry();
@@ -650,7 +666,7 @@ export class TerminalDiagramOverlay {
     // Duplicate fences (same locator or same direct code) collapsed onto one
     // element after the locator re-key; the occurrence suffix fixes that.
     const occurrences = new Map<string, number>();
-    const elements = rendered.map(({ fence, svg, error }) => {
+    const elements = drawable.map(({ fence, svg, error }) => {
       const base = diagramElementKey(fence, dark);
       const seen = occurrences.get(base) ?? 0;
       occurrences.set(base, seen + 1);
