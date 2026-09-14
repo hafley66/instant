@@ -1,7 +1,7 @@
 [package]
 name = "instant"
 default-run = "instant"
-version = "0.1.26"
+version = "0.1.27"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
