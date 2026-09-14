@@ -399,7 +399,7 @@ test("timeline domain tracks mail activity and survives pan, refresh, and refocu
   await expect(marbler).toHaveAttribute("data-follow", "0", { timeout: 15_000 });
   const baseline = await range();
   // The scrub moved and held through the refocus.
-  expect(baseline.start).toBe(panned.start);
+  expect(baseline).toEqual(panned);
 
   // A confirmed fresh mail (exactly two new frame dots: out on tl-root, in on
   // tl-peer) must not snap the paused interval back to the live tail.
