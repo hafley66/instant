@@ -1520,6 +1520,9 @@ fn read_session_graph(
         messages.extend(boop_store::bus::parse_box(&path));
     }
     let processes = boop_store::proc::SysinfoSnapshot::capture().map_err(|error| error.to_string())?;
+    // Liveness must probe the same tmux server as every other serve path, so a
+    // private INSTANT_TMUX_SOCKET is honored instead of the default server.
+    let tmux_socket = crate::pty::configured_tmux_socket();
     load_agent_session_graph_with_runtime(
         &store,
         AgentSessionGraphQuery {
@@ -1527,12 +1530,16 @@ fn read_session_graph(
             include_history: true,
             tmux: None,
             history_since_ts: history_since_ms,
+            // The panel reads only sessions/edges/shells. Leaving trace events
+            // out drops one Store::query_trace_events SQL per selected lane,
+            // which otherwise scales the graph read with total lane history.
+            include_trace_events: false,
         },
         AgentSessionGraphRuntime {
             routes: &routes,
             messages: &messages,
             multiplexer: boop_store::tmux::mux(),
-            tmux_socket: None,
+            tmux_socket: tmux_socket.as_deref(),
             processes: &processes,
         },
     )

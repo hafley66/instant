@@ -14,13 +14,24 @@ export const boopDb = path.join(boopDir, "boop.db");
 const BOOP = process.env.BOOP_BIN ?? path.join(process.env.HOME ?? "", ".cargo/bin/boop");
 
 /// boop pointed only at the scratch store/socket; TMUX stripped so a runner
-/// inside tmux cannot leak its server in.
+/// inside tmux cannot leak its server in. Every Boop/harness discovery root is
+/// forced under the scratch root so `dirs::home_dir()` (which ignores HOME on
+/// macOS) cannot reach the operator's real route registry.
 export const boopEnv = (): NodeJS.ProcessEnv => {
   const env = { ...process.env };
   delete env.TMUX;
+  delete env.BOOP_MAIL_DIR;
+  delete env.BOOP_READER_HOME;
+  delete env.CODEX_HOME;
+  const home = path.join(scratchRoot, "home");
+  const codex = path.join(scratchRoot, "codex");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(codex, { recursive: true });
   env.TMUX_TMPDIR = tmuxDir;
   env.BOOP_DB = boopDb;
   env.BOOP_MAIL_DIR = boopDir;
+  env.BOOP_READER_HOME = home;
+  env.CODEX_HOME = codex;
   env.BOOP_NO_SYNC = "1";
   return env;
 };
@@ -41,7 +52,8 @@ export function seedStore(): void {
 }
 
 export function resetStore(): void {
-  sql(`delete from agent_mail;
+  sql(`delete from agent_trace_event;
+       delete from agent_mail;
        delete from agent_delivery_transition;
        delete from agent_live;
        delete from agent_lane;
@@ -117,4 +129,62 @@ const NOW_SQL = `CAST(strftime('%s','now') AS INTEGER) * 1000 + CAST(substr(strf
 
 export function laneCount(): number {
   return Number(sql("select count(*) from agent_lane"));
+}
+
+/// `count` durable shell lanes in one statement, so a large synthetic store can
+/// be built without one sqlite3 process per row. Lanes are always kept by the
+/// graph projection, so they render regardless of the 24h activity window.
+export function seedBulkLanes(count: number, prefix = "bulk-lane"): void {
+  sql(`insert or ignore into dict_cwd(value) values ('/tmp/e2e-net');`);
+  sql(`insert or ignore into dict_status(value) values ('live');`);
+  sql(`with recursive seq(i) as (select 1 union all select i+1 from seq where i < ${count})
+       insert or ignore into dict_session(value) select '${prefix}-'||i from seq;`);
+  sql(`insert into agent_lane(lane_id, cwd_id, parent_lane_id, goal, spawned_ts)
+       select s.id, (select id from dict_cwd where value='/tmp/e2e-net'), null, 'bulk goal', ${NOW_SQL}
+         from dict_session s where s.value like '${prefix}-%';`);
+  sql(`insert or replace into agent_live(session_id, pid, status_id)
+       select s.id, 4242, (select id from dict_status where value='live')
+         from dict_session s where s.value like '${prefix}-%';`);
+}
+
+/// `count` durable harness sessions in one statement. These are the rows the
+/// graph's set-wise session query must scan, so a big store stresses both the
+/// session projection and the per-lane trace read the panel no longer asks for.
+export function seedBulkSessions(count: number, prefix = "bulk-sess"): void {
+  sql(`insert or ignore into dict_cwd(value) values ('/tmp/e2e-net');`);
+  sql(`insert or ignore into dict_harness(value) values ('codex');`);
+  sql(`with recursive seq(i) as (select 1 union all select i+1 from seq where i < ${count})
+       insert or ignore into dict_session(value) select '${prefix}-'||i from seq;`);
+  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+       select s.id, (select id from dict_harness where value='codex'),
+              (select id from dict_cwd where value='/tmp/e2e-net'), ${NOW_SQL}
+         from dict_session s where s.value like '${prefix}-%';`);
+}
+
+/// `turnsPerSession` transcript turns for every prefixed session. The graph's
+/// `turns`/`usage` CTEs aggregate `agent_turn` per session, so long transcripts
+/// are the native-session load the session projection must stay bounded under.
+export function seedBulkTurns(turnsPerSession: number, prefix = "bulk-sess"): void {
+  sql(`insert or ignore into dict_role(value) values ('assistant');`);
+  sql(`insert or ignore into dict_cwd(value) values ('/tmp/e2e-net');`);
+  sql(`with recursive t(n) as (select 1 union all select n+1 from t where n < ${turnsPerSession})
+       insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+       select s.id, t.n, ${NOW_SQL} + t.n,
+              (select id from dict_role where value='assistant'), 'bulk turn',
+              (select id from dict_cwd where value='/tmp/e2e-net')
+         from dict_session s, t
+        where s.value like '${prefix}-%';`);
+}
+
+/// `count` trace events spread over `lanes` prefixed lanes. The panel no longer
+/// requests trace events, so a large event table is exactly the load the graph
+/// read must stay bounded under.
+export function seedBulkEvents(count: number, lanes: number, prefix = "bulk-lane"): void {
+  sql(`insert or ignore into dict_trace_kind(value) values ('mail');`);
+  sql(`with recursive seq(i) as (select 1 union all select i+1 from seq where i < ${count})
+       insert into agent_trace_event(event_key, lane_id, kind_id, created_ts)
+       select 'seed-ev-'||i,
+              (select id from dict_session where value='${prefix}-'||(1 + (i % ${lanes}))),
+              (select id from dict_trace_kind where value='mail'), ${NOW_SQL} + i
+         from seq;`);
 }
