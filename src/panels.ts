@@ -104,6 +104,13 @@ export function registerBuiltin() {
         iconLabel: "Boop",
         html: "",
         component: BoopPanelV2,
+        // The marbler subtree owns two Pixi renderers. Dockview's default
+        // renderer unmounts an inactive tab, and tearing a Pixi Application
+        // down and rebuilding it on the next focus raced the async init
+        // (RenderTargetSystem null clear -> the panel boundary showed
+        // "Boop: crashed"). Keep the panel mounted so focus only toggles
+        // visibility; the pixi trees are created once.
+        keepAlive: true,
       },
     ],
   });

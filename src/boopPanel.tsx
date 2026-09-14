@@ -8,6 +8,7 @@ import { settings } from "./0_settings";
 import type { SortingState } from "@tanstack/react-table";
 import { createMarbler, MarblerPanel, type MarbleEvent, type MarbleFrame } from "@hafley66/marbler";
 import { buildGraphTree, flattenTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
+import "./1_boopPanel.css";
 
 export interface BoopLane {
   route: string;

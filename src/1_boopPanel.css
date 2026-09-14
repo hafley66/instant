@@ -1,0 +1,21 @@
+/* Boop rail panel chrome that the XP skin's global element rules break. */
+
+/* xp.css sets `input[type=checkbox]{appearance:none;position:fixed;opacity:0}`
+   because it expects the input to pair with a following <label> that paints a
+   pseudo-element. The active-only toggle is a standalone input inside its own
+   <label>, so the skin left it invisible: the panel opened with every idle lane
+   filtered out and no visible control to unfilter. Restore the native control
+   with specificity that beats the skin (0,2,1 over 0,1,1). */
+.boop-panel .boop-only-active input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  position: static;
+  opacity: 1;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  cursor: pointer;
+  vertical-align: middle;
+}
