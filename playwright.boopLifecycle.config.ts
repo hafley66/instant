@@ -8,10 +8,12 @@ import path from "node:path";
 // Isolated from the owner: private BOOP_DB/BOOP_MAIL_DIR, private app data dir,
 // private TMUX_TMPDIR, TMUX cleared, INSTANT_NO_GLOBALS=1.
 const port = Number(process.env.INSTANT_BOOP_LIFE_PORT ?? 47807);
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname));
+// Repo-relative default so the tier works from any checkout; point
+// INSTANT_BOOP_LIFE_SERVE at a warm CARGO_TARGET_DIR binary to skip the build.
 const serve =
   process.env.INSTANT_BOOP_LIFE_SERVE ??
-  "/Users/chrishafley/projects/boop-selection-work/cargo-target/debug/instant-serve";
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname));
+  path.join(root, "src-tauri/target/debug/instant-serve");
 const scratchRoot = process.env.INSTANT_BOOP_LIFE_TMP ?? `/tmp/instant-boop-life-${port}`;
 const dataDir = path.join(scratchRoot, "serve");
 const boopDir = path.join(scratchRoot, "boop");
