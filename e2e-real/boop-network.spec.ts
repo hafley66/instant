@@ -66,6 +66,40 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(shots, `boop-network-${name}.png`), fullPage: false });
 }
 
+/// Count pixels of an element screenshot that differ from the modal (background)
+/// color. Element screenshots composite the Pixi WebGL canvas, whereas reading
+/// the canvas buffer back returns an empty drawing buffer. Used to prove the
+/// waterfall actually drew marks, not just that a canvas element exists.
+async function screenshotInk(page: Page, selector: string): Promise<number> {
+  const png = (await page.locator(selector).screenshot()).toString("base64");
+  return page.evaluate(async (data) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${data}`;
+    await img.decode();
+    const copy = document.createElement("canvas");
+    copy.width = img.width;
+    copy.height = img.height;
+    const ctx = copy.getContext("2d");
+    if (!ctx) return -1;
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, copy.width, copy.height).data;
+    const counts = new Map<number, number>();
+    for (let i = 0; i < d.length; i += 4) {
+      const key = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let modal = 0;
+    let modalCount = 0;
+    for (const [key, count] of counts) if (count > modalCount) { modal = key; modalCount = count; }
+    const mr = (modal >> 16) & 255, mg = (modal >> 8) & 255, mb = modal & 255;
+    let ink = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (Math.abs(d[i] - mr) + Math.abs(d[i + 1] - mg) + Math.abs(d[i + 2] - mb) > 30) ink += 1;
+    }
+    return ink;
+  }, png);
+}
+
 interface GraphFrame {
   ms: number;
   sessions: number;
@@ -120,9 +154,9 @@ test("a large history renders the network and keeps the graph read bounded", asy
   await openBoop(page);
 
   // The Boop network view is the embedded marbler (`[data-testid=marbler]` /
-  // `section.network-panel`) under the roster. There is no separate network-mode
-  // control in current main: the marbler's `all/request/...` filter toolbar is
-  // hidden in embedded mode, so this is the whole network surface.
+  // `section.network-panel`) under the roster. It is a table view; there is no
+  // separate network-mode control in current main (the marbler's `all/request/`
+  // filter toolbar is hidden in embedded mode), so this is the whole surface.
   await expect(page.locator('[data-testid="marbler"]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".boop-marbler section.network-panel")).toHaveCount(1);
   // Mail frames render as waterfall dots on the roster lanes (the marbler's own
@@ -131,9 +165,10 @@ test("a large history renders the network and keeps the graph read bounded", asy
   const firstRow = marblerRows(page).first();
   await expect(firstRow).toBeVisible({ timeout: READ_BUDGET_MS + 30_000 });
   await expect(firstRow).toContainText("bulk-");
-  const nodeCount = await marblerRows(page).count();
-  expect(nodeCount).toBeGreaterThan(0);
+  const tableRowCount = await marblerRows(page).count();
+  expect(tableRowCount).toBeGreaterThan(0);
   await expect(page.locator(".boop-marbler .subtoolbar .summary")).toHaveText(/[1-9]\d* events/);
+  await expect(page.locator('[data-testid="waterfall-pixi"]')).toHaveCount(1);
   await expect(page.locator(".boop-marbler .time-navigator canvas")).toHaveCount(1);
   const visibleMs = Date.now() - opened;
 
@@ -147,11 +182,11 @@ test("a large history renders the network and keeps the graph read bounded", asy
   expect(frames[frames.length - 1].sessions).toBe(BIG_SESSIONS);
 
   await shot(page, "01-large-render");
-  console.log(JSON.stringify({ visibleMs, worstReadMs: worst, frames: frames.slice(0, 3), nodeCount }));
+  console.log(JSON.stringify({ visibleMs, worstReadMs: worst, frames: frames.slice(0, 3), tableRowCount }));
   expect(errors.page, errors.page.join("\n")).toEqual([]);
 });
 
-test("clicking a network node opens its detail drawer", async ({ page }) => {
+test("clicking a network table row opens its detail drawer", async ({ page }) => {
   resetStore();
   seedLane({ lane: "net-lane-a", cwd: "/tmp/e2e-net/a", state: "live", goal: "network a", spawnedTs: Date.now() - 60_000 });
   seedLane({ lane: "net-lane-b", parent: "net-lane-a", cwd: "/tmp/e2e-net/b", state: "live", goal: "network b", spawnedTs: Date.now() - 30_000 });
@@ -168,6 +203,23 @@ test("clicking a network node opens its detail drawer", async ({ page }) => {
   await expect(drawer).toContainText("boop://net-lane-a/net-lane-b");
   await expect(drawer).toContainText("net-lane-b");
   await shot(page, "02-selection");
+  expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
+});
+
+test("the waterfall canvas draws the mail frames", async ({ page }) => {
+  resetStore();
+  seedLane({ lane: "wf-lane-a", cwd: "/tmp/e2e-net/a", state: "live", goal: "waterfall a", spawnedTs: Date.now() - 60_000 });
+  seedLane({ lane: "wf-lane-b", parent: "wf-lane-a", cwd: "/tmp/e2e-net/b", state: "live", goal: "waterfall b", spawnedTs: Date.now() - 30_000 });
+  seedMail({ id: "wf-m1", from: "wf-lane-a", to: "wf-lane-b", kind: "note", body: "waterfall mail", ageSec: 10 });
+
+  const errors = await boot(page);
+  await openBoop(page);
+  await expect(page.locator('[data-testid="waterfall-pixi"]')).toBeVisible({ timeout: 30_000 });
+  // Poll the composited pixels: a blank waterfall fails, a drawn frame passes.
+  await expect
+    .poll(() => screenshotInk(page, '[data-testid="waterfall-pixi"]'), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await shot(page, "05-waterfall");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
 });
 
