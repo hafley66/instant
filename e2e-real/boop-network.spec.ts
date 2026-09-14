@@ -170,6 +170,10 @@ test("a large history renders the network and keeps the graph read bounded", asy
   await expect(page.locator(".boop-marbler .subtoolbar .summary")).toHaveText(/[1-9]\d* events/);
   await expect(page.locator('[data-testid="waterfall-pixi"]')).toHaveCount(1);
   await expect(page.locator(".boop-marbler .time-navigator canvas")).toHaveCount(1);
+  // The navigator is lanes*14 tall by default; with 1200 live lanes the clamp
+  // must keep the scrubber on screen.
+  const navBox = await page.locator(".boop-marbler .time-navigator").boundingBox();
+  expect(navBox?.height ?? 0).toBeLessThanOrEqual(141);
   const visibleMs = Date.now() - opened;
 
   // Every graph read completed inside the bound and asked for no trace events.
@@ -264,5 +268,99 @@ test("repeated refocus keeps the network rendered and a hidden write appears", a
   await expect(marblerRows(page)).toHaveCount(2, { timeout: 30_000 });
   await expect(marblerRows(page).filter({ hasText: "focus-beta" })).toHaveCount(1);
   await shot(page, "04-refocus-hidden-write");
+  expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
+});
+
+test("active-only shows live agents collapsed and hoists a live grandchild through an idle parent", async ({ page }) => {
+  resetStore();
+  seedLane({ lane: "act-root", cwd: "/tmp/e2e-net/act-root", state: "live", goal: "act root", spawnedTs: Date.now() - 90_000 });
+  seedLane({ lane: "act-mid", parent: "act-root", cwd: "/tmp/e2e-net/act-mid", state: "dead", goal: "act mid", spawnedTs: Date.now() - 80_000 });
+  seedLane({ lane: "act-leaf", parent: "act-mid", cwd: "/tmp/e2e-net/act-leaf", state: "live", goal: "act leaf", spawnedTs: Date.now() - 40_000 });
+  seedLane({ lane: "act-dead", cwd: "/tmp/e2e-net/act-dead", state: "dead", goal: "act dead", spawnedTs: Date.now() - 300_000 });
+  seedMail({ id: "act-m1", from: "act-root", to: "act-leaf", kind: "note", body: "hoist mail", ageSec: 20 });
+
+  const errors = await boot(page);
+  await openBoop(page);
+
+  // Roster: only the live root paints; the idle middle and dead sibling are gone.
+  await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.locator(".boop-panel")).toContainText("1 hidden by active-only");
+  await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-mid" })).toHaveCount(0);
+  await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-dead" })).toHaveCount(0);
+
+  // The lower marbler applies the same active projection.
+  await expect(marblerRows(page)).toHaveCount(2, { timeout: 30_000 });
+  await expect(marblerRows(page).filter({ hasText: "act-mid" })).toHaveCount(0);
+  await expect(marblerRows(page).filter({ hasText: "act-dead" })).toHaveCount(0);
+
+  // Expanding the live root reveals the hoisted live grandchild, never the idle middle.
+  const rootRow = page.locator(".boop-panel .dtable-row", { hasText: "act-root" }).first();
+  await rootRow.locator(".tt-twisty").click();
+  await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(2, { timeout: 15_000 });
+  await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-leaf" })).toHaveCount(1);
+  await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-mid" })).toHaveCount(0);
+
+  // Unchecking active-only exposes the full stored history in both panels. The
+  // middle row is painted again; its child stays collapsed until expanded.
+  await page.locator(".boop-panel input[type=checkbox]").click();
+  await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(3, { timeout: 15_000 });
+  await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-mid" })).toHaveCount(1);
+  await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-dead" })).toHaveCount(1);
+  await expect(marblerRows(page)).toHaveCount(4, { timeout: 15_000 });
+
+  await shot(page, "06-active-only-hoist");
+  expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
+});
+
+test("timeline domain tracks mail activity and survives pan, refresh, and refocus", async ({ page }) => {
+  resetStore();
+  const startedAgo = Date.now() - 3_600_000;
+  seedLane({ lane: "tl-root", cwd: "/tmp/e2e-net/tl-root", state: "live", goal: "tl root", spawnedTs: startedAgo });
+  seedLane({ lane: "tl-peer", cwd: "/tmp/e2e-net/tl-peer", state: "live", goal: "tl peer", spawnedTs: startedAgo });
+  seedMail({ id: "tl-m1", from: "tl-root", to: "tl-peer", kind: "note", body: "first", ageSec: 40 });
+  seedMail({ id: "tl-m2", from: "tl-peer", to: "tl-root", kind: "result", body: "last", ageSec: 5 });
+
+  const errors = await boot(page);
+  await openBoop(page);
+  await expect(page.locator(".boop-marbler .time-navigator canvas")).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.locator(".boop-marbler .time-navigator")).toBeVisible();
+
+  // Domain is mail-only. An hour-old lane start must not crush the two recent
+  // frames: the earliest frame sits near the left edge, not pinned at the right.
+  await expect(page.locator(".boop-master .boop-spark i").first()).toBeVisible({ timeout: 30_000 });
+  const firstLeft = await page.locator(".boop-master .boop-spark i").first().evaluate((el) => parseFloat((el as HTMLElement).style.left));
+  expect(firstLeft).toBeLessThan(50);
+
+  // Scrub (drag) the library navigator: live-follow turns off.
+  await expect(page.locator(".boop-tl-btn", { hasText: /^following$/ })).toHaveCount(1);
+  const nav = await page.locator(".boop-marbler .time-navigator").boundingBox();
+  const cx = nav!.x + nav!.width / 2;
+  const cy = nav!.y + nav!.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 60, cy, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator(".boop-tl-btn", { hasText: /^follow$/ })).toHaveCount(1);
+
+  // Ctrl+wheel zoom also leaves follow; then a mail refresh while hidden and a
+  // refocus must not snap the viewport back to the live tail.
+  await page.keyboard.down("Control");
+  await page.mouse.move(cx, cy);
+  await page.mouse.wheel(0, -120);
+  await page.keyboard.up("Control");
+  await expect(page.locator(".boop-tl-btn", { hasText: /^follow$/ })).toHaveCount(1);
+
+  await page.locator('.dv-tab:has(.dv-default-tab-content:text-is("tmux"))').click();
+  await expect(page.locator(".boop-panel")).toBeHidden();
+  seedMail({ id: "tl-m3", from: "tl-root", to: "tl-peer", kind: "note", body: "after pan", ageSec: 1 });
+  await page.locator('.dv-tab:has(.dv-default-tab-content:text-is("Boop"))').click();
+  await expect(page.locator(".boop-panel")).toBeVisible();
+  await expect(page.locator(".boop-tl-btn", { hasText: /^follow$/ })).toHaveCount(1, { timeout: 15_000 });
+
+  // Follow re-arms live tailing.
+  await page.locator(".boop-tl-btn", { hasText: /^follow$/ }).click();
+  await expect(page.locator(".boop-tl-btn", { hasText: /^following$/ })).toHaveCount(1);
+
+  await shot(page, "07-timeline-viewport");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
 });

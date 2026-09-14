@@ -6,90 +6,20 @@ import { commandEndpoint, invoke } from "./generated/native";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { settings } from "./0_settings";
 import type { SortingState } from "@tanstack/react-table";
-import { createMarbler, MarblerPanel, type MarbleEvent, type MarbleFrame } from "@hafley66/marbler";
-import { buildGraphTree, flattenTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
+import { createMarbler, MarblerPanel } from "@hafley66/marbler";
+import { buildGraphTree, flattenTree, activeOnlyTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
 import { boopRosterState } from "./0_boopPanelState";
+import {
+  lanesOfNodes,
+  laneStats,
+  stampsOf,
+  subtreeLanes,
+  subtreeLive,
+  toMarbleEvents,
+  type BoopLaneEvent,
+  type LaneStat,
+} from "./0_boopPresentation";
 import "./1_boopPanel.css";
-
-export interface BoopLane {
-  route: string;
-  kind: string;
-  harness: string | null;
-  model: string | null;
-  goal: string | null;
-  parent: string | null;
-  cwd: string | null;
-  branch: string | null;
-  registeredMs: number;
-  state: string;
-}
-
-export interface BoopLaneEvent {
-  ts: number;
-  kind: string;
-  fromRoute: string;
-  toRoute: string;
-  preview: string;
-}
-
-const FRAME_KINDS: ReadonlySet<MarbleFrame["kind"]> = new Set([
-  "spawn", "turn-start", "turn-finish", "mail-in", "mail-out",
-  "result", "error", "exit",
-]);
-
-function frameKind(mail: BoopLaneEvent, direction: "in" | "out" | "self"): MarbleFrame["kind"] {
-  if (mail.kind === "result") return "result";
-  if (mail.kind === "error" || mail.kind === "exited_without_completion") return "error";
-  const direct = mail.kind as MarbleFrame["kind"];
-  if (FRAME_KINDS.has(direct)) return direct;
-  return direction === "in" ? "mail-in" : "mail-out";
-}
-
-// Mail rows carry both endpoints; a row lands as a dot on each lane it
-// touches, with the other endpoint as its peer so marbler can draw the link.
-export function laneFrames(lane: BoopLane, events: BoopLaneEvent[]): MarbleFrame[] {
-  const touching = events.filter(
-    (event) => event.fromRoute === lane.route || event.toRoute === lane.route,
-  );
-  return touching.map((event, index) => {
-    const direction =
-      event.fromRoute === lane.route && event.toRoute === lane.route
-        ? ("self" as const)
-        : event.toRoute === lane.route
-          ? ("in" as const)
-          : ("out" as const);
-    const peer =
-      direction === "in" ? event.fromRoute : direction === "out" ? event.toRoute : null;
-    return {
-      id: `${lane.route}:${event.ts}:${index}`,
-      t: event.ts,
-      kind: frameKind(event, direction),
-      direction,
-      peer,
-      preview: event.preview,
-      repeat: 1,
-    };
-  });
-}
-
-export function toMarbleEvents(lanes: BoopLane[], events: BoopLaneEvent[]): MarbleEvent[] {
-  return lanes.map((lane) => ({
-    id: lane.route,
-    name: lane.route,
-    method: lane.harness ?? "shell",
-    status: lane.state === "open" ? 200 : 0,
-    type: "note",
-    initiator: lane.parent ?? "root",
-    size: "",
-    start: lane.registeredMs > 0 ? lane.registeredMs : null,
-    duration: null,
-    from: lane.parent ?? "bus",
-    to: lane.route,
-    preview: lane.goal ?? lane.cwd ?? "",
-    phases: [],
-    frames: laneFrames(lane, events),
-  }));
-}
 
 // Rows are graph nodes (lanes and sessions, nested) carrying the per-poll
 // rollups; the column array stays module-stable because rebuilt columns reset
@@ -108,7 +38,8 @@ const BOOP_COLUMNS: TreeColumn<BoopRow>[] = [
     header: "agent",
     tree: true,
     sortValue: (r) => r.label,
-    cell: (r) => r.label,
+    // The label is the human name; the full stored identity stays on hover.
+    cell: (r) => <span title={r.id}>{r.label}</span>,
     cellClass: (r) => (r.state === "live" ? "boop-open" : "boop-closed"),
   },
   { id: "kind", header: "kind", sortValue: (r) => r.kind, cell: (r) => r.kind, size: 64 },
@@ -179,97 +110,6 @@ function fmtAgo(ts: number, now: number): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-export interface LaneStat {
-  lastTs: number;
-  endedTs: number;
-  count: number;
-  dots: { id: string; t: number; cls: string }[];
-}
-
-// Per-lane rollup for the mail / time / spark columns. Dots cap at 240 so a
-// chatty lane cannot blow up the DOM; the cap keeps the newest dots.
-export function laneStats(rows: MarbleEvent[]): Map<string, LaneStat> {
-  const map = new Map<string, LaneStat>();
-  for (const row of rows) {
-    for (const frame of row.frames ?? []) {
-      const stat = map.get(row.id) ?? { lastTs: 0, endedTs: 0, count: 0, dots: [] };
-      stat.count += 1;
-      stat.lastTs = Math.max(stat.lastTs, frame.t);
-      if (frame.kind === "result" || frame.kind === "error" || frame.kind === "exit") {
-        stat.endedTs = Math.max(stat.endedTs, frame.t);
-      }
-      if (stat.dots.length < 240) {
-        stat.dots.push({
-          id: frame.id,
-          t: frame.t,
-          cls: frame.kind === "error" ? "err" : frame.direction,
-        });
-      }
-      map.set(row.id, stat);
-    }
-  }
-  return map;
-}
-
-export function stampsOf(rows: MarbleEvent[]): number[] {
-  const stamps: number[] = [];
-  for (const row of rows) {
-    if (row.start !== null) stamps.push(row.start);
-    for (const frame of row.frames ?? []) stamps.push(frame.t);
-  }
-  return stamps;
-}
-
-// Lane narrowing: the selected root's subtree (parent-edge walk) plus mail
-// peers, so links keep both endpoints. Filtered lanes are disabled.
-export function subtreeLanes(lanes: BoopLane[], rows: MarbleEvent[], root: string | null): MarbleEvent[] {
-  if (!root) return rows;
-  const keep = new Set<string>([root]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const lane of lanes) {
-      if (lane.parent && keep.has(lane.parent) && !keep.has(lane.route)) {
-        keep.add(lane.route);
-        grew = true;
-      }
-    }
-  }
-  for (const row of rows) {
-    if (!keep.has(row.id)) continue;
-    for (const frame of row.frames ?? []) if (frame.peer) keep.add(frame.peer);
-  }
-  return rows.filter((row) => keep.has(row.id));
-}
-
-// Root sessions for the master table: TUI panes and top-level lanes; a named
-// parent that is itself a route means the row is an intermediate lane.
-export function rootLanes(lanes: BoopLane[]): BoopLane[] {
-  return lanes.filter((lane) => !lane.parent || lane.parent === "root");
-}
-
-// The marbler and the mail rollups still speak BoopLane; every graph node is
-// one lane-shaped row, its parent the node it nests under.
-export function lanesOfNodes(nodes: GraphNode[]): BoopLane[] {
-  return nodes.map((node) => ({
-    route: node.id,
-    kind: node.kind,
-    harness: node.harness,
-    model: null,
-    goal: node.label,
-    parent: node.parentId,
-    cwd: node.cwd,
-    branch: null,
-    registeredMs: node.startedTs,
-    state: node.state === "live" ? "open" : "closed",
-  }));
-}
-
-// A root stays under "active only" when anything in its subtree is live.
-export function subtreeLive(node: GraphNode): boolean {
-  return node.state === "live" || node.children.some(subtreeLive);
-}
-
 const BOOP_SORT: SortingState = [{ id: "updated", desc: true }];
 // The graph read walks the process table and tmux, so it polls slower than
 // the mail tail; a tick that lands mid-flight is dropped, never queued.
@@ -289,8 +129,16 @@ export function BoopPanelV2() {
   const graphState = useSignal(graphQuery.$);
   const graph = graphState.data ?? null;
   const [events, setEvents] = useState<BoopLaneEvent[]>([]);
+  const onlyActive = useSignal(settings.boopOnlyActive.$);
   const roots = useMemo(() => (graph ? buildGraphTree(graph, sinceTs.current) : []), [graph]);
-  const nodes = useMemo(() => flattenTree(roots), [roots]);
+  // Active-only is a projection, not a root filter: a live agent under an
+  // inactive ancestor hoists to its nearest live ancestor (or becomes a root),
+  // so no inactive row is painted and no live agent is dropped.
+  const visibleRoots = useMemo(() => (onlyActive ? activeOnlyTree(roots) : roots), [roots, onlyActive]);
+  const nodes = useMemo(() => flattenTree(visibleRoots), [visibleRoots]);
+  // Every graph node, filtered or not: the roster's empty/loading decision must
+  // key on what the graph knows, never on what the active filter left visible.
+  const allNodeCount = useMemo(() => flattenTree(roots).length, [roots]);
   const lanes = useMemo(() => lanesOfNodes(nodes), [nodes]);
   const [selected, setSelected] = useState<string | null>(null);
   const [invokeError, setInvokeError] = useState<string | null>(null);
@@ -337,16 +185,18 @@ export function BoopPanelV2() {
     : null), [stamps, newest]);
 
   // A selected root narrows the network view to its descendant subtree plus
-  // mail peers. Click the row again to clear.
+  // mail peers. Click the row again to clear. Never point the filter at a row
+  // the active projection removed.
+  const shownRoot = selected && lanes.some((lane) => lane.route === selected) ? selected : null;
   const shown = useMemo(
-    () => subtreeLanes(lanes, rows, selected),
-    [lanes, rows, selected],
+    () => subtreeLanes(lanes, rows, shownRoot),
+    [lanes, rows, shownRoot],
   );
 
   useEffect(() => {
     marbler.current.source.$(shown);
-    marbler.current.selectedId.$(selected);
-  }, [shown, selected]);
+    marbler.current.selectedId.$(shownRoot);
+  }, [shown, shownRoot]);
 
   useEffect(() => {
     // Seeded-empty model starts with a degenerate range; while following,
@@ -367,7 +217,6 @@ export function BoopPanelV2() {
     }
   }, [shown, windowRange]);
 
-  const onlyActive = settings.boopOnlyActive.$();
   const toRow = (node: GraphNode): BoopRow => ({
     ...node,
     mailCount: stats.get(node.id)?.count ?? 0,
@@ -377,15 +226,14 @@ export function BoopPanelV2() {
     subRows: node.children.map(toRow),
   });
   const data: BoopRow[] = useMemo(() => {
-    const source = onlyActive ? roots.filter(subtreeLive) : roots;
-    return source.map(toRow);
+    return visibleRoots.map(toRow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roots, onlyActive, stats, windowRange]);
+  }, [visibleRoots, stats, windowRange]);
   const hiddenByActive = onlyActive ? roots.filter((node) => !subtreeLive(node)).length : 0;
   // Pending/errored/empty look identical to a person unless they are named
   // apart: a graph read still in flight reads as "no agents" otherwise.
   const roster = boopRosterState({
-    laneCount: lanes.length,
+    laneCount: allNodeCount,
     shownCount: data.length,
     hiddenByActive,
     status: graphState.status,
@@ -398,9 +246,33 @@ export function BoopPanelV2() {
       `${events.length} mail in window`,
     ];
   }, [lanes, events.length]);
-  const summary = selected
-    ? [`showing ${selected} + descendants`, `${shown.length} of ${rows.length} lanes`]
+  const summary = shownRoot
+    ? [`showing ${shownRoot} + descendants`, `${shown.length} of ${rows.length} lanes`]
     : summaryAll;
+
+  // Timeline buttons for the two viewport states the navigator's gestures do
+  // not expose: follow (re-arm live tailing) and fit (whole domain). marbler
+  // 0.0.3 does not re-export reduceTimeViewport, so these write the exact
+  // shapes its "follow"/"fit" gestures produce; scrub (drag) and zoom
+  // (ctrl+wheel) stay on the navigator itself.
+  const viewport = useSignal(marbler.current.viewport.$);
+  const setFollow = (enabled: boolean) => {
+    const vp = marbler.current.viewport.$();
+    if (!enabled) {
+      marbler.current.viewport.$({ ...vp, followLive: false });
+      return;
+    }
+    const span = vp.visible[1] - vp.visible[0] || vp.full[1] - vp.full[0] || 1;
+    marbler.current.viewport.$({
+      ...vp,
+      followLive: true,
+      visible: [Math.max(vp.full[0], vp.full[1] - span), vp.full[1]],
+    });
+  };
+  const fit = () => {
+    const vp = marbler.current.viewport.$();
+    marbler.current.viewport.$({ ...vp, followLive: false, visible: vp.full });
+  };
 
   return (
     <div className="v2-panel boop-panel">
@@ -424,7 +296,6 @@ export function BoopPanelV2() {
             data={data}
             getRowId={(r) => r.id}
             getSubRows={(r) => r.subRows}
-            defaultExpandedAll
             defaultSorting={BOOP_SORT}
             virtual
             rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
@@ -468,9 +339,25 @@ export function BoopPanelV2() {
         )}
       </div>
       <div className="boop-marbler">
-        {selected && (
+        <div className="boop-timeline-controls">
+          <span className="boop-tl-title">timeline</span>
+          <button
+            type="button"
+            className={viewport.followLive ? "boop-tl-btn active" : "boop-tl-btn"}
+            title="re-arm live tailing"
+            onClick={() => setFollow(!viewport.followLive)}
+          >
+            {viewport.followLive ? "following" : "follow"}
+          </button>
+          <button type="button" className="boop-tl-btn" title="fit the whole window" onClick={fit}>
+            fit
+          </button>
+          <span className="boop-tl-hint">drag to scrub · ctrl+wheel to zoom · dblclick fits</span>
+          {stamps.length === 0 && <span className="muted">no mail in window</span>}
+        </div>
+        {shownRoot && (
           <button type="button" className="boop-narrow" onClick={() => setSelected(null)}>
-            showing {selected} + descendants ×
+            showing {shownRoot} + descendants ×
           </button>
         )}
         <MarblerPanel model={marbler.current} embedded summary={summary} />

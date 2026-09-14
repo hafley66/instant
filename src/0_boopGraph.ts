@@ -74,6 +74,44 @@ function baseName(path: string | null): string {
   return path.replace(/\/$/, "").split("/").pop() ?? "";
 }
 
+// backend liveness dictionaries: shells carry "live"/"dead"/reported status,
+// sessions carry "live"/"dead"/"idle" plus a finished_ts span. Anything that
+// is neither is idle, not dead: an unprobed session is history, not an ending.
+function shellState(state: string): GraphNode["state"] {
+  if (state === "live") return "live";
+  if (state === "dead") return "dead";
+  return "idle";
+}
+
+function sessionState(session: GraphSession): GraphNode["state"] {
+  if (session.state === "live") return "live";
+  if (session.state === "dead" || session.finished_ts) return "dead";
+  return "idle";
+}
+
+// Duplicate cwd bases would otherwise paint identical labels for distinct
+// sessions. Only the collided rows gain a short id suffix, so common labels
+// stay short and every row stays distinguishable.
+function disambiguateSessionLabels(nodes: Map<string, GraphNode>): void {
+  const seen = new Set<string>();
+  for (const node of nodes.values()) {
+    if (node.kind !== "session") continue;
+    if (!seen.has(node.label)) {
+      seen.add(node.label);
+      continue;
+    }
+    const id = node.sessionId ?? node.id;
+    let length = 6;
+    let label = `${node.label} · ${id.slice(-length)}`;
+    while (seen.has(label) && length < id.length) {
+      length += 4;
+      label = `${node.label} · ${id.slice(-length)}`;
+    }
+    node.label = label;
+    seen.add(label);
+  }
+}
+
 // The tree. `sinceTs` drops sessions with no activity in the window unless a
 // lane binds them or a kept session descends from them (ancestors stay so
 // the family remains connected). Lanes are always kept.
@@ -90,7 +128,7 @@ export function buildGraphTree(graph: SessionGraph, sinceTs: number): GraphNode[
       label: shell.lane,
       kind: "lane",
       harness: shell.harness,
-      state: shell.state === "live" ? "live" : "dead",
+      state: shellState(shell.state),
       cwd: shell.cwd,
       sessionId: boundId,
       parentId: shell.parent_lane && laneNames.has(shell.parent_lane) ? shell.parent_lane : null,
@@ -143,10 +181,10 @@ export function buildGraphTree(graph: SessionGraph, sinceTs: number): GraphNode[
     }
     nodes.set(sessionNodeId(session.session), {
       id: sessionNodeId(session.session),
-      label: `${session.session.harness} ${id.slice(0, 8)}${session.cwd ? ` · ${baseName(session.cwd)}` : ""}`,
+      label: `${session.session.harness} · ${baseName(session.cwd) || id.slice(0, 8)}`,
       kind: "session",
       harness: session.session.harness,
-      state: session.finished_ts ? "dead" : "idle",
+      state: sessionState(session),
       cwd: session.cwd,
       sessionId: id,
       parentId: null,
@@ -156,6 +194,8 @@ export function buildGraphTree(graph: SessionGraph, sinceTs: number): GraphNode[
       children: [],
     });
   }
+
+  disambiguateSessionLabels(nodes);
 
   // Spawn edges: a child hangs under whichever row carries its parent session.
   // A lane that already names a parent lane keeps that edge.
@@ -207,6 +247,34 @@ export function flattenTree(roots: GraphNode[]): GraphNode[] {
     }
   };
   walk(roots);
+  return out;
+}
+
+// The requested view: every live agent, no inactive row anywhere. An inactive
+// ancestor is not painted as a placeholder; its live descendants hoist to the
+// nearest live ancestor (or become roots), preserving stored ids and the
+// visible parent edge. Collapsed by default, expansion then walks live
+// children only.
+export function activeOnlyTree(roots: GraphNode[]): GraphNode[] {
+  const out: GraphNode[] = [];
+  const liveStack: GraphNode[] = [];
+  const visit = (node: GraphNode) => {
+    const live = node.state === "live";
+    if (live) {
+      const visible: GraphNode = {
+        ...node,
+        parentId: liveStack.length ? liveStack[liveStack.length - 1].id : null,
+        children: [],
+      };
+      const parent = liveStack[liveStack.length - 1];
+      if (parent) parent.children.push(visible);
+      else out.push(visible);
+      liveStack.push(visible);
+    }
+    for (const child of node.children) visit(child);
+    if (live) liveStack.pop();
+  };
+  for (const root of roots) visit(root);
   return out;
 }
 

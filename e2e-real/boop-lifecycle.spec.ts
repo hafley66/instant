@@ -167,10 +167,16 @@ test("first mount shows seeded live lanes and mail rows", async ({ page }) => {
   const errors = await boot(page);
   await openBoop(page);
 
-  await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(3, { timeout: 30_000 });
-  await expect(row(page, ALPHA)).toBeVisible();
+  // Trees start collapsed: BETA and GAMMA are roots, ALPHA is BETA's child.
+  await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(2, { timeout: 30_000 });
   await expect(row(page, BETA)).toBeVisible();
   await expect(row(page, GAMMA)).toBeVisible();
+  await expect(row(page, ALPHA)).toHaveCount(0);
+
+  // Expanding BETA paints only its own child.
+  await row(page, BETA).locator(".tt-twisty").click();
+  await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(3, { timeout: 15_000 });
+  await expect(row(page, ALPHA)).toBeVisible();
   await expect(row(page, ALPHA)).toContainText("e2e-life/alpha");
 
   await expect(page.locator(".boop-panel .empty-help")).toHaveCount(0);

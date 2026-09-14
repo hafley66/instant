@@ -19,7 +19,7 @@ import {
   toMarbleEvents,
   type BoopLane,
   type BoopLaneEvent,
-} from "./boopPanel";
+} from "./0_boopPresentation";
 
 const LANE_A: BoopLane = {
   route: "feat-alpha",
@@ -136,10 +136,15 @@ describe("laneStats", () => {
     expect(stats.get("fix-beta")?.dots.map((dot) => dot.cls)).toEqual(["in", "out", "err"]);
   });
 
-  it("stampsOf covers lane starts and frame times for the viewport range", () => {
+  it("stampsOf tracks message activity only, never lane start times", () => {
     const rows = toMarbleEvents([LANE_A, LANE_B], EVENTS);
-    expect(stampsOf(rows)).toEqual(expect.arrayContaining([1000, 2000, 3000, 4000, 5000]));
+    const stamps = stampsOf(rows);
+    expect(stamps).toEqual(expect.arrayContaining([3000, 4000, 5000]));
+    // Lane spawn stamps (1000, 2000) must not stretch the viewport domain.
+    expect(stamps).not.toContain(1000);
+    expect(stamps).not.toContain(2000);
     expect(stampsOf([])).toEqual([]);
+    expect(stampsOf(toMarbleEvents([LANE_A], []))).toEqual([]);
   });
 });
 
