@@ -1,11 +1,10 @@
 // Boop Search panel: one text box over every user/assistant turn in boop.db,
 // rendered as a sortable @hafley66/grid table, flat or tree-by-chat.
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Signal, type Signal as SignalOf } from "@hafley66/signals";
 import { useSignal } from "@hafley66/signals/react";
-import { createDefaultGridState, createGrid, type Grid } from "@hafley66/grid";
-import { GridTable } from "@hafley66/grid/react";
-import { z } from "zod";
+import { TreeTable, type TreeColumn } from "./treetable";
+import type { ColumnSizingState } from "@tanstack/react-table";
 import { combineLatest, from, of, timer } from "rxjs";
 import { catchError, debounceTime, switchMap, takeWhile } from "rxjs/operators";
 import { invoke } from "./generated/native";
@@ -27,22 +26,6 @@ import "./1_boopSearch.css";
 const HARNESSES: ReadonlySet<string> = new Set<HarnessId>(["claude", "opencode", "codex", "kimi"]);
 const LIMIT = 500;
 
-const rowSchema = z.object({
-  id: z.string(),
-  kind: z.string(),
-  name: z.string(),
-  chat: z.string(),
-  session: z.string(),
-  harness: z.string(),
-  cwd: z.string(),
-  role: z.string(),
-  ts: z.number(),
-  lastTs: z.number(),
-  turn: z.number(),
-  snippet: z.string(),
-  count: z.number(),
-});
-
 type Model = {
   query: SignalOf<string>;
   role: SignalOf<SearchRole>;
@@ -50,8 +33,7 @@ type Model = {
   hits: SignalOf<BoopSearchHit[]>;
   error: SignalOf<string>;
   status: SignalOf<BoopSearchStatus | null>;
-  rows: SignalOf<SearchRow[]>;
-  grid: Grid<SearchRow>;
+  sizing: SignalOf<ColumnSizingState>;
 };
 
 let model: Model | null = null;
@@ -79,8 +61,6 @@ function resumeChat(row: SearchRow) {
   openWorktree(row.cwd, "", row.cwd, resumeLaunch(row.harness as HarnessId, row.session), true);
 }
 
-type Cell = { row: { original: SearchRow } };
-
 function highlight(text: string, terms: string[]) {
   const words = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).filter(Boolean);
   if (!words.length) return text;
@@ -90,64 +70,58 @@ function highlight(text: string, terms: string[]) {
 
 let activeTerms: string[] = [];
 
-const columns: Grid<SearchRow>["columns"] = [
-  { id: "__expand", header: "" },
+const columns: TreeColumn<SearchRow>[] = [
   {
     id: "snippet",
-    accessorKey: "snippet",
     header: "message",
-    cell: ({ row }: Cell) => {
-      const r = row.original;
-      if (!r.hit) return <span className="boop-search-text muted">{r.count} matching messages</span>;
-      const hit = r.hit;
-      return (
-        <span
-          className="boop-search-text boop-search-link"
-          title={`turn ${hit.turn} · click: open the full turn\n\n${hit.said.slice(0, 1500)}`}
-          onClick={() => openHit(hit)}
-        >
+    tree: true,
+    size: 640,
+    minSize: 160,
+    sortValue: (r) => r.snippet,
+    cell: (r) =>
+      r.hit ? (
+        <span className="boop-search-text" title={`turn ${r.turn} · click: open the full turn\n\n${r.hit.said.slice(0, 1500)}`}>
           {highlight(r.snippet, activeTerms)}
         </span>
-      );
-    },
+      ) : (
+        <span className="boop-search-text muted">{r.count} matching messages</span>
+      ),
   },
   {
     id: "chat",
-    accessorKey: "chat",
     header: "chat",
-    cell: ({ row }: Cell) => {
-      const r = row.original;
-      return (
-        <span
-          className={`boop-search-chat${r.cwd && HARNESSES.has(r.harness) ? " boop-search-link" : ""}`}
-          title={`${r.harness} · ${r.session}${r.cwd ? `\n${r.cwd}\ndouble-click: resume` : ""}`}
-          onDoubleClick={() => resumeChat(r)}
-        >
-          {r.chat}
-          {r.kind === "chat" ? <span className="boop-search-count">{r.count}</span> : null}
-        </span>
-      );
-    },
+    size: 160,
+    sortValue: (r) => r.chat,
+    cell: (r) => (
+      <span
+        className="boop-search-chat"
+        title={`${r.harness} · ${r.session}${r.cwd ? `\n${r.cwd}\ndouble-click: resume` : ""}`}
+      >
+        {r.chat}
+        {r.kind === "chat" ? <span className="boop-search-count">{r.count}</span> : null}
+      </span>
+    ),
   },
   {
     id: "role",
-    accessorKey: "role",
     header: "who",
-    cell: ({ row }: Cell) => (row.original.kind === "chat" ? "" : row.original.role === "assistant" ? "bot" : row.original.role),
+    size: 60,
+    sortValue: (r) => r.role,
+    cell: (r) => (r.kind === "chat" ? "" : r.role === "assistant" ? "bot" : r.role),
   },
   {
     id: "ts",
-    accessorKey: "ts",
     header: "said",
-    cell: ({ row }: Cell) => <span title={new Date(row.original.ts).toLocaleString()}>{whenLabel(row.original.ts)}</span>,
+    size: 90,
+    sortValue: (r) => r.ts,
+    cell: (r) => <span title={new Date(r.ts).toLocaleString()}>{whenLabel(r.ts)}</span>,
   },
   {
     id: "lastTs",
-    accessorKey: "lastTs",
     header: "chat active",
-    cell: ({ row }: Cell) => (
-      <span title={new Date(row.original.lastTs).toLocaleString()}>{whenLabel(row.original.lastTs)}</span>
-    ),
+    size: 100,
+    sortValue: (r) => r.lastTs,
+    cell: (r) => <span title={new Date(r.lastTs).toLocaleString()}>{whenLabel(r.lastTs)}</span>,
   },
 ];
 
@@ -159,23 +133,8 @@ function modelFor(): Model {
   const hits = Signal<BoopSearchHit[]>([]);
   const error = Signal("");
   const status = Signal<BoopSearchStatus | null>(null);
-  const rows = Signal<SearchRow[]>(() => searchRows(hits.$(), tree.$()));
-  const grid = createGrid<SearchRow>({
-    schema: rowSchema as z.ZodType<SearchRow>,
-    rows,
-    columnDefs: columns,
-    mode: "client",
-    state: Signal(
-      createDefaultGridState({
-        sorting: [{ id: "lastTs", desc: true }],
-        pagination: { pageIndex: 0, pageSize: 100_000 },
-      }),
-    ),
-    getRowId: (row) => row.id,
-    getSubRows: (row) => row.children,
-    getRowCanExpand: (row) => row.kind === "chat",
-  });
-  model = { query, role, tree, hits, error, status, rows, grid };
+  const sizing = setting<ColumnSizingState>("boopSearchSizing", {});
+  model = { query, role, tree, hits, error, status, sizing };
   return model;
 }
 
@@ -198,6 +157,8 @@ export function BoopSearchPanel() {
   const hits = useSignal(m.hits.$);
   const error = useSignal(m.error.$);
   const status = useSignal(m.status.$);
+  const sizing = useSignal(m.sizing.$);
+  const rows = useMemo(() => searchRows(hits, tree), [hits, tree]);
 
   useEffect(() => {
     const subscription = combineLatest([m.query.$, m.role.$])
@@ -275,8 +236,21 @@ export function BoopSearchPanel() {
         </button>
         <span className="muted boop-search-status">{error || statusLine(status, hits.length, query)}</span>
       </div>
-      <div className="boop-search-grid">
-        <GridTable grid={m.grid} density="compact" />
+      <div className="fs-list boop-search-grid">
+        <TreeTable<SearchRow>
+          columns={columns}
+          data={rows}
+          getRowId={(r) => r.id}
+          getSubRows={(r) => r.children}
+          defaultSorting={[{ id: "lastTs", desc: true }]}
+          defaultExpandedAll
+          virtual
+          columnSizing={sizing}
+          onColumnSizingChange={(next) => m.sizing.$(next)}
+          onRowClick={(r) => r.hit && openHit(r.hit)}
+          onRowDoubleClick={(r) => resumeChat(r)}
+          rowTitle={(r) => (r.hit ? "click: open the full turn" : r.cwd ? "double-click: resume this chat" : r.session)}
+        />
       </div>
     </div>
   );

@@ -25,9 +25,13 @@
 .boop-search-grid {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  --grid-row-hover: var(--row-hover);
-  --grid-row-selected: var(--row-active-bg);
+  display: flex;
+  flex-direction: column;
+}
+.boop-search-grid .fs-list,
+.boop-search-grid > * {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .boop-search-link {
   cursor: pointer;
@@ -44,8 +48,6 @@
 }
 .boop-search-text {
   display: block;
-  width: 100%;
-  min-width: 45vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
