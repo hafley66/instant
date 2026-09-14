@@ -24,12 +24,22 @@ fn scratch(label: &str) -> PathBuf {
     dir
 }
 
-async fn spin(doc_root: Option<PathBuf>) -> SocketAddr {
+/// A dist directory with a real index.html, so the SPA fallback is live and the
+/// no-root assertions prove `/rustdoc/...` cannot fall through to it.
+fn dist_with_spa() -> (PathBuf, PathBuf) {
     let dir = scratch("serve");
+    let dist = dir.join("dist");
+    std::fs::create_dir_all(&dist).unwrap();
+    std::fs::write(dist.join("index.html"), "<html>SPA-FALLBACK-MARKER</html>").unwrap();
+    (dir, dist)
+}
+
+async fn spin(doc_root: Option<PathBuf>) -> SocketAddr {
+    let (dir, dist) = dist_with_spa();
     let services = Arc::new(Services::boot(&dir).expect("services boot"));
     let host = Arc::new(ServeHost::new(dir.clone()));
     let state = Arc::new(ServeState { host, services, rustdoc_root: doc_root });
-    let app = router(state, dir);
+    let app = router(state, dist);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
@@ -38,7 +48,7 @@ async fn spin(doc_root: Option<PathBuf>) -> SocketAddr {
     addr
 }
 
-fn status(addr: SocketAddr, method: &str, path: &str) -> u16 {
+fn fetch(addr: SocketAddr, method: &str, path: &str) -> (u16, String) {
     let mut stream = std::net::TcpStream::connect(addr).expect("connect");
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let request =
@@ -46,12 +56,18 @@ fn status(addr: SocketAddr, method: &str, path: &str) -> u16 {
     stream.write_all(request.as_bytes()).expect("write");
     let mut buffer = Vec::new();
     let _ = stream.read_to_end(&mut buffer);
-    let text = String::from_utf8_lossy(&buffer);
-    text.lines()
+    let text = String::from_utf8_lossy(&buffer).into_owned();
+    let code = text
+        .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|code| code.parse().ok())
-        .unwrap_or(0)
+        .unwrap_or(0);
+    (code, text)
+}
+
+fn status(addr: SocketAddr, method: &str, path: &str) -> u16 {
+    fetch(addr, method, path).0
 }
 
 fn doc_root_with_crate() -> PathBuf {
@@ -68,8 +84,16 @@ fn doc_root_with_crate() -> PathBuf {
 async fn every_rustdoc_path_is_404_when_no_root_is_configured() {
     let addr = spin(None).await;
     for path in ["/rustdoc/", "/rustdoc/docprobe/index.html", "/rustdoc/percent%25name.html"] {
-        assert_eq!(status(addr, "GET", path), 404, "no-root {path}");
+        let (code, body) = fetch(addr, "GET", path);
+        assert_eq!(code, 404, "no-root {path}");
+        // The dist index.html SPA fallback must not answer a reserved doc path,
+        // or a HEAD probe would report availability that does not exist.
+        assert!(!body.contains("SPA-FALLBACK-MARKER"), "SPA fallback served {path}");
     }
+    // The fallback still covers ordinary app routes.
+    let (root_code, root_body) = fetch(addr, "GET", "/some/app/route");
+    assert_eq!(root_code, 200, "app route fallback");
+    assert!(root_body.contains("SPA-FALLBACK-MARKER"), "app route body");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

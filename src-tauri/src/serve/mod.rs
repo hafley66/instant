@@ -30,18 +30,20 @@ pub struct ServeState {
 }
 
 /// `/ws` upgrade + the bounded rustdoc tree + static `dist`, index.html fallback
-/// for every other path. The doc tree nests the same router the native loopback
-/// service uses, so both share one decoding and containment boundary.
+/// for every other path. The doc route is always mounted: with no root it
+/// answers 404 rather than letting `/rustdoc/...` fall through to the `dist`
+/// index.html SPA fallback, which would report a live doc root that isn't
+/// there. The doc tree nests the same router the native loopback service uses,
+/// so both share one decoding and containment boundary.
 pub fn router(state: Arc<ServeState>, dist: PathBuf) -> axum::Router {
     let files = tower_http::services::ServeDir::new(&dist)
         .fallback(tower_http::services::ServeFile::new(dist.join("index.html")));
-    let mut app = axum::Router::new()
+    let rustdoc_root = state.rustdoc_root.clone();
+    axum::Router::new()
         .route("/ws", axum::routing::get(upgrade))
-        .fallback_service(files);
-    if let Some(root) = state.rustdoc_root.clone() {
-        app = app.nest_service("/rustdoc", rustdoc::doc_router(root));
-    }
-    app.with_state(state)
+        .nest_service("/rustdoc", rustdoc::doc_router(rustdoc_root))
+        .fallback_service(files)
+        .with_state(state)
 }
 
 async fn upgrade(

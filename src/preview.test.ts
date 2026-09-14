@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const openExternal = vi.fn();
 const addPreviewPanel = vi.fn();
+const openBrowserTab = vi.fn();
 
 vi.mock("./reactdock", () => ({
   addPreviewPanel: (...a: unknown[]) => addPreviewPanel(...a),
@@ -28,6 +29,7 @@ vi.mock("./1_FileImageViewer", () => ({ FileImageViewer: () => null }));
 vi.mock("@hafley66/md", () => ({ renderD2: vi.fn() }));
 vi.mock("./0_d2Preview", () => ({ resolveD2Preview: vi.fn() }));
 vi.mock("./0_MonacoCodeViewer", () => ({ MonacoCodeViewer: () => null }));
+vi.mock("./browser", () => ({ openBrowserTab: (...a: unknown[]) => openBrowserTab(...a) }));
 vi.mock("./0_settings", () => ({
   settings: { mode: { $: () => "dark", $$: vi.fn() } },
 }));
@@ -39,12 +41,44 @@ vi.stubGlobal("sessionStorage", { getItem: () => null, setItem: () => {}, remove
 vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
 
 const { openPathInInstant } = await import("./preview");
+const { invoke } = await import("./generated/native");
+const { setHomeDir } = await import("./core");
 
 describe("openPathInInstant", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    setHomeDir("/Users/test");
+  });
+
   it("sends a video to the OS default app and opens no preview panel", async () => {
     await openPathInInstant("/x/clip.mp4");
     expect(openExternal).toHaveBeenCalledTimes(1);
     expect(openExternal).toHaveBeenCalledWith("/x/clip.mp4");
     expect(addPreviewPanel).not.toHaveBeenCalled();
+  });
+
+  it("probes the expanded path for generated docs, then falls through to the file browser", async () => {
+    (invoke as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    await openPathInInstant("~/target/doc/crate/index.html");
+    // The backend never sees a raw `~/`: the probe and the file URL agree.
+    expect(invoke).toHaveBeenCalledWith("rustdoc_open", {
+      path: "/Users/test/target/doc/crate/index.html",
+    });
+    expect(openBrowserTab).toHaveBeenCalledWith("file:///Users/test/target/doc/crate/index.html");
+  });
+
+  it("opens the loopback URL when the backend maps a generated page", async () => {
+    (invoke as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      "http://127.0.0.1:5555/target/doc/crate/index.html",
+    );
+    await openPathInInstant("~/target/doc/crate/index.html");
+    expect(openBrowserTab).toHaveBeenCalledWith(
+      "http://127.0.0.1:5555/target/doc/crate/index.html",
+    );
+  });
+
+  it("opens a plain ~/ HTML file in the file browser", async () => {
+    await openPathInInstant("~/papers/closure.html");
+    expect(openBrowserTab).toHaveBeenCalledWith("file:///Users/test/papers/closure.html");
   });
 });

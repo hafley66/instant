@@ -13,11 +13,17 @@
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::oneshot;
 
 use crate::serve::rustdoc;
+
+/// How long register waits for the spawned server thread to report that its
+/// runtime came up and the listener was adopted. A failure to start must not
+/// look like success.
+const START_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Server {
     port: u16,
@@ -37,14 +43,19 @@ pub struct DocService(Mutex<Inner>);
 
 impl DocService {
     /// Serve `root` on 127.0.0.1 and return its port. A root already registered
-    /// keeps its server and port, so repeated opens reuse one origin.
+    /// keeps its server and port, so repeated opens reuse one origin. The call
+    /// does not return success until the server thread has built its runtime and
+    /// adopted the listener, so a failed startup is an error and nothing dead is
+    /// cached.
     pub fn register(&self, root: &Path) -> Result<u16, String> {
         let canon = rustdoc::canonical_root(root)?;
-        let mut inner = self.0.lock().unwrap();
-        if let Some(server) = inner.servers.get(&canon) {
-            let port = server.port;
-            inner.last = Some(canon);
-            return Ok(port);
+        {
+            let mut inner = self.0.lock().unwrap();
+            if let Some(server) = inner.servers.get(&canon) {
+                let port = server.port;
+                inner.last = Some(canon);
+                return Ok(port);
+            }
         }
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .map_err(|e| format!("cannot bind doc server: {e}"))?;
@@ -56,18 +67,30 @@ impl DocService {
             .map_err(|e| format!("cannot read doc server addr: {e}"))?
             .port();
         let (shutdown, stop) = oneshot::channel::<()>();
-        let app = rustdoc::doc_router(canon.clone());
+        let app = rustdoc::doc_router(Some(canon.clone()));
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         std::thread::spawn(move || {
-            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+            let runtime = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-            else {
-                return;
+            {
+                Ok(runtime) => runtime,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(format!("cannot start doc server runtime: {e}")));
+                    return;
+                }
             };
             runtime.block_on(async move {
-                let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
-                    return;
+                let listener = match tokio::net::TcpListener::from_std(listener) {
+                    Ok(listener) => listener,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(format!("cannot adopt doc server listener: {e}")));
+                        return;
+                    }
                 };
+                // Only now is the socket accepting; anything earlier must be an
+                // error, not a cached port pointing at nothing.
+                let _ = ready_tx.send(Ok(()));
                 let _ = axum::serve(listener, app)
                     .with_graceful_shutdown(async move {
                         let _ = stop.await;
@@ -75,14 +98,25 @@ impl DocService {
                     .await;
             });
         });
-        inner.servers.insert(
-            canon.clone(),
-            Server {
-                port,
-                shutdown: Some(shutdown),
-            },
-        );
-        inner.last = Some(canon);
+        match ready_rx.recv_timeout(START_TIMEOUT) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err("doc server did not become ready".into()),
+        }
+        let port = {
+            let mut inner = self.0.lock().unwrap();
+            match inner.servers.entry(canon.clone()) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.get().port,
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(Server {
+                        port,
+                        shutdown: Some(shutdown),
+                    });
+                    port
+                }
+            }
+        };
+        self.0.lock().unwrap().last = Some(canon);
         Ok(port)
     }
 
@@ -104,6 +138,14 @@ impl DocService {
             }
         }
         inner.last = None;
+    }
+}
+
+/// Dropping the owner releases every listener, so a service that goes out of
+/// scope with the process still cleans up its sockets.
+impl Drop for DocService {
+    fn drop(&mut self) {
+        self.stop_all();
     }
 }
 

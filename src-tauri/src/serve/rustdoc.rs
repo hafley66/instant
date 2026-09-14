@@ -16,6 +16,7 @@ use std::sync::Arc;
 use axum::extract::{Path as AxumPath, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use tower_http::services::ServeFile;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -155,28 +156,51 @@ pub fn relative_path(root: &Path, file: &Path) -> Option<String> {
     Some(parts.join("/"))
 }
 
-/// Percent-encode a slash-joined path for a URL, keeping `/` as the separator
-/// and escaping every byte outside the unreserved set. The doc path can contain
-/// a space (the target directory often does), which cannot ride a URL raw.
+/// Percent-encode a slash-joined path for a URL, keeping `/` as the separator.
+/// The set is everything `percent-encoding` leaves unreserved (`A-Za-z0-9-._~`)
+/// plus `/`; a literal `%` must encode so the extractor's single decode can
+/// recover it. The doc path can contain a space (the target directory often
+/// does), which cannot ride a URL raw.
+const PATH_SEGMENT: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'&')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*')
+    .add(b'+')
+    .add(b',')
+    .add(b':')
+    .add(b';')
+    .add(b'<')
+    .add(b'=')
+    .add(b'>')
+    .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
+
 pub fn percent_encode_path(rel: &str) -> String {
-    let mut out = String::with_capacity(rel.len());
-    for b in rel.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
+    utf8_percent_encode(rel, PATH_SEGMENT).to_string()
 }
 
 /// A minimal router that serves one doc root: `/` lists the crates and
 /// `/{*path}` resolves through the containment-checked resolver. Used by the
 /// serve binary under `/rustdoc` and by the native loopback doc service, so
-/// both share one decoding and containment boundary. `Router<()>` so it nests
-/// into another router that carries its own state.
-pub fn doc_router(root: PathBuf) -> axum::Router {
+/// both share one decoding and containment boundary. `None` keeps the route
+/// reserved and answers 404, so a miss can never fall through to a `dist`
+/// index.html SPA fallback. `Router<()>` so it nests into another router that
+/// carries its own state.
+pub fn doc_router(root: Option<PathBuf>) -> axum::Router {
     axum::Router::new()
         .route("/", axum::routing::get(doc_listing))
         .route("/{*path}", axum::routing::get(doc_file))
@@ -187,17 +211,23 @@ fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
-async fn doc_listing(State(root): State<Arc<PathBuf>>) -> Response {
-    let html = listing_html(&root);
+async fn doc_listing(State(root): State<Arc<Option<PathBuf>>>) -> Response {
+    let Some(root) = root.as_deref() else {
+        return not_found();
+    };
+    let html = listing_html(root);
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
 async fn doc_file(
-    State(root): State<Arc<PathBuf>>,
+    State(root): State<Arc<Option<PathBuf>>>,
     AxumPath(path): AxumPath<String>,
     request: Request,
 ) -> Response {
-    let file = match resolve(&root, &path) {
+    let Some(root) = root.as_deref() else {
+        return not_found();
+    };
+    let file = match resolve(root, &path) {
         Ok(file) => file,
         Err(_) => return not_found(),
     };

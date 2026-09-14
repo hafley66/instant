@@ -25,7 +25,7 @@ import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS } from "./core";
 import { FileImageViewer } from "./1_FileImageViewer";
 import { renderD2 } from "@hafley66/md";
 import { resolveD2Preview } from "./0_d2Preview";
-import { browserFileUrl } from "./0_htmlFileUrl";
+import { browserFileUrl, expandHome } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
 import { openExternal, openExternalUrl } from "./0_openExternal";
 import { isKnownInstantKind, opensExternally } from "./0_externalKinds";
@@ -105,12 +105,15 @@ export async function openPathInInstant(path: string, line?: number): Promise<vo
     }
     // A generated cargo doc page must be HTTP-served (its search index is
     // fetch()ed); the backend maps it to a loopback origin. Non-rustdoc HTML
-    // returns false and continues to the file:// browser below.
+    // returns false and continues to the file:// browser below. Expand `~/`
+    // first so the backend's canonicalize sees an absolute path, the same
+    // expansion the browser URL uses.
+    const home = getHomeDir();
     if (!line && /\.html?$/i.test(path)) {
       const { openRustdocPath } = await import("./0_rustdoc");
-      if (await openRustdocPath(path)) return;
+      if (await openRustdocPath(expandHome(path, home))) return;
     }
-    const browserUrl = !line && browserFileUrl(path, getHomeDir());
+    const browserUrl = !line && browserFileUrl(path, home);
     if (browserUrl) {
       const { openBrowserTab } = await import("./browser");
       await openBrowserTab(browserUrl);

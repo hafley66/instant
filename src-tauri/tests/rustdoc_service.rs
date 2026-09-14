@@ -64,6 +64,22 @@ fn port_of(url: &str) -> (u16, String) {
     (port.parse().expect("port"), format!("/{path}"))
 }
 
+/// Poll until the port refuses connections, so a graceful shutdown has time to
+/// close the accept loop.
+fn assert_refused(port: u16) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if TcpStream::connect(("127.0.0.1", port)).is_err() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "port {port} still accepting after release"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn serves_a_registered_root_over_loopback() {
     let root = fixture();
@@ -110,6 +126,28 @@ fn register_reuses_one_server_per_canonical_root() {
     let second = service.register(&root).unwrap();
     assert_eq!(first, second);
     service.stop_all();
+}
+
+#[test]
+fn stop_all_releases_the_listener() {
+    let root = fixture();
+    let service = DocService::default();
+    let port = service.register(&root).unwrap();
+    assert_eq!(get(port, "/").0, 200);
+    service.stop_all();
+    assert_refused(port);
+}
+
+#[test]
+fn dropping_the_owner_releases_the_listener() {
+    let root = fixture();
+    let port;
+    {
+        let service = DocService::default();
+        port = service.register(&root).unwrap();
+        assert_eq!(get(port, "/").0, 200);
+    } // DocService::drop runs here
+    assert_refused(port);
 }
 
 #[test]
