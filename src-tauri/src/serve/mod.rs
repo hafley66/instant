@@ -2,6 +2,7 @@
 // Wire contract: src/reactive/wsTransport.ts; four frame shapes, hand-rolled.
 
 mod host;
+pub mod rustdoc;
 mod rpc;
 
 #[cfg(test)]
@@ -15,7 +16,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Path, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
@@ -23,16 +26,56 @@ use tokio::sync::{broadcast, mpsc};
 pub struct ServeState {
     pub host: Arc<ServeHost>,
     pub services: Arc<Services>,
+    /// Canonical `target/doc` tree to serve at `/rustdoc/`, set once from
+    /// `--doc-root`. `None` keeps the route closed (404).
+    pub rustdoc_root: Option<PathBuf>,
 }
 
-/// `/ws` upgrade + static `dist`, index.html fallback for every other path.
+/// `/ws` upgrade + the bounded rustdoc tree + static `dist`, index.html fallback
+/// for every other path.
 pub fn router(state: Arc<ServeState>, dist: PathBuf) -> axum::Router {
     let files = tower_http::services::ServeDir::new(&dist)
         .fallback(tower_http::services::ServeFile::new(dist.join("index.html")));
     axum::Router::new()
         .route("/ws", axum::routing::get(upgrade))
+        .route("/rustdoc/", axum::routing::get(rustdoc_listing))
+        .route("/rustdoc/{*path}", axum::routing::get(rustdoc_file))
         .fallback_service(files)
         .with_state(state)
+}
+
+fn not_found() -> Response {
+    (StatusCode::NOT_FOUND, "not found").into_response()
+}
+
+/// `/rustdoc/` lists the crate directories rustdoc emitted.
+async fn rustdoc_listing(State(state): State<Arc<ServeState>>) -> Response {
+    let Some(root) = state.rustdoc_root.as_deref() else {
+        return not_found();
+    };
+    let html = rustdoc::listing_html(root);
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response()
+}
+
+/// `/rustdoc/{*path}` serves one file from the tree, traversal-checked.
+async fn rustdoc_file(
+    State(state): State<Arc<ServeState>>,
+    Path(path): Path<String>,
+) -> Response {
+    let Some(root) = state.rustdoc_root.as_deref() else {
+        return not_found();
+    };
+    match rustdoc::resolve(root, &path) {
+        Ok((file, mime)) => match tokio::fs::read(&file).await {
+            Ok(bytes) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
+            Err(_) => not_found(),
+        },
+        Err(_) => not_found(),
+    }
 }
 
 async fn upgrade(

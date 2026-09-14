@@ -20,6 +20,9 @@ struct Args {
     /// Directory holding the built frontend (defaults to ../dist beside this binary)
     #[arg(long)]
     dist: Option<PathBuf>,
+    /// Generated cargo doc tree to serve read-only at /rustdoc/ (default: off)
+    #[arg(long)]
+    doc_root: Option<PathBuf>,
 }
 
 fn default_data_dir() -> PathBuf {
@@ -41,6 +44,16 @@ fn main() {
     let args = Args::parse();
     let data_dir = args.data_dir.unwrap_or_else(default_data_dir);
     let dist = args.dist.unwrap_or_else(default_dist);
+    let doc_root = match args.doc_root {
+        Some(path) => match instant_lib::serve::rustdoc::canonical_root(&path) {
+            Ok(canon) => Some(canon),
+            Err(e) => {
+                eprintln!("--doc-root {e}");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
     if let Err(e) = std::fs::create_dir_all(&data_dir) {
         eprintln!("cannot create data dir {}: {e}", data_dir.display());
         std::process::exit(1);
@@ -59,7 +72,7 @@ fn main() {
         };
         let host = Arc::new(ServeHost::new(data_dir.clone()));
         services.pty_events.start(host.clone());
-        let state = Arc::new(ServeState { host, services });
+        let state = Arc::new(ServeState { host, services, rustdoc_root: doc_root });
         let app = router(state, dist);
         let listener = match tokio::net::TcpListener::bind(("127.0.0.1", args.port)).await {
             Ok(l) => l,

@@ -42,3 +42,9 @@ overrides: `INSTANT_README_PORT` (default 47813), `INSTANT_README_TMP` (default
 | `03-favorites-panel.png` | Favorites panel after a reload, listing the Boop-backed turn from `boop_favorites` |
 | `04-boop-recipient-selector.png` | Boop recipient dropdown with two open coordinator TUIs checked and the send count reading 2 |
 | `05-boop-roster-mail.png` | Boop lane roster, nested, with mail counts and a per-lane waterfall |
+| `06-rustdoc-browser.png` | Rustdoc served at `/rustdoc/` in the embedded browser, with crate search results |
+
+`06-rustdoc-browser.png` comes from the rustdoc tier instead:
+`e2e-real/rustdoc.spec.ts` through `playwright.rustdoc.config.ts`, which mounts a
+real `cargo doc --no-deps` tree (built under a path with a space) at `/rustdoc/`
+and writes the same `docs/screenshots/` directory.

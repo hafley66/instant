@@ -20,7 +20,6 @@ summon gesture itself is macOS-only and is not pictured.
 **Durable tmux terminals render agent diagrams inline.** Three sessions are open
 as dock tabs; the active one is a turn whose D2 and Mermaid fences render as
 diagrams over the rows of a synthetic assistant turn: D2 above, Mermaid below.
-Rustdoc rendering is pending.
 
 ![Three durable tmux sessions open as tabs, with D2 and Mermaid diagrams rendered inline in the active terminal turn](docs/screenshots/01-turn-diagrams.png)
 
@@ -47,6 +46,14 @@ spawned whom and rolls up each lane's mail count, recency, and a per-lane mail
 waterfall.
 
 ![Boop lane roster with nested lanes, mail counts, and a waterfall column](docs/screenshots/05-boop-roster-mail.png)
+
+**Browse generated cargo docs in the embedded browser.** With the serve backend
+started on a doc root (`instant-serve --doc-root target/doc`), the palette's
+"Open Generated Rustdoc" opens a browser tab on the served tree. Serving over
+HTTP rather than `file://` is what lets Rustdoc's search index, styles, and
+scripts load: the search box returns items from the crate.
+
+![Instant's embedded browser showing a served Rustdoc crate page with search results for add](docs/screenshots/06-rustdoc-browser.png)
 
 To regenerate the images, see [docs/screenshots/README.md](docs/screenshots/README.md).
 

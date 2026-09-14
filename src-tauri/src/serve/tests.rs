@@ -22,7 +22,7 @@ async fn spin() -> (std::net::SocketAddr, Arc<ServeHost>) {
     std::fs::create_dir_all(&dir).expect("test data dir");
     let services = Arc::new(Services::boot(&dir).expect("services boot"));
     let host = Arc::new(ServeHost::new(dir.clone()));
-    let state = Arc::new(ServeState { host: host.clone(), services });
+    let state = Arc::new(ServeState { host: host.clone(), services, rustdoc_root: None });
     let app = router(state, dir); // ws tests never touch the static files
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind port 0");
     let addr = listener.local_addr().expect("local addr");
