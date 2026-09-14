@@ -88,6 +88,9 @@ export type CommandName =
   | "boop_lane_events"
   | "boop_agent_touches"
   | "boop_session_graph"
+  | "boop_search"
+  | "boop_search_status"
+  | "boop_search_sync"
   | "boop_mux_capture"
   | "boop_mux_session"
   | "boop_mux_send_keys"
@@ -254,6 +257,9 @@ export namespace commands {
     export const boopLaneEvents = "boop_lane_events";
     export const boopAgentTouches = "boop_agent_touches";
     export const boopSessionGraph = "boop_session_graph";
+    export const boopSearch = "boop_search";
+    export const boopSearchStatus = "boop_search_status";
+    export const boopSearchSync = "boop_search_sync";
   }
 
   export namespace boop_mux {

@@ -6,6 +6,7 @@ import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
 import { BoopPanelV2 } from "./boopPanel";
 import { BoopSelectionPanel } from "./1_boopSelection";
+import { BoopSearchPanel } from "./1_boopSearch";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { panic } from "./0_panicSettings";
 import { cdpPerf } from "./cdp";
@@ -111,6 +112,15 @@ export function registerBuiltin() {
         // "Boop: crashed"). Keep the panel mounted so focus only toggles
         // visibility; the pixi trees are created once.
         keepAlive: true,
+      },
+      {
+        id: "boop-search",
+        railParent: "boop",
+        title: "Boop Search",
+        icon: "🔍",
+        iconLabel: "Boop Search",
+        html: "",
+        component: BoopSearchPanel,
       },
     ],
   });

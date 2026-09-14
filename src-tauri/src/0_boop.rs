@@ -81,7 +81,7 @@ impl From<boop_store::Tag> for BoopTag {
     }
 }
 
-fn boop_db_path() -> Result<PathBuf, String> {
+pub(crate) fn boop_db_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("BOOP_DB").filter(|path| !path.is_empty()) {
         return Ok(PathBuf::from(path));
     }

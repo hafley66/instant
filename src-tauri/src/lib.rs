@@ -1,6 +1,8 @@
 mod activity;
 #[path = "0_boop.rs"]
 mod boop;
+#[path = "1_boop_search.rs"]
+pub mod boop_search;
 #[path = "0_tmux.rs"]
 mod boop_tmux;
 mod capture;
@@ -1071,6 +1073,9 @@ pub fn run() {
             boop::boop_favorite_toggle,
             boop::boop_tags_recent,
             boop::boop_tags_search,
+            boop_search::boop_search,
+            boop_search::boop_search_status,
+            boop_search::boop_search_sync,
             boop::boop_tags_apply,
             boop::boop_tags_for,
             boop::boop_turn_comments,

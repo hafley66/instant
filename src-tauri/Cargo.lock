@@ -2375,7 +2375,7 @@ dependencies = [
 
 [[package]]
 name = "instant"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2407,6 +2407,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
+ "tempfile",
  "tiny_http",
  "tokio",
  "tokio-tungstenite 0.29.0",
