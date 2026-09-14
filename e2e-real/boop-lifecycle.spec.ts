@@ -5,9 +5,10 @@
 // way it does in the product. Receipts are DOM rows, the empty state, console
 // errors, and the sqlite fixture that produced them.
 import { expect, test, type Page } from "@playwright/test";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { resetStore, seedCoordinator, seedLane, seedMail, seedStore } from "./0_boopLifecycleSeed";
+import { boopDb, resetStore, scratchRoot, seedCoordinator, seedLane, seedMail, seedStore } from "./0_boopLifecycleSeed";
 
 const port = Number(process.env.INSTANT_BOOP_LIFE_PORT ?? 47807);
 const shots = path.join(process.cwd(), "artifacts", "real");
@@ -64,6 +65,96 @@ async function shot(page: Page, name: string): Promise<void> {
   fs.mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: path.join(shots, `boop-lifecycle-${name}.png`), fullPage: false });
 }
+
+interface HeldRead {
+  locked: Promise<void>;
+  done: Promise<void>;
+  release: () => void;
+  child: ReturnType<typeof spawn>;
+}
+
+/// Hold a real exclusive lock on the scratch store so the graph read inside
+/// instant-serve blocks on a step/prepare, the same way it blocks behind a
+/// contending writer in the product. Nothing is intercepted: the hold is the
+/// sqlite file lock, and release is an explicit COMMIT in the holder process.
+function holdGraphRead(): HeldRead {
+  const releaseFile = path.join(scratchRoot, "graph-read.release");
+  fs.rmSync(releaseFile, { force: true });
+  const script = [
+    "const { DatabaseSync } = require('node:sqlite');",
+    "const fs = require('node:fs');",
+    "const db = new DatabaseSync(process.env.HOLD_DB);",
+    "db.exec('PRAGMA locking_mode=EXCLUSIVE');",
+    "db.exec('BEGIN EXCLUSIVE');",
+    "db.prepare('SELECT count(*) FROM agent_route').get();",
+    "process.stdout.write('locked\\n');",
+    "const start = Date.now();",
+    "const timer = setInterval(() => {",
+    "  if (fs.existsSync(process.env.HOLD_RELEASE) || Date.now() - start > 20_000) {",
+    "    clearInterval(timer);",
+    "    try { db.exec('COMMIT'); } catch {}",
+    "    db.close();",
+    "    process.exit(0);",
+    "  }",
+    "}, 25);",
+  ].join("\n");
+  const child = spawn(process.execPath, ["--no-warnings", "-e", script], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOLD_DB: boopDb, HOLD_RELEASE: releaseFile },
+  });
+  const locked = new Promise<void>((resolve, reject) => {
+    child.stdout?.once("data", () => resolve());
+    child.once("error", reject);
+  });
+  const done = new Promise<void>((resolve, reject) => {
+    child.once("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`graph-read lock holder exited ${code}`)),
+    );
+  });
+  return { locked, done, release: () => fs.writeFileSync(releaseFile, "go"), child };
+}
+
+test("a held graph read shows loading and never no-agents, then rows", async ({ page }) => {
+  // The live graph query runs for seconds before returning nonempty rows. A
+  // real exclusive lock holds the read while the panel first paints; the panel
+  // must name that as loading, not as "no agents in the window", and rows must
+  // appear once the lock releases and survive a refocus.
+  resetStore();
+  seedLane({ lane: ALPHA, cwd: "/tmp/e2e-life/alpha", state: "live", goal: "alpha goal", spawnedTs: NOW - 60_000 });
+
+  const errors = await boot(page);
+  const lock = holdGraphRead();
+  try {
+    await lock.locked;
+    await openBoop(page);
+
+    const help = page.locator(".boop-panel .empty-help");
+    await expect(help).toContainText("reading the session graph", { timeout: 10_000 });
+    await expect(help).not.toContainText("no agents in the window");
+    await expect(page.locator(".boop-panel")).not.toContainText("store read failed");
+    // Still pending after a real delay: the lock is actually holding the read,
+    // so this is the loading state and not a one-frame first paint.
+    await page.waitForTimeout(1_500);
+    await expect(help).toContainText("reading the session graph");
+    await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(0);
+    await shot(page, "09-held-read-loading");
+
+    lock.release();
+    await lock.done;
+
+    await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(1, { timeout: 30_000 });
+    await expect(help).toHaveCount(0);
+    await refocus(page);
+    await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(1, { timeout: 30_000 });
+    expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
+  } finally {
+    lock.release();
+    lock.child.kill("SIGKILL");
+    // A failed assertion can reach here without awaiting `done`; its SIGKILL
+    // exit is expected, so swallow the rejection instead of leaking it.
+    await lock.done.catch(() => {});
+  }
+});
 
 test("first mount shows seeded live lanes and mail rows", async ({ page }) => {
   resetStore();

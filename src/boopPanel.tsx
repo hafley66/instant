@@ -418,18 +418,21 @@ export function BoopPanelV2() {
             <span className="muted">{hiddenByActive} hidden by active-only</span>
           )}
         </div>
-        <TreeTable<BoopRow>
-          columns={BOOP_COLUMNS}
-          data={data}
-          getRowId={(r) => r.id}
-          getSubRows={(r) => r.subRows}
-          defaultExpandedAll
-          defaultSorting={BOOP_SORT}
-          virtual
-          rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
-          onRowClick={(r) => setSelected((prior) => (prior === r.id ? null : r.id))}
-        />
-        {roster.kind !== "rows" && (
+        {roster.kind === "rows" ? (
+          <TreeTable<BoopRow>
+            columns={BOOP_COLUMNS}
+            data={data}
+            getRowId={(r) => r.id}
+            getSubRows={(r) => r.subRows}
+            defaultExpandedAll
+            defaultSorting={BOOP_SORT}
+            virtual
+            rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
+            onRowClick={(r) => setSelected((prior) => (prior === r.id ? null : r.id))}
+          />
+        ) : (
+          // No rows to show: render the state on its own, not under a tall
+          // virtual table body that pushes the message below the fold.
           <div className="empty-help">
             {roster.kind === "loading" && (
               <>
