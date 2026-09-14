@@ -116,9 +116,7 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
     // cells with underscores before those bytes ever reach xterm. Force UTF-8
     // on every client, including clients attaching to an already-live server.
     c.arg("-u");
-    let configured_socket = socket
-        .map(str::to_owned)
-        .or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+    let configured_socket = socket.map(str::to_owned).or_else(configured_tmux_socket);
     if !cfg!(debug_assertions) && configured_socket.is_none() {
         c.args(["-L", "instant-prod"]);
     }
@@ -126,6 +124,13 @@ fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
         c.args(["-L", &socket]);
     }
     c
+}
+
+/// The tmux server `INSTANT_TMUX_SOCKET` names, if any. The offline graph read
+/// hands this to `Multiplexer::target_alive`, so a fixture or prod server is
+/// probed by the same socket every other serve path uses.
+pub(crate) fn configured_tmux_socket() -> Option<String> {
+    std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty())
 }
 
 pub(crate) fn tmux_cmd() -> std::process::Command {
