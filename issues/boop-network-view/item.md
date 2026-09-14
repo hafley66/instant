@@ -2,8 +2,10 @@
 created: 2026-09-13
 updated: 2026-09-14
 type: bug
-status: open
+status: fixed
 priority: high
+closed: 2026-09-14
+closed_by: codex
 ---
 
 # Fix blank Boop network view
@@ -17,6 +19,11 @@ User reports blank network view, suspects slow query and an unmerged worktree fi
 ### 2026-09-14T01:16:32Z · @codex
 
 Integrated paired boop-store 161f13a and Instant network fix plus final waterfall test 454fc540 into main. Parent main validation: network 5/5, lifecycle 7/7, store 14/14, just check/build/cargo-check pass; rebuilt instant-serve from main. Final synthetic 1200 sessions/1200 lanes/120000 turns/12000 events: RPC 350ms, visible rows 992ms. Trace defaults preserved; Instant explicitly skips unused trace reads. Configured tmux socket passed to liveness probes. Daily-driver restart/rebuild still required to load Rust changes. Global durable-query history scope remains a separate limitation. Both task worktrees and branches removed.
+
+### 2026-09-14T12:16:29Z · @codex
+
+User confirmed the running Boop tab now populates after schema v32 activity index migration. Live query measured 6.938s before and 0.117/0.114s after for 5802 rows. UI loading/error/empty fixes shipped in 8519295d; parent lifecycle 9/9 and compile gates passed. A subsequent screenshot raises separate roster/timeline layout and filtering issues, to track separately.
+
 
 ## Reopen Notes — 2026-09-14
 
