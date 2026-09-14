@@ -16,12 +16,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
+use tower_http::services::ServeFile;
 
 pub struct ServeState {
     pub host: Arc<ServeHost>,
@@ -61,19 +62,23 @@ async fn rustdoc_listing(State(state): State<Arc<ServeState>>) -> Response {
         .into_response()
 }
 
-/// `/rustdoc/{*path}` serves one file from the tree, traversal-checked.
+/// `/rustdoc/{*path}` serves one file from the tree through tower-http's file
+/// service, which owns content type and byte ranges. The resolver is the only
+/// traversal gate.
 async fn rustdoc_file(
     State(state): State<Arc<ServeState>>,
     Path(path): Path<String>,
+    request: Request,
 ) -> Response {
     let Some(root) = state.rustdoc_root.as_deref() else {
         return not_found();
     };
-    match rustdoc::resolve(root, &path) {
-        Ok((file, mime)) => match tokio::fs::read(&file).await {
-            Ok(bytes) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
-            Err(_) => not_found(),
-        },
+    let file = match rustdoc::resolve(root, &path) {
+        Ok(file) => file,
+        Err(_) => return not_found(),
+    };
+    match ServeFile::new(&file).try_call(request).await {
+        Ok(response) => response.map(axum::body::Body::new),
         Err(_) => not_found(),
     }
 }

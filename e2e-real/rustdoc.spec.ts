@@ -10,17 +10,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const port = Number(process.env.INSTANT_RUSTDOC_PORT ?? 47816);
+const noRootPort = Number(process.env.INSTANT_RUSTDOC_NOROOT_PORT ?? 47817);
 
 type EventFrame = { event: string; payload: Record<string, unknown> };
 
 /// Minimal JSON-RPC client over the app's own /ws: subscribe to events and send
 /// cdp_send. Node's global WebSocket is enough; no fixture transport.
 class Rpc {
-  private ws: WebSocket;
-  private events: EventFrame[] = [];
-  private pending: ((frame: EventFrame) => boolean)[] = [];
+  ws: WebSocket;
+  events: EventFrame[] = [];
+  pending: ((frame: EventFrame) => boolean)[] = [];
 
-  private constructor(ws: WebSocket) {
+  constructor(ws: WebSocket) {
     this.ws = ws;
     ws.addEventListener("message", (message) => {
       const data = typeof message.data === "string" ? message.data : "";
@@ -85,8 +86,8 @@ class Rpc {
   }
 }
 
-async function boot(page: Page): Promise<void> {
-  await page.goto(`/?ws=ws://127.0.0.1:${port}/ws`);
+async function boot(page: Page, atPort = port): Promise<void> {
+  await page.goto(`http://127.0.0.1:${atPort}/?ws=ws://127.0.0.1:${atPort}/ws`);
   await expect(page.locator("#sessions-toggle")).toBeVisible({ timeout: 30_000 });
 }
 
@@ -144,9 +145,26 @@ test("serves a generated cargo doc tree read-only within the doc root", async ({
   const asset = await request.get(`/rustdoc/${assetPath}`);
   expect(asset.status()).toBe(200);
 
+  // A literal percent in a filename survives the single decode boundary.
+  expect((await request.get("/rustdoc/percent%25name.html")).status()).toBe(200);
+  expect(await (await request.get("/rustdoc/percent%25name.html")).text()).toContain("percent");
+
   expect((await request.get("/rustdoc/does-not-exist.html")).status()).toBe(404);
   expect((await request.get("/rustdoc/..%2f..%2fCargo.toml")).status()).toBe(404);
   expect((await request.get("/rustdoc/%2e%2e%2fCargo.toml")).status()).toBe(404);
+});
+
+test("declines when no doc root is configured", async ({ page }) => {
+  await boot(page, noRootPort);
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "P", code: "KeyP", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  });
+  await page.locator(".cmdp-input").fill("Rustdoc");
+  await page.locator(".cmdp-input").press("Enter");
+
+  await expect(page.locator(".app-toast")).toContainText("no rustdoc doc root configured", { timeout: 10_000 });
+  await page.waitForTimeout(1_000);
+  expect(await page.locator(".term-host").count()).toBe(0);
 });
 
 test("opens generated docs in the embedded browser and runs Rustdoc search", async ({ page }) => {

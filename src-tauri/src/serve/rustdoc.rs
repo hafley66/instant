@@ -1,9 +1,14 @@
 // Bounded static serving for one generated cargo doc tree. rustdoc loads its
 // search index with fetch(), which Chrome blocks from a file:// origin, so the
 // doc tree is served over the existing HTTP origin instead. This resolver is the
-// only gate between a URL path and the filesystem: it drops absolute and `..`
-// segments, then re-checks the canonicalized result against the canonical root so
-// a symlink inside the tree cannot point out of it.
+// only gate between a URL path and the filesystem: it drops `..` segments, then
+// re-checks every canonicalized target against the canonical root so a symlink
+// inside the tree cannot point out of it. Responding is left to
+// tower_http::services::ServeFile, which owns content type and byte serving.
+//
+// Path parts arrive already percent-decoded from axum's Path extractor, so this
+// module decodes nothing; a second decode would corrupt filenames holding a
+// literal `%`.
 
 use std::path::{Path, PathBuf};
 
@@ -23,36 +28,15 @@ pub fn canonical_root(path: &Path) -> Result<PathBuf, String> {
     Ok(canon)
 }
 
-fn percent_decode(input: &str) -> Option<String> {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            if i + 2 >= bytes.len() {
-                return None;
-            }
-            let hi = (bytes[i + 1] as char).to_digit(16)?;
-            let lo = (bytes[i + 2] as char).to_digit(16)?;
-            out.push((hi * 16 + lo) as u8);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
-/// Map a URL path below the doc root to a file inside the canonical `root`.
-pub fn resolve(root: &Path, rel: &str) -> Result<(PathBuf, &'static str), DocError> {
-    let rel = rel.split(['?', '#']).next().unwrap_or("");
-    let decoded = percent_decode(rel).ok_or(DocError::Forbidden)?;
-    if decoded.contains('\0') {
+/// Map a decoded URL path below the doc root to a real file inside `root`. A
+/// directory resolves to its index.html, and that final target is canonicalized
+/// and re-checked so a symlinked index.html cannot escape either.
+pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, DocError> {
+    if rel.contains('\0') {
         return Err(DocError::Forbidden);
     }
     let mut candidate = root.to_path_buf();
-    for segment in decoded.split('/') {
+    for segment in rel.split('/') {
         if segment.is_empty() || segment == "." {
             continue;
         }
@@ -61,41 +45,23 @@ pub fn resolve(root: &Path, rel: &str) -> Result<(PathBuf, &'static str), DocErr
         }
         candidate.push(segment);
     }
-    let mut canon = std::fs::canonicalize(&candidate).map_err(|_| DocError::NotFound)?;
+    let canon = std::fs::canonicalize(&candidate).map_err(|_| DocError::NotFound)?;
     if !canon.starts_with(root) {
         return Err(DocError::Forbidden);
     }
-    if canon.is_dir() {
-        canon = canon.join("index.html");
-        if !canon.is_file() {
-            return Err(DocError::NotFound);
-        }
+    let target = if canon.is_dir() {
+        canon.join("index.html")
+    } else {
+        canon
+    };
+    let final_path = std::fs::canonicalize(&target).map_err(|_| DocError::NotFound)?;
+    if !final_path.starts_with(root) {
+        return Err(DocError::Forbidden);
     }
-    if !canon.is_file() {
+    if !final_path.is_file() {
         return Err(DocError::NotFound);
     }
-    let mime = mime_for(&canon);
-    Ok((canon, mime))
-}
-
-pub fn mime_for(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("html") | Some("htm") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
-        Some("json") | Some("map") => "application/json",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("woff2") => "font/woff2",
-        Some("woff") => "font/woff",
-        Some("txt") => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
-    }
+    Ok(final_path)
 }
 
 /// Top-level directories that hold an index.html, which is exactly the set of
@@ -140,4 +106,3 @@ pub fn listing_html(root: &Path) -> String {
 <h1>Generated documentation</h1><ul>{links}</ul></body></html>"
     )
 }
-

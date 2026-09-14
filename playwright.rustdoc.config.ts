@@ -19,6 +19,7 @@ import path from "node:path";
 // data dir itself as state_dir, so both that and the release `prod/` nesting are
 // created.
 const port = Number(process.env.INSTANT_RUSTDOC_PORT ?? 47816);
+const noRootPort = Number(process.env.INSTANT_RUSTDOC_NOROOT_PORT ?? 47817);
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname));
 const serve =
   process.env.INSTANT_RUSTDOC_SERVE ??
@@ -77,6 +78,19 @@ if (doc.status !== 0) {
 if (!fs.existsSync(path.join(docRoot, "docprobe/index.html"))) {
   throw new Error(`cargo doc produced no docprobe/index.html under ${docRoot}`);
 }
+// A filename with a literal percent, to prove the one-decode boundary over HTTP.
+fs.writeFileSync(path.join(docRoot, "percent%name.html"), "<html>percent</html>");
+const noRootDir = path.join(scratchRoot, "serve-noroot");
+const noRootBoopDir = path.join(scratchRoot, "boop-noroot");
+const noRootTmuxDir = path.join(scratchRoot, "tmux-noroot");
+fs.mkdirSync(noRootDir, { recursive: true });
+fs.mkdirSync(noRootBoopDir, { recursive: true });
+fs.mkdirSync(noRootTmuxDir, { recursive: true });
+for (const nested of [path.join(noRootDir, "cdp-chrome"), path.join(noRootDir, "prod/cdp-chrome")]) {
+  fs.mkdirSync(path.join(nested, "Default"), { recursive: true });
+}
+const isolation = (tmux: string, boop: string) =>
+  `env -u TMUX TMUX_TMPDIR=${tmux} INSTANT_NO_GLOBALS=1 INSTANT_TMUX_SOCKET= BOOP_DB=${path.join(boop, "boop.db")} BOOP_MAIL_DIR=${boop} BOOP_NO_SYNC=1`;
 
 export default defineConfig({
   testDir: "./e2e-real",
@@ -93,11 +107,20 @@ export default defineConfig({
       args: ["--renderer-process-limit=1", "--disable-gpu", "--in-process-gpu", "--disable-dev-shm-usage", "--js-flags=--max-old-space-size=384"],
     },
   },
-  webServer: {
-    command: `env -u TMUX TMUX_TMPDIR=${tmuxDir} INSTANT_NO_GLOBALS=1 INSTANT_TMUX_SOCKET= BOOP_DB=${boopDb} BOOP_MAIL_DIR=${boopDir} BOOP_NO_SYNC=1 ${serve} --port ${port} --data-dir ${dataDir} --dist ${path.join(root, "dist")} --doc-root "${docRoot}"`,
-    url: `http://127.0.0.1:${port}/`,
-    reuseExistingServer: !!process.env.INSTANT_RUSTDOC_REUSE,
-    timeout: 30_000,
-  },
-  metadata: { scratchRoot, docRoot, dataDir, boopDb, boopDir, tmuxDir, root },
+  webServer: [
+    {
+      command: `${isolation(tmuxDir, boopDir)} ${serve} --port ${port} --data-dir ${dataDir} --dist ${path.join(root, "dist")} --doc-root "${docRoot}"`,
+      url: `http://127.0.0.1:${port}/`,
+      reuseExistingServer: !!process.env.INSTANT_RUSTDOC_REUSE,
+      timeout: 30_000,
+    },
+    {
+      // Same backend with no --doc-root, so the no-root path is a real 404.
+      command: `${isolation(noRootTmuxDir, noRootBoopDir)} ${serve} --port ${noRootPort} --data-dir ${noRootDir} --dist ${path.join(root, "dist")}`,
+      url: `http://127.0.0.1:${noRootPort}/`,
+      reuseExistingServer: !!process.env.INSTANT_RUSTDOC_REUSE,
+      timeout: 30_000,
+    },
+  ],
+  metadata: { scratchRoot, docRoot, dataDir, noRootDir, boopDb, boopDir, tmuxDir, root },
 });

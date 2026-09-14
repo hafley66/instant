@@ -34,7 +34,7 @@ import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
 import { installMdviewHost } from "./mdview/ports";
 import { registerPaint } from "./paintPanel";
-import { openRustdocBrowser } from "./rustdoc";
+import { openRustdocBrowser } from "./0_rustdoc";
 import { isFilePickerOpen } from "./overlayGuard";
 import { installKeymap, type Command } from "./keymap";
 import { openPalette, isPaletteOpen } from "./palette";
@@ -153,7 +153,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "tab.open", keys: ["$mod+t"], title: "New Tab at Current Directory", group: "Tabs", run: openTabAtPwd },
   { id: "tab.reopen", keys: ["$mod+Shift+t"], title: "Reopen Closed Tab", group: "Tabs", run: reopenLastTab },
   { id: "tab.browser", keys: [], title: "Open Browser", group: "Tabs", run: () => openBrowserTab() },
-  { id: "tab.rustdoc", keys: [], title: "Open Generated Rustdoc", group: "Tabs", run: () => openRustdocBrowser() },
+  { id: "tab.rustdoc", keys: [], title: "Open Generated Rustdoc", group: "Tabs", run: () => void openRustdocBrowser() },
   { id: "browser.quality", keys: [], title: "Cycle Render Quality", group: "Browser", run: () => cycleBrowserQuality() },
   { id: "browser.perf", keys: [], title: "Toggle Performance Mode (1x)", group: "Browser", run: () => setBrowserPerf(!cdpPerf()) },
   // "Super XP": grainy pixel font everywhere (chrome + terminal). Persisted.
