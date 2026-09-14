@@ -19,20 +19,19 @@ summon gesture itself is macOS-only and is not pictured.
 
 **Durable tmux terminals render agent diagrams inline.** Three sessions are open
 as dock tabs; the active one is a turn whose D2 and Mermaid fences render as
-diagrams over the exact rows the harness printed. The D2 graph is drawn to the
-right of its terminal turn, the Mermaid below it. Rustdoc rendering is not
-shipped yet.
+diagrams over the rows of a synthetic assistant turn: D2 above, Mermaid below.
+Rustdoc rendering is pending.
 
 ![Three durable tmux sessions open as tabs, with D2 and Mermaid diagrams rendered inline in the active terminal turn](docs/screenshots/01-turn-diagrams.png)
 
 **Right-click a turn to favorite it, backed by Boop.** The context menu names the
-Boop turn (`readme-turn:42 · assistant`) and offers the star. Favoriting writes
-through `boop_favorite_toggle` into boop's store.
+Boop turn (`turn:42 · assistant`) and offers the star. Favorites are saved in
+Boop's SQLite store.
 
 ![Terminal context menu over a turn, showing the Boop turn label and the star favorite action](docs/screenshots/02-turn-favorite.png)
 
 **Favorites come back from the store.** After a reload, the Favorites panel lists
-the Boop-backed turn from `boop_favorites`, so the star survives the session.
+the saved turn, ready to revisit.
 
 ![Favorites panel listing the Boop turn group with the favorited turn preview](docs/screenshots/03-favorites-panel.png)
 
@@ -69,7 +68,7 @@ To regenerate the images, see [docs/screenshots/README.md](docs/screenshots/READ
    tab from the keyboard.
 5. **Message running agents.** Open the tmux rail's Boop dropdown, tick the
    coordinator TUIs you want, type a message, and send to that set. Recipients
-   are live sessions the app owns through tmux, not a broad broadcast.
+   are Boop-controlled live TUIs open in Instant tabs.
 6. **Watch Boop.** The Boop panel shows the lane roster and the mail stream over
    boop's store, refreshed live.
 
@@ -126,9 +125,10 @@ corepack pnpm@10.12.4 run tauri dev      # Rust backend + front end
 `just dev-safe` starts a second instance with the tray, global shortcut, and
 summon gesture disabled, for development alongside an already-running app.
 
-Type-check and build the front end alone:
+Check and build:
 
 ```sh
+corepack pnpm@10.12.4 exec tsc --noEmit
 corepack pnpm@10.12.4 run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
@@ -139,7 +139,7 @@ The activity recorder is **off by default** and toggled explicitly (Activity
 panel or the menu-bar item). It records only Cmd+C/Cmd+V keycodes, not
 keystrokes; never captures while an excluded app is frontmost or while the
 instant window is focused; and drops events matching the config exclusion filters
-before they are stored. Everything stays local under
+before they are stored. Activity data is stored locally under
 `~/Library/Application Support/com.instant.summon/`.
 
 ## License
