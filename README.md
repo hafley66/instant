@@ -2,8 +2,8 @@
 
 A macOS summon-overlay terminal. Double-tap right-⌘ (or double right-click) and
 a frameless window drops in at your cursor, hosting tmux sessions that run AI CLI
-agents (claude, opencode, a plain shell). It lives in the menu bar, not the Dock,
-so it is one gesture away and gone again.
+agents (claude, opencode, codex, or a plain shell). It lives in the menu bar, not
+the Dock, so it is one gesture away and gone again.
 
 Built with Tauri 2 + TypeScript. The chrome is a retro skin (Windows XP Luna,
 Persona 5, Armored Core 3 garage), the layout is a VS Code-style dockview, and a
@@ -80,6 +80,9 @@ Highlights beyond the workflow above:
 
 - **Worktree hub.** Repo to checkout to git worktrees as a tree; add a worktree
   inline, open a session in it, or resume a session already in that path.
+- **Boop-backed favorites.** Right-click a turn and pick the star. The favorite is
+  keyed by `session:turn` and written to boop's store, so it survives reloads and
+  lists in the Favorites panel.
 - **Activity recorder.** An fzf-searchable timeline of session visits, browser
   events (via the bundled extension), file opens, and screen captures. Off by
   default; see Privacy.
@@ -91,10 +94,8 @@ Highlights beyond the workflow above:
 ## Requirements
 
 - macOS (CGEventTap, screencapture, and the menu bar are macOS-only).
-- Rust toolchain plus
-  [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
 - `tmux` on `PATH` (the Homebrew location is added automatically).
-- An agent CLI if you want one: `claude` and/or `opencode`.
+- An agent CLI if you want one: `claude`, `opencode`, and/or `codex`.
 - Permissions on first run: **Accessibility / Input Monitoring** (summon gesture,
   send-selection tap) and **Screen Recording** (the Shot button and capture).
 
@@ -113,6 +114,9 @@ is moved to a timestamped `.backup` sibling. macOS asks for Accessibility and
 Input Monitoring, then Screen Recording, when those features are first used.
 
 ## Develop
+
+Building from source needs the Rust toolchain plus
+[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
 corepack pnpm@10.12.4 install

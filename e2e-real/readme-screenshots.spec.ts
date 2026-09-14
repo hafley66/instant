@@ -259,7 +259,6 @@ const turnBody = [
   "  direction: right",
   `  ${D2_MARKER}`,
   "  terminal -> diagram: render",
-  "  diagram -> favorites: star",
   "",
   // Blank rows let the overlay size the wide D2 graph past its four source
   // rows; the allocator only borrows rows that are actually blank.
@@ -289,7 +288,6 @@ const turnSaid = [
   "direction: right",
   D2_MARKER,
   "terminal -> diagram: render",
-  "diagram -> favorites: star",
   "```",
   "",
   "```mermaid",
@@ -388,8 +386,8 @@ test("1. workspace: inline D2 and Mermaid from a terminal turn", async ({ page }
   typeLine("review", "PS1=; clear; cat " + path.join(fixtures, "review.txt"));
 
   await showTurn(page);
-  await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("favorites");
-  await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("turn");
+  await expect(page.locator('.term-diagram[data-language="d2"]')).toContainText("terminal");
+  await expect(page.locator('.term-diagram[data-language="mermaid"]')).toContainText("favorite");
   await expect(page.locator('.term-diagram[data-language="d2"]')).toHaveAttribute("data-diagram-locator", `boop:${TURN_SESSION}:${TURN_ID}`);
   await page.waitForTimeout(700);
   await shot(page, "01-turn-diagrams");
