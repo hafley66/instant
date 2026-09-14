@@ -7,6 +7,7 @@ mod capture;
 mod cdp;
 mod config;
 mod deps;
+pub mod doc_service;
 mod favorites;
 mod fs;
 mod fs_watch;
@@ -1109,6 +1110,7 @@ pub fn run() {
             log_path,
             log_reveal,
             deps::tool_status,
+            doc_service::rustdoc_open,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1117,6 +1119,9 @@ pub fn run() {
             // doesn't linger holding its profile/port.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 cdp::kill_engine(&app.state::<Arc<services::Services>>());
+                app.state::<Arc<services::Services>>()
+                    .doc_service
+                    .stop_all();
             }
         });
 }

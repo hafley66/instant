@@ -100,6 +100,15 @@ pub fn dispatch(
         }
         "cdp_status" => ok(crate::cdp::cdp_status_impl(&services)),
 
+        // rustdoc
+        "rustdoc_open" => {
+            let p: RustdocOpenArgs = parse(name, params)?;
+            res(crate::doc_service::open_impl(
+                &services.doc_service,
+                p.path.as_deref().map(std::path::Path::new),
+            ))
+        }
+
         // workspace
         "list_workspaces" => ok(crate::workspace::list_workspaces_impl(&services)),
         "create_workspace" => {
@@ -541,6 +550,12 @@ struct CdpNavigateArgs {
 #[serde(rename_all = "camelCase")]
 struct CdpCloseArgs {
     id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RustdocOpenArgs {
+    path: Option<String>,
 }
 
 #[derive(Deserialize)]

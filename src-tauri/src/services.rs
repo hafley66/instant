@@ -10,6 +10,7 @@ use crate::activity::{ActivityDb, CaptureEnabled, RulesState, WatcherState};
 use crate::capture::WindowFocused;
 use crate::cdp::{CdpStore, ChromeEngine};
 use crate::config::ConfigState;
+use crate::doc_service::DocService;
 use crate::favorites::Favorites;
 use crate::fs_watch::FsWatchClaims;
 use crate::pty::PtyStore;
@@ -21,6 +22,7 @@ pub struct Services {
     pub pty_events: PtyEvents,
     pub cdp: CdpStore,
     pub chrome_engine: ChromeEngine,
+    pub doc_service: DocService,
     pub workspaces: Workspaces,
     pub favorites: Favorites,
     pub fs_watch: FsWatchClaims,
@@ -51,6 +53,7 @@ impl Services {
             pty_events: PtyEvents::default(),
             cdp: CdpStore::default(),
             chrome_engine: ChromeEngine::default(),
+            doc_service: DocService::default(),
             workspaces: Workspaces(Mutex::new(crate::workspace::load(data_dir))),
             favorites,
             fs_watch: FsWatchClaims::default(),

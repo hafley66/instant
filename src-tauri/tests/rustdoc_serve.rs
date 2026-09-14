@@ -4,7 +4,10 @@
 
 use std::path::PathBuf;
 
-use instant_lib::serve::rustdoc::{canonical_root, crate_list, listing_html, resolve, DocError};
+use instant_lib::serve::rustdoc::{
+    canonical_root, crate_list, find_root, listing_html, looks_generated, percent_encode_path,
+    relative_path, resolve, DocError,
+};
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
@@ -103,4 +106,43 @@ fn listing_names_only_crate_directories() {
     let html = listing_html(&root);
     assert!(html.contains("docprobe/index.html"));
     assert!(!html.contains("search.index"));
+}
+
+#[test]
+fn find_root_selects_the_directory_holding_crates_js() {
+    let dir = scratch("find-root");
+    std::fs::write(dir.join("crates.js"), "// crates").unwrap();
+    std::fs::create_dir_all(dir.join("docprobe")).unwrap();
+    let page = dir.join("docprobe/index.html");
+    std::fs::write(&page, "<html>crate</html>").unwrap();
+    assert_eq!(find_root(&page), Some(canonical_root(&dir).unwrap()));
+    // An HTML file outside any rustdoc root is not claimed.
+    let plain = std::env::temp_dir().join(format!("instant-rustdoc-plain-{}.html", std::process::id()));
+    std::fs::write(&plain, "<html>plain</html>").unwrap();
+    assert_eq!(find_root(&plain), None);
+    let _ = std::fs::remove_file(&plain);
+}
+
+#[test]
+fn looks_generated_matches_only_a_target_doc_component_pair() {
+    assert!(looks_generated(std::path::Path::new(
+        "/repo/target/doc/mycrate/index.html"
+    )));
+    assert!(!looks_generated(std::path::Path::new(
+        "/repo/docs/mycrate/index.html"
+    )));
+}
+
+#[test]
+fn relative_path_strips_the_root_and_percent_encoding_escapes_spaces() {
+    let root = canonical_root(&scratch("relative")).unwrap();
+    let file = root.join("docprobe/struct.Pair.html");
+    let rel = relative_path(&root, &file).unwrap();
+    assert_eq!(rel, "docprobe/struct.Pair.html");
+    assert!(relative_path(&root, std::path::Path::new("/etc/hosts")).is_none());
+    assert_eq!(
+        percent_encode_path("crate with spaces/index.html"),
+        "crate%20with%20spaces/index.html"
+    );
+    assert_eq!(percent_encode_path("docprobe/100%.html"), "docprobe/100%25.html");
 }

@@ -1,27 +1,37 @@
-// Rustdoc browsing. instant-serve, started with --doc-root, exposes a generated
-// cargo doc tree read-only at /rustdoc/ on the frontend's own HTTP origin. That
-// origin matters: rustdoc loads its search index with fetch(), which Chrome
-// blocks from file://, so the embedded browser engine is pointed at the served
-// tree instead of the local files. The availability check keeps the command from
-// opening a 404 tab when no doc root is configured, which covers both the native
-// shell (tauri://localhost) and a dev Vite origin.
+// Rustdoc browsing. A generated cargo doc tree loads its search index with
+// fetch(), which Chrome blocks from file://, and the native shell has no HTTP
+// origin of its own. The backend therefore serves a selected doc root from a
+// private 127.0.0.1 loopback server and hands back an absolute URL, so neither
+// the Tauri shell nor a Vite origin is involved. The same command works under
+// instant-serve. `openRustdocPath` maps one selected page; the palette variant
+// opens the last registered root.
+import { invoke } from "./generated/native";
 import { flashStatus } from "./core";
 import { openBrowserTab } from "./browser";
 
-export async function openRustdocBrowser(): Promise<void> {
-  if (location.protocol !== "http:" && location.protocol !== "https:") {
-    flashStatus("rustdoc browsing needs the serve backend (http origin)");
-    return;
-  }
-  let reachable = false;
+// Map a locally selected page to its served documentation URL. Returns false
+// when the path is not a rustdoc page, letting the normal file-open path run;
+// a rustdoc-shaped path with missing output flashes the backend's message.
+export async function openRustdocPath(path: string): Promise<boolean> {
+  let url: string | null;
   try {
-    reachable = (await fetch("/rustdoc/", { method: "HEAD" })).ok;
-  } catch {
-    reachable = false;
+    url = await invoke<string | null>("rustdoc_open", { path });
+  } catch (error) {
+    flashStatus(String(error));
+    return true;
   }
-  if (!reachable) {
-    flashStatus("no rustdoc doc root configured (start instant-serve with --doc-root)");
+  if (!url) return false;
+  void openBrowserTab(url);
+  return true;
+}
+
+export async function openRustdocBrowser(): Promise<void> {
+  let url: string | null;
+  try {
+    url = await invoke<string | null>("rustdoc_open");
+  } catch (error) {
+    flashStatus(String(error));
     return;
   }
-  void openBrowserTab(new URL("/rustdoc/", location.origin).href);
+  if (url) void openBrowserTab(url);
 }

@@ -1,8 +1,10 @@
 // Generated rustdoc inside Instant against the real backend. The tier mounts a
 // real `cargo doc --no-deps` tree (built by playwright.rustdoc.config.ts under a
-// path with a space) at /rustdoc/ and drives the app's own palette command into
-// the embedded Chrome. Receipts are the served bytes, the cdp-url event naming
-// the tab, and Rustdoc's own search results read back through the copy bridge.
+// path with a space), keeps the serve route's direct HTTP checks, and drives the
+// product entry points (the palette and the normal file-open flow) into the
+// embedded Chrome over the backend's loopback doc service. Receipts are the
+// served bytes, the cdp-url event naming the tab, and Rustdoc's own search
+// results read back through the copy bridge.
 //
 // Isolated: private data dir, boop store, tmux dir, no globals, no owner Chrome
 // profile (the config precreates <data-dir>/cdp-chrome/Default so cdp.rs never
@@ -20,15 +22,33 @@ class Rpc {
   ws: WebSocket;
   events: EventFrame[] = [];
   pending: ((frame: EventFrame) => boolean)[] = [];
+  private nextId = 1;
+  private calls = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 
   constructor(ws: WebSocket) {
     this.ws = ws;
     ws.addEventListener("message", (message) => {
       const data = typeof message.data === "string" ? message.data : "";
-      let frame: { method?: string; params?: { event?: string; payload?: unknown } };
+      let frame: {
+        id?: number;
+        method?: string;
+        result?: unknown;
+        error?: { message?: string };
+        params?: { event?: string; payload?: unknown };
+      };
       try {
         frame = JSON.parse(data);
       } catch {
+        return;
+      }
+      // A request/response frame carries an id and result or error.
+      if (typeof frame.id === "number" && (frame.result !== undefined || frame.error !== undefined)) {
+        const call = this.calls.get(frame.id);
+        if (call) {
+          this.calls.delete(frame.id);
+          if (frame.error) call.reject(new Error(frame.error.message ?? "rpc error"));
+          else call.resolve(frame.result);
+        }
         return;
       }
       if (frame.method !== "events" || !frame.params?.event) return;
@@ -62,6 +82,28 @@ class Rpc {
 
   send(frame: Record<string, unknown>): void {
     this.ws.send(JSON.stringify(frame));
+  }
+
+  /// One request/response round trip over the same /ws the app speaks.
+  call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs = 30_000): Promise<T> {
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.calls.delete(id);
+        reject(new Error(`rpc ${method} timed out`));
+      }, timeoutMs);
+      this.calls.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      this.send({ jsonrpc: "2.0", id, method, params });
+    });
   }
 
   /// Resolve with the next matching event and consume it. Past events count only
@@ -162,15 +204,72 @@ test("declines when no doc root is configured", async ({ page }) => {
   await page.locator(".cmdp-input").fill("Rustdoc");
   await page.locator(".cmdp-input").press("Enter");
 
-  await expect(page.locator(".app-toast")).toContainText("no rustdoc doc root configured", { timeout: 10_000 });
+  await expect(page.locator(".app-toast")).toContainText("no documentation root", { timeout: 10_000 });
   await page.waitForTimeout(1_000);
   expect(await page.locator(".term-host").count()).toBe(0);
+});
+
+test("maps a selected target/doc page to its own loopback origin", async ({ request }) => {
+  const rpc = await Rpc.connect();
+  try {
+    const docRoot = String((test.info().config.metadata as Record<string, unknown>).docRoot);
+    const url = await rpc.call<string>("rustdoc_open", { path: `${docRoot}/docprobe/index.html` });
+    expect(url).toContain("http://127.0.0.1:");
+    expect(url).toContain("/docprobe/index.html");
+    // No raw space survived into the path (the scratch root contains one).
+    expect(new URL(url).pathname).not.toContain(" ");
+
+    const served = await request.get(url);
+    expect(served.status()).toBe(200);
+    expect(await served.text()).toContain("docprobe");
+    expect((await request.get(`${new URL(url).origin}/missing.html`)).status()).toBe(404);
+    expect((await request.get(`${new URL(url).origin}/..%2f..%2fCargo.toml`)).status()).toBe(404);
+
+    // A plain HTML file is declined so the normal file-open path can continue.
+    expect(await rpc.call<string | null>("rustdoc_open", { path: "/etc/hosts" })).toBeNull();
+  } finally {
+    rpc.close();
+  }
+});
+
+test("opens a generated index.html through the normal file-open flow", async ({ page }) => {
+  await boot(page);
+  const flatRoot = String((test.info().config.metadata as Record<string, unknown>).flatRoot);
+  const rpc = await Rpc.connect();
+  try {
+    // ⌘⇧J is the app's "open a path" entry; typing an absolute path runs the same
+    // click ladder a terminal ⌘-click uses, ending in openPathInInstant. The
+    // HTML page must land in the embedded browser on the loopback doc origin,
+    // not in a code preview or a file:// tab.
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "J", code: "KeyJ", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await page.locator(".cmdp-input").fill(`${flatRoot}/flatprobe/index.html`);
+    await page.locator(".cmdp-input").press("Enter");
+
+    await expect(page.locator(".term-host").last()).toBeVisible({ timeout: 60_000 });
+    const opened = await rpc.wait((frame) => frame.event === "cdp-frame" && String(frame.payload.id).includes("127.0.0.1"));
+    const id = String(opened.payload.id);
+    const loaded = await readInTab(rpc, id, `({ title: document.title, protocol: location.protocol, path: location.pathname })`);
+    expect(loaded.protocol).toBe("http:");
+    expect(String(loaded.title)).toBe("FlatDoc");
+    expect(String(loaded.path)).toContain("flatprobe/index.html");
+    expect(String(loaded.path)).not.toContain(" ");
+  } finally {
+    rpc.close();
+  }
 });
 
 test("opens generated docs in the embedded browser and runs Rustdoc search", async ({ page }) => {
   await boot(page);
   const rpc = await Rpc.connect();
   try {
+    // The palette opens the most recently registered root. Register the target
+    // root first so the test does not depend on whether an earlier test opened
+    // a different tree.
+    const docRoot = String((test.info().config.metadata as Record<string, unknown>).docRoot);
+    await rpc.call<string>("rustdoc_open", { path: `${docRoot}/docprobe/index.html` });
+
     // The palette is the app's own entry point; run the command by name.
     await page.evaluate(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "P", code: "KeyP", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
@@ -183,9 +282,10 @@ test("opens generated docs in the embedded browser and runs Rustdoc search", asy
 
     // The initial load is started from the CDP target URL before the ws attaches,
     // so there is no frameNavigated event for it; the screencast id names the tab.
-    const opened = await rpc.wait((frame) => frame.event === "cdp-frame" && String(frame.payload.id).includes("/rustdoc/"));
+    // The palette now opens the loopback doc origin, not the frontend origin.
+    const opened = await rpc.wait((frame) => frame.event === "cdp-frame" && String(frame.payload.id).includes("127.0.0.1"));
     const id = String(opened.payload.id);
-    expect(id).toContain("/rustdoc/");
+    expect(id).toContain("127.0.0.1");
 
     const loaded = await readInTab(rpc, id, `({
       title: document.title,
@@ -249,6 +349,17 @@ test("opens generated docs in the embedded browser and runs Rustdoc search", asy
     const item = await readInTab(rpc, id, `({ title: document.title, path: location.pathname })`);
     expect(String(item.title)).toContain("Pair");
     expect(String(item.path)).toContain("struct.Pair.html");
+
+    // Back navigation returns to the crate page through the browser history.
+    rpc.send({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "cdp_send",
+      params: { id, method: "Runtime.evaluate", params: { expression: `history.back()` } },
+    });
+    await rpc.wait((frame) => frame.event === "cdp-url" && String(frame.payload.url).includes("docprobe/index.html"));
+    const back = await readInTab(rpc, id, `({ title: document.title })`);
+    expect(String(back.title)).toContain("docprobe");
   } finally {
     rpc.close();
   }

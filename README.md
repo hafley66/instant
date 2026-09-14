@@ -47,11 +47,15 @@ waterfall.
 
 ![Boop lane roster with nested lanes, mail counts, and a waterfall column](docs/screenshots/05-boop-roster-mail.png)
 
-**Browse generated cargo docs in the embedded browser.** With the serve backend
-started on a doc root (`instant-serve --doc-root target/doc`), the palette's
-"Open Generated Rustdoc" opens a browser tab on the served tree. Serving over
-HTTP rather than `file://` is what lets Rustdoc's search index, styles, and
-scripts load: the search box returns items from the crate.
+**Browse generated cargo docs in the embedded browser.** Open a generated
+`target/doc/<crate>/index.html` through Instant's file-open flow (⌘-click the
+path, or jump to it) and it opens in the embedded browser. The backend maps the
+page to an HTTP-served documentation root: natively it starts a private
+127.0.0.1 server on an ephemeral port, and `instant-serve --doc-root <root>`
+registers the same root, so both work without `file://`. Serving over HTTP is
+what lets Rustdoc's search index, styles, and scripts load: the search box
+returns items from the crate. The palette's "Open Generated Rustdoc" reopens the
+most recently registered root.
 
 ![Instant's embedded browser showing a served Rustdoc crate page with search results for add](docs/screenshots/06-rustdoc-browser.png)
 

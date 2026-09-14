@@ -103,6 +103,13 @@ export async function openPathInInstant(path: string, line?: number): Promise<vo
       await openExternal(path);
       return;
     }
+    // A generated cargo doc page must be HTTP-served (its search index is
+    // fetch()ed); the backend maps it to a loopback origin. Non-rustdoc HTML
+    // returns false and continues to the file:// browser below.
+    if (!line && /\.html?$/i.test(path)) {
+      const { openRustdocPath } = await import("./0_rustdoc");
+      if (await openRustdocPath(path)) return;
+    }
     const browserUrl = !line && browserFileUrl(path, getHomeDir());
     if (browserUrl) {
       const { openBrowserTab } = await import("./browser");

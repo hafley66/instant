@@ -189,6 +189,7 @@ mod tests {
             pty_events: Default::default(),
             cdp: Default::default(),
             chrome_engine: Default::default(),
+            doc_service: Default::default(),
             workspaces: Default::default(),
             favorites,
             fs_watch: Default::default(),

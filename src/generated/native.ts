@@ -26,6 +26,7 @@ export type CommandName =
   | "cdp_navigate"
   | "cdp_close"
   | "cdp_status"
+  | "rustdoc_open"
   | "list_workspaces"
   | "create_workspace"
   | "remove_workspace"
@@ -164,6 +165,10 @@ export namespace commands {
     export const cdpNavigate = "cdp_navigate";
     export const cdpClose = "cdp_close";
     export const cdpStatus = "cdp_status";
+  }
+
+  export namespace rustdoc {
+    export const rustdocOpen = "rustdoc_open";
   }
 
   export namespace workspace {

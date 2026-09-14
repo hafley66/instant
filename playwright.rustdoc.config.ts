@@ -4,9 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 // Rustdoc tier: Chromium drives the built bundle served by instant-serve with a
-// real generated cargo doc tree mounted at /rustdoc/. The crate is built from
-// scratch (cargo doc --no-deps) into a private directory whose path contains a
-// space, so the resolver is exercised on a real path, not a synthetic one.
+// real generated cargo doc tree. The backend keeps the /rustdoc route and also
+// registers the same root with its loopback doc service, which is what the
+// product entry points use. The crate is built from scratch (cargo doc
+// --no-deps) into a private directory whose path contains a space, so the
+// resolver is exercised on a real path, not a synthetic one.
 //
 // Isolation, same shape as the boop-network tier:
 //   BOOP_DB / BOOP_MAIL_DIR  scratch sqlite store + mailbox
@@ -80,6 +82,17 @@ if (!fs.existsSync(path.join(docRoot, "docprobe/index.html"))) {
 }
 // A filename with a literal percent, to prove the one-decode boundary over HTTP.
 fs.writeFileSync(path.join(docRoot, "percent%name.html"), "<html>percent</html>");
+// A second, space-free rustdoc root used by the normal-file-open test: the jump
+// palette hands the path to the backend unchanged, and a path with spaces would
+// make the resolver's token handling part of the assertion.
+const flatRoot = path.join(scratchRoot, "flatdoc");
+fs.mkdirSync(path.join(flatRoot, "flatprobe"), { recursive: true });
+fs.writeFileSync(path.join(flatRoot, "crates.js"), "// crates");
+fs.writeFileSync(
+  path.join(flatRoot, "flatprobe/index.html"),
+  "<!doctype html><html><head><title>FlatDoc</title></head><body><a href=\"struct.Pair.html\">Pair</a></body></html>",
+);
+fs.writeFileSync(path.join(flatRoot, "flatprobe/struct.Pair.html"), "<html><title>Pair</title></html>");
 const noRootDir = path.join(scratchRoot, "serve-noroot");
 const noRootBoopDir = path.join(scratchRoot, "boop-noroot");
 const noRootTmuxDir = path.join(scratchRoot, "tmux-noroot");
@@ -122,5 +135,5 @@ export default defineConfig({
       timeout: 30_000,
     },
   ],
-  metadata: { scratchRoot, docRoot, dataDir, noRootDir, boopDb, boopDir, tmuxDir, root },
+  metadata: { scratchRoot, docRoot, flatRoot, dataDir, noRootDir, boopDb, boopDir, tmuxDir, root },
 });

@@ -72,6 +72,15 @@ fn main() {
         };
         let host = Arc::new(ServeHost::new(data_dir.clone()));
         services.pty_events.start(host.clone());
+        // Register the same root with the loopback doc service the `rustdoc_open`
+        // command uses, so the palette and file-open paths work over HTTP here
+        // exactly as they do in the native shell.
+        if let Some(root) = doc_root.as_deref() {
+            if let Err(e) = services.doc_service.register(root) {
+                eprintln!("--doc-root {e}");
+                std::process::exit(1);
+            }
+        }
         let state = Arc::new(ServeState { host, services, rustdoc_root: doc_root });
         let app = router(state, dist);
         let listener = match tokio::net::TcpListener::bind(("127.0.0.1", args.port)).await {
