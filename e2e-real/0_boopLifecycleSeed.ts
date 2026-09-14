@@ -101,6 +101,39 @@ export function seedLane(seed: LaneSeed): void {
   }
 }
 
+interface RouteSeed {
+  route: string;
+  session: string;
+  harness?: string;
+  cwd?: string;
+  kind?: string;
+  /// tmux target the route registered; empty means the projection still emits a
+  /// shell but liveness has nothing to probe (state "unknown"/dead).
+  tmux?: string;
+}
+
+/// A harness-backed route (`agent_route` + `agent_session`), the real shape a
+/// coordinator tab takes. Unlike `seedLane` this has no `agent_lane` row, so the
+/// graph reaches it only through the route/session projection: the coverage the
+/// durable-shell-only lifecycle cases miss.
+export function seedCoordinator(seed: RouteSeed): void {
+  const harness = seed.harness ?? "claude";
+  const cwd = seed.cwd ?? "/tmp/e2e-life/coord";
+  const tmux = seed.tmux ?? "";
+  sql(`insert or ignore into dict_harness(value) values ('${harness}')`);
+  sql(`insert or ignore into dict_session(value) values ('${seed.route}')`);
+  sql(`insert or ignore into dict_session(value) values ('${seed.session}')`);
+  sql(`insert or ignore into dict_cwd(value) values ('${cwd}')`);
+  sql(`insert or replace into agent_session(session_id, harness_id, cwd_id, started_ts)
+       values ((select id from dict_session where value='${seed.session}'),
+               (select id from dict_harness where value='${harness}'),
+               (select id from dict_cwd where value='${cwd}'), ${NOW_SQL})`);
+  sql(`insert or replace into agent_route(route, kind, harness, tmux, cwd, mode, session_id, registered_at)
+       values ('${seed.route}', '${seed.kind ?? "coordinator"}', '${harness}', '${tmux}',
+               '${cwd}', 'interactive', '${seed.session}',
+               strftime('%Y-%m-%dT%H:%M:%fZ','now'))`);
+}
+
 interface MailSeed {
   id: string;
   from: string;

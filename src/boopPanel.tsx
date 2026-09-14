@@ -8,6 +8,7 @@ import { settings } from "./0_settings";
 import type { SortingState } from "@tanstack/react-table";
 import { createMarbler, MarblerPanel, type MarbleEvent, type MarbleFrame } from "@hafley66/marbler";
 import { buildGraphTree, flattenTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
+import { boopRosterState } from "./0_boopPanelState";
 import "./1_boopPanel.css";
 
 export interface BoopLane {
@@ -381,6 +382,15 @@ export function BoopPanelV2() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roots, onlyActive, stats, windowRange]);
   const hiddenByActive = onlyActive ? roots.filter((node) => !subtreeLive(node)).length : 0;
+  // Pending/errored/empty look identical to a person unless they are named
+  // apart: a graph read still in flight reads as "no agents" otherwise.
+  const roster = boopRosterState({
+    laneCount: lanes.length,
+    shownCount: data.length,
+    hiddenByActive,
+    status: graphState.status,
+    error: storeError,
+  });
   const summaryAll = useMemo(() => {
     const open = lanes.filter((lane) => lane.state === "open").length;
     return [
@@ -419,17 +429,37 @@ export function BoopPanelV2() {
           rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
           onRowClick={(r) => setSelected((prior) => (prior === r.id ? null : r.id))}
         />
-        {lanes.length === 0 && (
+        {roster.kind !== "rows" && (
           <div className="empty-help">
-            <h3>boop: no agents in the window</h3>
-            {storeError ? (
-              <p className="act-warn">store read failed: {storeError}</p>
-            ) : (
-              <p>
-                Rows come from boop's session graph: every lane and harness
-                session active in the last 24 hours, nested by who spawned whom.
-                Mail refreshes every second, the graph every three.
-              </p>
+            {roster.kind === "loading" && (
+              <>
+                <h3>boop: reading the session graph…</h3>
+                <p>Mail refreshes every second, the graph every three.</p>
+              </>
+            )}
+            {roster.kind === "error" && (
+              <>
+                <h3>boop: store read failed</h3>
+                <p className="act-warn">{roster.message}</p>
+              </>
+            )}
+            {roster.kind === "hidden-by-active" && (
+              <>
+                <h3>
+                  {roster.hidden} agent{roster.hidden === 1 ? "" : "s"} hidden by active-only
+                </h3>
+                <p>Turn off “active only” above to show finished and idle lanes.</p>
+              </>
+            )}
+            {roster.kind === "empty" && (
+              <>
+                <h3>boop: no agents in the window</h3>
+                <p>
+                  Rows come from boop's session graph: every lane and harness
+                  session active in the last 24 hours, nested by who spawned whom.
+                  Mail refreshes every second, the graph every three.
+                </p>
+              </>
             )}
           </div>
         )}

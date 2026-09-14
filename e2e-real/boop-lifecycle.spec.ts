@@ -7,7 +7,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { resetStore, seedLane, seedMail, seedStore } from "./0_boopLifecycleSeed";
+import { resetStore, seedCoordinator, seedLane, seedMail, seedStore } from "./0_boopLifecycleSeed";
 
 const port = Number(process.env.INSTANT_BOOP_LIFE_PORT ?? 47807);
 const shots = path.join(process.cwd(), "artifacts", "real");
@@ -86,6 +86,26 @@ test("first mount shows seeded live lanes and mail rows", async ({ page }) => {
   await expect(page.locator(".boop-panel")).not.toContainText("store read failed");
   await shot(page, "01-first-mount");
   expect(errors.page, errors.page.join("\n")).toEqual([]);
+});
+
+test("a harness-backed coordinator route renders from the session graph", async ({ page }) => {
+  // The real coordinator tab is an `agent_route` + `agent_session`, not an
+  // `agent_lane`, so its shell comes from the runtime route projection. Without
+  // a live tmux pane here active-only (default on) hides it, and the unfiltered
+  // view is what proves the graph projected it at all.
+  resetStore();
+  seedCoordinator({ route: "coord-alpha", session: "sess-coord-alpha", cwd: "/tmp/e2e-life/coord" });
+
+  const errors = await boot(page);
+  await openBoop(page);
+
+  await expect(page.locator(".boop-panel .empty-help")).toContainText("hidden by active-only", { timeout: 30_000 });
+  await expect(page.locator(".boop-panel .empty-help")).not.toContainText("no agents in the window");
+  await page.locator(".boop-panel input[type=checkbox]").click();
+  await expect(row(page, "coord-alpha")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".boop-panel .empty-help")).toHaveCount(0);
+  await shot(page, "08-coordinator-route");
+  expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
 });
 
 test("empty store shows a meaningful empty state, not a silent blank", async ({ page }) => {
