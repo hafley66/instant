@@ -42,10 +42,24 @@
   font-size: 0.85em;
   background: var(--row-hover);
 }
-.boop-search-snippet {
-  white-space: nowrap;
+.boop-search-text {
+  display: block;
+  width: 100%;
+  min-width: 45vw;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: block;
-  max-width: 60vw;
+  white-space: nowrap;
+}
+.boop-search-text mark {
+  background: var(--row-active-bg);
+  color: var(--row-active-fg);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.boop-search-chat {
+  display: inline-block;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }

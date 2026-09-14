@@ -11,7 +11,7 @@ use tauri::AppHandle;
 const INDEX_FILE: &str = "boop-search.db";
 const SESSIONS_PER_TX: usize = 200;
 const SAID_CAP_CHARS: usize = 20_000;
-const SNIPPET_RADIUS: usize = 100;
+const SNIPPET_RADIUS: usize = 160;
 
 /// Bytes a SQLite URI filename cannot carry raw; `/` passes through.
 const URI_PATH: &AsciiSet = &CONTROLS.add(b' ').add(b'?').add(b'#').add(b'%');

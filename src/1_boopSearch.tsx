@@ -81,8 +81,36 @@ function resumeChat(row: SearchRow) {
 
 type Cell = { row: { original: SearchRow } };
 
+function highlight(text: string, terms: string[]) {
+  const words = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).filter(Boolean);
+  if (!words.length) return text;
+  const parts = text.split(new RegExp(`(${words.join("|")})`, "gi"));
+  return parts.map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+}
+
+let activeTerms: string[] = [];
+
 const columns: Grid<SearchRow>["columns"] = [
   { id: "__expand", header: "" },
+  {
+    id: "snippet",
+    accessorKey: "snippet",
+    header: "message",
+    cell: ({ row }: Cell) => {
+      const r = row.original;
+      if (!r.hit) return <span className="boop-search-text muted">{r.count} matching messages</span>;
+      const hit = r.hit;
+      return (
+        <span
+          className="boop-search-text boop-search-link"
+          title={`turn ${hit.turn} · click: open the full turn\n\n${hit.said.slice(0, 1500)}`}
+          onClick={() => openHit(hit)}
+        >
+          {highlight(r.snippet, activeTerms)}
+        </span>
+      );
+    },
+  },
   {
     id: "chat",
     accessorKey: "chat",
@@ -92,7 +120,7 @@ const columns: Grid<SearchRow>["columns"] = [
       return (
         <span
           className={`boop-search-chat${r.cwd && HARNESSES.has(r.harness) ? " boop-search-link" : ""}`}
-          title={r.cwd ? `${r.cwd}\n${r.session}\ndouble-click: resume` : r.session}
+          title={`${r.harness} · ${r.session}${r.cwd ? `\n${r.cwd}\ndouble-click: resume` : ""}`}
           onDoubleClick={() => resumeChat(r)}
         >
           {r.chat}
@@ -101,12 +129,11 @@ const columns: Grid<SearchRow>["columns"] = [
       );
     },
   },
-  { id: "harness", accessorKey: "harness", header: "harness" },
   {
     id: "role",
     accessorKey: "role",
-    header: "role",
-    cell: ({ row }: Cell) => (row.original.kind === "chat" ? "" : row.original.role),
+    header: "who",
+    cell: ({ row }: Cell) => (row.original.kind === "chat" ? "" : row.original.role === "assistant" ? "bot" : row.original.role),
   },
   {
     id: "ts",
@@ -117,31 +144,10 @@ const columns: Grid<SearchRow>["columns"] = [
   {
     id: "lastTs",
     accessorKey: "lastTs",
-    header: "last activity",
+    header: "chat active",
     cell: ({ row }: Cell) => (
       <span title={new Date(row.original.lastTs).toLocaleString()}>{whenLabel(row.original.lastTs)}</span>
     ),
-  },
-  {
-    id: "turn",
-    accessorKey: "turn",
-    header: "turn",
-    cell: ({ row }: Cell) => (row.original.kind === "chat" ? "" : row.original.turn),
-  },
-  {
-    id: "snippet",
-    accessorKey: "snippet",
-    header: "text",
-    cell: ({ row }: Cell) => {
-      const r = row.original;
-      if (!r.hit) return "";
-      const hit = r.hit;
-      return (
-        <span className="boop-search-snippet boop-search-link" title="click: open the full turn" onClick={() => openHit(hit)}>
-          {r.snippet}
-        </span>
-      );
-    },
   },
 ];
 
@@ -209,6 +215,7 @@ export function BoopSearchPanel() {
         ),
       )
       .subscribe((rows) => {
+        activeTerms = m.query.$().split(/\s+/).filter(Boolean);
         m.hits.$(rows);
         if (rows.length) m.error.$("");
       });
