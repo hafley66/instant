@@ -13,6 +13,7 @@ import {
   seedBulkEvents,
   seedBulkLanes,
   seedBulkSessions,
+  seedBulkTurns,
   seedLane,
   seedMail,
   seedStore,
@@ -23,6 +24,7 @@ const shots = path.join(process.cwd(), "artifacts", "real");
 
 const BIG_LANES = 1200;
 const BIG_SESSIONS = 1200;
+const BIG_TURNS_PER_SESSION = 100;
 const BIG_EVENTS = 12_000;
 // Bound: with trace events dropped, the read is one runtime observation plus
 // set-wise store queries. The same store on the pre-fix binary measured
@@ -108,6 +110,7 @@ test("a large history renders the network and keeps the graph read bounded", asy
   resetStore();
   seedBulkLanes(BIG_LANES);
   seedBulkSessions(BIG_SESSIONS);
+  seedBulkTurns(BIG_TURNS_PER_SESSION);
   seedBulkEvents(BIG_EVENTS, BIG_LANES);
   seedMail({ id: "net-m1", from: "bulk-lane-1", to: "bulk-lane-2", kind: "note", body: "bulk mail", ageSec: 30 });
 
@@ -116,9 +119,15 @@ test("a large history renders the network and keeps the graph read bounded", asy
   const opened = Date.now();
   await openBoop(page);
 
-  // The roster and the network (marbler) must both paint real rows. The marbler
-  // grid paginates at 20 rows, so the page proves rendering while the graph
-  // frame below proves the full synthetic store was projected.
+  // The Boop network view is the embedded marbler (`[data-testid=marbler]` /
+  // `section.network-panel`) under the roster. There is no separate network-mode
+  // control in current main: the marbler's `all/request/...` filter toolbar is
+  // hidden in embedded mode, so this is the whole network surface.
+  await expect(page.locator('[data-testid="marbler"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".boop-marbler section.network-panel")).toHaveCount(1);
+  // Mail frames render as waterfall dots on the roster lanes (the marbler's own
+  // link marks are drawn on the Pixi timeline canvas, covered by the screenshot).
+  await expect(page.locator(".boop-master .boop-spark i").first()).toBeVisible({ timeout: 30_000 });
   const firstRow = marblerRows(page).first();
   await expect(firstRow).toBeVisible({ timeout: READ_BUDGET_MS + 30_000 });
   await expect(firstRow).toContainText("bulk-");
@@ -150,10 +159,14 @@ test("clicking a network node opens its detail drawer", async ({ page }) => {
 
   const errors = await boot(page);
   await openBoop(page);
-  const row = marblerRows(page).filter({ hasText: "net-lane-" }).first();
+  const row = marblerRows(page).filter({ hasText: "net-lane-b" }).first();
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.click();
-  await expect(page.locator('[data-testid="event-details"]')).toBeVisible({ timeout: 15_000 });
+  const drawer = page.locator('[data-testid="event-details"]');
+  await expect(drawer).toBeVisible({ timeout: 15_000 });
+  // The drawer names the graph edge (parent lane -> this lane) and its target.
+  await expect(drawer).toContainText("boop://net-lane-a/net-lane-b");
+  await expect(drawer).toContainText("net-lane-b");
   await shot(page, "02-selection");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
 });

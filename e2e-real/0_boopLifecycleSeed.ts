@@ -138,7 +138,7 @@ export function seedBulkLanes(count: number, prefix = "bulk-lane"): void {
   sql(`insert or ignore into dict_cwd(value) values ('/tmp/e2e-net');`);
   sql(`insert or ignore into dict_status(value) values ('live');`);
   sql(`with recursive seq(i) as (select 1 union all select i+1 from seq where i < ${count})
-       insert into dict_session(value) select '${prefix}-'||i from seq;`);
+       insert or ignore into dict_session(value) select '${prefix}-'||i from seq;`);
   sql(`insert into agent_lane(lane_id, cwd_id, parent_lane_id, goal, spawned_ts)
        select s.id, (select id from dict_cwd where value='/tmp/e2e-net'), null, 'bulk goal', ${NOW_SQL}
          from dict_session s where s.value like '${prefix}-%';`);
@@ -154,11 +154,26 @@ export function seedBulkSessions(count: number, prefix = "bulk-sess"): void {
   sql(`insert or ignore into dict_cwd(value) values ('/tmp/e2e-net');`);
   sql(`insert or ignore into dict_harness(value) values ('codex');`);
   sql(`with recursive seq(i) as (select 1 union all select i+1 from seq where i < ${count})
-       insert into dict_session(value) select '${prefix}-'||i from seq;`);
+       insert or ignore into dict_session(value) select '${prefix}-'||i from seq;`);
   sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
        select s.id, (select id from dict_harness where value='codex'),
               (select id from dict_cwd where value='/tmp/e2e-net'), ${NOW_SQL}
          from dict_session s where s.value like '${prefix}-%';`);
+}
+
+/// `turnsPerSession` transcript turns for every prefixed session. The graph's
+/// `turns`/`usage` CTEs aggregate `agent_turn` per session, so long transcripts
+/// are the native-session load the session projection must stay bounded under.
+export function seedBulkTurns(turnsPerSession: number, prefix = "bulk-sess"): void {
+  sql(`insert or ignore into dict_role(value) values ('assistant');`);
+  sql(`insert or ignore into dict_cwd(value) values ('/tmp/e2e-net');`);
+  sql(`with recursive t(n) as (select 1 union all select n+1 from t where n < ${turnsPerSession})
+       insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
+       select s.id, t.n, ${NOW_SQL} + t.n,
+              (select id from dict_role where value='assistant'), 'bulk turn',
+              (select id from dict_cwd where value='/tmp/e2e-net')
+         from dict_session s, t
+        where s.value like '${prefix}-%';`);
 }
 
 /// `count` trace events spread over `lanes` prefixed lanes. The panel no longer
