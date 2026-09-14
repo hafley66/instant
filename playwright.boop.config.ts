@@ -24,6 +24,11 @@ const dataDir = path.join(scratchRoot, "serve");
 const boopDir = path.join(scratchRoot, "boop");
 const tmuxDir = path.join(scratchRoot, "tmux");
 const boopDb = path.join(boopDir, "boop.db");
+// The app shells out to `boop` through PATH (run_click), so the exact binary the
+// spec seeds with must also be the first `boop` the server sees. BOOP_BIN names
+// both; an unset value falls back to the installed binary.
+const boopBin = process.env.BOOP_BIN ?? path.join(process.env.HOME ?? "", ".cargo/bin/boop");
+const boopBinDir = path.dirname(boopBin);
 
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(boopDir, { recursive: true });
@@ -47,7 +52,7 @@ export default defineConfig({
   webServer: {
     // `env -u TMUX`: the runner may itself be inside tmux; an inherited TMUX
     // would point every tmux call (app and boop) at the owner's server.
-    command: `env -u TMUX TMUX_TMPDIR=${tmuxDir} INSTANT_NO_GLOBALS=1 INSTANT_TMUX_SOCKET= BOOP_DB=${boopDb} BOOP_MAIL_DIR=${boopDir} BOOP_NO_SYNC=1 ${serve} --port ${port} --data-dir ${dataDir} --dist dist`,
+    command: `env -u TMUX TMUX_TMPDIR=${tmuxDir} PATH=${boopBinDir}:$PATH INSTANT_NO_GLOBALS=1 INSTANT_TMUX_SOCKET= BOOP_DB=${boopDb} BOOP_MAIL_DIR=${boopDir} BOOP_NO_SYNC=1 ${serve} --port ${port} --data-dir ${dataDir} --dist dist`,
     url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: !!process.env.INSTANT_BOOP_REUSE,
     timeout: 30_000,

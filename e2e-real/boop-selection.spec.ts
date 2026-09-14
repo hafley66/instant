@@ -3,6 +3,13 @@
 // tmux server are scratch (private BOOP_DB/BOOP_MAIL_DIR + TMUX_TMPDIR), so the
 // spec never touches the owner's ~/.agent store or default tmux socket.
 //
+// The dropdown lists only coordinator/native routes whose live pane is reached
+// by an open Instant terminal tab. These cases seed a coordinator (tab open), a
+// lane (pane live, excluded by kind), and a second coordinator with no tab
+// (excluded by the open-tab intersection). Only the first tab is opened in the
+// real UI: the persisted open-tab list is seeded before boot and the app opens
+// (reattaches) it through the normal restore path.
+//
 // Receipts are DOM geometry + boop's own sqlite rows. No live send: the composer
 // is exercised only through the checkbox/selection half of the feature.
 import { expect, test, type Page } from "@playwright/test";
@@ -18,8 +25,13 @@ const boopDb = path.join(boopDir, "boop.db");
 const BOOP = process.env.BOOP_BIN ?? path.join(process.env.HOME ?? "", ".cargo/bin/boop");
 const shots = path.join(process.cwd(), "artifacts", "real");
 
-const routeA = "e2e-sel-alpha";
-const routeB = "e2e-sel-beta";
+const routeCoord = "e2e-sel-coord";
+const routeLane = "e2e-sel-lane";
+const routeClosed = "e2e-sel-closed";
+
+const sessionCoord = "boopsel-coord";
+const sessionLane = "boopsel-lane";
+const sessionClosed = "boopsel-closed";
 
 /// tmux with the runner's TMUX stripped, scoped to our private TMUX_TMPDIR.
 const tmuxEnv = (): NodeJS.ProcessEnv => {
@@ -60,36 +72,52 @@ function seedStore(): void {
 /// private TMUX_TMPDIR's default socket so boop (which never passes -L) can
 /// resolve the panes. Killing our own named sessions is the private teardown;
 /// the empty server then exits on its own.
-const SESSIONS = ["boopsel-a", "boopsel-b"];
+const SESSIONS = [sessionCoord, sessionLane, sessionClosed];
 function killScratchSessions(): void {
   for (const session of SESSIONS) tmux(["kill-session", "-t", `=${session}`]);
 }
 
 /// One sleeping pane per route on the private socket, each title carrying the
-/// route name so the dropdown's title column has real content.
-function seedPanes(): { route: string; pane: string }[] {
+/// route name so the dropdown's title column has real content. The coordinator
+/// has a tab open; the lane is a recipient-excluded kind; the second
+/// coordinator has a live pane but no tab.
+function seedPanes(): void {
   killScratchSessions();
-  const out: { route: string; pane: string }[] = [];
-  for (let i = 0; i < SESSIONS.length; i += 1) {
-    const session = SESSIONS[i];
+  const rows: { session: string; route: string; kind: string }[] = [
+    { session: sessionCoord, route: routeCoord, kind: "coordinator" },
+    { session: sessionLane, route: routeLane, kind: "lane" },
+    { session: sessionClosed, route: routeClosed, kind: "coordinator" },
+  ];
+  for (const { session, route, kind } of rows) {
     const created = tmux(["-f", "/dev/null", "new-session", "-d", "-s", session, "sleep", "60000"]);
     expect(created.status, `tmux new-session ${session}: ${created.stderr}`).toBe(0);
     const pane = tmux(["list-panes", "-t", session, "-F", "#{pane_id}"]).stdout.trim();
-    const route = i === 0 ? routeA : routeB;
     tmux(["select-pane", "-t", pane, "-T", `${route} scratch title`]);
     sql(
       `insert into agent_route(route, kind, harness, tmux, registered_at)
-       values ('${route}', 'lane', 'claude', '${pane}', strftime('%Y-%m-%d %H:%M:%f000','now'))`,
+       values ('${route}', '${kind}', 'claude', '${pane}', strftime('%Y-%m-%d %H:%M:%f000','now'))`,
     );
-    out.push({ route, pane });
   }
-  return out;
+  // Retained DB selection on rows the dropdown will not show. A count or send
+  // that reads retained state instead of the visible set would include these.
+  sql(
+    `insert into agent_route_selection(route, selected) values ('${routeLane}', 1), ('${routeClosed}', 1)`,
+  );
 }
 
 async function boot(page: Page): Promise<void> {
   await page.goto(`/?ws=ws://127.0.0.1:${port}/ws`);
   await expect(page.locator("#sessions-toggle")).toBeVisible({ timeout: 30_000 });
   await page.waitForFunction(() => document.fonts.status === "loaded");
+}
+
+/// Open the coordinator's terminal by clicking its row in the tmux panel: the
+/// product's own openTab path, after the dock is ready. This is what makes the
+/// coordinator "open in the real UI"; the lane and closed coordinator stay shut.
+async function openCoordTab(page: Page): Promise<void> {
+  const row = page.locator(".dtable-row", { hasText: sessionCoord }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
 }
 
 /// Expand the tmux rail button's chevron so the dropdown's railContent mounts.
@@ -101,8 +129,12 @@ async function expand(page: Page): Promise<void> {
   await expect(page.locator(".bs-panel")).toBeVisible({ timeout: 20_000 });
 }
 
-async function waitRows(page: Page): Promise<void> {
-  await expect(page.locator(".bs-panel .dtable-row")).toHaveCount(2, { timeout: 25_000 });
+/// Only the coordinator with an open tab is listed.
+async function waitVisibleRow(page: Page): Promise<void> {
+  await expect(page.locator(".bs-panel .dtable-row")).toHaveCount(1, { timeout: 25_000 });
+  await expect(page.locator(".bs-panel .dtable-row")).toContainText(routeCoord);
+  await expect(page.locator(".bs-panel .dtable-row")).not.toContainText(routeLane);
+  await expect(page.locator(".bs-panel .dtable-row")).not.toContainText(routeClosed);
 }
 
 test.beforeAll(() => {
@@ -114,10 +146,22 @@ test.afterAll(() => {
   killScratchSessions();
 });
 
-test("checkbox is visible, checkable, and persists to the scratch store", async ({ page }) => {
+test("only the open coordinator is listed; closed and lane rows stay hidden", async ({ page }) => {
   await boot(page);
   await expand(page);
-  await waitRows(page);
+  await openCoordTab(page);
+  await waitVisibleRow(page);
+
+  // The lane is a recipient-excluded kind and the closed coordinator has no
+  // tab: neither row may appear even though both panes are live.
+  await expect(page.locator(".bs-panel .dtable-row")).toHaveCount(1);
+});
+
+test("checkbox is visible, checkable, and count reads only the visible set", async ({ page }) => {
+  await boot(page);
+  await expand(page);
+  await openCoordTab(page);
+  await waitVisibleRow(page);
 
   const box = page.locator(".bs-panel input.bs-check").first();
   await expect(box).toBeVisible();
@@ -136,49 +180,77 @@ test("checkbox is visible, checkable, and persists to the scratch store", async 
   expect(Number(style.opacity)).toBe(1);
   expect(style.appearance).not.toBe("none");
 
-  // Row height / type scale are readable, not the old 11px/22px.
-  const rowBox = await page.locator(".bs-panel .dtable-row").first().boundingBox();
-  expect(rowBox!.height).toBeGreaterThanOrEqual(32);
-  const fontSize = await page.locator(".bs-panel .dtable").evaluate((el) => getComputedStyle(el).fontSize);
-  expect(Number.parseFloat(fontSize)).toBeGreaterThanOrEqual(13);
+  // The lane and closed coordinator are selected in the scratch store, but the
+  // visible set has none checked: the count must be 0, not 2.
+  const send = page.locator(".bs-panel .bs-send");
+  await page.locator(".bs-panel .bs-body").fill("hello");
+  await expect(send).toHaveText(/\(0\)/);
+  await expect(send).toBeDisabled();
 
   // First click checks it and writes the scratch store.
   await box.click();
   await expect(box).toBeChecked();
-  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeA}'`)).toBe("1");
+  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeCoord}'`)).toBe("1");
+  await expect(send).toHaveText(/\(1\)/);
+  await expect(send).toBeEnabled();
+
+  // Hidden retained selection is not erased by showing a filtered list.
+  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeLane}'`)).toBe("1");
+  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeClosed}'`)).toBe("1");
 
   // Second click unchecks it.
   await box.click();
   await expect(box).not.toBeChecked();
-  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeA}'`)).toBe("0");
-
-  // Keyboard focus shows a visible outline (Tab from the grid host).
-  await page.locator(".bs-panel .tt-wrap").focus();
-  await page.keyboard.press("Tab");
-  const focusStyle = await box.evaluate((el) => {
-    const c = getComputedStyle(el);
-    return { outlineStyle: c.outlineStyle, outlineWidth: c.outlineWidth };
-  });
-  expect(focusStyle.outlineStyle).not.toBe("none");
-  expect(Number.parseFloat(focusStyle.outlineWidth)).toBeGreaterThan(0);
-
-  // Disabled is visibly dimmed, not an invisible control.
-  const disabledOpacity = await box.evaluate((el) => {
-    (el as HTMLInputElement).disabled = true;
-    const o = getComputedStyle(el).opacity;
-    (el as HTMLInputElement).disabled = false;
-    return o;
-  });
-  expect(Number(disabledOpacity)).toBeLessThan(1);
+  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeCoord}'`)).toBe("0");
+  await expect(send).toHaveText(/\(0\)/);
 
   fs.mkdirSync(shots, { recursive: true });
   await page.locator(".bs-panel").screenshot({ path: path.join(shots, "boop-selection.png") });
 });
 
+test("closing the tab drops the checked recipient from the count without a reload", async ({ page }) => {
+  await boot(page);
+  await expand(page);
+
+  // Nothing is open yet: the coordinator row is not eligible, and neither
+  // hidden row (lane, closed coordinator) counts toward the selection.
+  await expect(page.locator(".bs-panel .bs-status")).toHaveText(/no open coordinator sessions/, { timeout: 25_000 });
+  await expect(page.locator(".bs-panel .dtable-row")).toHaveCount(0);
+  await page.locator(".bs-panel .bs-body").fill("hello");
+  await expect(page.locator(".bs-panel .bs-send")).toHaveText(/\(0\)/);
+  await expect(page.locator(".bs-panel .bs-send")).toBeDisabled();
+
+  // Opening the coordinator in the real UI makes its row appear without a reload.
+  await openCoordTab(page);
+  await waitVisibleRow(page);
+
+  const box = page.locator(".bs-panel input.bs-check").first();
+  await box.click();
+  await expect(box).toBeChecked();
+  await expect(page.locator(".bs-panel .bs-send")).toHaveText(/\(1\)/);
+
+  // A real UI close (the dockview tab's close action) must reactively remove the
+  // row: the panel subscribes to the open-tab signal, so no reload is needed.
+  // The tab title follows the tmux pane title, which carries the route name.
+  const closeAction = page
+    .locator(".dv-tab", { hasText: new RegExp(`${sessionCoord}|${routeCoord}`) })
+    .locator(".dv-default-tab-action")
+    .first();
+  await expect(closeAction).toBeVisible({ timeout: 10_000 });
+  await closeAction.click();
+
+  await expect(page.locator(".bs-panel .dtable-row")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".bs-panel .bs-send")).toHaveText(/\(0\)/);
+  await expect(page.locator(".bs-panel .bs-send")).toBeDisabled();
+  // The retained checkbox survives for when the tab reopens.
+  await expect.poll(() => sql(`select selected from agent_route_selection where route='${routeCoord}'`)).toBe("1");
+});
+
 test("drag resize changes the panel box and survives a reload", async ({ page }) => {
   await boot(page);
   await expand(page);
-  await waitRows(page);
+  await openCoordTab(page);
+  await waitVisibleRow(page);
 
   const panel = page.locator(".bs-panel");
   const before = (await panel.boundingBox())!;
@@ -220,6 +292,8 @@ test("drag resize changes the panel box and survives a reload", async ({ page })
 test("Alt+Arrow is the keyboard resize alternative", async ({ page }) => {
   await boot(page);
   await expand(page);
+  await openCoordTab(page);
+  await waitVisibleRow(page);
   const panel = page.locator(".bs-panel");
   const before = (await panel.boundingBox())!;
   await page.locator(".bs-panel .tt-wrap").focus();

@@ -13,11 +13,16 @@ import { clickRpc } from "./ipc/contract";
 import { shQuote } from "./core";
 
 // One row of `boop beep selection list`. `pane` is the leaf tmux pane target
-// (`%N`) when the backend resolved one; `session` is the attach name.
+// (`%N`) when the backend resolved one; `session` is the attach name; `target`
+// is the composed `session:window.pane`; `kind` is the registry route kind
+// (coordinator/native on a current backend; empty when an older boop omitted
+// it). Only coordinators and interactive natives are recipients.
 export interface BoopSelectionRow {
   route: string;
+  kind: string;
   session: string;
   pane: string;
+  target: string;
   title: string;
   lastFocusedAt: number | null;
   selected: boolean;
@@ -61,8 +66,10 @@ function decodeSelectionRow(item: unknown, index: number): BoopSelectionRow {
   if (!route) throw new Error(`boop beep selection list: row ${index} has no route`);
   return {
     route,
+    kind: stringField(r.kind, `row ${index} kind`, false),
     session: stringField(r.session, `row ${index} session`, false) || route,
     pane: stringField(r.pane, `row ${index} pane`, false),
+    target: stringField(r.target, `row ${index} target`, false),
     title: stringField(r.title, `row ${index} title`, false),
     lastFocusedAt: focusField(r.lastFocusedAt, index),
     selected: boolField(r.selected, `row ${index} selected`),
@@ -138,6 +145,45 @@ export function formatRecentFocus(lastFocusedAt: number | null, now: number): st
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours}h`;
   return `${Math.round(hours / 24)}d`;
+}
+
+// ---- open-tab eligibility ----
+
+// Only a coordinator or an interactive native is a recipient. A `lane` is a
+// supervised child and a `shell` is a raw pane; neither belongs in the send
+// list even with a live pane. An empty kind means an older backend that did not
+// yet stamp the field, so the row is left to the tab intersection rather than
+// hidden outright. The check reads the kind field, never a route-name prefix.
+const RECIPIENT_KINDS = new Set(["coordinator", "native"]);
+
+export function rowIsRecipient(row: Pick<BoopSelectionRow, "kind">): boolean {
+  return !row.kind || RECIPIENT_KINDS.has(row.kind);
+}
+
+// Does one open terminal tab reach the row's live pane? A tab with an explicit
+// tmux target names a pane (`%N`), a window (`session:window`), or a session; a
+// plain tab is known by the tmux session name. A display alias is never
+// consulted, so a renamed tab cannot pull in a different route's pane.
+export function tabReachesRow(tab: FocusTargetTab, row: BoopSelectionRow): boolean {
+  const target = tab.tmuxTarget?.trim();
+  if (!target) return tab.name === row.session;
+  if (target === row.pane || target === row.target) return true;
+  if (target === row.session) return true;
+  // `session:window` names that window's active pane; the row's composed target
+  // for it is `session:window.pane`.
+  return target.includes(":") && row.target.startsWith(`${target}.`);
+}
+
+// The rows a person can see and send to: a recipient route whose live pane is
+// reached by a currently-open terminal tab. Order is the backend's
+// most-recently-focused order, preserved.
+export function eligibleRows(
+  rows: readonly BoopSelectionRow[],
+  tabs: readonly FocusTargetTab[],
+): BoopSelectionRow[] {
+  return rows.filter(
+    (row) => rowIsRecipient(row) && tabs.some((tab) => tabReachesRow(tab, row)),
+  );
 }
 
 // ---- focus target + dedup ----

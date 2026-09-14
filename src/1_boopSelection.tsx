@@ -5,11 +5,14 @@
 // lists). The component owns its polling; it never rewrites rail state, so a
 // data refresh never rebuilds the rail or clears the compose box.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useSignal } from "@hafley66/signals/react";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { openTab } from "./terminal";
 import { readPluginState, savePluginState } from "./pluginState";
+import { settings } from "./0_settings";
 import {
   clearSelection,
+  eligibleRows,
   formatRecentFocus,
   listSelection,
   onSelectionRefresh,
@@ -135,6 +138,11 @@ export function BoopSelectionPanel() {
   const refreshQueued = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<PanelSize>(readPanelSize);
+  // The persisted open-tab list is the live signal for "which TUIs are open":
+  // opening or closing a tab re-renders this panel, and the row set is
+  // recomputed, without waiting for the next poll or a reload.
+  const openTabs = useSignal(settings.openTabs.$);
+  const visibleRows = useMemo(() => eligibleRows(rows ?? [], openTabs), [rows, openTabs]);
   // Persist the latest dragged size, debounced so a drag writes once instead of
   // per pointermove. The panel's own slice, so no sibling plugin state is touched.
   useEffect(() => {
@@ -272,12 +280,17 @@ export function BoopSelectionPanel() {
     };
   }, [bridge]);
 
-  const count = useMemo(() => (rows ?? []).filter((r) => r.selected).length, [rows]);
+  const count = visibleRows.filter((r) => r.selected).length;
 
   const send = useCallback(() => {
     // Snapshot the displayed eligible routes at click: explicit recipients, not
-    // a broad shout. No send without an explicit click, a body, and a free lane.
-    const snapshot = (rows ?? []).filter((r) => r.selected).map((r) => r.route);
+    // a broad shout. Re-read the open-tab signal here, not the render-time
+    // value, so a tab closed between paint and click cannot slip a retained
+    // checkbox into the send. No send without an explicit click, a body, a free
+    // lane, and at least one recipient.
+    const snapshot = eligibleRows(rows ?? [], settings.openTabs.$())
+      .filter((r) => r.selected)
+      .map((r) => r.route);
     const text = body;
     if (!snapshot.length || !text.trim() || sendingRef.current || busyWritesRef.current > 0) return;
     sendingRef.current = true;
@@ -327,12 +340,12 @@ export function BoopSelectionPanel() {
       ) : null}
       {rows === null && !error ? (
         <div className="bs-status">loading…</div>
-      ) : rows && rows.length === 0 ? (
-        <div className="bs-status">no live Boop sessions</div>
+      ) : rows && visibleRows.length === 0 ? (
+        <div className="bs-status">no open coordinator sessions</div>
       ) : rows ? (
         <TreeTable<SelRow>
           columns={SEL_COLUMNS}
-          data={rows}
+          data={visibleRows}
           getRowId={(r) => r.route}
           defaultSorting={[{ id: "focus", desc: true }]}
         />
