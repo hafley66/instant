@@ -250,6 +250,21 @@ export function flattenTree(roots: GraphNode[]): GraphNode[] {
   return out;
 }
 
+// The rows a tree actually paints: a node always, its children only while the
+// node's id is open. Same predicate marbler's own model uses, so a controlled
+// tree and the timeline below it share one membership.
+export function flattenExpandedTree(roots: GraphNode[], isOpen: (id: string) => boolean): GraphNode[] {
+  const out: GraphNode[] = [];
+  const walk = (list: GraphNode[]) => {
+    for (const node of list) {
+      out.push(node);
+      if (node.children.length && isOpen(node.id)) walk(node.children);
+    }
+  };
+  walk(roots);
+  return out;
+}
+
 // The requested view: every live agent, no inactive row anywhere. An inactive
 // ancestor is not painted as a placeholder; its live descendants hoist to the
 // nearest live ancestor (or become roots), preserving stored ids and the

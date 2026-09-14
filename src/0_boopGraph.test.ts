@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeOnlyTree,
   buildGraphTree,
+  flattenExpandedTree,
   flattenTree,
   subtreeIds,
   type GraphNode,
@@ -71,6 +72,7 @@ describe("session/shell state mapping", () => {
       schema_version: 1,
       sessions: [
         { session: ident("claude", "s-live"), cwd: null, tmux: null, state: "live", started_ts: 1, last_activity_ts: 100 },
+        { session: ident("claude", "s-live-finished"), cwd: null, tmux: null, state: "live", started_ts: 1, last_activity_ts: 100, finished_ts: 50 },
         { session: ident("claude", "s-dead"), cwd: null, tmux: null, state: "dead", started_ts: 1, last_activity_ts: 100 },
         { session: ident("claude", "s-finished"), cwd: null, tmux: null, state: null, started_ts: 1, last_activity_ts: 100, finished_ts: 50 },
         { session: ident("claude", "s-idle"), cwd: null, tmux: null, state: "idle", started_ts: 1, last_activity_ts: 100 },
@@ -80,6 +82,8 @@ describe("session/shell state mapping", () => {
     };
     const byId = new Map(buildGraphTree(graph, 0).map((n) => [n.id, n.state]));
     expect(byId.get("claude:s-live")).toBe("live");
+    // Explicit live wins over a stale finished span.
+    expect(byId.get("claude:s-live-finished")).toBe("live");
     expect(byId.get("claude:s-dead")).toBe("dead");
     expect(byId.get("claude:s-finished")).toBe("dead");
     expect(byId.get("claude:s-idle")).toBe("idle");
@@ -167,5 +171,24 @@ describe("activeOnlyTree", () => {
     expect(out[0].children[0].id).toBe("live-grand");
     expect(out[0].children[0].label).toBe("opencode · wt");
     expect(out[0].children[0]).not.toBe(grand);
+  });
+});
+
+describe("flattenExpandedTree", () => {
+  it("paints a node always and its children only while the node is open", () => {
+    const tree = [
+      node("a", "live", [node("a1", "live", [node("a1x", "live")]), node("a2", "idle")]),
+      node("b", "dead"),
+    ];
+    const closed = flattenExpandedTree(tree, () => false).map((n) => n.id);
+    expect(closed).toEqual(["a", "b"]);
+    const openA = flattenExpandedTree(tree, (id) => id === "a").map((n) => n.id);
+    expect(openA).toEqual(["a", "a1", "a2", "b"]);
+    const all = flattenExpandedTree(tree, () => true).map((n) => n.id);
+    expect(all).toEqual(["a", "a1", "a1x", "a2", "b"]);
+  });
+
+  it("handles an empty forest", () => {
+    expect(flattenExpandedTree([], () => true)).toEqual([]);
   });
 });

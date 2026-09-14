@@ -17,6 +17,7 @@ import {
   seedLane,
   seedMail,
   seedStore,
+  sql,
 } from "./0_boopLifecycleSeed";
 
 const port = Number(process.env.INSTANT_BOOP_LIFE_PORT ?? 47815);
@@ -146,6 +147,16 @@ test("a large history renders the network and keeps the graph read bounded", asy
   seedBulkSessions(BIG_SESSIONS);
   seedBulkTurns(BIG_TURNS_PER_SESSION);
   seedBulkEvents(BIG_EVENTS, BIG_LANES);
+  // Only a handful of the 1200 lanes stay live. The graph read still returns
+  // all 1200 shells/sessions (the bounding claim under test), but the panel's
+  // timeline is not asked to render an artificial 1200-row navigator: the
+  // installed marbler sizes that navigator by lane count and offers no compact
+  // height, a gap reported with the review.
+  sql(`delete from agent_live
+        where session_id in (
+          select s.id from dict_session s
+           where s.value like 'bulk-lane-%'
+             and cast(substr(s.value, 11) as integer) > 6)`);
   seedMail({ id: "net-m1", from: "bulk-lane-1", to: "bulk-lane-2", kind: "note", body: "bulk mail", ageSec: 30 });
 
   const frames = watchGraph(page);
@@ -170,10 +181,10 @@ test("a large history renders the network and keeps the graph read bounded", asy
   await expect(page.locator(".boop-marbler .subtoolbar .summary")).toHaveText(/[1-9]\d* events/);
   await expect(page.locator('[data-testid="waterfall-pixi"]')).toHaveCount(1);
   await expect(page.locator(".boop-marbler .time-navigator canvas")).toHaveCount(1);
-  // The navigator is lanes*14 tall by default; with 1200 live lanes the clamp
-  // must keep the scrubber on screen.
+  // Six live lanes at lanes*14 + chrome; the navigator is not clipped, so its
+  // height scales with the live lane count it is actually given.
   const navBox = await page.locator(".boop-marbler .time-navigator").boundingBox();
-  expect(navBox?.height ?? 0).toBeLessThanOrEqual(141);
+  expect(navBox?.height ?? 0).toBeLessThanOrEqual(120);
   const visibleMs = Date.now() - opened;
 
   // Every graph read completed inside the bound and asked for no trace events.
@@ -198,6 +209,10 @@ test("clicking a network table row opens its detail drawer", async ({ page }) =>
 
   const errors = await boot(page);
   await openBoop(page);
+  // The child is collapsed in both panels; expanding the roster row adds it to
+  // the timeline, which is where the drawer click happens.
+  await expect(marblerRows(page)).toHaveCount(1, { timeout: 30_000 });
+  await page.locator(".boop-panel .dtable-row", { hasText: "net-lane-a" }).first().locator(".tt-twisty").click();
   const row = marblerRows(page).filter({ hasText: "net-lane-b" }).first();
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.click();
@@ -235,11 +250,16 @@ test("roster selection narrows the network to the subtree", async ({ page }) => 
 
   const errors = await boot(page);
   await openBoop(page);
-  await expect(marblerRows(page)).toHaveCount(3, { timeout: 30_000 });
+  // Collapsed: the child is hidden from the timeline, so two roots show.
+  await expect(marblerRows(page)).toHaveCount(2, { timeout: 30_000 });
+  await expect(marblerRows(page).filter({ hasText: "narrow-child" })).toHaveCount(0);
+  // Selecting the root drills into its full active subtree, including the
+  // collapsed child, and drops the sibling subtree.
   const rootRow = page.locator(".boop-panel .dtable-row", { has: page.locator("td", { hasText: "narrow-root" }) }).first();
   await rootRow.click();
   await expect(page.locator(".boop-narrow")).toBeVisible({ timeout: 10_000 });
   await expect(marblerRows(page)).toHaveCount(2, { timeout: 10_000 });
+  await expect(marblerRows(page).filter({ hasText: "narrow-child" })).toHaveCount(1);
   await expect(marblerRows(page).filter({ hasText: "narrow-other" })).toHaveCount(0);
   await shot(page, "03-subtree");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
@@ -284,29 +304,33 @@ test("active-only shows live agents collapsed and hoists a live grandchild throu
 
   // Roster: only the live root paints; the idle middle and dead sibling are gone.
   await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(1, { timeout: 30_000 });
-  await expect(page.locator(".boop-panel")).toContainText("1 hidden by active-only");
+  await expect(page.locator(".boop-panel")).toContainText("2 hidden by active-only");
   await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-mid" })).toHaveCount(0);
   await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-dead" })).toHaveCount(0);
 
-  // The lower marbler applies the same active projection.
-  await expect(marblerRows(page)).toHaveCount(2, { timeout: 30_000 });
-  await expect(marblerRows(page).filter({ hasText: "act-mid" })).toHaveCount(0);
-  await expect(marblerRows(page).filter({ hasText: "act-dead" })).toHaveCount(0);
+  // The lower marbler shares the roster's collapsed membership: one visible row.
+  await expect(marblerRows(page)).toHaveCount(1, { timeout: 30_000 });
+  await expect(marblerRows(page).filter({ hasText: "act-root" })).toHaveCount(1);
 
-  // Expanding the live root reveals the hoisted live grandchild, never the idle middle.
+  // Expanding the live root reveals the hoisted live grandchild in BOTH panels,
+  // and never the idle middle.
   const rootRow = page.locator(".boop-panel .dtable-row", { hasText: "act-root" }).first();
   await rootRow.locator(".tt-twisty").click();
   await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(2, { timeout: 15_000 });
   await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-leaf" })).toHaveCount(1);
   await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-mid" })).toHaveCount(0);
+  await expect(marblerRows(page)).toHaveCount(2, { timeout: 15_000 });
+  await expect(marblerRows(page).filter({ hasText: "act-leaf" })).toHaveCount(1);
+  await expect(marblerRows(page).filter({ hasText: "act-mid" })).toHaveCount(0);
 
-  // Unchecking active-only exposes the full stored history in both panels. The
-  // middle row is painted again; its child stays collapsed until expanded.
+  // Unchecking active-only exposes the full stored history; the middle row is
+  // painted again but its child stays collapsed until expanded, in both panels.
   await page.locator(".boop-panel input[type=checkbox]").click();
   await expect(page.locator(".boop-panel .dtable-row")).toHaveCount(3, { timeout: 15_000 });
   await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-mid" })).toHaveCount(1);
   await expect(page.locator(".boop-panel .dtable-row", { hasText: "act-dead" })).toHaveCount(1);
-  await expect(marblerRows(page)).toHaveCount(4, { timeout: 15_000 });
+  await expect(marblerRows(page)).toHaveCount(3, { timeout: 15_000 });
+  await expect(marblerRows(page).filter({ hasText: "act-leaf" })).toHaveCount(0);
 
   await shot(page, "06-active-only-hoist");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);
@@ -331,35 +355,57 @@ test("timeline domain tracks mail activity and survives pan, refresh, and refocu
   const firstLeft = await page.locator(".boop-master .boop-spark i").first().evaluate((el) => parseFloat((el as HTMLElement).style.left));
   expect(firstLeft).toBeLessThan(50);
 
-  // Scrub (drag) the library navigator: live-follow turns off.
-  await expect(page.locator(".boop-tl-btn", { hasText: /^following$/ })).toHaveCount(1);
+  const marbler = page.locator(".boop-marbler");
+  const range = async () => {
+    const raw = await marbler.getAttribute("data-visible");
+    const [start, end] = (raw ?? "0:0").split(":").map(Number);
+    return { start, end, span: end - start };
+  };
+
+  // Live-follow armed on first paint.
+  await expect(marbler).toHaveAttribute("data-follow", "1");
+  const before = await range();
+
   const nav = await page.locator(".boop-marbler .time-navigator").boundingBox();
   const cx = nav!.x + nav!.width / 2;
   const cy = nav!.y + nav!.height / 2;
-  await page.mouse.move(cx, cy);
-  await page.mouse.down();
-  await page.mouse.move(cx - 60, cy, { steps: 5 });
-  await page.mouse.up();
-  await expect(page.locator(".boop-tl-btn", { hasText: /^follow$/ })).toHaveCount(1);
 
-  // Ctrl+wheel zoom also leaves follow; then a mail refresh while hidden and a
-  // refocus must not snap the viewport back to the live tail.
+  // Ctrl+wheel zoom shrinks the visible span and turns follow off.
   await page.keyboard.down("Control");
   await page.mouse.move(cx, cy);
   await page.mouse.wheel(0, -120);
   await page.keyboard.up("Control");
-  await expect(page.locator(".boop-tl-btn", { hasText: /^follow$/ })).toHaveCount(1);
+  await expect(marbler).toHaveAttribute("data-follow", "0");
+  const zoomed = await range();
+  expect(zoomed.span).toBeLessThan(before.span);
 
+  // Scrub (drag) the zoomed navigator: the visible window moves within the
+  // domain. A full-domain window cannot pan, so this runs after the zoom.
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 60, cy, { steps: 5 });
+  await page.mouse.up();
+  await expect(marbler).toHaveAttribute("data-follow", "0");
+  const panned = await range();
+  expect(panned.start).not.toBe(zoomed.start);
+
+  // Refocus once to settle any layout work, then take the baseline the paused
+  // viewport must hold.
   await page.locator('.dv-tab:has(.dv-default-tab-content:text-is("tmux"))').click();
   await expect(page.locator(".boop-panel")).toBeHidden();
-  seedMail({ id: "tl-m3", from: "tl-root", to: "tl-peer", kind: "note", body: "after pan", ageSec: 1 });
   await page.locator('.dv-tab:has(.dv-default-tab-content:text-is("Boop"))').click();
   await expect(page.locator(".boop-panel")).toBeVisible();
-  await expect(page.locator(".boop-tl-btn", { hasText: /^follow$/ })).toHaveCount(1, { timeout: 15_000 });
+  await expect(marbler).toHaveAttribute("data-follow", "0", { timeout: 15_000 });
+  const baseline = await range();
 
-  // Follow re-arms live tailing.
-  await page.locator(".boop-tl-btn", { hasText: /^follow$/ }).click();
-  await expect(page.locator(".boop-tl-btn", { hasText: /^following$/ })).toHaveCount(1);
+  // A confirmed fresh mail must not snap the window back to the live tail.
+  const dotsBefore = await page.locator(".boop-master .boop-spark i").count();
+  seedMail({ id: "tl-m3", from: "tl-root", to: "tl-peer", kind: "note", body: "after pan", ageSec: 1 });
+  await expect
+    .poll(async () => page.locator(".boop-master .boop-spark i").count(), { timeout: 15_000 })
+    .toBeGreaterThan(dotsBefore);
+  const after = await range();
+  expect(after).toEqual(baseline);
 
   await shot(page, "07-timeline-viewport");
   expect([...errors.page, ...errors.console], [...errors.page, ...errors.console].join("\n")).toEqual([]);

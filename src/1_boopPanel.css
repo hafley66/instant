@@ -20,9 +20,9 @@
   vertical-align: middle;
 }
 
-/* Host toolbar above the embedded marbler: follow/fit are plain controls, the
-   scrub/zoom gestures live on the navigator below. The marbler shell becomes
-   the flexible row under it. */
+/* Host chrome above the embedded marbler. Viewport edits stay on the
+   navigator's own gestures (drag scrub, ctrl+wheel zoom, dblclick fit); the
+   marbler shell becomes the flexible row under this bar. */
 .boop-panel .boop-marbler {
   flex-direction: column;
 }
@@ -47,29 +47,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.boop-tl-btn {
-  border: 1px solid var(--marbler-border, #3a414c);
-  border-radius: 3px;
-  background: transparent;
-  color: inherit;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-.boop-tl-btn.active {
-  background: #315d9d;
-  border-color: #315d9d;
-  color: #fff;
-}
 .boop-tl-hint {
   color: var(--marbler-muted, #848c98);
-  margin-left: auto;
-}
-
-/* The navigator's own height is lanes * 14 + chrome, so a live roster of many
-   agents pushes the scrubber and the grid off the panel. Clamp it; lanes past
-   the cap are clipped overview rows, not controls. */
-.boop-panel .boop-marbler .time-navigator {
-  max-height: 140px;
-  overflow: hidden;
 }
 

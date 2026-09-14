@@ -174,8 +174,3 @@ export function lanesOfNodes(nodes: GraphNode[]): BoopLane[] {
     state: node.state === "live" ? "open" : "closed",
   }));
 }
-
-// A root stays under "active only" when anything in its subtree is live.
-export function subtreeLive(node: GraphNode): boolean {
-  return node.state === "live" || node.children.some(subtreeLive);
-}

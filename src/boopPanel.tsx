@@ -1,20 +1,19 @@
 // Boop rail panel: lane roster (master table) with the mail stream drawn by
 // @hafley66/marbler; a lane is a line, a mail is a dot, filtered = disabled.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSignal } from "@hafley66/signals/react";
 import { commandEndpoint, invoke } from "./generated/native";
 import { TreeTable, type TreeColumn } from "./treetable";
 import { settings } from "./0_settings";
-import type { SortingState } from "@tanstack/react-table";
+import type { ExpandedState, SortingState } from "@tanstack/react-table";
 import { createMarbler, MarblerPanel } from "@hafley66/marbler";
-import { buildGraphTree, flattenTree, activeOnlyTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
+import { buildGraphTree, flattenTree, activeOnlyTree, flattenExpandedTree, type GraphNode, type SessionGraph } from "./0_boopGraph";
 import { boopRosterState } from "./0_boopPanelState";
 import {
   lanesOfNodes,
   laneStats,
   stampsOf,
   subtreeLanes,
-  subtreeLive,
   toMarbleEvents,
   type BoopLaneEvent,
   type LaneStat,
@@ -135,11 +134,23 @@ export function BoopPanelV2() {
   // inactive ancestor hoists to its nearest live ancestor (or becomes a root),
   // so no inactive row is painted and no live agent is dropped.
   const visibleRoots = useMemo(() => (onlyActive ? activeOnlyTree(roots) : roots), [roots, onlyActive]);
-  const nodes = useMemo(() => flattenTree(visibleRoots), [visibleRoots]);
+  // All active nodes drive the mail rollups and the viewport domain; the
+  // expansion-controlled subset drives the lower timeline's membership.
+  const activeNodes = useMemo(() => flattenTree(visibleRoots), [visibleRoots]);
+  // One controlled expansion for both panels: collapsing a roster row drops its
+  // descendants from the timeline below too, so the timeline is not flooded by
+  // rows the tree above has hidden.
+  const [expanded, setExpanded] = useState<ExpandedState>({});
+  const isOpen = useCallback(
+    (id: string) => expanded === true || Boolean(expanded[id]),
+    [expanded],
+  );
+  const nodes = useMemo(() => flattenExpandedTree(visibleRoots, isOpen), [visibleRoots, isOpen]);
   // Every graph node, filtered or not: the roster's empty/loading decision must
   // key on what the graph knows, never on what the active filter left visible.
   const allNodeCount = useMemo(() => flattenTree(roots).length, [roots]);
   const lanes = useMemo(() => lanesOfNodes(nodes), [nodes]);
+  const activeLanes = useMemo(() => lanesOfNodes(activeNodes), [activeNodes]);
   const [selected, setSelected] = useState<string | null>(null);
   const [invokeError, setInvokeError] = useState<string | null>(null);
   const lastTs = useRef(0);
@@ -175,8 +186,11 @@ export function BoopPanelV2() {
     : null);
 
   const rows = useMemo(() => toMarbleEvents(lanes, events), [lanes, events]);
-  const stats = useMemo(() => laneStats(rows), [rows]);
-  const stamps = useMemo(() => stampsOf(rows), [rows]);
+  // Rollups and the domain span every active node, not just the expanded
+  // subset, so collapsing a row never rescales the timeline or drops its mail.
+  const allRows = useMemo(() => toMarbleEvents(activeLanes, events), [activeLanes, events]);
+  const stats = useMemo(() => laneStats(allRows), [allRows]);
+  const stamps = useMemo(() => stampsOf(allRows), [allRows]);
   const newest = Math.max(0, ...stamps);
   // Memoized: an unstable identity here fired the viewport effect on every
   // render and stomped in-flight navigator gestures.
@@ -185,12 +199,13 @@ export function BoopPanelV2() {
     : null), [stamps, newest]);
 
   // A selected root narrows the network view to its descendant subtree plus
-  // mail peers. Click the row again to clear. Never point the filter at a row
-  // the active projection removed.
-  const shownRoot = selected && lanes.some((lane) => lane.route === selected) ? selected : null;
+  // mail peers. Click the row again to clear. Narrowing drills into the full
+  // active subtree (a deliberate focus), while the unfiltered view shows only
+  // the expansion-controlled rows so the timeline is not flooded.
+  const shownRoot = selected && activeLanes.some((lane) => lane.route === selected) ? selected : null;
   const shown = useMemo(
-    () => subtreeLanes(lanes, rows, shownRoot),
-    [lanes, rows, shownRoot],
+    () => (shownRoot ? subtreeLanes(activeLanes, allRows, shownRoot) : rows),
+    [shownRoot, activeLanes, allRows, rows],
   );
 
   useEffect(() => {
@@ -205,7 +220,11 @@ export function BoopPanelV2() {
     if (!windowRange) return;
     const fullSame = vp.full[0] === windowRange[0] && vp.full[1] === windowRange[1];
     if (vp.followLive) {
-      const span = vp.visible[1] - vp.visible[0] || windowRange[1] - windowRange[0];
+      // First paint has a degenerate seeded full; span the whole domain then.
+      // Once full has settled, keep the user's span and chase the tail.
+      const windowSpan = windowRange[1] - windowRange[0];
+      const current = vp.visible[1] - vp.visible[0];
+      const span = fullSame && current > 0 ? current : windowSpan;
       const visible: [number, number] = [
         Math.max(windowRange[0], windowRange[1] - span),
         windowRange[1],
@@ -229,7 +248,7 @@ export function BoopPanelV2() {
     return visibleRoots.map(toRow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleRoots, stats, windowRange]);
-  const hiddenByActive = onlyActive ? roots.filter((node) => !subtreeLive(node)).length : 0;
+  const hiddenByActive = onlyActive ? allNodeCount - activeNodes.length : 0;
   // Pending/errored/empty look identical to a person unless they are named
   // apart: a graph read still in flight reads as "no agents" otherwise.
   const roster = boopRosterState({
@@ -240,39 +259,21 @@ export function BoopPanelV2() {
     error: storeError,
   });
   const summaryAll = useMemo(() => {
-    const open = lanes.filter((lane) => lane.state === "open").length;
+    const open = activeLanes.filter((lane) => lane.state === "open").length;
     return [
-      `${open} open · ${lanes.length - open} closed`,
+      `${open} open · ${activeLanes.length - open} closed`,
       `${events.length} mail in window`,
     ];
-  }, [lanes, events.length]);
+  }, [activeLanes, events.length]);
   const summary = shownRoot
     ? [`showing ${shownRoot} + descendants`, `${shown.length} of ${rows.length} lanes`]
     : summaryAll;
 
-  // Timeline buttons for the two viewport states the navigator's gestures do
-  // not expose: follow (re-arm live tailing) and fit (whole domain). marbler
-  // 0.0.3 does not re-export reduceTimeViewport, so these write the exact
-  // shapes its "follow"/"fit" gestures produce; scrub (drag) and zoom
-  // (ctrl+wheel) stay on the navigator itself.
+  // Read-only viewport mirror for observability (tests and range display).
+  // Viewport edits stay in the marbler navigator's own gestures; the host does
+  // not reimplement the reducer. A follow/fit control bar needs marbler to
+  // export reduceTimeViewport (see the review report).
   const viewport = useSignal(marbler.current.viewport.$);
-  const setFollow = (enabled: boolean) => {
-    const vp = marbler.current.viewport.$();
-    if (!enabled) {
-      marbler.current.viewport.$({ ...vp, followLive: false });
-      return;
-    }
-    const span = vp.visible[1] - vp.visible[0] || vp.full[1] - vp.full[0] || 1;
-    marbler.current.viewport.$({
-      ...vp,
-      followLive: true,
-      visible: [Math.max(vp.full[0], vp.full[1] - span), vp.full[1]],
-    });
-  };
-  const fit = () => {
-    const vp = marbler.current.viewport.$();
-    marbler.current.viewport.$({ ...vp, followLive: false, visible: vp.full });
-  };
 
   return (
     <div className="v2-panel boop-panel">
@@ -296,6 +297,8 @@ export function BoopPanelV2() {
             data={data}
             getRowId={(r) => r.id}
             getSubRows={(r) => r.subRows}
+            expanded={expanded}
+            onExpandedChange={setExpanded}
             defaultSorting={BOOP_SORT}
             virtual
             rowClass={(r) => (r.id === selected ? "fs-selected" : undefined)}
@@ -338,20 +341,14 @@ export function BoopPanelV2() {
           </div>
         )}
       </div>
-      <div className="boop-marbler">
+      <div
+        className="boop-marbler"
+        data-follow={viewport.followLive ? "1" : "0"}
+        data-visible={`${Math.round(viewport.visible[0])}:${Math.round(viewport.visible[1])}`}
+        data-lanes={shown.length}
+      >
         <div className="boop-timeline-controls">
           <span className="boop-tl-title">timeline</span>
-          <button
-            type="button"
-            className={viewport.followLive ? "boop-tl-btn active" : "boop-tl-btn"}
-            title="re-arm live tailing"
-            onClick={() => setFollow(!viewport.followLive)}
-          >
-            {viewport.followLive ? "following" : "follow"}
-          </button>
-          <button type="button" className="boop-tl-btn" title="fit the whole window" onClick={fit}>
-            fit
-          </button>
           <span className="boop-tl-hint">drag to scrub · ctrl+wheel to zoom · dblclick fits</span>
           {stamps.length === 0 && <span className="muted">no mail in window</span>}
         </div>
