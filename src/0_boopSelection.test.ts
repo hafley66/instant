@@ -175,12 +175,15 @@ describe("open-tab eligibility", () => {
     ...over,
   });
 
-  it("treats only coordinator and native (and an unstamped kind) as recipients", () => {
+  it("treats only coordinator and native as recipients", () => {
     expect(rowIsRecipient({ kind: "coordinator" })).toBe(true);
     expect(rowIsRecipient({ kind: "native" })).toBe(true);
-    expect(rowIsRecipient({ kind: "" })).toBe(true);
     expect(rowIsRecipient({ kind: "lane" })).toBe(false);
     expect(rowIsRecipient({ kind: "shell" })).toBe(false);
+    expect(rowIsRecipient({ kind: "ghost" })).toBe(false);
+    // An older binary that omits the kind must not leak lanes.
+    expect(rowIsRecipient({ kind: "" })).toBe(false);
+    expect(rowIsRecipient({ kind: undefined as unknown as string })).toBe(false);
   });
 
   it("matches a plain tab by session name, never a display alias", () => {
@@ -188,11 +191,13 @@ describe("open-tab eligibility", () => {
     expect(tabReachesRow({ name: "coord-session" }, row({ session: "other" }))).toBe(false);
   });
 
-  it("matches a viewer tab by pane id, composed target, session, or window", () => {
+  it("matches a viewer tab only on the exact pane, composed target, or session", () => {
     expect(tabReachesRow({ name: "v", tmuxTarget: "%3" }, row())).toBe(true);
     expect(tabReachesRow({ name: "v", tmuxTarget: "coord-session:0.0" }, row())).toBe(true);
     expect(tabReachesRow({ name: "v", tmuxTarget: "coord-session" }, row())).toBe(true);
-    expect(tabReachesRow({ name: "v", tmuxTarget: "coord-session:0" }, row())).toBe(true);
+    // A window-only target is ambiguous (which pane is active) and must not
+    // match every pane in the window.
+    expect(tabReachesRow({ name: "v", tmuxTarget: "coord-session:0" }, row())).toBe(false);
     expect(tabReachesRow({ name: "v", tmuxTarget: "coord-session:1" }, row())).toBe(false);
     expect(tabReachesRow({ name: "v", tmuxTarget: "%9" }, row())).toBe(false);
   });
@@ -222,6 +227,13 @@ describe("open-tab eligibility", () => {
     ];
     const tabs = [{ name: "viewer", tmuxTarget: "%2" }];
     expect(eligibleRows(rows, tabs).map((r) => r.route)).toEqual(["b"]);
+  });
+
+  it("excludes graphics/browser tabs and rows without a resolved pane", () => {
+    const rows = [row({ route: "a" }), row({ route: "b", pane: "" })];
+    expect(eligibleRows(rows, [{ name: "coord-session" }]).map((r) => r.route)).toEqual(["a"]);
+    expect(eligibleRows([row()], [{ name: "coord-session", graphics: true }])).toEqual([]);
+    expect(eligibleRows([row()], [{ name: "coord-session", browser: true }])).toEqual([]);
   });
 
   it("drops a checked recipient the moment its tab closes", () => {
