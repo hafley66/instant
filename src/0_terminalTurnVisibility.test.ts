@@ -9,6 +9,9 @@ import {
   type BoopTurn,
 } from "./0_terminalTurnVisibility";
 import type { LogicalLine, XtermViewport } from "./00a_terminalIntersection";
+import ompChaotic from "../labs/turn-identity/fixtures/omp-chaotic.json";
+import ompChaoticGolden from "../labs/turn-identity/fixtures/omp-chaotic.golden.json";
+import ompChaoticTurns from "../labs/turn-identity/fixtures/omp-chaotic.turns.json";
 
 const turn = (turn: number, said: string): BoopTurn => ({
   session: "session-a", harness: "codex", turn, ts: turn, role: "assistant", said,
@@ -687,5 +690,16 @@ describe("terminal turn visibility v2", () => {
     `);
     visibility.dispose();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps the OMP structured tool command and output distinct from repeated tool calls", () => {
+    const visible = locateVisibleTurns(ompChaotic.lines, ompChaoticTurns);
+    expect(visible.map(({ id, turn, role, confidence, anchorStart, anchorEnd, bufferStart, bufferEnd }) => ({
+      id, turn, role, confidence, anchorStart, anchorEnd, bufferStart, bufferEnd,
+    }))).toEqual(ompChaoticGolden.turns);
+
+    const owner = (row: number) => visible.find((turn) => turn.anchorStart <= row && row <= turn.anchorEnd)?.id ?? null;
+    expect([500, 509, 512, 513, 514, 515].map(owner)).toEqual([null, null, null, null, null, null]);
+    expect(visible.every((turn, index) => index === 0 || visible[index - 1].bufferEnd < turn.bufferStart)).toBe(true);
   });
 });

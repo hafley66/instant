@@ -1,0 +1,7 @@
+{
+  "fixture": "omp-chaotic",
+  "turns": [
+    { "id": "01a0a289-c8c6-7000-97cc-3aa77c2d40ea:541", "turn": 541, "role": "tool", "confidence": "anchored", "anchorStart": 501, "anchorEnd": 508, "bufferStart": 501, "bufferEnd": 508 },
+    { "id": "01a0a289-c8c6-7000-97cc-3aa77c2d40ea:542", "turn": 542, "role": "tool", "confidence": "anchored", "anchorStart": 510, "anchorEnd": 511, "bufferStart": 510, "bufferEnd": 511 }
+  ]
+}

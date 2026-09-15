@@ -1,6 +1,18 @@
 import { debounceTime, filter, interval, share, Subject, type Observable, Subscription } from "rxjs";
 import { projectTurnRegions, regionAtBufferRow, type ProjectedTurnRegion } from "./00_terminalTurnRegions";
 import type { LogicalLine, TmuxPane, XtermViewport } from "./00a_terminalIntersection";
+import {
+  growAnchors,
+  hasDiscriminatingHit,
+  lineMatches,
+  matchRowOwners,
+  monotonicTurnMatch,
+  normalizeTurnLine,
+  sourceLines,
+  type TurnMatch,
+} from "./0a_terminalTurnMatching";
+
+export { normalizeTurnLine } from "./0a_terminalTurnMatching";
 
 export type BoopTurn = {
   session: string;
@@ -55,110 +67,6 @@ export function selectProjectionTurns(direct: BoopTurn[], candidates: BoopTurn[]
 }
 
 const turnId = (turn: Pick<BoopTurn, "session" | "turn">) => `${turn.session}:${turn.turn}`;
-
-export function normalizeTurnLine(line: string): string {
-  return line
-    .toLowerCase()
-    .replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬✨✳✻⎿━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "")
-    // Inline markdown markers vanish in the rendered pane: `x`, **x**, _x_,
-    // ~~x~~, # heading. Deleting (not spacing) them keeps "(`5a38640`)" equal
-    // to the on-screen "(5a38640)". Cell/border glyphs become spaces since the
-    // renderer pads them out.
-    .replace(/[`_*~#]/g, "")
-    .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬|│┃┆┊╎╏┌┐└┘├┤┬┴]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-type TurnMatch = {
-  source: { turn: BoopTurn; id: string; normalized: string[] };
-  hits: Array<LogicalLine & { sourceIndex: number }>;
-  sourceSpan: number;
-};
-
-// A short source line found inside a long rendered row is a coincidence, so
-// containment either way must cover half the longer string.
-function lineMatches(screen: string, source: string): boolean {
-  return screen === source || source.length >= 8 && (
-    screen.includes(source) && source.length * 2 >= screen.length
-    || source.includes(screen) && screen.length >= 12
-  );
-}
-
-function monotonicTurnMatch(
-  screen: Array<LogicalLine & { normalized: string }>,
-  source: TurnMatch["source"],
-): TurnMatch | null {
-  const rows = screen.filter((row) => row.normalized);
-  const rowCount = rows.length;
-  const sourceCount = source.normalized.length;
-  const scores = Array.from({ length: rowCount + 1 }, () => new Uint32Array(sourceCount + 1));
-  for (let row = 1; row <= rowCount; row += 1) {
-    for (let column = 1; column <= sourceCount; column += 1) {
-      const matchScore = lineMatches(rows[row - 1].normalized, source.normalized[column - 1])
-        ? scores[row - 1][column - 1] + 1000
-          + Math.min(rows[row - 1].normalized.length, source.normalized[column - 1].length)
-        : 0;
-      scores[row][column] = Math.max(matchScore, scores[row - 1][column], scores[row][column - 1]);
-    }
-  }
-  if (scores[rowCount][sourceCount] === 0) return null;
-  const hits: TurnMatch["hits"] = [];
-  let row = rowCount;
-  let column = sourceCount;
-  while (row > 0 && column > 0) {
-    if (lineMatches(rows[row - 1].normalized, source.normalized[column - 1])
-      && scores[row][column] === scores[row - 1][column - 1] + 1000
-        + Math.min(rows[row - 1].normalized.length, source.normalized[column - 1].length)) {
-      hits.push({ ...rows[row - 1], sourceIndex: column - 1 });
-      row -= 1;
-      column -= 1;
-    } else if (scores[row - 1][column] >= scores[row][column - 1]) {
-      row -= 1;
-    } else {
-      column -= 1;
-    }
-  }
-  hits.reverse();
-  const sourceSpan = hits[hits.length - 1].sourceIndex - hits[0].sourceIndex + 1;
-  return { source, hits, sourceSpan };
-}
-
-// The monotonic match is 1:1, so a source line an app hard-wraps across
-// several screen rows anchors only one of them; walk the rest back in.
-function growAnchors(
-  visible: VisibleTurn[],
-  screen: Array<LogicalLine & { normalized: string }>,
-  sources: TurnMatch["source"][],
-) {
-  const rows = screen.filter((row) => row.normalized);
-  const anchored = new Map(visible.map((turn) => [turn.id, turn]));
-  const ownerAt = new Map<number, string>();
-  for (const turn of visible) {
-    for (const row of rows) {
-      if (row.start >= turn.anchorStart && row.end <= turn.anchorEnd) ownerAt.set(row.start, turn.id);
-    }
-  }
-  for (const [id, turn] of anchored) {
-    const source = sources.find((candidate) => candidate.id === id);
-    if (!source) continue;
-    const claims = (row: LogicalLine & { normalized: string }) =>
-      (ownerAt.get(row.start) ?? id) === id
-      && source.normalized.some((line) => lineMatches(row.normalized, line));
-    const first = rows.findIndex((row) => row.start >= turn.anchorStart);
-    if (first < 0) continue;
-    let low = first;
-    while (low > 0 && claims(rows[low - 1])) low -= 1;
-    let high = rows.findIndex((row) => row.end >= turn.anchorEnd);
-    if (high < 0) high = rows.length - 1;
-    while (high + 1 < rows.length && claims(rows[high + 1])) high += 1;
-    turn.anchorStart = Math.min(turn.anchorStart, rows[low].start);
-    turn.anchorEnd = Math.max(turn.anchorEnd, rows[high].end);
-    turn.bufferStart = turn.anchorStart;
-    turn.bufferEnd = turn.anchorEnd;
-    for (let index = low; index <= high; index += 1) ownerAt.set(rows[index].start, id);
-  }
-}
 
 // A pane tmux also sees is a pane whose rows two readers agree on.
 export function tmuxConfirms(lines: LogicalLine[], tmuxCapture: string): boolean {
@@ -259,8 +167,7 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
   const tmuxBacked = tmuxConfirms(lines, tmuxCapture);
   const sources = turns.map((turn) => {
     const id = turnId(turn);
-    const normalized = turn.said
-      .split("\n")
+    const normalized = sourceLines(turn)
       .map(normalizeTurnLine)
       .filter(Boolean);
     return { turn, id, normalized };
@@ -275,14 +182,15 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
       || left.source.normalized.length - right.source.normalized.length
       || right.source.turn.ts - left.source.turn.ts
     );
+  const rowOwners = matchRowOwners(matches);
   const claimedRows = new Set<number>();
   const visible: VisibleTurn[] = [];
   for (const { source, hits } of matches) {
     const unclaimed = hits.filter((hit) => !claimedRows.has(hit.start));
-    if (unclaimed.length * 2 < hits.length) continue;
-    for (const hit of hits) claimedRows.add(hit.start);
-    const anchorStart = Math.min(...hits.map((hit) => hit.start));
-    const anchorEnd = Math.max(...hits.map((hit) => hit.end));
+    if (unclaimed.length * 2 < hits.length || !hasDiscriminatingHit(unclaimed, screen, source, rowOwners)) continue;
+    for (const hit of unclaimed) claimedRows.add(hit.start);
+    const anchorStart = Math.min(...unclaimed.map((hit) => hit.start));
+    const anchorEnd = Math.max(...unclaimed.map((hit) => hit.end));
     visible.push({
       ...source.turn,
       id: source.id,
@@ -332,7 +240,7 @@ export function extendTo(
     const line = screen[index];
     const edge = step === 1 ? line.end : line.start;
     if (!inside(edge)) break;
-    if (!line.normalized) break;
+    if (!line.normalized || line.normalized === "output") break;
     reached = edge;
   }
   return reached;
