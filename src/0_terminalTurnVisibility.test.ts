@@ -699,6 +699,11 @@ describe("terminal turn visibility v2", () => {
     }))).toEqual(ompChaoticGolden.turns);
 
     const owner = (row: number) => visible.find((turn) => turn.anchorStart <= row && row <= turn.anchorEnd)?.id ?? null;
+    expect(ompChaotic.lines.map((line) => ({
+      start: line.start,
+      normalized: normalizeTurnLine(line.text),
+      id: owner(line.start),
+    }))).toEqual(ompChaoticGolden.lines);
     expect([500, 509, 512, 513, 514, 515].map(owner)).toEqual([null, null, null, null, null, null]);
     expect(visible.every((turn, index) => index === 0 || visible[index - 1].bufferEnd < turn.bufferStart)).toBe(true);
   });
@@ -717,6 +722,15 @@ describe("terminal turn visibility v2", () => {
       { ...turn(1, said), session: "edge", role: "tool" },
       { ...turn(2, said), session: "edge", role: "tool" },
     ])).toEqual([]);
+  });
+
+  it("decodes formatted structured tool arguments after the first newline", () => {
+    const said = ["bash", "{", '  "command": "echo formatted-tool-command"', "}"].join("\n");
+    expect(locateVisibleTurns([{ text: "│ $ echo formatted-tool-command", start: 1, end: 1 }], [
+      { ...turn(1, said), session: "edge", role: "tool" },
+    ]).map(({ id, anchorStart, anchorEnd }) => ({ id, anchorStart, anchorEnd }))).toEqual([
+      { id: "edge:1", anchorStart: 1, anchorEnd: 1 },
+    ]);
   });
 
   it("rejects an accepted anchor interval that intersects an earlier interval", () => {

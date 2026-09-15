@@ -21,8 +21,10 @@ export function normalizeTurnLine(line: string): string {
 }
 
 export function sourceLines(turn: BoopTurn): string[] {
-  const [toolName, argumentsJson, ...rest] = turn.said.split("\n");
-  if (turn.role !== "tool" || !toolName || !argumentsJson || rest.length) return turn.said.split("\n");
+  const separator = turn.said.indexOf("\n");
+  if (turn.role !== "tool" || separator < 0) return turn.said.split("\n");
+  const toolName = turn.said.slice(0, separator);
+  const argumentsJson = turn.said.slice(separator + 1);
   try {
     const argumentsValue: unknown = JSON.parse(argumentsJson);
     if (typeof argumentsValue === "object" && argumentsValue !== null
