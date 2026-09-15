@@ -702,4 +702,34 @@ describe("terminal turn visibility v2", () => {
     expect([500, 509, 512, 513, 514, 515].map(owner)).toEqual([null, null, null, null, null, null]);
     expect(visible.every((turn, index) => index === 0 || visible[index - 1].bufferEnd < turn.bufferStart)).toBe(true);
   });
+
+  it("keeps an unambiguous short non-tool turn", () => {
+    expect(locateVisibleTurns([{ text: "done", start: 1, end: 1 }], [
+      { ...turn(1, "done"), session: "edge" },
+    ]).map(({ id, anchorStart, anchorEnd }) => ({ id, anchorStart, anchorEnd }))).toEqual([
+      { id: "edge:1", anchorStart: 1, anchorEnd: 1 },
+    ]);
+  });
+
+  it("leaves identical structured tool calls unassigned", () => {
+    const said = "bash\n{\"command\":\"echo repeated-tool-command\"}";
+    expect(locateVisibleTurns([{ text: "│ $ echo repeated-tool-command", start: 1, end: 1 }], [
+      { ...turn(1, said), session: "edge", role: "tool" },
+      { ...turn(2, said), session: "edge", role: "tool" },
+    ])).toEqual([]);
+  });
+
+  it("rejects an accepted anchor interval that intersects an earlier interval", () => {
+    const visible = locateVisibleTurns([
+      { text: "alpha", start: 1, end: 1 },
+      { text: "bravo", start: 2, end: 2 },
+      { text: "charlie", start: 3, end: 3 },
+    ], [
+      { ...turn(1, "alpha\ncharlie"), session: "edge" },
+      { ...turn(2, "bravo"), session: "edge" },
+    ]);
+    expect(visible.map(({ id, bufferStart, bufferEnd }) => ({ id, bufferStart, bufferEnd }))).toEqual([
+      { id: "edge:1", bufferStart: 1, bufferEnd: 3 },
+    ]);
+  });
 });

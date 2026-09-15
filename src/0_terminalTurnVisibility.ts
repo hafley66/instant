@@ -188,9 +188,10 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
   for (const { source, hits } of matches) {
     const unclaimed = hits.filter((hit) => !claimedRows.has(hit.start));
     if (unclaimed.length * 2 < hits.length || !hasDiscriminatingHit(unclaimed, screen, source, rowOwners)) continue;
-    for (const hit of unclaimed) claimedRows.add(hit.start);
     const anchorStart = Math.min(...unclaimed.map((hit) => hit.start));
     const anchorEnd = Math.max(...unclaimed.map((hit) => hit.end));
+    if (visible.some((turn) => anchorStart <= turn.anchorEnd && turn.anchorStart <= anchorEnd)) continue;
+    for (const hit of unclaimed) claimedRows.add(hit.start);
     visible.push({
       ...source.turn,
       id: source.id,
