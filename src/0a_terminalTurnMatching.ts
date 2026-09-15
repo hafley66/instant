@@ -94,13 +94,12 @@ export function hasDiscriminatingHit(
   source: TurnMatch["source"],
   owners: Map<string, number>,
 ): boolean {
+  if (source.turn.role !== "tool") return true;
   return hits.some((hit) => {
     const row = screen.find((candidate) => candidate.start === hit.start);
     if (!row) return false;
-    const unambiguous = owners.get(`${hit.start}:${source.turn.role}`) === 1;
-    return source.turn.role === "tool"
-      ? unambiguous && characterCount(row.normalized) >= 8
-      : unambiguous || source.turn.role === "user" && row.text.trimStart().startsWith("❯");
+    return owners.get(`${hit.start}:${source.turn.role}`) === 1
+      && characterCount(row.normalized) >= 8;
   });
 }
 
