@@ -7,6 +7,13 @@ use boop_harness::Registry;
 use boop_mux::{Multiplexer, Tmux};
 use std::path::PathBuf;
 
+fn with_session_lookup_socket<T>(
+    socket: Option<&str>,
+    lookup: impl FnOnce(Option<&str>) -> T,
+) -> T {
+    lookup(socket)
+}
+
 /// The harness session standing in a tmux pane, answered by each harness's own
 /// live registry rather than by a transcript mtime or a tmux scrape.
 #[tauri::command]
@@ -29,9 +36,25 @@ pub async fn boop_mux_session(
             Some(path) => PathBuf::from(path),
             None => boop_store::bus::default_mail_dir().map_err(|error| error.to_string())?,
         };
-        live::session_in_pane(&Registry::discover(), &pane, &mail_dir)
-            .map_err(|error| error.to_string())
+        with_session_lookup_socket(socket.as_deref(), |socket| {
+            live::session_in_pane_on_socket(&Registry::discover(), &pane, socket, &mail_dir)
+                .map_err(|error| error.to_string())
+        })
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_session_lookup_socket;
+
+    #[test]
+    fn forwards_the_resolved_socket_to_the_live_session_lookup() {
+        let received = with_session_lookup_socket(Some("instant-test.sock"), |socket| {
+            socket.map(str::to_owned)
+        });
+
+        assert_eq!(received, Some("instant-test.sock".to_owned()));
+    }
 }

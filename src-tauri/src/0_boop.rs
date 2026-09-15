@@ -1238,7 +1238,10 @@ mod tests {
         };
         // Not in boop-harness's root re-export list, unlike every other
         // Capabilities field type; reached through the module instead.
-        use boop_harness::harness::{NativeBackendSupport, NativeSettingsSupport};
+        use boop_harness::harness::{
+            mock_tui::{MockTuiContext, MockTuiLaunch},
+            NativeBackendSupport, NativeSettingsSupport,
+        };
 
         static CAPS: Capabilities = Capabilities {
             bans_plan_family_models: false,
@@ -1246,10 +1249,12 @@ mod tests {
             variant: VariantSupport::None,
             mail: MailPolicy::Door,
             image_paste_keys: None,
+            interrupt_keys: None,
             native_tui_projector: false,
             wrapper_owns_alternate_screen: false,
             native_backend: NativeBackendSupport::Unsupported,
             native_settings: NativeSettingsSupport::Unsupported("candidate_for fixture"),
+            registry_names_processes: false,
         };
 
         struct Scan(Vec<SessionRef>);
@@ -1257,6 +1262,9 @@ mod tests {
         impl Harness for Scan {
             fn id(&self) -> HarnessId {
                 HarnessId::Claude
+            }
+            fn mock_tui_launch(&self, _: &MockTuiContext<'_>) -> anyhow::Result<MockTuiLaunch> {
+                anyhow::bail!("candidate_for fixture does not launch a TUI")
             }
             fn capabilities(&self) -> &'static Capabilities {
                 &CAPS
