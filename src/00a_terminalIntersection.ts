@@ -1,6 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 import { merge, Observable, Subject, takeUntil } from "rxjs";
 import { invoke } from "./generated/native";
+import type { PaneSessionBinding } from "./0a_terminalHarnessBinding";
 
 export type LogicalLine = { text: string; start: number; end: number };
 export type ViewportChange = {
@@ -100,7 +101,12 @@ export interface TmuxPane {
 export class NativeTmuxPane implements TmuxPane {
   session_id: string | null = null;
   session_read_at = Number.NEGATIVE_INFINITY;
-  constructor(readonly target: string, readonly socket?: string) {}
+  session_binding: PaneSessionBinding | null = null;
+  constructor(
+    readonly target: string,
+    readonly socket?: string,
+    readonly onSessionBinding?: (binding: PaneSessionBinding | null) => void,
+  ) {}
 
   captureVisible(): Promise<string> {
     return invoke<string>("boop_mux_capture", { target: this.target, socket: this.socket ?? null });
@@ -113,9 +119,14 @@ export class NativeTmuxPane implements TmuxPane {
     // a registry walk, an HTTP round trip to opencode and a codex subprocess.
     const ttl = this.session_id ? 5_000 : 1_000;
     if (performance.now() - this.session_read_at < ttl) return this.session_id;
-    this.session_id = await invoke<string | null>("boop_mux_session", {
+    const binding = await invoke<PaneSessionBinding | null>("boop_mux_session", {
       target: this.target, socket: this.socket ?? null,
     }).catch(() => null);
+    const changed = binding?.session !== this.session_binding?.session
+      || binding?.harness !== this.session_binding?.harness;
+    this.session_binding = binding;
+    this.session_id = binding?.session ?? null;
+    if (changed) this.onSessionBinding?.(binding);
     this.session_read_at = performance.now();
     return this.session_id;
   }

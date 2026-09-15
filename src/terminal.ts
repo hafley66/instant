@@ -86,6 +86,7 @@ import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
 import { projectionTurnSources } from "./0b_ompTurnBinding";
+import { resolvedTerminalHarness, type PaneSessionBinding } from "./0a_terminalHarnessBinding";
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import { renderSessionActive, refreshSessions } from "./worktrees";
 import { settings } from "./0_settings";
@@ -116,6 +117,7 @@ export type Tab = {
   wheel?: TerminalWheelRouter;
   pinnedSelection?: TerminalPinnedSelection;
   harness: HarnessObservation;
+  paneSession: PaneSessionBinding | null;
   outputTail: string;
   /// Set when Instant spawned this pane as a fork lane: the preset it runs.
   /// The fork menu reads it so a fork of a fork repeats its own conversation's
@@ -196,21 +198,38 @@ export function observeTerminalOutput(id: string, chunk: string) {
   tab.outputTail = trimOutputTail(tab.outputTail, chunk);
   const meta = tabMetaById(id);
   const live = store.get().sessions.find((s) => s.name === tab.name);
+  setTerminalHarness(tab, detectHarness(meta?.command, live?.commands?.[0], tab.outputTail));
+}
+
+function setTerminalHarness(tab: Tab, observed: HarnessObservation) {
   const previousHarness = tab.harness.id;
-  tab.harness = detectHarness(meta?.command, live?.commands?.[0], tab.outputTail);
+  tab.harness = resolvedTerminalHarness(observed, tab.paneSession);
   // The initial warm can happen before the terminal has printed its harness
   // banner. Re-read exactly once when output resolves that runtime identity so
   // a generic shell does not stay pinned to another editor's newest session.
-  if (tab.harness.id && tab.harness.id !== previousHarness) {
-    void warmTurns(id);
-    void tab.syncTurns?.();
+  if (tab.harness.id !== previousHarness) {
+    if (tab.harness.id) {
+      void warmTurns(tab.id);
+      void tab.syncTurns?.();
+    }
     tab.turnVisibility?.schedule();
   }
   tab.el.dataset.harness = tab.harness.id ?? "unknown";
   tab.el.dataset.harnessConfidence = tab.harness.confidence;
   tab.el.title = tab.harness.id
-    ? `${tab.harness.id} · ${tab.harness.confidence} detection`
+    ? tab.harness.evidence.includes("boop:session")
+      ? `${tab.harness.id} · bound session`
+      : `${tab.harness.id} · ${tab.harness.confidence} detection`
     : "terminal · harness not detected";
+}
+
+function setPaneSessionBinding(id: string, binding: PaneSessionBinding | null) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.paneSession = binding;
+  const meta = tabMetaById(id);
+  const live = store.get().sessions.find((session) => session.name === tab.name);
+  setTerminalHarness(tab, detectHarness(meta?.command, live?.commands?.[0], tab.outputTail));
 }
 
 export function terminalHarness(id: string): HarnessObservation | null {
@@ -748,7 +767,11 @@ export function openTab(
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
   const tmuxTarget = opts.tmuxTarget;
   const viewport = graphics ? undefined : new XtermViewportAdapter(term);
-  const tmuxPane = graphics ? undefined : new NativeTmuxPane(tmuxTarget ?? name);
+  const tmuxPane = graphics ? undefined : new NativeTmuxPane(
+    tmuxTarget ?? name,
+    undefined,
+    (binding) => setPaneSessionBinding(id, binding),
+  );
   const turnVisibility = graphics || !viewport ? undefined : new TerminalTurnVisibilityV2(
     viewport,
     async () => {
@@ -870,7 +893,7 @@ export function openTab(
       void navigator.clipboard.writeText(text).catch(() => {});
     },
   });
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, outputTail: "" });
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, paneSession: null, outputTail: "" });
   void syncTurns?.();
   applyTurnDebugOverlay(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
