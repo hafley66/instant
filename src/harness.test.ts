@@ -23,6 +23,19 @@ describe("harness detection", () => {
     expect(detectHarness("zsh", "zsh").id).toBeNull();
   });
 
+  it("recognizes an OMP coordinator launch", () => {
+    expect(detectHarness("boop tui omp", "node")).toMatchInlineSnapshot(`
+      {
+        "confidence": "medium",
+        "evidence": [
+          "omp:command",
+        ],
+        "id": "omp",
+        "outputTail": "",
+      }
+    `);
+  });
+
   it("keeps only the bounded output tail", () => {
     expect(trimOutputTail("12345", "6789", 6)).toBe("456789");
   });

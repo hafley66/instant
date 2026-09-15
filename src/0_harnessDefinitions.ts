@@ -71,6 +71,17 @@ export const harnessDefinitions: HarnessDefinition[] = [
     },
   },
   {
+    id: "omp", label: "Oh My Pi",
+    matchesCommand: (s) => /(?:^|[\\/\s])omp(?:\.exe)?(?:\s|$)/i.test(s),
+    matchesProcess: (s) => /^omp(?:\.exe)?$/.test(s),
+    isAgentProcess: (s) => /^(?:omp(?:\.exe)?|node|bun)$/.test(s),
+    resumeFlag: "--resume",
+    hasExplicitSession: (s) => /\s(?:-r|--resume)(?:\s|=|$)/.test(s),
+    matchesOutput: () => false,
+    resume: (sessionId) => `omp --resume ${sessionId}`,
+    lane: (brief, model) => interactiveLane("omp", "interactive", brief, model),
+  },
+  {
     id: "codex", label: "Codex",
     matchesCommand: (s) => /(?:^|[\\/\s])codex(?:\.exe)?(?:\s|$)/i.test(s),
     matchesProcess: (s) => /^codex(?:\.exe)?$/.test(s),

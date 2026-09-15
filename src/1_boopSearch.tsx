@@ -23,7 +23,7 @@ import {
 } from "./1_boopSearchRows";
 import "./1_boopSearch.css";
 
-const HARNESSES: ReadonlySet<string> = new Set<HarnessId>(["claude", "opencode", "codex", "kimi"]);
+const HARNESSES: ReadonlySet<string> = new Set<HarnessId>(["claude", "opencode", "codex", "kimi", "omp"]);
 const LIMIT = 500;
 
 type Model = {

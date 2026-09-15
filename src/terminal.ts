@@ -85,6 +85,7 @@ import { InspectorMachine, type InspectorEvent } from "./0_inspectorState";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
+import { projectionTurnSources } from "./0b_ompTurnBinding";
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import { renderSessionActive, refreshSessions } from "./worktrees";
 import { settings } from "./0_settings";
@@ -752,11 +753,21 @@ export function openTab(
     viewport,
     async () => {
       const session_id = await tmuxPane?.session() ?? null;
-      const direct = session_id ? boopTurnsForSession(session_id) : boopTurnsForTab(id);
       const activeHarness = tabs.get(id)?.harness.id ?? harness.id;
-      const candidates = activeHarness ? boopCandidateTurns(activeHarness) : Promise.resolve([]);
-      const [directTurns, candidateTurns] = await Promise.all([direct, candidates]);
-      return selectProjectionTurns(directTurns, candidateTurns);
+      const exactOnly = activeHarness === "omp";
+      const [paneTurns, tabTurns, candidateTurns] = await Promise.all([
+        session_id ? boopTurnsForSession(session_id) : Promise.resolve([]),
+        session_id || exactOnly ? Promise.resolve([]) : boopTurnsForTab(id),
+        activeHarness && !exactOnly ? boopCandidateTurns(activeHarness) : Promise.resolve([]),
+      ]);
+      const sources = projectionTurnSources(
+        activeHarness,
+        session_id,
+        paneTurns,
+        tabTurns,
+        candidateTurns,
+      );
+      return selectProjectionTurns(sources.direct, sources.candidates);
     },
     tmuxPane,
     (lines, turns) => invoke<TurnSpan[]>(commands.boop.boopLocateTurns, { lines, turns }),
