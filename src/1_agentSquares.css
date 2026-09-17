@@ -28,6 +28,16 @@
   transition: padding-right var(--asq-move) var(--asq-ease);
 }
 
+/* `.xterm-viewport` is `inset: 0` against the *padding* box, so padding on
+   `.xterm` leaves its scrollbar — `overflow-y: scroll`, always present — drawing
+   inside the margin the strip just took. It spans the content box instead, which
+   is where the grid ends: the scrollbar stays in the terminal, the gutter stays
+   the strip's. (The app's note at `styles.css:1023` already calls this layer
+   vestigial; the real scroller is `.xterm-scrollable-element`.) */
+.term-host.asq-open .xterm-viewport {
+  right: var(--asq-gutter);
+}
+
 .asq-host {
   position: absolute;
   top: 0;
