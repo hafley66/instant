@@ -1,4 +1,5 @@
 import { accessSync, constants, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { delimiter, join } from "node:path";
 
 export const liveAgentPrompt = "render the terminal flow";
@@ -21,10 +22,31 @@ export type AgentReplayTurn = Readonly<{
   said: string;
 }>;
 
+/// How the canned prompt reaches a harness's own composer. Mirrors
+/// `MockTuiReplay` in `boop-harness/src/harness/mock_tui.rs`.
+export type AgentTuiReplay =
+  /// The prompt rides argv; the driver only observes.
+  | { kind: "prompt-arg" }
+  /// Wait for `readiness` on screen, type the prompt, press Enter.
+  | { kind: "type-prompt"; readiness: string };
+
+/// The launch a *wrapper* owns: `boop tui <harness> --cwd <workspace>` spawns
+/// it, registers the pane, and the wrapper's plan supplies the working
+/// directory. Mirrors `mock_tui_launch` in `boop-harness/src/harness/*.rs`,
+/// which is the recipe boop's own mock-TUI tests use — a wrapper launch is not
+/// the same argv as a bare one. Three of the four harnesses take the prompt at
+/// their own composer and expect no prompt argument at all.
+export type AgentWrapperRecipe = Readonly<{
+  args: readonly string[];
+  replay: AgentTuiReplay;
+}>;
+
 export type AgentTuiLaunch = Readonly<{
   harness: LiveAgentHarness;
   executable: string;
   args: readonly string[];
+  /// The argv and the prompt entry a `boop tui` launch needs.
+  wrapper: AgentWrapperRecipe;
   env: Readonly<Record<string, string>>;
   configPaths: readonly string[];
   turns: readonly AgentReplayTurn[];
@@ -168,6 +190,8 @@ function codexLaunch(context: LaunchContext): AgentTuiLaunch {
     harness: context.harness,
     executable: context.executable,
     args: ["--no-alt-screen", "-C", context.workspace, liveAgentPrompt],
+    // Boop's wrapper supplies `-C` itself; a second one is a hard error.
+    wrapper: { args: ["--no-alt-screen", liveAgentPrompt], replay: { kind: "prompt-arg" } },
     env: { ...context.common, CODEX_HOME: codexHome, OPENAI_API_KEY: "test" },
     configPaths: [join(codexHome, "config.toml")],
     turns: replayTurns(context.harness, context.displayName),
@@ -196,6 +220,18 @@ function claudeLaunch(context: LaunchContext): AgentTuiLaunch {
       "--permission-mode", "dontAsk",
       "--tools", "",
     ],
+    // No `--bare` here: it drops the messaging socket from the session
+    // registry, and the claude door — the thing that binds this pane to a
+    // conversation — delivers over it.
+    wrapper: {
+      args: [
+        "--safe-mode",
+        "--model", "claude-sonnet-4-5",
+        "--permission-mode", "dontAsk",
+        "--tools", "",
+      ],
+      replay: { kind: "type-prompt", readiness: "Claude Code v" },
+    },
     env: {
       ...context.common,
       CLAUDE_CONFIG_DIR: claudeConfig,
@@ -243,6 +279,9 @@ function opencodeLaunch(context: LaunchContext): AgentTuiLaunch {
       "--model", "llmock/mock-model",
       liveAgentPrompt,
     ],
+    // `opencode run` is one-shot. Under the wrapper, opencode runs as its own
+    // TUI against the server the wrapper starts, and takes no argv at all.
+    wrapper: { args: [], replay: { kind: "type-prompt", readiness: "Mock Model llmock" } },
     env: {
       ...context.common,
       OPENCODE_CONFIG: config,
@@ -273,6 +312,18 @@ function kimiLaunch(context: LaunchContext): AgentTuiLaunch {
     'display_name = "Mock Model"',
     "",
   ].join("\n"));
+  // kimi asks "Trust this folder?" before it will run, and the question is
+  // answered by a file, not a flag: the TUI parks on the dialog and never
+  // reaches its model line. Same shape boop-harness writes in
+  // `seed_workspace_trust`: `workspace-trust/wd_workspace_<sha256[0..6]>`
+  // holding the canonical root.
+  const root = realpathSync(context.workspace);
+  const trustDir = join(kimiConfig, "workspace-trust");
+  mkdirSync(trustDir, { recursive: true });
+  writeFileSync(
+    join(trustDir, `wd_workspace_${createHash("sha256").update(root).digest("hex").slice(0, 12)}`),
+    JSON.stringify({ root, trustedAt: Date.now() }),
+  );
   return {
     harness: context.harness,
     executable: context.executable,
@@ -281,6 +332,9 @@ function kimiLaunch(context: LaunchContext): AgentTuiLaunch {
       "--prompt", liveAgentPrompt,
       "--output-format", "text",
     ],
+    // Same split as opencode: the one-shot form is for the cast tier, the
+    // wrapper gets an interactive TUI and types the prompt into it.
+    wrapper: { args: ["--model", "llmock/mock-model"], replay: { kind: "type-prompt", readiness: "Mock Model" } },
     env: { ...context.common },
     configPaths: [join(kimiConfig, "config.toml")],
     turns: replayTurns(context.harness, context.displayName),
@@ -329,4 +383,74 @@ export function resolveLlmockExecutable(repo: string): string | null {
   } catch {
     return executableOnPath("llmock", process.env.PATH ?? "");
   }
+}
+
+/// One shell word, quoted for `bash -lc`.
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export type AgentWrapperOptions = Readonly<{
+  launch: AgentTuiLaunch;
+  /// `boop` itself.
+  boop: string;
+  /// The tmux session name, which is also the route name the wrapper registers.
+  session: string;
+  workspace: string;
+  /// `--mail-dir` for the wrapper: where its registration and locks live.
+  boopDir: string;
+  /// `BOOP_DB` for the agent: the same store the wrapper registers in.
+  boopDb: string;
+  /// `TMUX_TMPDIR` for both: the scratch tmux server, never the owner's.
+  tmuxDir: string;
+}>;
+
+/// The `bash -lc` line that runs a harness under `boop tui` in a tmux pane.
+///
+/// `boop tui <harness>` is the launcher that *registers the pane*: it writes the
+/// route and the registry row a harness's own door resolves, which is what an
+/// app's `boop_mux_session` reads before any seeded route. A bare CLI in a pane
+/// runs fine and binds nothing, so a tier that asserts a live binding has to
+/// come through here.
+///
+/// Three rules are load-bearing and none are obvious:
+///   - `--cwd` makes the wrapper own the working directory, so the launch uses
+///     `launch.wrapper.args`, where a harness's own cwd flag would duplicate and
+///     the CLI would refuse to start;
+///   - `env -i <adapter env>` keeps the owner's environment out of the agent, so
+///     the run is the scratch env and nothing else;
+///   - `TMUX` and `TMUX_PANE` come back in explicitly, expanded by the shell tmux
+///     starts for this command, because `env -i` wiped them and the TUI path
+///     needs both.
+///
+/// `exec` is deliberate: the agent has to *be* the pane's process, because the
+/// pane's foreground command is how the app names the harness and how tmux
+/// reports the pane. A shell left in front of it reads as `bash`, and a test that
+/// wraps the agent in `{ …; sleep 300; }` for a linger gets a pane whose
+/// foreground command is the linger — with a one-shot CLI the `sleep` also has to
+/// outlive the `exec` that would have replaced it, which it cannot. Every wrapper
+/// launch is therefore an interactive TUI that stays up after its reply, and the
+/// pane lives exactly as long as the agent does.
+export function wrappedAgentCommand(options: AgentWrapperOptions): string {
+  const env = Object.entries({
+    ...(options.launch.env as unknown as Record<string, string>),
+    BOOP_DB: options.boopDb,
+    BOOP_MAIL_DIR: options.boopDir,
+    BOOP_NO_SYNC: "1",
+    TMUX_TMPDIR: options.tmuxDir,
+  })
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join(" ");
+  const args = [
+    "tui", options.launch.harness,
+    "--bin", options.launch.executable,
+    "--name", options.session,
+    "--cwd", options.workspace,
+    "--mail-dir", options.boopDir,
+    "--", ...options.launch.wrapper.args,
+  ];
+  return (
+    `exec env -i ${env} TMUX="$TMUX" TMUX_PANE="$TMUX_PANE" ` +
+    `${shellQuote(options.boop)} ${args.map(shellQuote).join(" ")}`
+  );
 }

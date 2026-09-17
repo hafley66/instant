@@ -1,7 +1,8 @@
 # Agent squares: the right-margin turn strip
 
-Date: 2026-09-16. Status: plan only. No implementation is committed on this
-branch; four modules are drafted in the worktree and are listed at the end.
+Date: 2026-09-16. Status: landed on `feat/agent-squares`. The crate, the app
+modules and the live tier are committed; the files table and the open items
+below are the ones that survived implementation.
 
 ## Goal
 
@@ -263,12 +264,15 @@ Rules the plumbing keeps:
 | `src/chrome.ts` | `bindAgentSquaresChrome()` — button state + `syncAgentSquares()` | edited |
 | `src/main.ts` | call the bind beside `bindTurnDebugChrome()`, import the CSS | edited |
 | `src/terminal.ts` | `applyAgentSquares(tab)` / `syncAgentSquares()`; `Tab.agentSquares`; both dispose paths; applied on open and on a session rebind | edited |
+| `scripts/2_agentTuiReplay.ts` | `AgentWrapperRecipe` + `wrappedAgentCommand()` — the `boop tui` line that registers a harness's pane, and the argv/env a wrapper launch needs where a bare one differs | added |
+| `e2e-live/3_agent-strip.live.ts` | the live tier: a real CLI in a real pane against pinned llmock, asserting binding → frame → layout → DOM → popover, one PNG per harness | added |
+| `playwright.agent.config.ts` | the tier's isolation: scratch HOME, tmux server, boop db, `instant-serve` data-dir, own port | added |
 
 `src/1_agentSquaresEstimate.ts` and its test are deleted: the module they pinned
 now lives in `boop-turnstrip`, with the same fixture ported to Rust.
 
-Working-tree files in `.boop-worktrees/feat/agent-squares`; the crate is a
-working-tree addition in `~/projects/hafley-rs`.
+Committed on `.boop-worktrees/feat/agent-squares`; the crate is committed in
+`~/projects/hafley-rs` (`32d59379`).
 
 ## Verification
 
