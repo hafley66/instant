@@ -26,6 +26,11 @@ const frame = (session: string, rows: number): Strip => ({
     },
   ],
   tags: { [`turn:${session}:2`]: ["rust"] },
+  layout: {
+    squares: [{ id: `${session}:2`, kind: "agent", y: 0, scale: 1, active: true }],
+    span: 3,
+    block: { top: 0, height: 6 },
+  },
 })
 
 describe("the strip's feed", () => {
@@ -42,6 +47,22 @@ describe("the strip's feed", () => {
       [
         {
           "at": 1700000000000,
+          "layout": {
+            "block": {
+              "height": 6,
+              "top": 0,
+            },
+            "span": 3,
+            "squares": [
+              {
+                "active": true,
+                "id": "s1:2",
+                "kind": "agent",
+                "scale": 1,
+                "y": 0,
+              },
+            ],
+          },
           "rows": 3,
           "session": "s1",
           "tags": {
@@ -69,6 +90,22 @@ describe("the strip's feed", () => {
         },
         {
           "at": 1700000000000,
+          "layout": {
+            "block": {
+              "height": 6,
+              "top": 0,
+            },
+            "span": 3,
+            "squares": [
+              {
+                "active": true,
+                "id": "s1:2",
+                "kind": "agent",
+                "scale": 1,
+                "y": 0,
+              },
+            ],
+          },
           "rows": 4,
           "session": "s1",
           "tags": {

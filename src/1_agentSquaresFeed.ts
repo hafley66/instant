@@ -9,6 +9,7 @@
 import { filter, type Observable } from "rxjs"
 import { invoke } from "./generated/native"
 import { nativeEvent$ } from "./reactive/nativeTransport"
+import type { SquareKind } from "./0_agentSquareVisual"
 
 /** The event the server pushes a projection on. Mirrors `SQUARES_EVENT` in
  *  `src-tauri/src/1_squares.rs` — change both. */
@@ -33,13 +34,39 @@ export type StripTurn = {
 }
 
 /** One pushed frame. `tags` is keyed by source (`turn:<session>:<turn>`) and
- *  answers for every turn in the frame, empty list included. */
+ *  answers for every turn in the frame, empty list included.
+ *
+ *  `layout` is the server's own placement of those turns, computed by
+ *  `boop-turnstrip` from the pane capture plus tmux's `#{pane_height}` (a
+ *  scrolled pane is a copy-mode view, so the window is the capture's last
+ *  `pane_height` rows and the client reports nothing). `null` means the height
+ *  could not be read: the frame still carries spans and marks, and the strip
+ *  draws nothing. */
 export type Strip = {
   session: string
   at: number
   rows: number
   turns: StripTurn[]
   tags: Record<string, string[]>
+  layout: StripLayout | null
+}
+
+/** One square's place in the strip, in the server's own numbers. */
+export type SquareLayout = {
+  id: string
+  kind: SquareKind
+  /** Where the square sits on the strip's track, oldest at 0. */
+  y: number
+  scale: number
+  active: boolean
+}
+
+/** The strip itself: every square, the window's total, and the on-screen range. */
+export type StripLayout = {
+  squares: SquareLayout[]
+  /** Estimated rows the whole window occupies: the strip's denominator. */
+  span: number
+  block: { top: number; height: number }
 }
 
 export type SquaresWatch = {

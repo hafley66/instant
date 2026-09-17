@@ -43,6 +43,50 @@ pub async fn boop_mux_exit_copy_mode(
     .map_err(|error| error.to_string())?
 }
 
+/// Where the pane's rows are: how many there are, and how far a client has
+/// scrolled its copy-mode view up from the live bottom.
+///
+/// Scrolling a pane is a tmux copy-mode view (`pty::scroll_session`), never
+/// xterm scrollback, and `capture-pane -S -n` returns the history above the
+/// live area followed by the live area itself whatever the copy-mode offset is
+/// (measured: a pane scrolled 20 rows still captures newest-first at the tail).
+/// The client's window is therefore the capture's tail shifted up by
+/// `scroll_position`, which is empty outside copy-mode and counts rows up from
+/// the live bottom inside it.
+pub(crate) struct PaneWindow {
+    pub height: usize,
+    pub scroll: usize,
+}
+
+/// One `display-message` for both numbers: a separate call per number would be
+/// two tmux round trips inside a projection the pane can outrun.
+pub(crate) fn pane_window(target: &str, socket: Option<&str>) -> Result<PaneWindow, String> {
+    let out = tmux_command(socket)
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{pane_height}|#{scroll_position}",
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut parts = text.trim().split('|');
+    let height = parts
+        .next()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .ok_or_else(|| format!("pane_height {target}: {}", text.trim()))?;
+    let scroll = parts
+        .next()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    Ok(PaneWindow { height, scroll })
+}
+
 /// Whether the pane was in a mode and had to be brought back.
 fn leave_copy_mode(socket: Option<&str>, pane: &str) -> Result<bool, String> {
     let out = tmux_command(socket)

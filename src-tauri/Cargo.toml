@@ -47,6 +47,7 @@ boop-mux = { path = "../../hafley-rs/crates/boop-mux" }
 boop-store = { path = "../../hafley-rs/crates/boop-store", default-features = false, features = ["agent-read"] }
 boop-harness = { path = "../../hafley-rs/crates/boop-harness" }
 boop-turnvis = { path = "../../hafley-rs/crates/boop-turnvis" }
+boop-turnstrip = { path = "../../hafley-rs/crates/boop-turnstrip" }
 nucleo-matcher = "0.3"
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }

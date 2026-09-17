@@ -1,24 +1,36 @@
-// The turn strip's data, derived from data the terminal already has: the
-// visible-turn projection it computes on activity. Nothing here reads the DOM,
-// the store or IPC, so the whole widget is a pure function of its input and a
-// test can pin it without a browser.
+// The strip's data, wrapped from the server's push. Where a square sits, how
+// big it is and which one is being read are the server's numbers: `boop-turnstrip`
+// measures them from the pane it already watches, so nothing here re-derives a
+// row, estimates a height, or reads a buffer. What is left is what only a view
+// can decide — the hue a turn is drawn in, its popover header, and the preview
+// slice of text the frame already carries.
+//
+// The chain, and where this module sits in it:
+//
+//   pane capture + tags          server (`squares_update` push)
+//     -> `Strip`                 src/1_agentSquaresFeed.ts   (the wire shape)
+//     -> `AgentSquaresProps`     this module: the view's own fields
+//     -> `<AgentSquaresView/>`   the strip, which draws what it is given
 import { turnHue } from "./0_turnDebugOverlay"
-import type { VisibleTurn } from "./0_terminalTurnVisibility"
+import type { SquareKind } from "./0_agentSquareVisual"
+import type { Strip, StripTurn } from "./1_agentSquaresFeed"
 
 /** How many characters of a turn a popover carries. The text is already in
  *  memory, so a big cap costs nothing at hover time and never fetches. */
 export const PREVIEW_CHARS = 900
 
-/** One square. `kind` picks the side and the shape; `role` keeps the harness's
- *  own word for it. */
+/** One square, ready to draw: the server's placement plus the view's own
+ *  dressing. `kind` and the three geometry fields come off the wire unchanged. */
 export type AgentSquare = {
   id: string
-  kind: "user" | "agent" | "tool" | "other"
+  kind: SquareKind
   role: string
   turn: number
   hue: number
   at: string
   preview: string
+  y: number
+  scale: number
   active: boolean
 }
 
@@ -28,52 +40,39 @@ export type AgentSquaresProps = {
   active: number
 }
 
-export function kindOf(role: string): AgentSquare["kind"] {
-  if (role === "user") return "user"
-  if (role === "tool") return "tool"
-  if (role === "assistant") return "agent"
-  return "other"
-}
-
-function label(turn: VisibleTurn): string {
+function label(turn: StripTurn): string {
   const when = new Date(turn.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   return `${turn.role} · turn ${turn.turn} · ${when}`
 }
 
 /**
- * The strip for one terminal: the newest `max` visible turns, oldest first, with
- * the one covering `focusRow` marked active.
+ * One square per turn the server placed, in the order it placed them.
  *
- * `focusRow` is the terminal's top visible buffer row, so the active square is
- * the message being looked at, and it follows a scroll without any extra
- * bookkeeping. A row past the last message, or no row at all, falls back to the
- * newest square, which is what a live pane is looking at anyway.
+ * A frame with no layout — the pane's height could not be read — draws nothing
+ * rather than guessing a position. A placed turn the frame does not carry is
+ * dropped rather than drawn blank: the layout is derived from these turns, so
+ * that combination is a server bug, not a state to render.
  */
-export function squaresOf(
-  visible: VisibleTurn[],
-  focusRow: number | null,
-  max: number,
-): AgentSquaresProps {
-  const ordered = [...visible].sort((a, b) => a.bufferStart - b.bufferStart)
-  const kept = max > 0 ? ordered.slice(Math.max(0, ordered.length - max)) : ordered
-  let active = kept.length - 1
-  if (focusRow !== null) {
-    const hit = kept.findIndex((turn) => focusRow >= turn.bufferStart && focusRow <= turn.bufferEnd)
-    // A row above the first kept square means the cap trimmed the message that
-    // is actually being read; the oldest square is the closest answer left.
-    active = hit >= 0 ? hit : focusRow < (kept[0]?.bufferStart ?? 0) ? 0 : kept.length - 1
-  }
-  return {
-    active,
-    squares: kept.map((turn, index) => ({
-      id: turn.id,
-      kind: kindOf(turn.role),
+export function squaresOf(frame: Strip): AgentSquaresProps {
+  const layout = frame.layout
+  if (!layout) return { squares: [], active: -1 }
+  const turns = new Map(frame.turns.map((turn) => [turn.id, turn]))
+  const squares: AgentSquare[] = []
+  for (const square of layout.squares) {
+    const turn = turns.get(square.id)
+    if (!turn) continue
+    squares.push({
+      id: square.id,
+      kind: square.kind,
       role: turn.role,
       turn: turn.turn,
-      hue: turnHue(turn.id),
+      hue: turnHue(square.id),
       at: label(turn),
       preview: turn.said.slice(0, PREVIEW_CHARS),
-      active: index === active,
-    })),
+      y: square.y,
+      scale: square.scale,
+      active: square.active,
+    })
   }
+  return { squares, active: squares.findIndex((square) => square.active) }
 }

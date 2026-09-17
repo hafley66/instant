@@ -24,29 +24,41 @@ Constraints that decide the design:
 
 | need | source | cost |
 |---|---|---|
-| turns on screen | `TerminalTurnVisibilityV2.changes` / `.visible` per tab | already computed on activity |
-| which one is being read | `term.buffer.active.viewportY` on `term.onScroll` | one xterm read |
-| turn identity colour | `turnHue(id)` (`0_turnDebugOverlay.ts`) | pure |
+| turns on screen | the server's own capture + `boop-turnvis` (`1_squares.rs`) | one capture per write burst, 120 ms coalesced |
+| which one is being read | `#{pane_height}` + `#{scroll_position}` read off the pane | one `display-message` per projection |
+| where each square sits | `boop-turnstrip::layout` over those rows | pure, in Rust |
+| turn identity colour | `turnHue(id)` (`0_turnDebugOverlay.ts`) | pure, client |
 | favorites | `boop_favorites()` → `boopFavorites` cache in `favorites.ts` | one read, refreshed on enable/toggle |
-| tags | `Store::tags_for_many(&[id])` over the visible id set | one read per visible-set change |
+| tags | `tags_for_many` inside the feed (`1_squares.rs`) | one read per projection, riding the frame |
 
-Nothing here needs the boop-side `lane squares` verb. The pane text, the matcher
-and the projection are already running for the turn-debug overlay; the strip is a
-second projection of the same stream. If instant later wants the boop-side
-matcher instead, `boop_mux_capture` + `boop_turns` + `boop_locate_turns` are the
+Nothing here needs the boop-side `lane squares` verb. If instant later wants a
+debug path, `boop_mux_capture` + `boop_turns` + `boop_locate_turns` are the
 existing three calls, and `boop beep lane squares <lane>` (hafley-rs
 `feat/terminal-snapshot-squares`, commits `727c4239`, `67df7fe4`) is the same
-projection in one call for a debug path.
+projection in one call.
+
+The client's own matcher (`TerminalTurnVisibilityV2`) is not touched by any of
+this. The terminal's other overlays read `regions[]` — diagrams, the context
+gutter, structured rows — and `boop-turnvis` does not produce regions, so the
+local matcher keeps its own path. The strip is a second projection of the same
+stream, computed where the pane and the store already are.
 
 ## Type chain
 
 ```
-TerminalTurnVisibilityV2.changes        term.buffer.active.viewportY
-        │ events.visible : VisibleTurn[]        │ focusRow
-        └──────────────┬─────────────────────────┘
+pane capture + turns + tags                  server: src-tauri/src/1_squares.rs
+        │ boop-turnvis: spans + ids           │ #{pane_height}, #{scroll_position}
+        └──────────────┬──────────────────────┘
                        ▼
-   [model]  squaresOf(visible, focusRow, max) → { squares: AgentSquare[], active: number }
-                       │ AgentSquare = { id, kind, role, turn, hue, at, preview }  pure data
+   [crate]  boop-turnstrip::layout → Layout
+                       │ Layout = { squares: [{ id, kind, y, scale, active }], span, block }
+                       │ rows_of: how much of each turn the window holds
+                       ▼
+   host.emit("squares-update", Strip)          one frame; the client sends nothing
+        │ nativeEvent$ → squaresFeed(session)
+        ▼
+   [model]  squaresOf(frame) → { squares: AgentSquare[], active: number }
+                       │ AgentSquare = { id, kind, role, turn, hue, at, preview, y, scale, active }
                        ▼
    [visual] createSquareVisual(seed) → SquareVisual   stable per id, held in a ref map
                        │ SquareState = SquareSeed & { active, y, strength }
@@ -60,11 +72,16 @@ TerminalTurnVisibilityV2.changes        term.buffer.active.viewportY
 ## Props and input/output
 
 ```ts
+// on the wire (src/1_agentSquaresFeed.ts), one frame per projection
+type StripTurn   = { id; session; harness; turn; ts; role; said; bufferStart; bufferEnd; ... }
+type StripLayout = { squares: { id; kind; y; scale; active }[]; span: number; block: { top; height } }
+type Strip       = { session; at; rows; turns: StripTurn[]; tags: Record<string, string[]>; layout: StripLayout | null }
+
 type SquareVisual = Signal<SquareState>        // SignalCreator tree
 type SquareState  = SquareSeed & { active: boolean; y: number; strength: number }
-type SquareSeed   = { id; kind: "user" | "agent" | "tool" | "other";
+type SquareSeed   = { id; kind: "user" | "agent" | "tool" | "other";   // kind comes off the frame
                       role: string; turn: number; hue: number;
-                      at: string; preview: string }
+                      at: string; preview: string; y: number; scale: number }
 type TurnMark     = { favorite: boolean; tags: string[] }
 type SquareMarks  = Record<string, TurnMark>   // keyed by turn id, `session:turn`
 
@@ -76,13 +93,17 @@ type AgentSquaresViewProps = {
 
 | boundary | in | out | pure |
 |---|---|---|---|
-| `squaresOf` | `VisibleTurn[]`, `focusRow`, `max` | `AgentSquare[]` + active index | ✓ |
+| `squaresOf` | `Strip` (the pushed frame) | `AgentSquare[]` + active index | ✓ |
 | `createSquareVisual` | `SquareSeed` | `SquareVisual` | ✓ |
 | `placeSquare` / `activateSquare` / `reseedSquare` | `SquareVisual`, scalars | — | one field each |
 | `strengthAt` / `squareColor` / `squareVars` | state or scalars | number / css / custom props | ✓ |
 | `AgentSquaresView` | `visuals`, `marks` | DOM | ✓ no effects, no handlers |
-| `AgentSquares` | `{ term, visibility }` | `<AgentSquaresView/>` | owns subscriptions |
+| `AgentSquares` | `{ frame }` | `<AgentSquaresView/>` | owns subscriptions |
 | `useSquareVisuals` | `AgentSquare[]` | `SquareVisual[]` | ref map keyed by id |
+
+`y` and `scale` are the server's numbers and are forwarded, not re-derived: a
+square's height is a function of the whole window (`span`), so a client that
+recomputed it from one turn would disagree with every other square.
 
 React holds **handles, not state**: the hook creates a visual on first sight,
 calls `place`/`activate`/`reseed` on every render, and drops ids that left the
@@ -93,12 +114,12 @@ tracks — no `SignalReact`, no `useSignal` in the strip.
 
 | axis | rule |
 |---|---|
-| count | `agentSquares.max` (default 24), newest end kept; older turns drop off the top |
+| count | `boop-turnstrip`'s `Options::max_squares` (24), newest end kept; older turns drop off the top. The cap is the server's because it changes `span` and therefore every `y` |
 | height | uniform: every square is `SQUARE_H`; the strip is capped at `SQUARE_STRIP_MAX` and the window slides inside it. Turn size never changes a square's height |
-| scale | flexed by the turn's share of the window, `clamp(RATIO_FLEX · L_t / L_ref, SQUARE_MIN, SQUARE_MAX)`; the active square's `SQUARE_SCALE` (1.55) multiplies on top and the clamp applies last |
-| placement | `y` comes from estimated cumulative rows, never from index: a 50-line result takes more strip than a one-line prompt, bounded by the clamp |
-| viewport | the on-screen block is the viewport range pushed through the same cumulative map, clamped to a minimum height so it never vanishes |
-| active | the square whose `[bufferStart, bufferEnd]` contains `viewportY`; above the first kept square → the oldest kept; past the last → the newest |
+| scale | flexed by the turn's total against the window's median, `clamp(1 + RATIO_FLEX · (L_t / L_ref − 1), SQUARE_MIN, SQUARE_MAX)`; the active square's `SQUARE_SCALE` (1.55) multiplies on top and the clamp applies last. Computed in the crate, forwarded as `scale` |
+| placement | `y` comes from estimated cumulative rows, never from index: a 50-line result takes more strip than a one-line prompt, bounded by the clamp. Computed in the crate, forwarded as `y` |
+| viewport | the on-screen block is the window pushed through the same cumulative map, clamped to a minimum height so it never vanishes. Computed in the crate, forwarded as `block` |
+| active | the square holding the window's first row (the reader's top row); above the first kept square → the oldest kept; past the last → the newest. Computed in the crate, forwarded as `active` |
 | click | nothing is bound. A square carries no handler and writes no state; the only affordances are the CSS `:hover` / `:focus-visible` popover and the browser tooltip |
 | strength | 1 at the active square and its neighbours, `SQUARE_DIM` past them |
 | motion | `y` and `scale` are custom props on a transitioned `transform`; reorders and re-scales animate without layout |
@@ -109,10 +130,27 @@ tracks — no `SignalReact`, no `useSignal` in the strip.
 
 ## Estimator: rows for a turn nobody can see
 
-instant does not own the pane's rendering, so the strip cannot read geometry for
-every turn. It measures what is on screen and extrapolates the rest.
+The estimator lives in `boop-turnstrip` (hafley-rs `crates/boop-turnstrip`), not
+in the client. It is a pure function of the pane's rows, the turns the matcher
+found on them, and the window those rows are seen through, so it runs wherever
+the rows already are — the feed thread, which is the only place that has them
+without a fetch.
 
-Per update, from the matcher and xterm:
+The window is not a client fact either. Scrolling a pane parks it in tmux
+copy-mode (`pty::scroll_session`), so a client's view is the capture's tail
+shifted up by `#{scroll_position}` inside `#{pane_height}` rows:
+
+```text
+window = [ rows − pane_height − scroll , rows − 1 − scroll ]     in capture rows
+focus  = window.top                                              the reader's top row
+```
+
+Measured on tmux 3.7b: `capture-pane -p -J -S -400` returns the live area at its
+tail whatever the copy-mode offset is (a pane scrolled 20 rows still captured
+`199, 200` last), and `scroll_position` is empty outside copy-mode. `-S -400` is
+what makes `rows` large enough to hold a window of turns; only the tail matters.
+
+Per update, from the matcher and the window:
 
 | symbol | meaning |
 |---|---|
@@ -163,117 +201,137 @@ onScreen = [ Σ_{t' older than vpStart} est_rows(t') / S , Σ_{t' ≤ vpEnd} est
 
 Percent-of-turn seen (`r_t`) drives the partial-visibility case above; the
 estimator never overrides a measured span, it only fills the rows nobody
-attributed.
+attributed. `l_i` (the lines of a turn inside the window) comes from
+`boop-turnstrip::rows_of`, which aligns the turn's own `said` lines against the
+window's rows (`align_rows`). That is the Rust successor to the client's
+`regions[].sourceBufferRows`: the same fact, computed where the rows are, and it
+is why no region projection has to cross the wire.
 
 ## Reads and their keys
 
-```ts
-// the squares themselves: already-computed stream, wrapped into a signal
-const events = Signal(visibility.changes, { visible: visibility.visible, entered: [], exited: [] })
+Server side, one projection per write burst (`1_squares.rs`):
 
-// scroll: xterm's own signal drives placement, no polling, no read
-const focus = Signal<number | null>(term.buffer.active.viewportY)
-term.onScroll(() => focus.$(term.buffer.active.viewportY))
-// the visible set is re-derived from focus + the row estimator on scroll, so a
-// stream that never goes quiet still updates the block
-
-// favorites: one read, cached by favorites.ts, refreshed on enable and toggle
-boopFavorites                       // matched by `turn:${session}:${turn}`
-
-// tags: one call for the whole visible set, through a `boop_tags_for_many`
-// command to add beside `boop_tags_for` (it wraps boop-store's tags_for_many).
-// throttle, not debounce: a streaming pane never goes quiet, so a debounce
-// would starve the read. Leading edge paints immediately, trailing edge
-// coalesces the burst that landed during the window.
-visibleIds$.pipe(
-  throttleTime(TAG_THROTTLE_MS, undefined, { leading: true, trailing: true }),
-  distinctUntilChanged(),           // sorted joined ids
-  switchMap(ids => invoke("boop_tags_for_many", { sources: ids })),   // Record<id, string[]>
-)
+```text
+pty write          ->  one dirty bit (capacity-1 channel)     no read
+FLUSH_INTERVAL     ->  capture-pane -p -J -S -400             one tmux call
+                      display-message '#{pane_height}|#{scroll_position}'
+                      boop-turnvis::locate_visible_turns      pure
+                      boop-turnstrip::layout                  pure
+open_store_ro()    ->  tags_for_many(sources of the turns)    one statement
+                      host.emit("squares-update", Strip)      push
 ```
 
-Rules the plumbing has to keep:
+Client side, no reads at all:
 
-1. **Invalidate by change, never by timer.** A quiet pane reads nothing; a busy
-   pane reads at most once per throttle window. Never debounce a stream that
-   never goes quiet.
-2. **One reconciliation in flight.** `switchMap` (a superseded tag read is
-   worthless), not `mergeMap`.
-3. **Emit only when the projection differs.** `distinctUntilChanged` on the
-   visible id list and on the derived square list.
-4. **Measure before estimate.** A row span the matcher attributed is never
+```ts
+// the strip is a subscription; the frame is the whole input
+squaresFeed(session)                 // nativeEvent$("squares-update") | filter(session)
+squaresOf(frame)                     // pure: hue, header, preview; y/scale/active forwarded
+
+// favorites: one read, cached by favorites.ts, refreshed on enable and toggle
+boopFavorites                        // matched by `turn:${session}:${turn}`
+```
+
+Rules the plumbing keeps:
+
+1. **Invalidate by change, never by timer.** A quiet pane projects nothing; a
+   busy pane projects at most once per `FLUSH_INTERVAL`. Nothing polls.
+2. **One reconcile in flight.** The feed thread coalesces the burst that landed
+   during a flush into the next projection rather than queueing one per write.
+3. **Measure before estimate.** A row span the matcher attributed is never
    replaced by a computed row.
+4. **The cap is the server's.** `max_squares` changes `span` and therefore every
+   `y`, so a client that trimmed the list itself would put every square in the
+   wrong place.
 
 ## Files
 
 | file | role | state |
 |---|---|---|
-| `src/0_agentSquaresSettings.ts` | `agentSquares = { on, max }` | drafted |
+| `crates/boop-turnstrip` (hafley-rs) | the estimator, the placement and the geometry, in Rust | landed in the working tree |
+| `src-tauri/src/1_squares.rs` | the feed: capture, window, layout, tags, one push | edited |
+| `src-tauri/src/0_tmux.rs` | `pane_window` — `#{pane_height}` and `#{scroll_position}` in one call | edited |
+| `src/0_agentSquaresFeed.ts` | the frame's shape, including `layout` | edited |
+| `src/0_agentSquaresSettings.ts` | `agentSquares = { on }` (the cap lives in the crate) | drafted |
 | `src/0_agentSquareVisual.ts` | geometry, colour, anims, `SignalCreator` state | drafted |
-| `src/1_agentSquaresModel.ts` | `squaresOf` and the pure helpers | drafted |
-| `src/1_agentSquaresEstimate.ts` | `kappa_k` / `gamma_k` / `est_rows` / monotone `row_est`, `y(t)`, the on-screen block | to write |
+| `src/1_agentSquaresModel.ts` | `squaresOf(frame)` — hue, header, preview; everything else forwarded | rewritten |
 | `src/1_agentSquares.css` | strip, transitions, CSS-only popover | drafted |
-| `src/1_agentSquaresMarks.ts` | favorites + tags per turn id | to write |
+| `src/1_agentSquaresMarks.ts` | favorites + the frame's tags per turn id | to write |
 | `src/1_agentSquares.tsx` | `useSquareVisuals`, `AgentSquaresView`, container, mount | to write |
 | `index.html` | `#squares-toggle` beside the other four | to edit |
 | `src/chrome.ts` | `bindAgentSquaresChrome()` — button state + `syncAgentSquares()` | to edit |
 | `src/main.ts` | call the bind beside `bindTurnDebugChrome()` | to edit |
 | `src/terminal.ts` | `applyAgentSquares(tab)` / `syncAgentSquares()`; `Tab.agentSquares`; dispose paths; call in `activate()` | to edit |
 
-Drafted modules are uncommitted working-tree files in
-`.boop-worktrees/feat/agent-squares`; nothing is staged.
+`src/1_agentSquaresEstimate.ts` and its test are deleted: the module they pinned
+now lives in `boop-turnstrip`, with the same fixture ported to Rust.
+
+Working-tree files in `.boop-worktrees/feat/agent-squares`; the crate is a
+working-tree addition in `~/projects/hafley-rs`.
 
 ## Verification
 
-- `pnpm typecheck`, `pnpm test` (vitest) in the worktree.
-- Unit: `squaresOf` against a fixture `VisibleTurn[]` — cap keeps the newest end,
-  the active pick follows `focusRow` across the three cases, roles map to kinds.
-- Unit: `squareVars` / `strengthAt` / `squareColor` are pure outputs.
-- Unit: the estimator on a fixture with one fully visible turn, one half visible
-  (`r = 0.5`), and one off screen — `kappa_k` recovers the fixture's true
-  rows-per-line, `est_rows` stays inside `[L_t, kappa_max · L_t]`, and
-  `row_est` never inverts on a shuffled window.
-- Unit: `y(t)` and the on-screen block are monotone in `row_est` and the block
-  keeps its minimum height at both ends of the window.
+- `cargo test -p boop-turnstrip` (hafley-rs) — the estimator's units, including
+  the TypeScript fixture replayed as a grid: `kappa_k` recovers the fixture's
+  true rows-per-line, `est_rows` stays inside `[L_t, kappa_max · L_t]`,
+  `row_est` never inverts, and `y(t)`/`block` stay monotone with the block's
+  minimum height at both ends.
+- `cargo test --lib` in the worktree — the frame's own units: one square per
+  pushed turn, one active square, the window following `pane_height` and
+  `scroll_position`, the composer dropped before matching.
+- `serve::tests::the_strip_rides_the_events_channel` — the frame reaches a
+  subscribed WebSocket as an `events` payload, over `Host::emit`.
+- `pnpm vitest run`, `pnpm exec tsc --noEmit` in the worktree — the frame's
+  shape, `squaresOf` over a frame fixture, and `squareVars` / `strengthAt` /
+  `squareColor` as pure outputs.
 - Browser: enable the toggle, open a busy claude tab, confirm the gutter is 32px,
   the pane reflows, the active square scales, and a popover shows without a
   frame's delay while a turn streams.
-- Perf check: with the strip on and a pane producing output, the strip issues no
-  reads of its own; the tag read fires once per visible-set change.
+- Perf check: with the strip on and a pane producing output, the client issues
+  no reads of its own; the feed's capture happens once per `FLUSH_INTERVAL`.
 
 ## Decided
 
 1. **One batch read, never n+1.** Settled, not a question. hafley-rs
    `910dc8c5` (`main` `943f8fd0`) adds `Store::tags_for_many(&[String])` in
    `crates/boop-store/src/tags.rs` — one `IN` statement over `agent_tag_link`,
-   every source asked for present, an untagged source answering `[]` — and
-   `boop tag for <SOURCE>... [--format text|json]` in `crates/boop/src/cli/tag.rs`
-   for the shell. instant links `boop-store`, so the marks file adds a
-   `boop_tags_for_many(sources)` command beside `boop_tags_for` (same
-   `0_boop.rs` / `lib.rs` / `serve/rpc.rs` registration) and reads the whole
-   visible set in one call. No per-square tag read exists in either path.
+   every source asked for present, an untagged source answering `[]`. The feed
+   calls it once per projection over the turns it just located, so the marks
+   ride the same frame and no per-square read exists in either path.
    `boop_tags_for` stays only for the single-source case `favorites.ts` already
    uses.
-2. **Throttle, not debounce.** The visible-id read is
-   `throttleTime(TAG_THROTTLE_MS, undefined, { leading: true, trailing: true })`.
-   A streaming pane never goes quiet, so a debounce would starve the read;
-   leading edge paints now, trailing edge coalesces the burst.
-3. **Visibility comes from scroll plus estimates.** instant does not own the
-   pane's rendering, so the on-screen set and the strip's block are re-derived
-   from `viewportY` through the row estimator on every scroll event. Placement
-   never polls and never issues a read.
+2. **The estimator is a Rust crate, not a client module.**
+   `crates/boop-turnstrip` depends on `boop-turnvis` and `serde`, touches no IO,
+   and is a pure function of rows + turns + window. Keeping it in the client
+   would have meant the same math in two languages the moment anything else
+   wanted a strip; keeping it here means the feed, a CLI and a wasm binding all
+   call one implementation. `boop-turnvis` itself is untouched — it is a frozen
+   byte-identical port with a golden corpus, and the strip composes on its
+   public `normalize_turn_line`.
+3. **The window is the pane's, not the client's.** Scrolling parks the pane in
+   tmux copy-mode, so `#{pane_height}` and `#{scroll_position}` fully determine
+   what a client is looking at. The layout therefore rides the push that already
+   fires on every pane write, and a client that only draws asks for nothing on
+   scroll and nothing per square.
 4. **Interaction is hover only.** A click binds nothing and writes nothing; the
    popover and the tooltip are CSS on a pre-rendered child, so the pointer
    arrives in the same frame as the paint.
 5. **Uniform squares, clamped flex.** One `SQUARE_H`, one
    `SQUARE_STRIP_MAX`; the scale flexes by estimated size inside
-   `[SQUARE_MIN, SQUARE_MAX]`.
+   `[SQUARE_MIN, SQUARE_MAX]`, computed in the crate and forwarded.
 
 ## Open
 
 1. **Exit animation.** Entry is a CSS keyframe; a square that leaves the
    projection disappears on the same frame. An exit animation needs a
    short-lived presence list.
-2. **Estimator constants.** `RATIO_FLEX`, `SQUARE_MIN`, `SQUARE_MAX`, the
-   per-kind bucket list, and `TAG_THROTTLE_MS` need measurements from a busy
-   pane before they are pinned.
+2. **Estimator constants.** `ratio_flex`, `scale_min`, `scale_max`, the per-kind
+   bucket list and `max_squares` in `boop-turnstrip::Options`, plus the client's
+   `SQUARE_*` / `TAG_THROTTLE_MS` CSS mirrors, need measurements from a busy pane
+   before they are pinned.
+3. **The copy-mode indicator row.** A scrolled pane's top row carries tmux's own
+   `[12/340]` indicator, painted by the client and not present in a
+   `capture-pane` — so that one row of the window can fail to align and `l_i` can
+   come back one low for the turn holding it. The clamps absorb it (never fewer
+   rows than lines, never more than `kappa_max`), but the count is worth a
+   check on a scrolled pane.

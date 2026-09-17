@@ -3,6 +3,7 @@
 // nothing is asked for per square.
 //
 //   pty output  ->  one dirty bit  ->  capture-pane -p -J  ->  boop-turnvis
+//               ->  boop-turnstrip (rows, placement, geometry)
 //               ->  one tags_for_many  ->  host.emit("squares-update")
 //
 // The frame lands on the events channel every other push uses, so the client
@@ -10,18 +11,24 @@
 // src/1_agentSquaresFeed.ts). One reconcile in flight, one dirty bit: a pane
 // that writes faster than a projection is worth still costs one capture per
 // FLUSH_INTERVAL, and a quiet pane costs none.
+//
+// The viewport is not a client fact. Scrolling parks the pane in tmux copy-mode
+// (`pty::scroll_session`), so the window is the capture's tail shifted by
+// `#{scroll_position}` inside `#{pane_height}` rows — read here, pushed with
+// everything else, which is why a client that only draws asks for nothing.
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use boop_turnstrip::{Layout, TurnRow, Viewport};
 use boop_turnvis::locate_visible_turns;
 use serde::{Deserialize, Serialize};
 
 use crate::boop::{
     from_visible, input_region, now_ms, open_store_ro, read_turns, to_turnvis, BoopTurn, LocatedTurn,
 };
-use crate::boop_tmux::tmux_command;
+use crate::boop_tmux::{pane_window, tmux_command, PaneWindow};
 use crate::host::Host;
 
 /// The event the strip listens on.
@@ -51,9 +58,14 @@ pub struct SquaresUnwatchArgs {
     pub pty: String,
 }
 
-/// One push: every turn the pane holds with the matcher's spans, plus the tags
-/// the visible turns carry. `at` is the projection's own stamp, so a client can
-/// drop a frame that arrived out of order.
+/// One push: every turn the pane holds with the matcher's spans, the tags the
+/// visible turns carry, and the strip's own geometry. `at` is the projection's
+/// own stamp, so a client can drop a frame that arrived out of order.
+///
+/// The layout rides the frame because the viewport is already a fact this side
+/// holds: the window is the last `#{pane_height}` rows of the capture
+/// (`boop_tmux::pane_height`), since a scrolled pane is a tmux copy-mode view
+/// rather than xterm scrollback. A client that only draws asks for nothing.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Strip {
@@ -62,6 +74,9 @@ pub struct Strip {
     pub rows: usize,
     pub turns: Vec<LocatedTurn>,
     pub tags: BTreeMap<String, Vec<String>>,
+    /// `None` only when the pane's height could not be read, so the client can
+    /// tell "no strip" from "an empty strip".
+    pub layout: Option<Layout>,
 }
 
 /// The pane's own lines. `-J` joins a wrapped row onto the line it continues,
@@ -82,13 +97,16 @@ pub fn capture_lines(target: &str, socket: Option<&str>) -> Result<Vec<String>, 
         .collect())
 }
 
-/// The projection itself: rows in, spans and marks out. Pure, so the test pins
-/// it without tmux and the watcher only supplies what it read.
+/// The projection itself: rows in, spans, marks and the strip's geometry out.
+/// Pure, so the test pins it without tmux and the watcher only supplies what it
+/// read. `window` is the only thing the caller reads outside the capture; with
+/// `None` the frame carries spans and marks but no layout.
 pub fn project_rows(
     session: &str,
     rows: &[String],
     turns: Vec<BoopTurn>,
     tags: BTreeMap<String, Vec<String>>,
+    window: Option<PaneWindow>,
 ) -> Strip {
     let harness = turns
         .iter()
@@ -110,16 +128,51 @@ pub fn project_rows(
         })
         .collect();
     let turns: Vec<boop_turnvis::BoopTurn> = turns.into_iter().map(to_turnvis).collect();
+    let located = locate_visible_turns(&lines, &turns);
+    let layout = window.and_then(|window| window_layout(&lines, &located, rows.len(), window));
     Strip {
         session: session.to_owned(),
         at: now_ms() as i64,
         rows: rows.len(),
-        turns: locate_visible_turns(&lines, &turns)
-            .into_iter()
-            .map(from_visible)
-            .collect(),
+        turns: located.into_iter().map(from_visible).collect(),
         tags,
+        layout,
     }
+}
+
+/// The strip's geometry for the window a client is looking at.
+///
+/// The capture's tail holds the pane's live rows, and a scrolled pane is a
+/// copy-mode view of the same rows shifted up by `window.scroll`, so the window
+/// is `[rows - height - scroll, rows - 1 - scroll]` and the reader's top row is
+/// its first row. Everything the estimator needs is the capture plus those two
+/// numbers, which is why the client sends nothing.
+fn window_layout(
+    lines: &[boop_turnvis::LogicalLine],
+    located: &[boop_turnvis::VisibleTurn],
+    rows: usize,
+    window: PaneWindow,
+) -> Option<Layout> {
+    let height = window.height.min(rows);
+    if height == 0 {
+        return None;
+    }
+    let scroll = window.scroll.min(rows - height);
+    let bottom = (rows - 1 - scroll) as i64;
+    let viewport = Viewport {
+        top: bottom - height as i64 + 1,
+        bottom,
+    };
+    let turn_rows: Vec<TurnRow> = located
+        .iter()
+        .map(|turn| boop_turnstrip::rows_of(lines, turn, viewport))
+        .collect();
+    Some(boop_turnstrip::layout(
+        &turn_rows,
+        viewport,
+        viewport.top,
+        &boop_turnstrip::Options::default(),
+    ))
 }
 
 /// One source per pushed turn, so the marks ride on the same frame.
@@ -133,8 +186,12 @@ pub fn sources_of(turns: &[LocatedTurn]) -> Vec<String> {
 /// Read the pane and the store, once, and build the frame the socket carries.
 pub fn project(session: &str, target: &str, socket: Option<&str>) -> Result<Strip, String> {
     let rows = capture_lines(target, socket)?;
+    // A pane that predates this process's tmux still captures; only the window
+    // read can come back empty, and then the frame carries spans without a
+    // layout rather than no frame at all.
+    let window = pane_window(target, socket).ok();
     let turns = read_turns(session)?;
-    let strip = project_rows(session, &rows, turns, BTreeMap::new());
+    let strip = project_rows(session, &rows, turns, BTreeMap::new(), window);
     let tags = open_store_ro()?
         .tags_for_many(&sources_of(&strip.turns))
         .map_err(|error| error.to_string())?;
@@ -249,7 +306,13 @@ mod tests {
         ];
         let tags = BTreeMap::from([("turn:s1:2".to_owned(), vec!["rust".to_owned()])]);
 
-        let strip = project_rows("s1", &rows, turns, tags.clone());
+        let strip = project_rows(
+            "s1",
+            &rows,
+            turns,
+            tags.clone(),
+            Some(PaneWindow { height: 3, scroll: 0 }),
+        );
 
         assert_eq!(strip.session, "s1");
         assert_eq!(strip.rows, 5);
@@ -262,14 +325,38 @@ mod tests {
             );
             assert!(found.buffer_start <= found.buffer_end);
         }
+        let layout = strip.layout.expect("a pane height in means a layout out");
+        assert_eq!(
+            layout.squares.len(),
+            strip.turns.len(),
+            "one square per pushed turn"
+        );
+        assert_eq!(
+            layout.squares.iter().filter(|square| square.active).count(),
+            1,
+            "exactly one square is the one being read: {:?}",
+            layout.squares
+        );
+        assert!(
+            layout.block.height >= boop_turnstrip::Options::default().block_min,
+            "the window never vanishes: {:?}",
+            layout.block
+        );
     }
 
     #[test]
     fn an_empty_capture_is_one_frame_with_nothing_in_it() {
-        let strip = project_rows("s1", &[], Vec::new(), BTreeMap::new());
+        let strip = project_rows(
+            "s1",
+            &[],
+            Vec::new(),
+            BTreeMap::new(),
+            Some(PaneWindow { height: 10, scroll: 0 }),
+        );
         assert_eq!(strip.rows, 0);
         assert!(strip.turns.is_empty());
         assert!(strip.tags.is_empty());
+        assert!(strip.layout.is_none(), "an empty capture has no first row to measure from");
     }
 
     /// The composer is the harness's own row range, not a turn: the projection
@@ -281,12 +368,86 @@ mod tests {
             .map(|row| (*row).to_owned())
             .collect();
         let turns = vec![turn("s1", 1, "assistant", "done")];
-        let strip = project_rows("s1", &rows, turns, BTreeMap::new());
+        let strip = project_rows(
+            "s1",
+            &rows,
+            turns,
+            BTreeMap::new(),
+            Some(PaneWindow { height: 4, scroll: 0 }),
+        );
         for found in &strip.turns {
             assert!(
                 found.buffer_end < 5,
                 "no span may reach the composer: {found:?}"
             );
         }
+    }
+
+    /// The window is the pane's own rows shifted up by its copy-mode scroll,
+    /// with nothing sent from the client: the active square and the block both
+    /// follow the two numbers the server read off tmux.
+    #[test]
+    fn the_window_follows_the_pane_height_and_its_scroll() {
+        let rows: Vec<String> = [
+            "alpha one",
+            "alpha two",
+            "alpha three",
+            "alpha four",
+            "beta one",
+            "beta two",
+            "beta three",
+            "beta four",
+        ]
+        .iter()
+        .map(|row| (*row).to_owned())
+        .collect();
+        let turns = vec![
+            turn("s1", 1, "user", "alpha one\nalpha two\nalpha three\nalpha four"),
+            turn("s1", 2, "assistant", "beta one\nbeta two\nbeta three\nbeta four"),
+        ];
+        let at = |height: usize, scroll: usize| {
+            project_rows(
+                "s1",
+                &rows,
+                turns.clone(),
+                BTreeMap::new(),
+                Some(PaneWindow { height, scroll }),
+            )
+        };
+        let active = |strip: &Strip| {
+            strip
+                .layout
+                .as_ref()
+                .expect("layout")
+                .squares
+                .iter()
+                .position(|square| square.active)
+        };
+
+        let whole = at(8, 0);
+        let tail = at(4, 0);
+        let scrolled = at(4, 4);
+
+        assert_eq!(whole.turns.len(), 2, "both turns matched: {:?}", whole.turns);
+        assert_eq!(active(&whole), Some(0), "the whole capture reads from its first turn");
+        assert_eq!(active(&tail), Some(1), "the live tail reads the newer turn");
+        assert_eq!(
+            active(&scrolled),
+            Some(0),
+            "four rows up from the tail reads the older turn again"
+        );
+        assert!(
+            tail.layout.as_ref().unwrap().block.top > whole.layout.as_ref().unwrap().block.top,
+            "the block moves down with the window"
+        );
+        assert_eq!(
+            scrolled.layout.as_ref().unwrap().block.top,
+            whole.layout.as_ref().unwrap().block.top,
+            "scrolling four rows over a four-row pane puts the window back on the capture's first row"
+        );
+        assert!(
+            scrolled.layout.unwrap().block.height < whole.layout.unwrap().block.height,
+            "the window is four rows either way: the block maps those rows, so it stays shorter"
+        );
     }
 }
