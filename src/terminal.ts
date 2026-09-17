@@ -580,7 +580,15 @@ function wordSpanAt(id: string, clientX: number, clientY: number): { wide: strin
   const bufferRow = buf.viewportY + row;
   const softRows = softPathRows(id, bufferRow);
   const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
-  if (soft && col >= soft.range.startCol && col < soft.range.endCol) return { wide: soft.text, narrow: soft.text };
+  if (soft && col >= soft.range.startCol && col < soft.range.endCol) {
+    // `soft.text` may chain several rows (a TUI wrap rejoined), and a block of
+    // complete paths satisfies the same shape test. `narrow` stays the word on
+    // the clicked row, so a join nothing on disk backs falls back to the path
+    // under the pointer instead of the stitched run.
+    const rowText = buf.getLine(bufferRow)?.translateToString(true) ?? "";
+    const rowSpan = tokenAtColumn(rowText, col);
+    return { wide: soft.text, narrow: rowSpan?.text ?? soft.text };
+  }
   const wrapped = wrappedLineRows(id, bufferRow);
   if (!wrapped) return { wide: "", narrow: "" };
   const joined = joinWrappedRows(wrapped.rows);
