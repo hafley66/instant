@@ -5,7 +5,7 @@ The PNGs in this directory are the README figures. They are produced by
 Chromium loads the built bundle from `dist/`, `instant-serve` serves it against
 the real Rust backend over JSON-RPC, and the app's own UI paths are driven to
 open sessions, render a boop-backed turn, open its context menu, favorite it,
-tick recipients, and read the Boop panel.
+tick recipients, read the Boop panel, and draw the turn strip.
 
 Everything the frames show is a scratch fixture: tmux sessions on a private
 `TMUX_TMPDIR` socket, a scratch `BOOP_DB`/`BOOP_MAIL_DIR` sqlite store, and
@@ -42,7 +42,15 @@ overrides: `INSTANT_README_PORT` (default 47813), `INSTANT_README_TMP` (default
 | `03-favorites-panel.png` | Favorites panel after a reload, listing the Boop-backed turn from `boop_favorites` |
 | `04-boop-recipient-selector.png` | Boop recipient dropdown with two open coordinator TUIs checked and the send count reading 2 |
 | `05-boop-roster-mail.png` | Boop lane roster, nested, with mail counts and a per-lane waterfall |
+| `07-turn-strip.png` | The turn strip in the terminal's right margin: one square per attributed turn, sized by the server's placement, with the reader's window as a block |
+| `08-turn-strip-popover.png` | The same strip with a square hovered, showing the CSS popover: the turn's role, number, time and its own words |
 | `06-rustdoc-browser.png` | Rustdoc served from the loopback doc origin in the embedded browser, with crate search results |
+
+The strip figures are the server's own numbers. The pane capture, tmux's
+`#{pane_height}`/`#{scroll_position}`, and `boop-turnstrip`'s layout cross the
+push as one frame; the scene reads that frame out of the WebSocket and asserts
+the squares against it, so a wrong placement fails here rather than in a
+screenshot nobody looks at.
 
 `06-rustdoc-browser.png` comes from the rustdoc tier instead:
 `e2e-real/rustdoc.spec.ts` through `playwright.rustdoc.config.ts`, which mounts a

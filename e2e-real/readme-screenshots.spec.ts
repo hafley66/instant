@@ -108,7 +108,7 @@ function seedTurn(session: string, turn: number, role: string, said: string, har
   sql(`insert or ignore into dict_session(value) values ('${session}')`);
   sql(`insert or ignore into dict_harness(value) values ('${harness}')`);
   sql(`insert or ignore into dict_role(value) values ('${role}')`);
-  sql(`insert into agent_session(session_id, harness_id, cwd_id, started_ts)
+  sql(`insert or ignore into agent_session(session_id, harness_id, cwd_id, started_ts)
        values ((select id from dict_session where value='${session}'),
                (select id from dict_harness where value='${harness}'), null, ${Date.now()})`);
   sql(`insert into agent_turn(session_id, turn, ts, role_id, said, cwd_id)
@@ -118,7 +118,7 @@ function seedTurn(session: string, turn: number, role: string, said: string, har
 
 // ---- scratch tmux sessions and panes ----
 
-const SESSIONS = ["turn", "docs", "review", "api", "hub"];
+const SESSIONS = ["turn", "docs", "review", "api", "hub", "strip"];
 
 function killSessions(): void {
   for (const session of SESSIONS) tmux(["kill-session", "-t", `=${session}`]);
@@ -217,6 +217,15 @@ async function turnDebugOff(page: Page): Promise<void> {
   const button = page.locator("#turn-debug-toggle");
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "false");
+}
+
+/// The strip's own switch. Turning it on gives every terminal whose pane has a
+/// session its own watcher, and the first frame needs no write from the pane.
+async function squaresOn(page: Page): Promise<void> {
+  const button = page.locator("#squares-toggle");
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
 }
 
 /// Poll until the debug overlay attributes a visible row to one of the turn
@@ -320,6 +329,35 @@ const reviewBody = [
   "",
 ].join("\n");
 
+// ---- the strip's own scene ----
+
+const STRIP_SESSION = "strip";
+const STRIP_ROUTE = "lane-strip";
+
+// What the pane prints for the four turns: the harness markers the matcher
+// normalises away, and a tool turn's own header line, which is how its `said`
+// starts.
+const stripBody = [
+  "❯ make the strip draw one square per turn",
+  "⏺ Four readers, one frame: capture, locate, layout, push.",
+  "",
+  "⏺ bash",
+  "  pnpm vitest run - 726 passed",
+  "",
+  "⏺ Reading the store",
+  "",
+].join("\n");
+
+// The same four turns as the store holds them: a one-line prompt, a long
+// answer, a tool result and a short answer, which is what makes the strip's
+// scale flex.
+const stripTurns: ReadonlyArray<{ turn: number; role: string; said: string }> = [
+  { turn: 11, role: "user", said: "make the strip draw one square per turn" },
+  { turn: 12, role: "assistant", said: "Four readers, one frame: capture, locate, layout, push." },
+  { turn: 13, role: "tool", said: "bash\npnpm vitest run - 726 passed" },
+  { turn: 14, role: "assistant", said: "Reading the store" },
+];
+
 async function showTurn(page: Page): Promise<void> {
   await openSession(page, TURN_SESSION);
   await expect(page.locator(".term-host .xterm-screen:visible")).toBeVisible({ timeout: 20_000 });
@@ -349,6 +387,13 @@ test.beforeAll(async () => {
   // The turn both diagram and favorite scenes read, bound the way a lane is.
   seedTurn(TURN_SESSION, TURN_ID, "assistant", turnSaid);
   bindPane(TURN_SESSION, "turn-route");
+
+  // The strip scene: its own pane and turns, bound so the app's own probe
+  // resolves the session the feed watches. Seeded here with the rest so the
+  // session row is on screen the moment the app boots.
+  seedPane(STRIP_SESSION);
+  bindPane(STRIP_SESSION, STRIP_ROUTE);
+  for (const turn of stripTurns) seedTurn(STRIP_SESSION, turn.turn, turn.role, turn.said);
 
   // The selector reads routes whose live panes boop resolves through the
   // private tmux server; wait for both scratch coordinators before the tests
@@ -484,4 +529,89 @@ test("4. roster: Boop lane graph and mail stream over scratch lanes", async ({ p
   await expect(page.locator(".boop-panel")).not.toContainText("store read failed");
   await page.waitForTimeout(1_500);
   await shotElement(page, ".boop-panel .boop-master", "05-boop-roster-mail");
+});
+
+test("5. squares: one square per turn in the terminal's right margin", async ({ page }) => {
+  // What the server pushes for this page, which is also how the scene learns
+  // which session the app bound the pane to.
+  await page.addInitScript(() => {
+    window.__squaresFrames = [];
+    // The transport assigns `socket.onmessage`, so the hook belongs on the
+    // property, not on addEventListener.
+    const descriptor = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
+    Object.defineProperty(WebSocket.prototype, "onmessage", {
+      configurable: true,
+      enumerable: descriptor?.enumerable ?? true,
+      get: descriptor?.get,
+      set(listener) {
+        const wrapped = function (event) {
+          try {
+            const frame = JSON.parse(String(event.data));
+            if (frame?.params?.event === "squares-update") window.__squaresFrames.push(frame.params.payload);
+          } catch {}
+          return listener.call(this, event);
+        };
+        descriptor?.set?.call(this, wrapped);
+      },
+    });
+  });
+  await boot(page);
+  await openSession(page, STRIP_SESSION);
+  await expect(page.locator(".term-host .xterm-screen:visible")).toBeVisible({ timeout: 20_000 });
+  const file = path.join(fixtures, "strip.txt");
+  fs.writeFileSync(file, stripBody);
+  typeLine(STRIP_SESSION, "PS1=; stty -echo; clear; cat " + file);
+  await expect.poll(() => screenText(page), { timeout: 30_000 }).toContain("one square per turn");
+
+  // The strip places what the server measured: one square per attributed turn,
+  // the reader's window as a block, and the terminal's right margin given up.
+  await squaresOn(page);
+  await expect
+    .poll(() => page.evaluate(() => window.__squaresFrames.length), { timeout: 30_000, message: "no frame reached the page" })
+    .toBeGreaterThan(0);
+
+  // A live agent on the host can have this pane id in its own registry, and the
+  // app's probe reads that registry before the seeded route: the session it
+  // watches is then that agent's, not `strip`. Seed whichever session it bound,
+  // so the scene proves the strip rather than the probe, then poke the pane so
+  // the feed re-projects with the turns now in the store.
+  const watched = await page.evaluate(() => window.__squaresFrames.at(-1).session);
+  if (watched !== STRIP_SESSION) {
+    for (const turn of stripTurns) seedTurn(watched, turn.turn, turn.role, turn.said);
+    typeLine(STRIP_SESSION, "true");
+  }
+
+  await expect
+    .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the strip drew no squares" })
+    .toBe(stripTurns.length);
+  await expect(page.locator(`.asq[data-turn='${watched}:12']`)).toHaveCount(1);
+  await expect(page.locator(".asq[data-active='true']")).toHaveCount(1);
+  await expect(page.locator(".term-host.asq-open")).toHaveCount(1);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0);
+        return host ? getComputedStyle(host).paddingRight : "";
+      }),
+    )
+    .toBe("32px");
+  // The squares are placed along the strip's track, not stacked at its origin.
+  const spread = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>(".asq")].map((square) => Number.parseFloat(square.style.getPropertyValue("--asq-y"))),
+  );
+  expect(Math.max(...spread)).toBeGreaterThan(0);
+  expect(spread).toEqual([...spread].sort((a, b) => a - b));
+  await page.waitForTimeout(700);
+  await shot(page, "07-turn-strip");
+
+  // The popover is CSS on a child rendered with the square, so the pointer
+  // shows the turn's own words without a read.
+  await page.locator(`.asq[data-turn='${watched}:12']`).hover();
+  const pop = page.locator(".asq:hover .asq-pop");
+  await expect(pop).toBeVisible({ timeout: 10_000 });
+  await expect(pop).toContainText("assistant · turn 12");
+  await expect(pop).toContainText("Four readers, one frame");
+  // The reveal is a 110ms transition; shoot it settled, not mid-fade.
+  await page.waitForTimeout(400);
+  await shot(page, "08-turn-strip-popover");
 });
