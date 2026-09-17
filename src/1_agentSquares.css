@@ -1,0 +1,126 @@
+/* The turn strip: a 32px right margin the terminal gives up while it is on, and
+   one square per turn on screen inside it.
+
+   Animation lives here, not in JS: a square is absolutely positioned and moves
+   by `transform`, so a re-projection that reorders the strip animates for free
+   and never lays out. The active square scales through the same transition.
+
+   Popovers are CSS-only. The pointer writes no state, no handler runs, and the
+   body was rendered with the square, so a hover costs one class match. */
+:root {
+  --asq-size: 9px;
+  --asq-step: 14px;
+  --asq-gutter: 32px;
+  --asq-move: 260ms;
+  --asq-ease: cubic-bezier(0.22, 0.9, 0.24, 1);
+}
+
+/* The terminal panel gives up its right margin. `fit()` re-runs on the class
+   flip, so the grid reflows into the narrower area instead of being covered. */
+.term-host.asq-open,
+.asq-open.terminal {
+  padding-right: var(--asq-gutter);
+  transition: padding-right var(--asq-move) var(--asq-ease);
+}
+
+.asq-host {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--asq-gutter);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4;
+  contain: layout paint;
+}
+
+.asq-strip {
+  position: relative;
+  width: var(--asq-size);
+  height: calc(var(--asq-count, 0) * var(--asq-step));
+}
+
+.asq {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: var(--asq-size);
+  height: var(--asq-size);
+  margin-left: calc(var(--asq-size) / -2);
+  border-radius: var(--asq-shape, 2.4px);
+  background: var(--asq-color, #888);
+  transform: translateY(var(--asq-y, 0)) scale(var(--asq-scale, 1));
+  transform-origin: center;
+  opacity: var(--asq-strength, 0.42);
+  pointer-events: auto;
+  cursor: pointer;
+  transition:
+    transform var(--asq-move) var(--asq-ease),
+    opacity var(--asq-move) var(--asq-ease),
+    background-color 180ms linear;
+  animation: asq-in var(--asq-move) var(--asq-ease) both;
+  /* Its own layer: the transform animation then never repaints neighbours. */
+  will-change: transform;
+}
+
+.asq[data-active="true"] {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--asq-color) 40%, transparent);
+}
+
+.asq:focus-visible {
+  outline: 1px solid var(--asq-color);
+  outline-offset: 2px;
+}
+
+@keyframes asq-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--asq-y, 0)) scale(0.3);
+  }
+}
+
+/* The popover is a child, rendered with the square, so it is on screen the
+   frame the pointer arrives. No fetch, no measure, no state write. */
+.asq-pop {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  width: 360px;
+  max-height: 220px;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  background: rgba(12, 12, 14, 0.96);
+  color: #e8e8ea;
+  font: 11px/1.45 ui-monospace, Menlo, monospace;
+  white-space: pre-wrap;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-50%) translateX(6px);
+  transition:
+    opacity 110ms ease-out,
+    transform 110ms var(--asq-ease),
+    visibility 0s linear 110ms;
+  pointer-events: none;
+  contain: content;
+}
+
+.asq-pop-meta {
+  display: block;
+  margin-bottom: 4px;
+  color: #9a9aa2;
+}
+
+.asq:hover .asq-pop,
+.asq:focus-visible .asq-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+  /* Show immediately on the way in; the delay above only covers the way out. */
+  transition-delay: 0s, 0s, 0s;
+}
