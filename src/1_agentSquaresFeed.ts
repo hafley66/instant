@@ -74,27 +74,25 @@ export type SquareLayout = {
 
 /** The strip itself, in whichever space the mode placed its squares.
  *
- *  Both variants: `squares[0 .. band]` are the reader's own turns the mode
- *  placed nothing for, oldest first, `y` counting places in the band rather than
- *  rows and `active` always false; the rest are the mode's own, oldest first,
- *  exactly one active. The tag is on the wire, so a client branches once on
- *  which space `y` is in and never has to guess. */
+ *  `squares` is oldest first in both modes, exactly one active. The tag is on
+ *  the wire, so a client branches once on which space `y` is in and never has to
+ *  guess. */
 export type StripLayout =
   | {
       mode: "relative"
       squares: SquareLayout[]
+      /** How many leading squares are the reader's own turns the mode placed
+       *  nothing for: `y` counts places in the band rather than rows, and
+       *  `active` is always false. `recent` has no band, so it carries none. */
       band: number
       /** The reader's window in rows: what a square's `y` is measured in. */
       rows: number
     }
   | {
-      mode: "map"
+      mode: "recent"
       squares: SquareLayout[]
-      band: number
-      /** Estimated rows the whole window occupies: the strip's denominator. */
-      span: number
-      /** The reader's rows, in the map's own space. */
-      block: { top: number; height: number }
+      /** The reader's window in rows, which is what centred the block. */
+      rows: number
     }
 
 export type SquaresWatch = {

@@ -41,7 +41,7 @@ declare global {
       tags: Record<string, string[]>;
       layout:
         | { mode: "relative"; squares: Square[]; band: number; rows: number }
-        | { mode: "map"; squares: Square[]; band: number; span: number; block: { top: number; height: number } }
+        | { mode: "recent"; squares: Square[]; rows: number }
         | null;
     }>;
   }
@@ -478,43 +478,62 @@ for (const adapter of liveAgentAdapters) {
     await page.keyboard.press("Escape");
     await expect(card).toBeHidden();
 
-    // 5. The other mode. The reader picks it in the toolbar, the server answers
-    //    with the map's own shape, and the block is what a scroll moves.
-    await page.selectOption("#squares-mode", "map");
+    // 5. The other mode. The reader picks it in the toolbar, and the server
+    //    answers with the session's own recency list: the newest conversation
+    //    turns, one square each, uniform, oldest first — a set that is not the
+    //    window's, and a placement that is not a row.
+    await page.selectOption("#squares-mode", "recent");
+    const recentFrames = () =>
+      page.evaluate(
+        (sessionId) =>
+          (window.__squaresFrames ?? []).filter((f) => f.session === sessionId && f.layout?.mode === "recent"),
+        bound,
+      );
     await expect
-      .poll(
-        () =>
-          page.evaluate(
-            (sessionId) =>
-              (window.__squaresFrames ?? []).filter((f) => f.session === sessionId && f.layout?.mode === "map").length,
-            bound,
-          ),
-        { timeout: 60_000, message: "no map frame after the reader asked for one" },
-      )
+      .poll(() => recentFrames().then((frames) => frames.length), {
+        timeout: 60_000,
+        message: "no recent frame after the reader asked for one",
+      })
       .toBeGreaterThan(0);
-    const mapFrame = await page.evaluate(
-      (sessionId) =>
-        (window.__squaresFrames ?? [])
-          .filter((f) => f.session === sessionId && f.layout?.mode === "map")
-          .pop() ?? null,
-      bound,
-    );
-    const map = mapFrame?.layout;
-    expect(map?.mode, "the frame that arrived after the switch").toBe("map");
-    if (!map || map.mode !== "map") throw new Error("no map frame to read");
-    expect(map.span, "a map with no rows in it").toBeGreaterThan(0);
-    expect(map.block.height, "a block with no height").toBeGreaterThan(0);
-    expect(map.squares.length).toBeGreaterThan(0);
+    const recentFrame = (await recentFrames()).pop();
+    const recent = recentFrame?.layout;
+    if (!recent || recent.mode !== "recent") throw new Error("no recent frame to read");
+    const carried = new Set((recentFrame?.turns ?? []).map((turn) => turn.id));
+    const roleOf = new Map((recentFrame?.turns ?? []).map((turn) => [turn.id, turn.role]));
+    expect(recent.squares.length, "a recency list with nothing in it").toBeGreaterThan(0);
+    for (const square of recent.squares) {
+      // A square the frame cannot name has nothing to show on hover, so the
+      // client drops it: the frame carries every turn the list placed.
+      expect(carried, `square ${square.id} is not on the frame`).toContain(square.id);
+      expect(["user", "assistant"], `a ${roleOf.get(square.id)} turn drew a square`).toContain(roleOf.get(square.id));
+    }
+    // Places in the block, oldest first, all one size: a place, never a row.
+    expect(recent.squares.map((square) => square.y)).toEqual(recent.squares.map((_, index) => index));
+    expect(new Set(recent.squares.map((square) => square.scale))).toEqual(new Set([1]));
     await expect
-      .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the map drew no squares" })
-      .toBe(map.squares.length);
-    const blockHeight = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>(".asq-window");
-      return block ? Number.parseFloat(block.style.getPropertyValue("--asq-win-height")) : 0;
+      .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the recency block drew no squares" })
+      .toBe(recent.squares.length);
+    // The block is centred on the pane's track and one step apart, which is the
+    // whole of what this mode promises about where a square goes.
+    const block = await page.evaluate(() => {
+      const strip = document.querySelector<HTMLElement>(".asq-strip");
+      const tracks = Number.parseFloat(strip?.style.getPropertyValue("--asq-track") ?? "0");
+      const step = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--asq-step") || "0",
+      );
+      const tops = [...document.querySelectorAll<HTMLElement>(".asq:not([data-band='true'])")]
+        .map((square) => Number.parseFloat(square.style.getPropertyValue("--asq-y")))
+        .sort((left, right) => left - right);
+      return { tracks, step, tops };
     });
-    expect(blockHeight, "the map drew no window block").toBeGreaterThan(0);
-    const mapPng = join(shots, `${adapter.harness}-map.png`);
-    await page.screenshot({ path: mapPng });
-    await testInfo.attach(`${adapter.harness}-map`, { path: mapPng, contentType: "image/png" });
+    expect(block.step, "the strip's own step, in px").toBeGreaterThan(0);
+    expect(block.tops.length).toBe(recent.squares.length);
+    expect(block.tops[0]).toBeCloseTo(Math.max(0, (block.tracks - block.tops.length * block.step) / 2), 0);
+    for (let index = 1; index < block.tops.length; index += 1) {
+      expect(block.tops[index] - block.tops[index - 1], "a square per step").toBeCloseTo(block.step, 0);
+    }
+    const recentPng = join(shots, `${adapter.harness}-recent.png`);
+    await page.screenshot({ path: recentPng });
+    await testInfo.attach(`${adapter.harness}-recent`, { path: recentPng, contentType: "image/png" });
   });
 }

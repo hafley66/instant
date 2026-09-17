@@ -79,14 +79,10 @@
         </button>
         <!-- Both start hidden, matching the strip's own default: bindAgentSquaresChrome
              shows them off agentSquares.on, so they exist only while it is on. -->
-        <select id="squares-mode" title="Place squares by row in the reader's window, or by row in the whole buffer" hidden>
+        <select id="squares-mode" title="Place squares by row in the reader's window, or by place among the newest turns" hidden>
           <option value="relative">relative</option>
-          <option value="map">map</option>
+          <option value="recent">recent</option>
         </select>
-        <label id="squares-tools-label" title="Place tool turns on the strip" hidden>
-          <input type="checkbox" id="squares-tools" />
-          tools
-        </label>
         <button id="structured-overlay-toggle" title="Toggle table/list selection checkboxes">
           ☑
         </button>

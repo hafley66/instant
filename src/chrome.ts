@@ -156,31 +156,22 @@ export function bindTurnDebugChrome() {
 }
 
 /** Subscribes the turn-strip settings to the toolbar and to the per-terminal
- *  strips. The toggle owns the strip's existence, the mode select and the tools
- *  checkbox own what it draws, and `userKeep` owns how much of the reader's own
- *  history the band keeps. Both option controls act on a running strip, so the
- *  toggle also owns their visibility. Each of the four fires once on subscribe,
- *  so this replaces both the store subscriptions and their initial sync calls. */
+ *  strips. The toggle owns the strip's existence, the mode select owns what it
+ *  draws, and `userKeep` owns how much of the reader's own history the band
+ *  keeps. The mode select acts on a running strip, so the toggle also owns its
+ *  visibility. Each subscription fires once on subscribe, so this replaces both
+ *  the store subscriptions and their initial sync calls. */
 export function bindAgentSquaresChrome() {
   const mode = $("#squares-mode") as HTMLSelectElement;
-  const tools = $("#squares-tools") as HTMLInputElement;
-  const toolsLabel = $("#squares-tools-label") as HTMLElement;
   agentSquares.on.$.subscribe((on) => {
     const button = $("#squares-toggle") as HTMLButtonElement;
     button.classList.toggle("active", on);
     button.setAttribute("aria-pressed", String(on));
     mode.hidden = !on;
-    // The label, not the box: hiding the box alone would leave "tools" sitting
-    // in the toolbar with nothing to click.
-    toolsLabel.hidden = !on;
     syncAgentSquares();
   });
   agentSquares.mode.$.subscribe((value) => {
     mode.value = value;
-    syncAgentSquares();
-  });
-  agentSquares.showTools.$.subscribe((show) => {
-    tools.checked = show;
     syncAgentSquares();
   });
   agentSquares.userKeep.$.subscribe(() => syncAgentSquares());
@@ -510,9 +501,6 @@ export function wireChrome() {
 
   ($("#squares-mode") as HTMLSelectElement).onchange = (e) =>
     agentSquares.mode.$((e.currentTarget as HTMLSelectElement).value as SquaresMode);
-
-  ($("#squares-tools") as HTMLInputElement).onchange = (e) =>
-    agentSquares.showTools.$((e.currentTarget as HTMLInputElement).checked);
 
   $("#structured-overlay-toggle").onclick = () =>
     settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$());

@@ -60,32 +60,10 @@
   position: relative;
   width: var(--asq-size);
   /* The track every square's px is measured on, written per frame from the
-     pane's own box: in relative mode it is the window's rows, in map mode the
-     pane itself. `320px` is where a strip with no frame yet stands. */
+     pane's own box: in relative mode it is the window's rows, in recent mode the
+     pane itself, with the block centred on it. `320px` is where a strip with no
+     frame yet stands. */
   height: var(--asq-track, 320px);
-}
-
-/* Where the reader is: the window's rows pushed through the same map the squares
-   use, so the block and the squares can never disagree. No interaction. The
-   block is the map's own mark: in relative mode the whole track *is* the window,
-   so there is nothing to point at and the view leaves the mode off. */
-.asq-window {
-  display: none;
-  position: absolute;
-  left: calc(50% - 14px);
-  width: 28px;
-  height: var(--asq-win-height, 6px);
-  transform: translateY(var(--asq-win-top, 0px));
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  pointer-events: none;
-  transition:
-    transform var(--asq-move) var(--asq-ease),
-    height var(--asq-move) var(--asq-ease);
-}
-
-.asq-strip[data-mode="map"] .asq-window {
-  display: block;
 }
 
 .asq {

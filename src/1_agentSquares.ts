@@ -81,7 +81,6 @@ function markLine(mark: TurnMark): string {
 export class TerminalAgentSquares {
   private host = document.createElement("div")
   private strip = document.createElement("div")
-  private window = document.createElement("div")
   private entries = new Map<string, Entry>()
   private frames?: Subscription
   private stop?: () => Promise<void>
@@ -103,8 +102,6 @@ export class TerminalAgentSquares {
   ) {
     this.host.className = "asq-host"
     this.strip.className = "asq-strip"
-    this.window.className = "asq-window"
-    this.strip.append(this.window)
     this.host.append(this.strip)
   }
 
@@ -120,10 +117,10 @@ export class TerminalAgentSquares {
   }
 
   /** The pane moved to another boop session, or the reader changed what the
-   *  strip draws (a mode, the tools, the size of the band). Either way it is a
-   *  different projection, so the watcher restarts rather than merges. The
-   *  options arrive rebuilt on every settings sync, so the comparison is by
-   *  value: an equal pair costs nothing. */
+   *  strip draws (a mode, the size of the band). Either way it is a different
+   *  projection, so the watcher restarts rather than merges. The options arrive
+   *  rebuilt on every settings sync, so the comparison is by value: an equal
+   *  pair costs nothing. */
   async retarget(input: AgentSquaresInput, options: SquaresOptions): Promise<void> {
     const same =
       input.pty === this.input.pty &&
@@ -131,7 +128,6 @@ export class TerminalAgentSquares {
       input.target === this.input.target &&
       input.socket === this.input.socket &&
       options.mode === this.options.mode &&
-      options.showTools === this.options.showTools &&
       options.userKeep === this.options.userKeep
     if (same) {
       this.input = input
@@ -245,11 +241,6 @@ export class TerminalAgentSquares {
       entry.el.remove()
       this.entries.delete(id)
     }
-    const block = props.block
-    if (block) {
-      this.window.style.setProperty("--asq-win-top", `${block.top}px`)
-      this.window.style.setProperty("--asq-win-height", `${block.height}px`)
-    }
   }
 
   /**
@@ -281,8 +272,8 @@ export class TerminalAgentSquares {
       entry.el.remove()
     }
     this.entries.clear()
-    // No layout means no map, so the block goes with it rather than sitting at
-    // whatever the last frame left behind.
+    // No layout means no placement, so the mode goes with it rather than
+    // sitting at whatever the last frame left behind.
     delete this.strip.dataset.mode
   }
 

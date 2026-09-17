@@ -21,7 +21,9 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use boop_turnstrip::{kind_of, Layout, Mode, Options, TurnKind, TurnRow, Viewport};
+use boop_turnstrip::{
+    drawn_at_all, kind_of, Layout, ListedTurn, Mode, Options, TurnKind, TurnRow, Viewport,
+};
 use boop_turnvis::locate_visible_turns;
 use serde::{Deserialize, Serialize};
 
@@ -66,8 +68,6 @@ pub struct SquaresOptions {
     #[serde(default)]
     pub mode: Option<Mode>,
     #[serde(default)]
-    pub show_tools: Option<bool>,
-    #[serde(default)]
     pub user_keep: Option<usize>,
 }
 
@@ -77,7 +77,6 @@ impl SquaresOptions {
         let defaults = Options::default();
         Options {
             mode: self.mode.unwrap_or(defaults.mode),
-            show_tools: self.show_tools.unwrap_or(defaults.show_tools),
             user_keep: self.user_keep.unwrap_or(defaults.user_keep),
             ..defaults
         }
@@ -167,8 +166,9 @@ pub fn project_rows(
     let located = locate_visible_turns(&lines, &turns.iter().cloned().map(to_turnvis).collect::<Vec<_>>());
     let pins = pinned_of(&turns, options);
     let pin_ids: Vec<String> = pins.iter().map(|turn| turn_id(turn)).collect();
+    let listed = listed_of(&turns);
     let layout = window.and_then(|window| {
-        window_layout(&lines, &located, &pin_ids, rows.len(), window, options)
+        window_layout(&lines, &located, &pin_ids, &listed, rows.len(), window, options)
     });
     // Only the pins the strip actually drew are worth carrying: the crate drops
     // a pin the mode placed a square for, and a frame that shipped the rest
@@ -185,11 +185,29 @@ pub fn project_rows(
         .filter(|turn| band.contains(turn_id(turn).as_str()))
         .map(|turn| pinned_turn(turn))
         .collect();
+    let mut shipped: Vec<LocatedTurn> = located.into_iter().map(from_visible).collect();
+    // The recency list draws turns the window lost, so the frame carries them:
+    // a square whose turn the frame does not hold has nothing to show on hover,
+    // and the client drops a placed turn it cannot name. Relative mode reads the
+    // window alone, so its frame is already exactly the turns it placed — and a
+    // band square belongs to `pinned`, not here.
+    if options.mode == Mode::Recent {
+        if let Some(layout) = &layout {
+            let carried: HashSet<String> = shipped.iter().map(|turn| turn.id.clone()).collect();
+            for turn in &turns {
+                let id = turn_id(turn);
+                let placed = layout.squares().iter().any(|square| square.id == id);
+                if placed && !carried.contains(&id) {
+                    shipped.push(listed_turn(turn));
+                }
+            }
+        }
+    }
     Strip {
         session: session.to_owned(),
         at: now_ms() as i64,
         rows: rows.len(),
-        turns: located.into_iter().map(from_visible).collect(),
+        turns: shipped,
         pinned,
         tags,
         layout,
@@ -225,6 +243,34 @@ fn pinned_of<'a>(turns: &'a [BoopTurn], options: &Options) -> Vec<&'a BoopTurn> 
     kept
 }
 
+/// How deep the recency list reads into the store. The list drops the oldest
+/// turns it cannot show anyway, so the pool only has to be deeper than any
+/// block; the conversation kinds are filtered out of it first, so a long stretch
+/// of tool turns costs the reader nothing.
+const RECENT_POOL: usize = 200;
+
+/// The session's own turns as the recency list needs them: the newest
+/// `RECENT_POOL` of the conversation kinds, oldest first, each named by the
+/// matcher's own key. Read from the store rather than from the pane, because a
+/// turn the window lost is a member of the list like any other.
+fn listed_of(turns: &[BoopTurn]) -> Vec<ListedTurn> {
+    let mut drawn: Vec<&BoopTurn> = turns
+        .iter()
+        .filter(|turn| drawn_at_all(kind_of(&turn.role)))
+        .collect();
+    drawn.sort_by_key(|turn| (turn.ts, turn.turn));
+    if drawn.len() > RECENT_POOL {
+        drawn.drain(..drawn.len() - RECENT_POOL);
+    }
+    drawn
+        .into_iter()
+        .map(|turn| ListedTurn {
+            id: turn_id(turn),
+            kind: kind_of(&turn.role),
+        })
+        .collect()
+}
+
 /// A pinned turn as the frame carries it. It has no rows: the matcher did not
 /// find it on the pane at all, so its span is the zero it never had, and the
 /// confidence says so rather than claiming an anchor it does not have.
@@ -245,6 +291,16 @@ fn pinned_turn(turn: &BoopTurn) -> LocatedTurn {
     }
 }
 
+/// A turn the recency list placed but the matcher never saw: the list is the
+/// session's own history, so a turn scrolled out of the capture — or one the
+/// pane never drew — is a member like any other. Same zeros as a pin, and its
+/// own confidence, because the client draws its row from neither.
+fn listed_turn(turn: &BoopTurn) -> LocatedTurn {
+    LocatedTurn {
+        confidence: "listed",
+        ..pinned_turn(turn)
+    }
+}
 /// The strip's geometry for the window a client is looking at.
 ///
 /// The capture's tail holds the pane's live rows, and a scrolled pane is a
@@ -256,6 +312,7 @@ fn window_layout(
     lines: &[boop_turnvis::LogicalLine],
     located: &[boop_turnvis::VisibleTurn],
     pins: &[String],
+    listed: &[ListedTurn],
     rows: usize,
     window: PaneWindow,
     options: &Options,
@@ -277,6 +334,7 @@ fn window_layout(
     Some(boop_turnstrip::layout_pinned(
         &turn_rows,
         pins,
+        listed,
         viewport,
         viewport.top,
         options,
@@ -582,6 +640,9 @@ mod tests {
         let turns = vec![
             turn("s1", 1, "user", "alpha one\nalpha two\nalpha three\nalpha four"),
             turn("s1", 2, "assistant", "beta one\nbeta two\nbeta three\nbeta four"),
+            // Never on the pane and never in the capture: only the recency list
+            // knows it, which is the case the frame has to carry.
+            turn("s1", 3, "assistant", "a reply the capture never held"),
         ];
         let at = |height: usize, scroll: usize, options: &Options| {
             project_rows(
@@ -611,10 +672,6 @@ mod tests {
                 .map(|square| square.id.clone())
         };
         let relative = Options::default();
-        let map = Options {
-            mode: Mode::Map,
-            ..Options::default()
-        };
 
         let whole = at(8, 0, &relative);
         let tail = at(4, 0, &relative);
@@ -638,31 +695,59 @@ mod tests {
             "the prompt above the tail is the band's"
         );
 
-        // The map is the one mode with a block, and the block is what a scroll
-        // moves: the two numbers the server read off tmux, nothing from the
-        // client.
-        let whole = at(8, 0, &map);
-        let tail = at(4, 0, &map);
-        let scrolled = at(4, 4, &map);
-        let block = |strip: &Strip| {
-            let layout = strip.layout.as_ref().expect("layout");
-            let Layout::Map(map) = layout else {
-                panic!("map mode asked for, a relative strip came back");
-            };
-            map.block
+        // The recency list is the session's own turns, not the window's: the
+        // same four squares on their own places, whatever the reader is looking
+        // at. A scroll moves the mark, never a square.
+        let recent = Options {
+            mode: Mode::Recent,
+            ..Options::default()
         };
-        assert!(
-            block(&tail).top > block(&whole).top,
-            "the block moves down with the window"
+        let whole = at(8, 0, &recent);
+        let tail = at(4, 0, &recent);
+        let scrolled = at(4, 4, &recent);
+        let places = |strip: &Strip| -> Vec<(String, f64)> {
+            let layout = strip.layout.as_ref().expect("layout");
+            let Layout::Recent(recent) = layout else {
+                panic!("recent mode asked for, {:?} came back", layout);
+            };
+            recent
+                .squares
+                .iter()
+                .map(|square| (square.id.clone(), square.y))
+                .collect()
+        };
+        assert_eq!(
+            places(&whole),
+            [
+                ("s1:1".to_owned(), 0.0),
+                ("s1:2".to_owned(), 1.0),
+                ("s1:3".to_owned(), 2.0),
+            ],
+            "the list is the session's turns, including the one off the pane"
+        );
+        assert_eq!(places(&tail), places(&whole), "a scroll moves no square");
+        assert_eq!(places(&scrolled), places(&whole));
+        assert_eq!(
+            scrolled.layout.as_ref().unwrap().band(),
+            0,
+            "the block is a list of turns, so it has no band to hold the rest"
+        );
+        // The list draws turns the window lost, so the frame has to carry them:
+        // the client drops a placed square whose turn it cannot name.
+        let shipped: Vec<(&str, &str)> = scrolled
+            .turns
+            .iter()
+            .map(|turn| (turn.id.as_str(), turn.confidence))
+            .collect();
+        assert_eq!(
+            shipped.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            ["s1:1", "s1:2", "s1:3"],
+            "every square the list placed is on the frame"
         );
         assert_eq!(
-            block(&scrolled).top,
-            block(&whole).top,
-            "scrolling four rows over a four-row pane puts the window back on the capture's first row"
-        );
-        assert!(
-            block(&scrolled).height < block(&whole).height,
-            "the window is four rows either way: the block maps those rows, so it stays shorter"
+            shipped[2].1, "listed",
+            "the turn the pane never held rides without a span: {:?}",
+            shipped
         );
     }
 }

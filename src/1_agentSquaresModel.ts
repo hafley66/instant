@@ -20,10 +20,6 @@ import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
  *  memory, so a big cap costs nothing at hover time and never fetches. */
 export const PREVIEW_CHARS = 900
 
-/** How tall the reader's window draws in the map, least. A window one row tall
- *  would otherwise be a hairline the reader cannot find. */
-const BLOCK_MIN = 6
-
 /** The pane's own px, which only the view can measure: one row's height, and
  *  how tall the strip itself draws. */
 export type SquareGeometry = { cellHeight: number; track: number }
@@ -57,9 +53,6 @@ export type AgentSquaresProps = {
   band: number
   /** The strip's own height in px, which the view writes to `--asq-track`. */
   track: number
-  /** The reader's rows in the same px, or `null` in relative mode, where the
-   *  whole track *is* the window. */
-  block: { top: number; height: number } | null
 }
 
 function label(turn: StripTurn): string {
@@ -81,28 +74,19 @@ export function previewOf(said: string): string {
 }
 
 /** One square's px along the track, from the units its mode counts in. Relative
- *  counts rows inside the reader's window, map counts estimated buffer rows, so
- *  the same square moves with the scroll in one mode and not the other. The
- *  crate never sends a span of 0; a frame from a server that did would divide
- *  the whole strip away, so a bad denominator degrades to 1. */
+ *  counts rows inside the reader's window, so a square moves with the scroll;
+ *  recent counts places in a block of the newest turns, which sits centred on
+ *  the track and does not move with it. */
 function trackY(layout: StripLayout, y: number, geometry: SquareGeometry): number {
   if (layout.mode === "relative") return y * geometry.cellHeight
-  return (y / (layout.span > 0 ? layout.span : 1)) * geometry.track
-}
-
-/** The reader's rows on the map's track, kept visible even when the window is a
- *  sliver of the map. */
-function blockOf(layout: StripLayout, geometry: SquareGeometry): { top: number; height: number } | null {
-  if (layout.mode === "relative") return null
-  const denominator = layout.span > 0 ? layout.span : 1
-  return {
-    top: (layout.block.top / denominator) * geometry.track,
-    height: Math.max(BLOCK_MIN, (layout.block.height / denominator) * geometry.track),
-  }
+  const block = layout.squares.length * SQUARE_STEP
+  return Math.max(0, (geometry.track - block) / 2) + y * SQUARE_STEP
 }
 
 /**
- * One square per turn the server placed, in the order it placed them.
+ * One square per turn the server placed, in the order it placed them. Only the
+ * conversation's own turns reach it: the server drops tool and meta turns from
+ * the layout, so nothing here re-filters a kind or a role.
  *
  * A frame with no layout — the pane's height could not be read — draws nothing
  * rather than guessing a position. A placed turn the frame does not carry is
@@ -111,16 +95,17 @@ function blockOf(layout: StripLayout, geometry: SquareGeometry): { top: number; 
  */
 export function squaresOf(frame: Strip, geometry: SquareGeometry): AgentSquaresProps {
   const layout = frame.layout
-  if (!layout) return { squares: [], active: -1, band: 0, track: geometry.track, block: null }
+  if (!layout) return { squares: [], active: -1, band: 0, track: geometry.track }
   // A band square refers to a turn the matcher never saw, so the frame carries
   // those separately; both sets are the frame's turns as far as a square is
-  // concerned.
+  // concerned. Only `relative` has a band.
+  const band = layout.mode === "relative" ? layout.band : 0
   const turns = new Map([...frame.turns, ...frame.pinned].map((turn) => [turn.id, turn]))
   const squares: AgentSquare[] = []
   layout.squares.forEach((square, index) => {
     const turn = turns.get(square.id)
     if (!turn) return
-    const pinned = index < layout.band
+    const pinned = index < band
     squares.push({
       id: square.id,
       kind: square.kind,
@@ -140,8 +125,7 @@ export function squaresOf(frame: Strip, geometry: SquareGeometry): AgentSquaresP
   return {
     squares,
     active: squares.findIndex((square) => square.active),
-    band: layout.band,
+    band,
     track: layout.mode === "relative" ? layout.rows * geometry.cellHeight : geometry.track,
-    block: blockOf(layout, geometry),
   }
 }

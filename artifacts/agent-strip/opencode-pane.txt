@@ -7,7 +7,7 @@ agent-opencode.%2 dead=0 cmd=boop
        tmux --> xterm                                                                                                                      
        xterm --> Markdown                                                                                                                  
                                                                                                                                            
-     ▣  Build · Mock Model · 972ms                                                                                                         
+     ▣  Build · Mock Model · 1.0s                                                                                                          
                                                                                                                                            
                                                                                                                                            
                                                                                                                                            

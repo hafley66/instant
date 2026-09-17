@@ -358,6 +358,11 @@ const stripTurns: ReadonlyArray<{ turn: number; role: string; said: string }> = 
   { turn: 14, role: "assistant", said: "Reading the store" },
 ];
 
+/// The turns the strip draws: the conversation's own, not the tools. The
+/// fixture keeps a tool turn on purpose — the layout drops it, and the test
+/// says so rather than counting four squares.
+const stripDrawn = stripTurns.filter((turn) => turn.role === "user" || turn.role === "assistant");
+
 async function showTurn(page: Page): Promise<void> {
   await openSession(page, TURN_SESSION);
   await expect(page.locator(".term-host .xterm-screen:visible")).toBeVisible({ timeout: 20_000 });
@@ -583,7 +588,10 @@ test("5. squares: one square per turn in the terminal's right margin", async ({ 
 
   await expect
     .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the strip drew no squares" })
-    .toBe(stripTurns.length);
+    .toBe(stripDrawn.length);
+  // The tool turn is in the store and on the pane, and it draws nothing: the
+  // strip is the conversation.
+  await expect(page.locator('.asq[data-turn$=":13"]'), "a tool turn took a square").toHaveCount(0);
   await expect(page.locator(`.asq[data-turn='${watched}:12']`)).toHaveCount(1);
   await expect(page.locator(".asq[data-active='true']")).toHaveCount(1);
   await expect(page.locator(".term-host.asq-open")).toHaveCount(1);

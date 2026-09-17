@@ -10,14 +10,14 @@ agent-opencode.%2 dead=0 cmd=boop
  │  ▐█████▌  Send /help for help information.                                                                                            │
  │                                                                                                                                       │
  │  Directory: /private/tmp/instant-agent-47821/workspace                                                                                │
- │  Session:   session_047a50f1-ed11-4a85-8bbb-3a7ffa86aece                                                                              │
+ │  Session:   session_b2afaffa-51fa-4bc7-bf87-7203db0cf509                                                                              │
  │  Model:     Mock Model                                                                                                                │
- │  Version:   0.43.0                                                                                                                    │
+ │  Version:   2.0.0                                                                                                                     │
  │                                                                                                                                       │
  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  
  ✦ Kimi Code Desktop is here — Everything you love about Kimi Code, now on desktop
-   install from https://www.kimi.com/code
+   Run /desktop or visit https://www.kimi.com/code to install
  
    No session yet — one will be created on your first message.                                                                            
    tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.           
@@ -25,19 +25,19 @@ agent-opencode.%2 dead=0 cmd=boop
  ✨ render the terminal flow                                                                                                              
  
  ● FIXED_TERMINAL_REPLY                                                                                                                   
-                                                                                                                                          
-   ```mermaid                                                                                                                             
-     flowchart LR                                                                                                                         
-       PTY --> tmux                                                                                                                       
-       tmux --> xterm                                                                                                                     
-       xterm --> Markdown                                                                                                                 
-   ```                                                                                                                                    
+   
+   ┌─────┐    ┌──────┐    ┌───────┐    ┌──────────┐                                                                                       
+   │ PTY ├───▶│ tmux ├───▶│ xterm ├───▶│ Markdown │                                                                                       
+   └─────┘    └──────┘    └───────┘    └──────────┘                                                                                       
  
  ╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
  │ >                                                                                                                                     │
  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- Mock Model  …/tmp/instant-agent-47821/workspace       /yolo to skip most approvals for trusted batch work, only use it in repos you trust
+ Mock Model  …/tmp/instant-agent-47821/workspace                                           /sessions to browse and resume earlier sessions
                                                                                                                     context: 1% (30/97.7k)
+
+
+
 
 
 

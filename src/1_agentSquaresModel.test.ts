@@ -2,6 +2,7 @@
 // height is known, and what a turn's text looks like before it reaches a
 // popover. Both are the client's only numbers — everything else is forwarded.
 import { describe, expect, it } from "vitest"
+import { SQUARE_STEP, type SquareKind } from "./0_agentSquareVisual"
 import { previewOf, squaresOf } from "./1_agentSquaresModel"
 import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
 
@@ -20,18 +21,26 @@ const turn = (id: string, role: string, said: string, ts: number): StripTurn => 
   confidence: "anchored",
 })
 
-const frame = (layout: StripLayout, pinned: StripTurn[] = []): Strip => ({
+const TURNS: StripTurn[] = [
+  turn("s1:2", "assistant", "line one\nline two", 1_700_000_000_000),
+  turn("s1:3", "tool", "sqlite3 --version", 1_700_000_100_000),
+]
+
+const frame = (layout: StripLayout, pinned: StripTurn[] = [], turns: StripTurn[] = TURNS): Strip => ({
   session: "s1",
   at: 1_700_000_000_000,
   rows: 40,
-  turns: [
-    turn("s1:2", "assistant", "line one\nline two", 1_700_000_000_000),
-    turn("s1:3", "tool", "sqlite3 --version", 1_700_000_100_000),
-  ],
+  turns,
   pinned,
   tags: {},
   layout,
 })
+
+/** The wire type itself: `map`'s `block` and `span` are gone from the frame, so
+ *  a client cannot branch on either. */
+type HasKey<T, K extends string> = K extends keyof T ? true : false
+const RECENT: HasKey<Extract<StripLayout, { mode: "recent" }>, "block"> = false
+const RECENT_SPAN: HasKey<Extract<StripLayout, { mode: "recent" }>, "span"> = false
 
 describe("the strip's own numbers", () => {
   it("puts a relative square on its own row and the band in its own lane", () => {
@@ -56,7 +65,6 @@ describe("the strip's own numbers", () => {
       {
         "active": 1,
         "band": 1,
-        "block": null,
         "squares": [
           {
             "active": false,
@@ -102,65 +110,72 @@ describe("the strip's own numbers", () => {
         "track": 408,
       }
     `)
+    // The map's window block is gone with its mode: nothing rides the props.
+    expect(Object.keys(props).sort()).toEqual(["active", "band", "squares", "track"])
   })
 
-  it("spreads a map over its track and keeps the block visible", () => {
+  it("centres a recent block on the track and steps it by SQUARE_STEP", () => {
+    const turns = [
+      turn("s1:1", "user", "the opening prompt", 1_699_999_000_000),
+      turn("s1:2", "agent", "line one\nline two", 1_700_000_000_000),
+      turn("s1:3", "agent", "and the reply", 1_700_000_100_000),
+    ]
     const props = squaresOf(
-      frame({
-        mode: "map",
-        band: 0,
-        span: 100,
-        block: { top: 20, height: 10 },
-        squares: [{ id: "s1:2", kind: "agent", y: 30, scale: 1, active: true }],
-      }),
-      { cellHeight: 17, track: 320 },
-    )
-    expect(props).toMatchInlineSnapshot(`
-      {
-        "active": 0,
-        "band": 0,
-        "block": {
-          "height": 32,
-          "top": 64,
+      frame(
+        {
+          mode: "recent",
+          rows: 24,
+          squares: [
+            { id: "s1:1", kind: "user", y: 0, scale: 1, active: false },
+            { id: "s1:2", kind: "agent", y: 1, scale: 1, active: true },
+            { id: "s1:3", kind: "agent", y: 2, scale: 1, active: false },
+          ],
         },
-        "squares": [
-          {
-            "active": true,
-            "at": "assistant · turn 2 · 05:13 PM",
-            "hue": 33,
-            "id": "s1:2",
-            "kind": "agent",
-            "pinned": false,
-            "preview": "line one
-      line two",
-            "role": "assistant",
-            "scale": 1,
-            "turn": 2,
-            "y": 96,
-          },
-        ],
-        "track": 320,
-      }
-    `)
-
-    // A window that is a sliver of a long map still draws: a hairline block is
-    // one the reader cannot find.
-    const sliver = squaresOf(
-      frame({
-        mode: "map",
-        band: 0,
-        span: 1000,
-        block: { top: 900, height: 1 },
-        squares: [],
-      }),
+        [],
+        turns,
+      ),
       { cellHeight: 17, track: 320 },
     )
-    expect(sliver.block).toMatchInlineSnapshot(`
-      {
-        "height": 6,
-        "top": 288,
-      }
-    `)
+
+    // The whole track *is* the recent strip's space: no rows of its own to
+    // convert, and no band counted in.
+    expect(props.track).toBe(320)
+    expect(props.band).toBe(0)
+    expect(props.active).toBe(1)
+    const top = (320 - 3 * SQUARE_STEP) / 2
+    expect(props.squares.map((square) => square.y)).toEqual([
+      top,
+      top + SQUARE_STEP,
+      top + 2 * SQUARE_STEP,
+    ])
+    // Uniform: a recent square's size is never its turn's, and none is pinned.
+    expect(props.squares.map((square) => square.scale)).toEqual([1, 1, 1])
+    expect(props.squares.some((square) => square.pinned)).toBe(false)
+
+    // A block taller than the track still starts at its top: the centring clamps
+    // rather than pushing the oldest square off the strip.
+    const many = Array.from({ length: 40 }, (_, index) => ({
+      id: `s1:${index + 1}`,
+      kind: "agent" as SquareKind,
+      y: index,
+      scale: 1,
+      active: false,
+    }))
+    const overfull = squaresOf(
+      frame(
+        { mode: "recent", rows: 24, squares: many },
+        [],
+        many.map((square, index) => turn(square.id, "assistant", "a reply", 1_699_999_000_000 + index)),
+      ),
+      { cellHeight: 17, track: 320 },
+    )
+    expect(overfull.squares.map((square) => square.y)).toEqual(
+      many.map((_, index) => index * SQUARE_STEP),
+    )
+  })
+
+  it("drops the wire type's map fields", () => {
+    expect([RECENT, RECENT_SPAN]).toEqual([false, false])
   })
 
   it("turns the store's escaped text back into words", () => {
