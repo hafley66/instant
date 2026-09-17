@@ -16,9 +16,11 @@ import { turnHue } from "./0_turnDebugOverlay"
 import { SQUARE_STEP, type SquareKind } from "./0_agentSquareVisual"
 import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
 
-/** How many characters of a turn a popover carries. The text is already in
- *  memory, so a big cap costs nothing at hover time and never fetches. */
-export const PREVIEW_CHARS = 900
+/** How many characters of a turn a card carries. The text is already in memory,
+ *  so a big cap costs nothing at open time and never fetches; the card is a
+ *  reader and shows what a turn actually said, while the hover popover clips the
+ *  same slice in CSS. */
+export const PREVIEW_CHARS = 4000
 
 /** The pane's own px, which only the view can measure: one row's height, and
  *  how tall the strip itself draws. */

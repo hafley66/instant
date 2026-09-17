@@ -14,15 +14,20 @@
   flex-direction: column;
   gap: 6px;
   box-sizing: border-box;
-  max-width: min(360px, 60%);
-  max-height: min(280px, 60%);
-  padding: 7px 9px 8px;
+  /* A reader, not a tooltip: the card gets the room to show a turn's own
+     markdown — a code block, a table, a heading — without the reader scrolling
+     a keyhole. `place` clamps it into the pane, so the caps are what keeps it
+     findable on a small panel. */
+  min-width: min(420px, 92%);
+  max-width: min(680px, 92%);
+  max-height: min(70%, 640px);
+  padding: 9px 11px 10px;
   border: 1px solid var(--frame-dark);
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--panel-fg);
   box-shadow: 0 6px 22px rgb(0 0 0 / .34);
-  font: 11px/1.4 Menlo, Monaco, monospace;
+  font: 13px/1.5 Menlo, Monaco, monospace;
 }
 
 .turn-panel-head {

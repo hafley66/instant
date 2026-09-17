@@ -39,6 +39,16 @@ const SQUARE_SHAPES: Record<SquareKind, string> = {
   other: "3px",
 }
 
+/** How far off the strip's centre line a kind's square sits: the reader's own
+ *  turns lean right, the agent's lean left, so the column says who spoke before
+ *  the colour does. Px, small enough to stay inside the gutter. */
+const SQUARE_SKEW: Record<SquareKind, number> = {
+  user: 3,
+  agent: -3,
+  tool: 0,
+  other: 0,
+}
+
 /** What identifies a square before it has a position or an active flag. */
 export type SquareSeed = {
   id: string
@@ -143,5 +153,6 @@ export function squareVars(state: SquareState): Record<string, string> {
     "--asq-strength": `${state.strength}`,
     "--asq-color": squareColor(state.kind, state.hue),
     "--asq-shape": SQUARE_SHAPES[state.kind],
+    "--asq-dx": `${SQUARE_SKEW[state.kind]}px`,
   }
 }

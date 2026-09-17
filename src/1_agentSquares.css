@@ -75,7 +75,8 @@
   margin-left: calc(var(--asq-size) / -2);
   border-radius: var(--asq-shape, 2.4px);
   background: var(--asq-color, #888);
-  transform: translateY(var(--asq-y, 0)) scale(calc(var(--asq-scale, 1) * var(--asq-hover, 1)));
+  transform: translateX(var(--asq-dx, 0px)) translateY(var(--asq-y, 0))
+    scale(calc(var(--asq-scale, 1) * var(--asq-hover, 1)));
   transform-origin: center;
   opacity: var(--asq-strength, 0.42);
   pointer-events: auto;
