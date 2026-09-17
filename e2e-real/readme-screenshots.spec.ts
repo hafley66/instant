@@ -591,7 +591,11 @@ test("5. squares: one square per turn in the terminal's right margin", async ({ 
     .poll(() =>
       page.evaluate(() => {
         const host = [...document.querySelectorAll<HTMLElement>(".term-host")].find((h) => h.getBoundingClientRect().width > 0);
-        return host ? getComputedStyle(host).paddingRight : "";
+        const xterm = host?.querySelector<HTMLElement>(".xterm");
+        // The measured element gives the margin up, not the host: FitAddon
+        // subtracts the terminal element's padding and reads the host's border
+        // box, so padding on the host is invisible to the fit.
+        return xterm ? getComputedStyle(xterm).paddingRight : "";
       }),
     )
     .toBe("32px");

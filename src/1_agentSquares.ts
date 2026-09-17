@@ -96,6 +96,10 @@ export class TerminalAgentSquares {
     private el: HTMLElement,
     private input: AgentSquaresInput,
     private options: SquaresOptions,
+    /** The pane's usable width just changed: `asq-open` is the only place that
+     *  knows the gutter opened, and the terminal has to measure its columns
+     *  again from here — the flip is not otherwise observable. */
+    private onGutter: () => void,
   ) {
     this.host.className = "asq-host"
     this.strip.className = "asq-strip"
@@ -111,6 +115,7 @@ export class TerminalAgentSquares {
     this.panel ??= new TurnPanel(this.el)
     this.el.append(this.host)
     this.el.classList.add("asq-open")
+    this.onGutter()
     this.stop = await watchSquares(this.input, this.options)
   }
 
@@ -157,6 +162,7 @@ export class TerminalAgentSquares {
     this.panelId = undefined
     this.el.classList.remove("asq-open")
     this.host.remove()
+    this.onGutter()
     await stop?.()
   }
 

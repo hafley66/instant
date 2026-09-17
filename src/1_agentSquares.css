@@ -15,10 +15,15 @@
   --asq-ease: cubic-bezier(0.22, 0.9, 0.24, 1);
 }
 
-/* The terminal panel gives up its right margin. `fit()` re-runs on the class
-   flip, so the grid reflows into the narrower area instead of being covered. */
-.term-host.asq-open,
-.asq-open.terminal {
+/* The terminal panel gives up its right margin. The padding goes on the measured
+   element, `.xterm`, not on the host: FitAddon subtracts the terminal element's
+   own padding and reads the *parent's* computed width, and the host is
+   `box-sizing: border-box` — padding on the host shrinks the content area while
+   the fit still proposes the border box's columns, which is how the grid ended
+   up drawing its last columns under the strip. `fit()` re-runs on the class flip
+   (the strip calls back), so the grid reflows into the narrower area instead of
+   being covered. */
+.term-host.asq-open .xterm {
   padding-right: var(--asq-gutter);
   transition: padding-right var(--asq-move) var(--asq-ease);
 }

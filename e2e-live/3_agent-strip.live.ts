@@ -407,6 +407,29 @@ for (const adapter of liveAgentAdapters) {
         })),
       }
     });
+    // The pane gives the strip its right margin up and the grid is measured
+    // again so its last column stops at the margin instead of running under it.
+    // Reported from a live run as "the margin is nowhere to be found and the
+    // squares draw on tui space": both are this geometry, and both settle with
+    // the 260ms padding transition, so this polls rather than racing the
+    // animation. The padding is on the measured element — padding on the host is
+    // invisible to FitAddon, which reads the host's border box.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const host = document.querySelector<HTMLElement>(".term-host.asq-open")
+            const term = host?.querySelector<HTMLElement>(".xterm")
+            const screen = host?.querySelector<HTMLElement>(".xterm-screen")
+            const strip = host?.querySelector<HTMLElement>(".asq-host")
+            return {
+              padding: term ? getComputedStyle(term).paddingRight : "",
+              clear: (screen?.getBoundingClientRect().right ?? Number.POSITIVE_INFINITY) <= (strip?.getBoundingClientRect().left ?? 0),
+            }
+          }),
+        { timeout: 10_000, message: "the grid never cleared the strip's margin" },
+      )
+      .toEqual({ padding: "32px", clear: true });
     // Relative mode draws a square on its own row, so the px it lands on is the
     // server's row times the pane's own row height. That is the whole contract
     // of this mode, and nothing else checks it: a square at the wrong px still

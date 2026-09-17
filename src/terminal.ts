@@ -196,16 +196,17 @@ function applyAgentSquares(tab: Tab) {
       void tab.agentSquares.retarget(input, options);
       return;
     }
-    const strip = new TerminalAgentSquares(tab.el, input, options);
+    // The strip calls back on its own class flip — that is when the pane's
+    // usable width changes, and it can happen well after this call, once the
+    // watcher has a pane to give the strip.
+    const strip = new TerminalAgentSquares(tab.el, input, options, () => refitForGutter(tab));
     tab.agentSquares = strip;
     void strip.start().catch((error) => console.warn("[squares] watch failed", error));
-    refitForGutter(tab);
     return;
   }
   if (tab.agentSquares) {
     void tab.agentSquares.dispose().catch(() => {});
     tab.agentSquares = undefined;
-    refitForGutter(tab);
   }
 }
 
