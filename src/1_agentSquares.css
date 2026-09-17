@@ -75,7 +75,7 @@
   margin-left: calc(var(--asq-size) / -2);
   border-radius: var(--asq-shape, 2.4px);
   background: var(--asq-color, #888);
-  transform: translateY(var(--asq-y, 0)) scale(var(--asq-scale, 1));
+  transform: translateY(var(--asq-y, 0)) scale(calc(var(--asq-scale, 1) * var(--asq-hover, 1)));
   transform-origin: center;
   opacity: var(--asq-strength, 0.42);
   pointer-events: auto;
@@ -91,6 +91,14 @@
 
 .asq[data-active="true"] {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--asq-color) 40%, transparent);
+}
+
+/* The pointer magnifies what it is over, the way a Dock magnifies the icon under
+   it: the hovered square grows to the active square's own multiplier on top of
+   whatever the scroll intersection gave it, on the strip's existing transition,
+   so nothing relayouts and no handler runs. */
+.asq:hover {
+  --asq-hover: 1.55;
 }
 
 .asq:focus-visible {

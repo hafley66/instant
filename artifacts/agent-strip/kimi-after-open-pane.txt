@@ -4,37 +4,37 @@ agent-kimi.%3 dead=0 cmd=boop
 agent-opencode.%2 dead=0 cmd=boop
 
  
- ╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
- │                                                                                                                                   │
- │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                                                   │
- │  ▐█████▌  Send /help for help information.                                                                                        │
- │                                                                                                                                   │
- │  Directory: /private/tmp/instant-agent-47821/workspace                                                                            │
- │  Session:   session_162302cc-6367-416f-be45-c7faa8fc7b31                                                                          │
- │  Model:     Mock Model                                                                                                            │
- │  Version:   2.0.0                                                                                                                 │
- │                                                                                                                                   │
- ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                                                       │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                                                       │
+ │  ▐█████▌  Send /help for help information.                                                                                            │
+ │                                                                                                                                       │
+ │  Directory: /private/tmp/instant-agent-47821/workspace                                                                                │
+ │  Session:   session_5b05bf5f-d6a2-4ada-ac9a-00eb168b4d50                                                                              │
+ │  Model:     Mock Model                                                                                                                │
+ │  Version:   2.0.0                                                                                                                     │
+ │                                                                                                                                       │
+ ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  
  ✦ Kimi Code Desktop is here — Everything you love about Kimi Code, now on desktop
    Run /desktop or visit https://www.kimi.com/code to install
  
-   No session yet — one will be created on your first message.                                                                        
-   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.       
+   No session yet — one will be created on your first message.                                                                            
+   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.           
  
- ✨ render the terminal flow                                                                                                          
+ ✨ render the terminal flow                                                                                                              
  
- ● FIXED_TERMINAL_REPLY                                                                                                               
+ ● FIXED_TERMINAL_REPLY                                                                                                                   
    
-   ┌─────┐    ┌──────┐    ┌───────┐    ┌──────────┐                                                                                   
-   │ PTY ├───▶│ tmux ├───▶│ xterm ├───▶│ Markdown │                                                                                   
-   └─────┘    └──────┘    └───────┘    └──────────┘                                                                                   
+   ┌─────┐    ┌──────┐    ┌───────┐    ┌──────────┐                                                                                       
+   │ PTY ├───▶│ tmux ├───▶│ xterm ├───▶│ Markdown │                                                                                       
+   └─────┘    └──────┘    └───────┘    └──────────┘                                                                                       
  
- ╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
- │ >                                                                                                                                 │
- ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- Mock Model  …/tmp/instant-agent-47821/workspace
-                                                                                                                context: 1% (30/97.7k)
+ ╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                                                                                     │
+ ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Mock Model  …/tmp/instant-agent-47821/workspace                  ! to run a shell command | /compact compresses context when it gets long
+                                                                                                                    context: 1% (30/97.7k)
 
 
 

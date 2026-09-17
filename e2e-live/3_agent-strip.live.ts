@@ -284,6 +284,42 @@ test.afterAll(() => {
   for (const adapter of liveAgentAdapters) tmux(["kill-session", "-t", `=agent-${adapter.harness}`]);
 });
 
+/// Ask the app's own rpc for a scroll, the way the UI's wheel handler does: the
+/// `scroll_session` command on the pane's session, over the loopback socket the
+/// serve binary opens. The reply says the command ran; the frame it wakes is the
+/// assertion.
+async function askScroll(session: string): Promise<boolean> {
+  const port = Number(process.env.INSTANT_AGENT_PORT ?? 47821);
+  return new Promise((resolve) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const done = (answer: boolean) => {
+      socket.close();
+      resolve(answer);
+    };
+    const timer = setTimeout(() => done(false), 10_000);
+    socket.addEventListener("open", () => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "scroll_session",
+          params: { name: session, up: true, lines: 40 },
+        }),
+      );
+    });
+    socket.addEventListener("message", (event) => {
+      const frame = JSON.parse(String(event.data)) as { id?: number; error?: unknown };
+      if (frame.id !== 1) return;
+      clearTimeout(timer);
+      done(!frame.error);
+    });
+    socket.addEventListener("error", () => {
+      clearTimeout(timer);
+      done(false);
+    });
+  });
+}
+
 for (const adapter of liveAgentAdapters) {
   test(`real ${adapter.harness} against the mock provider draws its strip`, async ({ page }, testInfo) => {
     const executable = resolveAgentExecutable(adapter);
@@ -451,6 +487,24 @@ for (const adapter of liveAgentAdapters) {
     await expect(pop).toContainText(liveAgentReplyMarker);
     await page.waitForTimeout(400);
 
+    // The pointer magnifies what it is over, Dock-style: the hovered square
+    // carries the active multiplier on top of whatever size the server gave it,
+    // and a square the pointer is not over keeps exactly that size.
+    const shown = await page.evaluate(() => {
+      const scaleOf = (el: HTMLElement) => Number.parseFloat(getComputedStyle(el).transform.slice(7).split(",")[0]);
+      const ownOf = (el: HTMLElement) => Number.parseFloat(el.style.getPropertyValue("--asq-scale"));
+      const hovered = document.querySelector<HTMLElement>(".asq:hover");
+      const cold = [...document.querySelectorAll<HTMLElement>(".asq:not(:hover)")].pop();
+      return {
+        hovered: hovered ? { drawn: scaleOf(hovered), own: ownOf(hovered) } : null,
+        cold: cold ? { drawn: scaleOf(cold), own: ownOf(cold) } : null,
+      };
+    });
+    expect(shown.hovered, "the pointer is over a square").not.toBeNull();
+    expect(shown.cold, "a square the pointer is not over").not.toBeNull();
+    expect(shown.hovered!.drawn, "the hovered square is magnified").toBeCloseTo(shown.hovered!.own * 1.55, 1);
+    expect(shown.cold!.drawn, "a cold square draws at its own size").toBeCloseTo(shown.cold!.own, 1);
+
     const png = join(shots, `${adapter.harness}-strip.png`);
     await page.screenshot({ path: png });
     await testInfo.attach(`${adapter.harness}-strip`, { path: png, contentType: "image/png" });
@@ -480,13 +534,13 @@ for (const adapter of liveAgentAdapters) {
 
     // 4b. A scroll reaches the strip. The reader's window is read off tmux's
     //     `scroll_position`, and a scroll is not pane output, so the app nudges
-    //     the feed itself: with the pane otherwise quiet, a frame landing after
-    //     a wheel is that nudge and nothing else.
+    //     the feed itself. Asked over the app's own rpc rather than with a
+    //     wheel: a pane whose TUI grabs the mouse consumes the wheel and scrolls
+    //     its own view, which is a different thing and would test the TUI. With
+    //     the pane otherwise quiet, a frame landing is that nudge and nothing
+    //     else.
     const beforeScroll = await frameCount();
-    const paneBox = await page.locator(".term-host.asq-open").boundingBox();
-    if (!paneBox) throw new Error("no pane to scroll");
-    await page.mouse.move(paneBox.x + paneBox.width / 2, paneBox.y + paneBox.height / 2);
-    await page.mouse.wheel(0, -600);
+    expect(await askScroll(session), "the rpc took the scroll").toBe(true);
     await expect
       .poll(frameCount, { timeout: 30_000, message: "a scroll never reached the strip's feed" })
       .toBeGreaterThan(beforeScroll);
