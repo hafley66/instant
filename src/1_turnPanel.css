@@ -105,6 +105,5 @@
   border-left: 2px solid color-mix(in srgb, var(--panel-fg) 30%, transparent);
   background: color-mix(in srgb, var(--term-bg) 85%, transparent);
   color: color-mix(in srgb, var(--term-fg) 88%, transparent);
-  white-space: pre-wrap;
   word-break: break-word;
 }

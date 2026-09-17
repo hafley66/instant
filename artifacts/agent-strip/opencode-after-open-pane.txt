@@ -14,7 +14,7 @@ agent-opencode.%2 dead=0 cmd=boop
        tmux --> xterm                                                                              LSPs are disabled                       
        xterm --> Markdown                                                                                                                  
                                                                                                                                            
-     ▣  Build · Mock Model · 1.0s                                                                                                          
+     ▣  Build · Mock Model · 999ms                                                                                                         
                                                                                                                                            
                                                                                                                                            
                                                                                                                                            

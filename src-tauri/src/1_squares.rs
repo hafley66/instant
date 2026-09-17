@@ -35,8 +35,21 @@ use crate::host::Host;
 
 /// The event the strip listens on.
 pub const SQUARES_EVENT: &str = "squares-update";
-/// History one capture asks tmux for: enough rows for a window of turns.
+/// History one capture asks tmux for, least. A scrolled pane reads deeper — see
+/// `capture_depth` — because the reader's window is the capture's tail shifted
+/// up by the scroll: a fixed depth would pin the window to the capture's top and
+/// leave the strip behind on a long scroll.
 const CAPTURE_LINES: u32 = 400;
+
+/// How deep one capture reads: the short history for a live pane, and the
+/// reader's own scroll plus a pane's rows for a scrolled one.
+fn capture_depth(window: Option<&PaneWindow>) -> u32 {
+    let Some(window) = window else {
+        return CAPTURE_LINES;
+    };
+    let wanted = window.scroll.saturating_add(window.height);
+    CAPTURE_LINES.max(u32::try_from(wanted).unwrap_or(u32::MAX))
+}
 /// One reconcile per window at most. The pane can outrun a projection.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(120);
 /// Idle wait between polls of the dirty bit. A timeout is not a flush.
@@ -116,8 +129,8 @@ pub struct Strip {
 
 /// The pane's own lines. `-J` joins a wrapped row onto the line it continues,
 /// so one entry is one logical line and its row number is its own index.
-pub fn capture_lines(target: &str, socket: Option<&str>) -> Result<Vec<String>, String> {
-    let start = format!("-{CAPTURE_LINES}");
+pub fn capture_lines(target: &str, socket: Option<&str>, depth: u32) -> Result<Vec<String>, String> {
+    let start = format!("-{depth}");
     let output = tmux_command(socket)
         .args(["capture-pane", "-p", "-J", "-S", &start, "-t", target])
         .output()
@@ -356,11 +369,12 @@ pub fn project(
     socket: Option<&str>,
     options: &Options,
 ) -> Result<Strip, String> {
-    let rows = capture_lines(target, socket)?;
-    // A pane that predates this process's tmux still captures; only the window
+    // The window is read first: it decides how deep the capture has to go. A
+    // pane that predates this process's tmux still captures; only the window
     // read can come back empty, and then the frame carries spans without a
     // layout rather than no frame at all.
     let window = pane_window(target, socket).ok();
+    let rows = capture_lines(target, socket, capture_depth(window.as_ref()))?;
     let turns = read_turns(session)?;
     let strip = project_rows(session, &rows, turns, BTreeMap::new(), window, options);
     // The band's turns carry marks too: a pinned prompt is exactly the square a
@@ -468,6 +482,22 @@ mod tests {
             session_scope: "root".to_owned(),
             parent_session: None,
         }
+    }
+
+    /// A live pane reads the short history; a scrolled one reads deep enough to
+    /// hold the reader's window, since the window is the capture's tail shifted
+    /// up by the scroll.
+    #[test]
+    fn a_scrolled_pane_reads_as_deep_as_the_reader_scrolled() {
+        assert_eq!(capture_depth(None), CAPTURE_LINES);
+        assert_eq!(
+            capture_depth(Some(&PaneWindow { height: 39, scroll: 0 })),
+            CAPTURE_LINES
+        );
+        assert_eq!(
+            capture_depth(Some(&PaneWindow { height: 39, scroll: 900 })),
+            939
+        );
     }
 
     /// The frame a client draws from: the pane's own rows in, spans and marks

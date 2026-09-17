@@ -961,6 +961,11 @@ pub async fn scroll_session(name: String, up: bool, lines: u32) {
         .args(["send-keys", "-t", &name, "-X", "-N", &n, dir])
         .env("PATH", &path)
         .status();
+    // A scroll is not pane output. The strip's window is read off tmux
+    // (`scroll_position`), so without this the feed would keep the window it
+    // last projected and a quiet pane would leave the squares behind the reader
+    // until something wrote again.
+    crate::squares::note_output(&format!("s:{name}"));
 }
 
 /// tmux's own copy buffer. With `set-clipboard external` a mouse drag lands

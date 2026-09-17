@@ -478,6 +478,19 @@ for (const adapter of liveAgentAdapters) {
     await page.keyboard.press("Escape");
     await expect(card).toBeHidden();
 
+    // 4b. A scroll reaches the strip. The reader's window is read off tmux's
+    //     `scroll_position`, and a scroll is not pane output, so the app nudges
+    //     the feed itself: with the pane otherwise quiet, a frame landing after
+    //     a wheel is that nudge and nothing else.
+    const beforeScroll = await frameCount();
+    const paneBox = await page.locator(".term-host.asq-open").boundingBox();
+    if (!paneBox) throw new Error("no pane to scroll");
+    await page.mouse.move(paneBox.x + paneBox.width / 2, paneBox.y + paneBox.height / 2);
+    await page.mouse.wheel(0, -600);
+    await expect
+      .poll(frameCount, { timeout: 30_000, message: "a scroll never reached the strip's feed" })
+      .toBeGreaterThan(beforeScroll);
+
     // 5. The other mode. The reader picks it in the toolbar, and the server
     //    answers with the session's own recency list: the newest conversation
     //    turns, one square each, uniform, oldest first — a set that is not the

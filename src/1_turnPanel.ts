@@ -17,6 +17,12 @@ import { invoke } from "./generated/native"
 import { applyTags, askTags, boopFavorites, boopTurnsForSession, favoriteBoopTurn } from "./favorites"
 import type { BoopTurn } from "./0_terminalTurnVisibility"
 import type { TurnMark } from "./1_agentSquaresMarks"
+import { createElement } from "react"
+import { flushSync } from "react-dom"
+import { createRoot, type Root } from "react-dom/client"
+import { code } from "@streamdown/code"
+import { Streamdown } from "streamdown"
+import { settings } from "./0_settings"
 import "./1_turnPanel.css"
 
 export type { TurnMark }
@@ -60,6 +66,30 @@ export type TurnPanelTarget = {
 const escapeText = /\u001b\[[0-9;]*[A-Za-z]|\\x1b\[[0-9;]*[A-Za-z]|\\u001b\[[0-9;]*[A-Za-z]/g
 const literalNewline = /\\n/g
 
+/// What the markdown viewer draws a message with: the same renderer, the same
+/// code plugin and the same wrapper the package's own panel uses, so a message
+/// and a markdown file are drawn by one stylesheet. `streamdown/styles.css`
+/// arrives with the renderer's own import; `@hafley66/md/style.css`, which the
+/// app already loads, carries the `mdview-streamdown` rules.
+const mdControls = { code: { copy: true, download: false }, table: false, mermaid: false }
+
+function messageBody(text: string) {
+  return createElement(
+    "div",
+    { className: "mdview-streamdown", "data-md-code-theme": settings.mode.$() === "dark" ? "dark" : "light" },
+    createElement(
+      Streamdown,
+      {
+        mode: "static",
+        plugins: { code },
+        controls: mdControls,
+        shikiTheme: ["github-light", "github-dark"],
+      },
+      text,
+    ),
+  )
+}
+
 /** The marks a card starts from when its caller has no frame-read tags: the
  *  favorites cache answers the star for every source and the tags for the turns
  *  under it. The debug overlay's turns are never in a strip frame, so they start
@@ -87,6 +117,9 @@ export class TurnPanel {
   private star = document.createElement("button")
   private tagLane = document.createElement("div")
   private body = document.createElement("div")
+  /** The markdown renderer's root: mounted on the body the first time a card
+   *  draws, unmounted when it closes. */
+  private md?: Root
   private target: TurnPanelTarget | null = null
   /** The tags this card draws, seeded from the click and replaced by the store's
    *  own answer for the source. */
@@ -157,6 +190,10 @@ export class TurnPanel {
     this.target = null
     if (pinned === this) pinned = null
     this.card.remove()
+    // The renderer goes with the card: a closed card keeps no React tree, and
+    // the next open mounts a fresh one.
+    this.md?.unmount()
+    this.md = undefined
     window.removeEventListener("keydown", this.onKey, true)
     document.removeEventListener("pointerdown", this.onDown, true)
   }
@@ -219,7 +256,13 @@ export class TurnPanel {
       none.textContent = "no tags"
       this.tagLane.append(none)
     }
-    this.body.textContent = target.preview.replace(escapeText, "").replace(literalNewline, "\n")
+    // The message is drawn, not printed: the same markdown renderer the mdview
+    // panel uses, so a turn's code fences, lists and headings read as they were
+    // written. Synchronous, because `place` measures the card right after this
+    // and a body rendered a frame later would be clamped against an empty one.
+    const text = target.preview.replace(escapeText, "").replace(literalNewline, "\n")
+    this.md ??= createRoot(this.body)
+    flushSync(() => this.md?.render(messageBody(text)))
   }
 
   /** The store's own tags for the source. The frame's read can be a second old
