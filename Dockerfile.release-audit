@@ -6,6 +6,7 @@ WORKDIR /instant
 RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
 
 COPY package.json pnpm-lock.yaml .npmrc ./
+COPY patches/ ./patches/
 RUN pnpm install --frozen-lockfile
 RUN pnpm exec playwright install --with-deps chromium
 
