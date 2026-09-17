@@ -163,6 +163,23 @@ function stampPaneRows(el: HTMLElement, term: Terminal) {
   el.dataset.rows = String(term.rows);
 }
 
+/// How long the gutter takes to open or close. Mirrors `--asq-move` in
+/// `1_agentSquares.css`.
+const GUTTER_MOVE_MS = 260;
+
+/// The gutter is `padding-right` on the pane, so xterm's grid has to be measured
+/// again when it flips — otherwise the grid keeps its old columns, the last ones
+/// run under the strip, and the margin reads as cut off. The padding is
+/// animated, so a fit taken now measures a box that is still moving: fit for the
+/// frame the class lands on, and again once the transition has settled.
+function refitForGutter(tab: Tab) {
+  tab.fit.fit();
+  window.setTimeout(() => {
+    // The tab can be closed, or its terminal disposed, inside the transition.
+    if (tabs.get(tab.id) === tab) tab.fit.fit();
+  }, GUTTER_MOVE_MS + 60);
+}
+
 // The strip is on for a terminal whose pane has a boop session. The feed reads
 // the pane the pty already streams (`squares_watch`), so a tab with no tmux —
 // graphics, a dead pane, a shell that never bound — has nothing to watch and
@@ -182,11 +199,13 @@ function applyAgentSquares(tab: Tab) {
     const strip = new TerminalAgentSquares(tab.el, input, options);
     tab.agentSquares = strip;
     void strip.start().catch((error) => console.warn("[squares] watch failed", error));
+    refitForGutter(tab);
     return;
   }
   if (tab.agentSquares) {
     void tab.agentSquares.dispose().catch(() => {});
     tab.agentSquares = undefined;
+    refitForGutter(tab);
   }
 }
 
