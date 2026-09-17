@@ -13,7 +13,8 @@ import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, flashStatus } f
 export { askText } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, commentForSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays } from "./terminal";
+import { agentSquares } from "./0_agentSquaresSettings";
+import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, commentForSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays, syncAgentSquares } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   applyTags,
@@ -151,6 +152,18 @@ export function bindTurnDebugChrome() {
     button.classList.toggle("active", on);
     button.setAttribute("aria-pressed", String(on));
     syncTurnDebugOverlays();
+  });
+}
+
+/** Subscribes the turn-strip toggle to its button and to the per-terminal
+ *  strips. A strip only exists while the setting is true; flipping it on gives
+ *  every terminal whose pane has a session its own watcher. */
+export function bindAgentSquaresChrome() {
+  agentSquares.on.$.subscribe((on) => {
+    const button = $("#squares-toggle") as HTMLButtonElement;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+    syncAgentSquares();
   });
 }
 
@@ -473,6 +486,8 @@ export function wireChrome() {
   $("#panic-toggle").onclick = () => panic.on.$(!panic.on.$());
 
   $("#turn-debug-toggle").onclick = () => turnDebug.on.$(!turnDebug.on.$());
+
+  $("#squares-toggle").onclick = () => agentSquares.on.$(!agentSquares.on.$());
 
   $("#structured-overlay-toggle").onclick = () =>
     settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$());

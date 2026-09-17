@@ -34,13 +34,35 @@
   justify-content: center;
   pointer-events: none;
   z-index: 4;
-  contain: layout paint;
+  /* `layout`, never `paint`: the popover is a child of a square and hangs left
+     of this 32px box, so paint containment would clip the thing the strip exists
+     to show. Layout containment still keeps the strip's geometry out of the
+     terminal's. */
+  contain: layout;
 }
 
 .asq-strip {
   position: relative;
   width: var(--asq-size);
-  height: calc(var(--asq-count, 0) * var(--asq-step));
+  /* The track the server's `y` is measured in: `boop-turnstrip::Options::strip_max`
+     minus its `square_height`. Mirrored here — change both. */
+  height: var(--asq-track, 320px);
+}
+
+/* Where the reader is: the window's rows pushed through the same map the squares
+   use, so the block and the squares can never disagree. No interaction. */
+.asq-window {
+  position: absolute;
+  left: calc(50% - 14px);
+  width: 28px;
+  height: var(--asq-win-height, 6px);
+  transform: translateY(var(--asq-win-top, 0px));
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  transition:
+    transform var(--asq-move) var(--asq-ease),
+    height var(--asq-move) var(--asq-ease);
 }
 
 .asq {

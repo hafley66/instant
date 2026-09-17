@@ -245,13 +245,21 @@ pub fn note_output(pty: &str) {
 }
 
 fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
+    // The first projection does not wait for a write. A pane that is already
+    // idle when its strip attaches — a finished turn, a viewer onto a quiet
+    // session — would otherwise show nothing until it next wrote, which on a
+    // settled pane is never.
+    let mut wait_for_a_write = false;
     loop {
-        match listener.recv_timeout(IDLE_WAIT) {
-            Ok(()) => {}
-            // A quiet pane projects nothing: only a write wakes this.
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => return,
+        if wait_for_a_write {
+            match listener.recv_timeout(IDLE_WAIT) {
+                Ok(()) => {}
+                // A quiet pane projects nothing: only a write wakes this.
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
         }
+        wait_for_a_write = true;
         let started = Instant::now();
         match project(&args.session, &args.target, args.socket.as_deref()) {
             Ok(strip) => {

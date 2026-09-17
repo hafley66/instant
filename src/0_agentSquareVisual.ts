@@ -46,6 +46,8 @@ export type SquareState = SquareSeed & {
   active: boolean
   /** Offset along the strip, in px, animated by CSS. */
   y: number
+  /** The server's own flex for this turn, before the active multiplier. */
+  scale: number
   /** 1 at full strength, SQUARE_DIM away from the active square. */
   strength: number
 }
@@ -56,13 +58,14 @@ export type SquareVisual = Signal<SquareState>
  *  write surface, so a caller moves one field and leaves the rest alone. */
 export function createSquareVisual(seed: SquareSeed): SquareVisual {
   return SignalCreator<SquareState>({
-    initialState: { ...seed, active: false, y: 0, strength: SQUARE_DIM },
+    initialState: { ...seed, active: false, y: 0, scale: 1, strength: SQUARE_DIM },
   })
 }
 
 /** Move a square to its slot without disturbing the rest of its state. */
-export function placeSquare(visual: SquareVisual, y: number, strength: number) {
+export function placeSquare(visual: SquareVisual, y: number, scale: number, strength: number) {
   if (visual.y.$() !== y) visual.y.$(y)
+  if (visual.scale.$() !== scale) visual.scale.$(scale)
   if (visual.strength.$() !== strength) visual.strength.$(strength)
 }
 
@@ -117,7 +120,10 @@ export function squareColor(kind: SquareKind, hue: number): string {
 export function squareVars(state: SquareState): Record<string, string> {
   return {
     "--asq-y": `${state.y}px`,
-    "--asq-scale": `${state.active ? SQUARE_SCALE : 1}`,
+    // The server's flex sets the size; being the one being read multiplies on
+    // top of it, which is what keeps the active square the biggest thing in the
+    // margin without making the others uniform.
+    "--asq-scale": `${state.scale * (state.active ? SQUARE_SCALE : 1)}`,
     "--asq-strength": `${state.strength}`,
     "--asq-color": squareColor(state.kind, state.hue),
     "--asq-shape": state.kind === "tool" ? "1.6px" : "2.4px",

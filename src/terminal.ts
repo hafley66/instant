@@ -12,6 +12,8 @@ import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
 import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
 import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
 import { turnDebug } from "./0_turnDebugSettings";
+import { agentSquares } from "./0_agentSquaresSettings";
+import { TerminalAgentSquares } from "./1_agentSquares";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue, type PromptContextItem } from "./1a_terminalContextQueue";
 import { TerminalContextSync } from "./1b_terminalContextSync";
@@ -106,6 +108,7 @@ export type Tab = {
   turnVisibility?: TerminalTurnVisibilityV2;
   syncTurns?: () => Promise<void>;
   turnDebugOverlay?: TerminalTurnDebugOverlay;
+  agentSquares?: TerminalAgentSquares;
   viewport?: XtermViewportAdapter;
   lineAnchors?: TerminalLineAnchors;
   contextQueue?: TerminalContextQueue;
@@ -151,6 +154,34 @@ function applyTurnDebugOverlay(tab: Tab) {
 }
 export function syncTurnDebugOverlays() {
   for (const tab of tabs.values()) applyTurnDebugOverlay(tab);
+}
+
+// The strip is on for a terminal whose pane has a boop session. The feed reads
+// the pane the pty already streams (`squares_watch`), so a tab with no tmux —
+// graphics, a dead pane, a shell that never bound — has nothing to watch and
+// gets no strip. A pane that rebinds to another session restarts its strip: the
+// squares belong to one session's turns.
+function applyAgentSquares(tab: Tab) {
+  const session = tab.paneSession?.session;
+  if (agentSquares.on.$() && !tab.graphics && session) {
+    const input = { pty: tab.id, session, target: tab.tmuxTarget ?? tab.name, socket: undefined };
+    if (tab.agentSquares) {
+      void tab.agentSquares.retarget(input);
+      return;
+    }
+    const strip = new TerminalAgentSquares(tab.el, input);
+    tab.agentSquares = strip;
+    void strip.start().catch((error) => console.warn("[squares] watch failed", error));
+    return;
+  }
+  if (tab.agentSquares) {
+    void tab.agentSquares.dispose().catch(() => {});
+    tab.agentSquares = undefined;
+  }
+}
+
+export function syncAgentSquares() {
+  for (const tab of tabs.values()) applyAgentSquares(tab);
 }
 
 /// The pane's cwd as tmux reports it now. The store's copy refreshes only when
@@ -227,6 +258,7 @@ function setPaneSessionBinding(id: string, binding: PaneSessionBinding | null) {
   const tab = tabs.get(id);
   if (!tab) return;
   tab.paneSession = binding;
+  applyAgentSquares(tab);
   const meta = tabMetaById(id);
   const live = store.get().sessions.find((session) => session.name === tab.name);
   setTerminalHarness(tab, detectHarness(meta?.command, live?.commands?.[0], tab.outputTail));
@@ -626,6 +658,7 @@ export function openTab(
     stale?.contextQueue?.dispose();
     stale?.lineAnchors?.dispose();
     stale?.turnDebugOverlay?.dispose();
+    void stale?.agentSquares?.dispose();
     stale?.turnVisibility?.dispose();
     stale?.viewport?.dispose();
     stale?.cmdClickGesture?.dispose();
@@ -896,6 +929,7 @@ export function openTab(
   tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, paneSession: null, outputTail: "" });
   void syncTurns?.();
   applyTurnDebugOverlay(tabs.get(id)!);
+  applyAgentSquares(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -1334,6 +1368,7 @@ export function onTermClosed(id: string) {
   t.contextQueue?.dispose();
   t.lineAnchors?.dispose();
   t.turnDebugOverlay?.dispose();
+  void t.agentSquares?.dispose();
   t.turnVisibility?.dispose();
   t.viewport?.dispose();
   t.cmdClickGesture?.dispose();

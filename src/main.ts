@@ -7,6 +7,7 @@
 import "xp.css";
 import "./0_sourceFonts.css";
 import "./0_stfuButton.css";
+import "./1_agentSquares.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
 import { listenNativeEvent } from "./reactive/nativeTransport";
@@ -115,6 +116,7 @@ import {
   syncInlineDiagrams,
   bindPanicChrome,
   bindTurnDebugChrome,
+  bindAgentSquaresChrome,
   syncInlineStructured,
   applyToolbar,
   syncSidebar,
@@ -275,6 +277,7 @@ async function main() {
   ).subscribe(() => renderWorktreesPanel());
   bindPanicChrome();
   bindTurnDebugChrome();
+  bindAgentSquaresChrome();
   // Re-apply the persisted recording flag to the backend (default off there).
   invoke("capture_set_enabled", { on: settings.captureEnabled.$() }).catch(
     console.error,

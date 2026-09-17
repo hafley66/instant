@@ -60,11 +60,12 @@ pane capture + turns + tags                  server: src-tauri/src/1_squares.rs
    [model]  squaresOf(frame) → { squares: AgentSquare[], active: number }
                        │ AgentSquare = { id, kind, role, turn, hue, at, preview, y, scale, active }
                        ▼
-   [visual] createSquareVisual(seed) → SquareVisual   stable per id, held in a ref map
-                       │ SquareState = SquareSeed & { active, y, strength }
+   [visual] createSquareVisual(seed) → SquareVisual   one per square, held by id
+                       │ SquareState = SquareSeed & { active, y, scale, strength }
                        │ written only by placeSquare / activateSquare / reseedSquare
                        ▼
-   [view]   AgentSquaresView({ visuals, marks })      pure, reads .$() only
+   [view]   TerminalAgentSquares                      one node per square, kept across frames
+                       │ subscribes its own visual and writes nothing else
                        ▼
             .asq{--asq-y,--asq-scale,--asq-color}  +  .asq-pop (CSS hover)
 ```
@@ -97,18 +98,18 @@ type AgentSquaresViewProps = {
 | `createSquareVisual` | `SquareSeed` | `SquareVisual` | ✓ |
 | `placeSquare` / `activateSquare` / `reseedSquare` | `SquareVisual`, scalars | — | one field each |
 | `strengthAt` / `squareColor` / `squareVars` | state or scalars | number / css / custom props | ✓ |
-| `AgentSquaresView` | `visuals`, `marks` | DOM | ✓ no effects, no handlers |
-| `AgentSquares` | `{ frame }` | `<AgentSquaresView/>` | owns subscriptions |
-| `useSquareVisuals` | `AgentSquare[]` | `SquareVisual[]` | ref map keyed by id |
+| `TerminalAgentSquares.render` | `Strip` (the frame) | DOM | ✓ no reads, no timers |
+| `TerminalAgentSquares.start` / `dispose` | `{ pty, session, target }` | a watcher, and its teardown | owns one subscription |
 
 `y` and `scale` are the server's numbers and are forwarded, not re-derived: a
 square's height is a function of the whole window (`span`), so a client that
 recomputed it from one turn would disagree with every other square.
 
-React holds **handles, not state**: the hook creates a visual on first sight,
-calls `place`/`activate`/`reseed` on every render, and drops ids that left the
-projection. The view only reads `.$()`, which the vite `signalsJsx()` plugin
-tracks — no `SignalReact`, no `useSignal` in the strip.
+The strip holds **handles, not state**: a frame creates a visual only for a
+square it has not seen, calls `place` / `activate` / `reseed` on the rest, and
+drops the ones that left. Each element subscribes its own visual and writes its
+own CSS variables, so one square moving never touches another's node — and the
+CSS owns the interpolation from there.
 
 ## Behaviour
 
@@ -256,12 +257,12 @@ Rules the plumbing keeps:
 | `src/0_agentSquareVisual.ts` | geometry, colour, anims, `SignalCreator` state | drafted |
 | `src/1_agentSquaresModel.ts` | `squaresOf(frame)` — hue, header, preview; everything else forwarded | rewritten |
 | `src/1_agentSquares.css` | strip, transitions, CSS-only popover | drafted |
-| `src/1_agentSquaresMarks.ts` | favorites + the frame's tags per turn id | to write |
-| `src/1_agentSquares.tsx` | `useSquareVisuals`, `AgentSquaresView`, container, mount | to write |
-| `index.html` | `#squares-toggle` beside the other four | to edit |
-| `src/chrome.ts` | `bindAgentSquaresChrome()` — button state + `syncAgentSquares()` | to edit |
-| `src/main.ts` | call the bind beside `bindTurnDebugChrome()` | to edit |
-| `src/terminal.ts` | `applyAgentSquares(tab)` / `syncAgentSquares()`; `Tab.agentSquares`; dispose paths; call in `activate()` | to edit |
+| `src/1_agentSquaresMarks.ts` | favorites + the frame's tags per turn id | written |
+| `src/1_agentSquares.ts` | `TerminalAgentSquares`: one node per square, the frame as its only input | written |
+| `index.html` | `#squares-toggle` beside the other four | edited |
+| `src/chrome.ts` | `bindAgentSquaresChrome()` — button state + `syncAgentSquares()` | edited |
+| `src/main.ts` | call the bind beside `bindTurnDebugChrome()`, import the CSS | edited |
+| `src/terminal.ts` | `applyAgentSquares(tab)` / `syncAgentSquares()`; `Tab.agentSquares`; both dispose paths; applied on open and on a session rebind | edited |
 
 `src/1_agentSquaresEstimate.ts` and its test are deleted: the module they pinned
 now lives in `boop-turnstrip`, with the same fixture ported to Rust.
@@ -284,9 +285,26 @@ working-tree addition in `~/projects/hafley-rs`.
 - `pnpm vitest run`, `pnpm exec tsc --noEmit` in the worktree — the frame's
   shape, `squaresOf` over a frame fixture, and `squareVars` / `strengthAt` /
   `squareColor` as pure outputs.
-- Browser: enable the toggle, open a busy claude tab, confirm the gutter is 32px,
-  the pane reflows, the active square scales, and a popover shows without a
-  frame's delay while a turn streams.
+- **Live receipt, instant-serve + headless Chromium against real panes** (this
+  check is what pinned the two bugs below):
+  - A pane's strip, end to end: `squares_watch` on `sprefa-2` (codex) delivered
+    `rows=446 turns=21 tags=21 layout.squares=21`; `sprefa-19` (omp) `461/22/22`,
+    `ascii-renderer-5` (claude) `62/5/5`, this session's own pane `423/14/14`.
+  - Drawn: 21 squares with the server's own `y`/`scale`, one `data-active`,
+    `.asq-open` giving `padding-right: 32px` on the terminal, and the window
+    block at the window's rows.
+  - The popover, on a real turn: `tool · turn 12 · 11:30 PM` + its preview text,
+    `opacity: 1`, 360px wide, hanging left of the square.
+  - The loop on a scroll: a wheel over the pane parks it in tmux copy-mode, the
+    pane repaints, and the strip re-projects from the new capture (3 squares and
+    a 92.9px block at the live bottom; more squares and a moved block once the
+    copy-mode view is what the capture's tail describes). `-e` returns the pane
+    to the live bottom when scrolled back.
+- Bug the receipt found: the feed only projected on a pane **write**, so a
+  strip attached to an already-idle pane showed nothing until that pane next
+  wrote — never, on a settled pane. `run` now projects once on the way in.
+- Bug the receipt found: `.asq-host` had `contain: paint`, which clipped the
+  360px popover hanging outside its 32px box. It is `contain: layout` now.
 - Perf check: with the strip on and a pane producing output, the client issues
   no reads of its own; the feed's capture happens once per `FLUSH_INTERVAL`.
 
