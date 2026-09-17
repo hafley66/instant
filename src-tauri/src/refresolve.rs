@@ -462,6 +462,17 @@ fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
+/// Whether an absolute (`/…`) or home-anchored (`~/…`) token names something on
+/// disk. The token may be several paths a soft join stitched together, so the
+/// rung that answers with the token itself has to look. An empty HOME leaves
+/// `~/…` trusted, since only the renderer expands it before opening.
+fn absolute_on_disk(rel: &str, home: &str) -> bool {
+    match rel.strip_prefix("~/") {
+        Some(tail) => !home.is_empty() && std::fs::symlink_metadata(Path::new(home).join(tail)).is_ok(),
+        None => std::fs::symlink_metadata(rel).is_ok(),
+    }
+}
+
 /// The rung that knows what the agent did: a token the agent printed names a
 /// file it touched, or a file beside one. Exact tail on the touched paths
 /// first (newest wins when only one distinct file carries the tail), then the
@@ -523,7 +534,15 @@ fn resolve_ref_with(
         return ResolveResult::Miss;
     }
 
+    // An absolute token names exactly one path, so the ladder answers it here:
+    // the rungs below join RELATIVE tokens onto directories, and answering a
+    // stitched absolute token (several paths a soft join chained) with some
+    // other file that shares its tail would open the wrong file. Nothing on
+    // disk means a miss, and the click falls back to its row-scoped candidate.
     if rel.starts_with('/') || rel.starts_with("~/") {
+        if !absolute_on_disk(&rel, &home) {
+            return ResolveResult::Miss;
+        }
         return ResolveResult::Hit {
             reference: ResolvedRef { path: rel, line, source: "absolute" },
         };
@@ -1142,6 +1161,29 @@ mod tests {
             }
             other => panic!("expected Absent, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_stitched_absolute_path_is_not_a_hit() {
+        let tree = Tree::new("softjoin");
+        tree.file("playwright.readme.config.ts");
+        tree.file("docs/screenshots/07-turn-strip.png");
+        tree.file("docs/screenshots/08-turn-strip-popover.png");
+        let cwd = tree.path("docs/screenshots");
+        // The shape a soft join builds from a block of one-path-per-line rows:
+        // the second path's basename matches a file on disk, the concatenation
+        // matches nothing.
+        let first = tree.path("playwright.readme.config.ts");
+        let second = tree.path("docs/screenshots/07-turn-strip.png");
+        let stitched = format!("{first}{second}");
+
+        assert_eq!(resolve(&tree, &stitched, &cwd), ResolveResult::Miss);
+        assert_eq!(
+            resolve(&tree, &second, &cwd),
+            ResolveResult::Hit {
+                reference: ResolvedRef { path: second, line: None, source: "absolute" },
+            }
+        );
     }
 
     #[test]

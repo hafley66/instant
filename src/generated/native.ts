@@ -13,6 +13,7 @@ export type CommandName =
   | "list_sessions"
   | "open_session"
   | "write_pty"
+  | "pty_ack"
   | "resize_pty"
   | "close_pty"
   | "kill_session"
@@ -95,8 +96,6 @@ export type CommandName =
   | "boop_mux_session"
   | "boop_mux_send_keys"
   | "boop_mux_exit_copy_mode"
-  | "squares_watch"
-  | "squares_unwatch"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
@@ -113,6 +112,8 @@ export type CommandName =
   | "sprefa_eval"
   | "sprefa_query_sql"
   | "sprefa_rel_source"
+  | "squares_watch"
+  | "squares_unwatch"
   | "tool_status"
   | "screenshot"
   | "open_target"
@@ -154,6 +155,7 @@ export namespace commands {
     export const listSessions = "list_sessions";
     export const openSession = "open_session";
     export const writePty = "write_pty";
+    export const ptyAck = "pty_ack";
     export const resizePty = "resize_pty";
     export const closePty = "close_pty";
     export const killSession = "kill_session";
@@ -271,11 +273,6 @@ export namespace commands {
     export const boopMuxExitCopyMode = "boop_mux_exit_copy_mode";
   }
 
-  export namespace squares {
-    export const squaresWatch = "squares_watch";
-    export const squaresUnwatch = "squares_unwatch";
-  }
-
   export namespace ledger {
     export const listAiSessions = "list_ai_sessions";
     export const readAiMessages = "read_ai_messages";
@@ -302,6 +299,11 @@ export namespace commands {
     export const sprefaEval = "sprefa_eval";
     export const sprefaQuerySql = "sprefa_query_sql";
     export const sprefaRelSource = "sprefa_rel_source";
+  }
+
+  export namespace squares {
+    export const squaresWatch = "squares_watch";
+    export const squaresUnwatch = "squares_unwatch";
   }
 
   export namespace deps {

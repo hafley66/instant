@@ -1028,6 +1028,7 @@ pub fn run() {
             pty::list_sessions,
             open_session,
             pty::write_pty,
+            pty::pty_ack,
             pty::resize_pty,
             pty::close_pty,
             pty::kill_session,

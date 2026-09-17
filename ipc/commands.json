@@ -1,150 +1,21 @@
 {
-  "pty": [
-    "list_sessions",
-    "open_session",
-    "write_pty",
-    "resize_pty",
-    "close_pty",
-    "kill_session",
-    "scroll_session",
-    "tmux_buffer",
-    "rogue_agent_sessions",
-    "rename_session_window"
-  ],
-  "cdp": [
-    "cdp_open",
-    "cdp_send",
-    "cdp_resize",
-    "cdp_navigate",
-    "cdp_close",
-    "cdp_status"
-  ],
-  "rustdoc": [
-    "rustdoc_open"
-  ],
-  "workspace": [
-    "list_workspaces",
-    "create_workspace",
-    "remove_workspace"
-  ],
-  "worktrees": [
-    "scan_worktrees",
-    "add_worktree",
-    "git_diff",
-    "remove_worktree",
-    "worktree_at"
-  ],
-  "activity": [
-    "activity_events",
-    "activity_clear",
-    "activity_log",
-    "capture_set_enabled",
-    "capture_enabled",
-    "rules_get",
-    "rules_set",
-    "activity_rule_matches",
-    "watcher_status"
-  ],
-  "capture": [
-    "capture_permissions",
-    "capture_request_screen"
-  ],
-  "config": [
-    "config_get",
-    "config_set",
-    "config_reload",
-    "config_open"
-  ],
-  "files": [
-    "list_dir",
-    "list_dir_meme",
-    "list_dir_recursive",
-    "search_files",
-    "resolve_ref",
-    "clear_ref_index",
-    "read_git_blob",
-    "read_image",
-    "read_text",
-    "save_text",
-    "delete_file",
-    "stash_drop",
-    "fs_watch_claim",
-    "fs_watch_release"
-  ],
-  "harness": [
-    "harness_session",
-    "harness_sessions"
-  ],
-  "boop": [
-    "boop_turns",
-    "boop_turns_recent",
-    "boop_sync_session",
-    "boop_locate_turns",
-    "boop_favorite_add",
-    "boop_favorites",
-    "boop_favorite_toggle",
-    "boop_tags_recent",
-    "boop_tags_search",
-    "boop_tags_apply",
-    "boop_tags_for",
-    "boop_turn_comments",
-    "boop_turn_comment_upsert",
-    "boop_turn_comment_delete",
-    "boop_turn_comments_sent",
-    "boop_turn_annotations",
-    "boop_turn_comment_forks",
-    "boop_config_presets",
-    "boop_lanes",
-    "boop_lane_events",
-    "boop_agent_touches",
-    "boop_session_graph",
-    "boop_search",
-    "boop_search_status",
-    "boop_search_sync"
-  ],
-  "boop_mux": [
-    "boop_mux_capture",
-    "boop_mux_session",
-    "boop_mux_send_keys",
-    "boop_mux_exit_copy_mode"
-  ],
-  "squares": [
-    "squares_watch",
-    "squares_unwatch"
-  ],
-  "ledger": [
-    "list_ai_sessions",
-    "read_ai_messages",
-    "latest_ai_message"
-  ],
-  "meme": [
-    "make_slack_emoji",
-    "magick_available",
-    "install_imagemagick",
-    "save_meme",
-    "copy_meme_image"
-  ],
-  "favorites": [
-    "fav_add",
-    "fav_remove",
-    "fav_list"
-  ],
-  "sprefa": [
-    "sprefa_schema",
-    "sprefa_ping",
-    "sprefa_eval",
-    "sprefa_query_sql",
-    "sprefa_rel_source"
-  ],
-  "deps": [
-    "tool_status"
-  ],
-  "shell": [
-    "screenshot",
-    "open_target",
-    "run_click",
-    "log_append",
-    "log_path",
-    "log_reveal"
-  ]
+  "pty": ["list_sessions", "open_session", "write_pty", "pty_ack", "resize_pty", "close_pty", "kill_session", "scroll_session", "tmux_buffer", "rogue_agent_sessions", "rename_session_window"],
+  "cdp": ["cdp_open", "cdp_send", "cdp_resize", "cdp_navigate", "cdp_close", "cdp_status"],
+  "rustdoc": ["rustdoc_open"],
+  "workspace": ["list_workspaces", "create_workspace", "remove_workspace"],
+  "worktrees": ["scan_worktrees", "add_worktree", "git_diff", "remove_worktree", "worktree_at"],
+  "activity": ["activity_events", "activity_clear", "activity_log", "capture_set_enabled", "capture_enabled", "rules_get", "rules_set", "activity_rule_matches", "watcher_status"],
+  "capture": ["capture_permissions", "capture_request_screen"],
+  "config": ["config_get", "config_set", "config_reload", "config_open"],
+  "files": ["list_dir", "list_dir_meme", "list_dir_recursive", "search_files", "resolve_ref", "clear_ref_index", "read_git_blob", "read_image", "read_text", "save_text", "delete_file", "stash_drop", "fs_watch_claim", "fs_watch_release"],
+  "harness": ["harness_session", "harness_sessions"],
+  "boop": ["boop_turns", "boop_turns_recent", "boop_sync_session", "boop_locate_turns", "boop_favorite_add", "boop_favorites", "boop_favorite_toggle", "boop_tags_recent", "boop_tags_search", "boop_tags_apply", "boop_tags_for", "boop_turn_comments", "boop_turn_comment_upsert", "boop_turn_comment_delete", "boop_turn_comments_sent", "boop_turn_annotations", "boop_turn_comment_forks", "boop_config_presets", "boop_lanes", "boop_lane_events", "boop_agent_touches", "boop_session_graph", "boop_search", "boop_search_status", "boop_search_sync"],
+  "boop_mux": ["boop_mux_capture", "boop_mux_session", "boop_mux_send_keys", "boop_mux_exit_copy_mode"],
+  "ledger": ["list_ai_sessions", "read_ai_messages", "latest_ai_message"],
+  "meme": ["make_slack_emoji", "magick_available", "install_imagemagick", "save_meme", "copy_meme_image"],
+  "favorites": ["fav_add", "fav_remove", "fav_list"],
+  "sprefa": ["sprefa_schema", "sprefa_ping", "sprefa_eval", "sprefa_query_sql", "sprefa_rel_source"],
+  "squares": ["squares_watch", "squares_unwatch"],
+  "deps": ["tool_status"],
+  "shell": ["screenshot", "open_target", "run_click", "log_append", "log_path", "log_reveal"]
 }
