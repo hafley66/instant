@@ -88,7 +88,7 @@ pub(crate) fn boop_db_path() -> Result<PathBuf, String> {
     Store::default_path().map_err(|error| error.to_string())
 }
 
-fn open_store_ro() -> Result<Store, String> {
+pub(crate) fn open_store_ro() -> Result<Store, String> {
     let path = boop_db_path()?;
     Store::open_readonly(path).map_err(|error| error.to_string())
 }
@@ -168,7 +168,7 @@ fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
 /// was instant's top CPU cost. Read only the newest window.
 const TURN_WINDOW: u64 = 300;
 
-fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
+pub(crate) fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
     let store = open_store_ro()?;
     let last_turn: Option<u64> = store
         .connection()
@@ -451,7 +451,7 @@ pub struct BoopTurnComment {
     pub updated_ts: i64,
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
@@ -937,26 +937,70 @@ pub struct LocatedTurn {
     pub confidence: &'static str,
 }
 
-fn locate_turns(lines: Vec<LogicalLine>, turns: Vec<BoopTurn>) -> Vec<LocatedTurn> {
+/// The rows a harness reserves for its own input box, in the pane's own row
+/// numbers. The composer is not a turn, so both the client path and the feed
+/// drop it before matching.
+pub(crate) fn input_region(
+    rows: &[String],
+    harness: Option<&str>,
+) -> Option<boop_harness::harness::TerminalInputRegion> {
     let registry = boop_harness::Registry::discover();
+    harness
+        .and_then(|name| registry.by_name(name))
+        .and_then(|adapter| {
+            let rows = rows.iter().map(String::as_str).collect::<Vec<_>>();
+            adapter.terminal_input_region(&rows)
+        })
+}
+
+pub(crate) fn to_turnvis(turn: BoopTurn) -> boop_turnvis::BoopTurn {
+    boop_turnvis::BoopTurn {
+        session: turn.session,
+        harness: turn.harness,
+        turn: turn.turn,
+        ts: turn.ts,
+        role: turn.role,
+        said: turn.said,
+    }
+}
+
+pub(crate) fn from_visible(found: boop_turnvis::VisibleTurn) -> LocatedTurn {
+    LocatedTurn {
+        session: found.session,
+        harness: found.harness,
+        turn: found.turn,
+        ts: found.ts,
+        role: found.role,
+        said: found.said,
+        id: found.id,
+        buffer_start: found.buffer_start,
+        buffer_end: found.buffer_end,
+        anchor_start: found.anchor_start,
+        anchor_end: found.anchor_end,
+        confidence: match found.confidence {
+            boop_turnvis::Confidence::Anchored => "anchored",
+            boop_turnvis::Confidence::Extended => "extended",
+        },
+    }
+}
+
+fn locate_turns(lines: Vec<LogicalLine>, turns: Vec<BoopTurn>) -> Vec<LocatedTurn> {
     let harness = turns
         .iter()
         .max_by_key(|turn| turn.ts)
         .map(|turn| turn.harness.as_str());
-    let input = harness
-        .and_then(|name| registry.by_name(name))
-        .and_then(|adapter| {
-            let rows = lines
-                .iter()
-                .map(|line| line.text.as_str())
-                .collect::<Vec<_>>();
-            adapter.terminal_input_region(&rows)
-        });
+    let rows = lines
+        .iter()
+        .map(|line| line.text.clone())
+        .collect::<Vec<_>>();
+    let input = input_region(&rows, harness);
     let lines: Vec<boop_turnvis::LogicalLine> = lines
         .into_iter()
         .enumerate()
         .filter(|(index, _)| {
-            input.is_none_or(|region| *index < region.start || *index > region.end)
+            input
+                .as_ref()
+                .is_none_or(|region| *index < region.start || *index > region.end)
         })
         .map(|(_, line)| boop_turnvis::LogicalLine {
             text: line.text,
@@ -964,36 +1008,10 @@ fn locate_turns(lines: Vec<LogicalLine>, turns: Vec<BoopTurn>) -> Vec<LocatedTur
             end: line.end,
         })
         .collect();
-    let turns: Vec<boop_turnvis::BoopTurn> = turns
-        .into_iter()
-        .map(|turn| boop_turnvis::BoopTurn {
-            session: turn.session,
-            harness: turn.harness,
-            turn: turn.turn,
-            ts: turn.ts,
-            role: turn.role,
-            said: turn.said,
-        })
-        .collect();
+    let turns: Vec<boop_turnvis::BoopTurn> = turns.into_iter().map(to_turnvis).collect();
     boop_turnvis::locate_visible_turns(&lines, &turns)
         .into_iter()
-        .map(|found| LocatedTurn {
-            session: found.session,
-            harness: found.harness,
-            turn: found.turn,
-            ts: found.ts,
-            role: found.role,
-            said: found.said,
-            id: found.id,
-            buffer_start: found.buffer_start,
-            buffer_end: found.buffer_end,
-            anchor_start: found.anchor_start,
-            anchor_end: found.anchor_end,
-            confidence: match found.confidence {
-                boop_turnvis::Confidence::Anchored => "anchored",
-                boop_turnvis::Confidence::Extended => "extended",
-            },
-        })
+        .map(from_visible)
         .collect()
 }
 

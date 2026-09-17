@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-fn tmux_command(socket: Option<&str>) -> Command {
+pub(crate) fn tmux_command(socket: Option<&str>) -> Command {
     let mut command = Command::new("tmux");
     if let Some(socket) = socket {
         command.args(["-L", socket]);

@@ -96,6 +96,36 @@ async fn unknown_method_returns_error_frame() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_strip_rides_the_events_channel() {
+    let (addr, host) = spin().await;
+    let mut client = connect(addr).await;
+    client.send(json!({ "jsonrpc": "2.0", "method": "events" })).await;
+    // Let the server register the subscription before the push.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let rows = ["❯ hi".to_owned(), String::new(), "⏺ done".to_owned()];
+    let tags = std::collections::BTreeMap::from([("turn:s1:1".to_owned(), vec!["rust".to_owned()])]);
+    let strip = crate::squares::project_rows("s1", &rows, Vec::new(), tags);
+    let host: Arc<dyn Host> = host;
+    crate::squares::publish(&host, &strip).expect("publish");
+
+    let frame = client.next_frame().await;
+    assert_eq!(frame["method"], json!("events"), "frame: {frame}");
+    assert_eq!(
+        frame["params"]["event"],
+        json!("squares-update"),
+        "frame: {frame}"
+    );
+    assert_eq!(frame["params"]["payload"]["session"], json!("s1"), "frame: {frame}");
+    assert_eq!(frame["params"]["payload"]["rows"], json!(3), "frame: {frame}");
+    assert_eq!(
+        frame["params"]["payload"]["tags"]["turn:s1:1"],
+        json!(["rust"]),
+        "frame: {frame}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn events_subscription_forwards_host_emits() {
     let (addr, host) = spin().await;
     let mut client = connect(addr).await;

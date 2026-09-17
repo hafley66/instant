@@ -233,6 +233,14 @@ pub fn dispatch(
             let p: StashDropArgs = parse(name, params)?;
             ok(wait(crate::fs::stash_drop(p.paths)))
         }
+        "squares_watch" => {
+            let p: crate::squares::SquaresWatchArgs = parse(name, params)?;
+            res(crate::squares::squares_watch_impl(host, p))
+        }
+        "squares_unwatch" => {
+            let p: crate::squares::SquaresUnwatchArgs = parse(name, params)?;
+            res(crate::squares::squares_unwatch_impl(&p.pty))
+        }
         "fs_watch_claim" => {
             let p: FsWatchClaimArgs = parse(name, params)?;
             res(crate::fs_watch::fs_watch_claim_impl(host, &services, p.claim_id, p.path, p.recursive))

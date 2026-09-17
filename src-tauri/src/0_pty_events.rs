@@ -73,6 +73,11 @@ impl PtyEvents {
                 counters
                     .chunks
                     .fetch_add(chunks.len() as u64, Ordering::Relaxed);
+                // The strip reads the pane it was just told about: one dirty
+                // bit per pane, and the feed does the reading off this thread.
+                for chunk in &chunks {
+                    crate::squares::note_output(&chunk.id);
+                }
                 let _ = host.emit(
                     "pty-data-batch",
                     serde_json::to_value(&PtyDataBatch { chunks }).unwrap_or(serde_json::Value::Null),

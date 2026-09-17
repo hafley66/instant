@@ -22,6 +22,8 @@ mod kitty;
 mod ledger;
 #[path = "0_pty_events.rs"]
 mod pty_events;
+#[path = "1_squares.rs"]
+mod squares;
 pub use boop_harness::transcript::Message as AiMessage;
 mod meme;
 mod pty;
@@ -759,6 +761,23 @@ async fn open_session(
 }
 
 #[tauri::command]
+fn squares_watch(
+    app: AppHandle,
+    pty: String,
+    session: String,
+    target: String,
+    socket: Option<String>,
+) -> Result<(), String> {
+    let h: Arc<dyn host::Host> = Arc::new(host::TauriHost(app));
+    squares::squares_watch_impl(h, squares::SquaresWatchArgs { pty, session, target, socket })
+}
+
+#[tauri::command]
+fn squares_unwatch(pty: String) -> Result<(), String> {
+    squares::squares_unwatch_impl(&pty)
+}
+
+#[tauri::command]
 fn fs_watch_claim(
     app: AppHandle,
     services: tauri::State<Arc<services::Services>>,
@@ -1087,6 +1106,8 @@ pub fn run() {
             boop::boop_config_presets,
             boop::boop_agent_touches,
             boop::boop_session_graph,
+            squares_watch,
+            squares_unwatch,
             boop_tmux::boop_mux_capture,
             boop_tmux::boop_mux_exit_copy_mode,
             harness_store::boop_mux_session,

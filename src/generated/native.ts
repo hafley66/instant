@@ -95,6 +95,8 @@ export type CommandName =
   | "boop_mux_session"
   | "boop_mux_send_keys"
   | "boop_mux_exit_copy_mode"
+  | "squares_watch"
+  | "squares_unwatch"
   | "list_ai_sessions"
   | "read_ai_messages"
   | "latest_ai_message"
@@ -267,6 +269,11 @@ export namespace commands {
     export const boopMuxSession = "boop_mux_session";
     export const boopMuxSendKeys = "boop_mux_send_keys";
     export const boopMuxExitCopyMode = "boop_mux_exit_copy_mode";
+  }
+
+  export namespace squares {
+    export const squaresWatch = "squares_watch";
+    export const squaresUnwatch = "squares_unwatch";
   }
 
   export namespace ledger {
