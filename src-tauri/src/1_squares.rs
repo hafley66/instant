@@ -16,12 +16,12 @@
 // (`pty::scroll_session`), so the window is the capture's tail shifted by
 // `#{scroll_position}` inside `#{pane_height}` rows — read here, pushed with
 // everything else, which is why a client that only draws asks for nothing.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use boop_turnstrip::{Layout, TurnRow, Viewport};
+use boop_turnstrip::{kind_of, Layout, Mode, Options, TurnKind, TurnRow, Viewport};
 use boop_turnvis::locate_visible_turns;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,38 @@ pub struct SquaresWatchArgs {
     pub target: String,
     #[serde(default)]
     pub socket: Option<String>,
+    /// What the reader asked the strip to draw. Every field is optional and
+    /// falls back to the crate's measured default, so a client that sends
+    /// nothing gets the same strip as before the modes existed.
+    #[serde(default)]
+    pub options: SquaresOptions,
+}
+
+/// The reader's own choices, as the client spells them. The crate's `Options`
+/// carries more than a client should have to send (the flex, the gap, the
+/// budget), so only the three a reader can actually change cross the wire.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SquaresOptions {
+    #[serde(default)]
+    pub mode: Option<Mode>,
+    #[serde(default)]
+    pub show_tools: Option<bool>,
+    #[serde(default)]
+    pub user_keep: Option<usize>,
+}
+
+impl SquaresOptions {
+    /// The crate's options with the reader's choices laid over the defaults.
+    pub fn merged(self) -> Options {
+        let defaults = Options::default();
+        Options {
+            mode: self.mode.unwrap_or(defaults.mode),
+            show_tools: self.show_tools.unwrap_or(defaults.show_tools),
+            user_keep: self.user_keep.unwrap_or(defaults.user_keep),
+            ..defaults
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -73,6 +105,10 @@ pub struct Strip {
     pub at: i64,
     pub rows: usize,
     pub turns: Vec<LocatedTurn>,
+    /// The reader's own turns the window does not hold — the prompts above the
+    /// capture. They carry no rows (nothing matched them) and they are what the
+    /// strip's band draws, so a reader can always see their own last prompts.
+    pub pinned: Vec<LocatedTurn>,
     pub tags: BTreeMap<String, Vec<String>>,
     /// `None` only when the pane's height could not be read, so the client can
     /// tell "no strip" from "an empty strip".
@@ -107,6 +143,7 @@ pub fn project_rows(
     turns: Vec<BoopTurn>,
     tags: BTreeMap<String, Vec<String>>,
     window: Option<PaneWindow>,
+    options: &Options,
 ) -> Strip {
     let harness = turns
         .iter()
@@ -127,16 +164,84 @@ pub fn project_rows(
             end: index,
         })
         .collect();
-    let turns: Vec<boop_turnvis::BoopTurn> = turns.into_iter().map(to_turnvis).collect();
-    let located = locate_visible_turns(&lines, &turns);
-    let layout = window.and_then(|window| window_layout(&lines, &located, rows.len(), window));
+    let located = locate_visible_turns(&lines, &turns.iter().cloned().map(to_turnvis).collect::<Vec<_>>());
+    let pins = pinned_of(&turns, options);
+    let pin_ids: Vec<String> = pins.iter().map(|turn| turn_id(turn)).collect();
+    let layout = window.and_then(|window| {
+        window_layout(&lines, &located, &pin_ids, rows.len(), window, options)
+    });
+    // Only the pins the strip actually drew are worth carrying: the crate drops
+    // a pin the mode placed a square for, and a frame that shipped the rest
+    // would ask the client to look up turns nothing draws.
+    let band: HashSet<&str> = match &layout {
+        Some(layout) => layout.squares()[..layout.band()]
+            .iter()
+            .map(|square| square.id.as_str())
+            .collect(),
+        None => HashSet::new(),
+    };
+    let pinned: Vec<LocatedTurn> = pins
+        .iter()
+        .filter(|turn| band.contains(turn_id(turn).as_str()))
+        .map(|turn| pinned_turn(turn))
+        .collect();
     Strip {
         session: session.to_owned(),
         at: now_ms() as i64,
         rows: rows.len(),
         turns: located.into_iter().map(from_visible).collect(),
+        pinned,
         tags,
         layout,
+    }
+}
+
+/// The id every turn read is addressed by: the matcher's own spelling, so a pin
+/// and a located turn are the same key to the client.
+fn turn_id(turn: &BoopTurn) -> String {
+    format!("{}:{}", turn.session, turn.turn)
+}
+
+/// The reader's own turns, newest `user_keep` of them, oldest first. Whether
+/// the mode places a square for one is not this function's business: a prompt
+/// the matcher found above the window and a prompt the capture never held are
+/// both turns the reader wants back, and the crate drops the ones it drew.
+///
+/// The store hands the turns back in transcript order, but the band's end is
+/// what a reader wants kept when it is too short, so the order is stated here
+/// rather than assumed.
+fn pinned_of<'a>(turns: &'a [BoopTurn], options: &Options) -> Vec<&'a BoopTurn> {
+    if options.user_keep == 0 {
+        return Vec::new();
+    }
+    let mut kept: Vec<&BoopTurn> = turns
+        .iter()
+        .filter(|turn| kind_of(&turn.role) == TurnKind::User)
+        .collect();
+    kept.sort_by_key(|turn| (turn.ts, turn.turn));
+    if kept.len() > options.user_keep {
+        kept.drain(..kept.len() - options.user_keep);
+    }
+    kept
+}
+
+/// A pinned turn as the frame carries it. It has no rows: the matcher did not
+/// find it on the pane at all, so its span is the zero it never had, and the
+/// confidence says so rather than claiming an anchor it does not have.
+fn pinned_turn(turn: &BoopTurn) -> LocatedTurn {
+    LocatedTurn {
+        session: turn.session.clone(),
+        harness: turn.harness.clone(),
+        turn: turn.turn,
+        ts: turn.ts,
+        role: turn.role.clone(),
+        said: turn.said.clone(),
+        id: turn_id(turn),
+        buffer_start: 0,
+        buffer_end: 0,
+        anchor_start: 0,
+        anchor_end: 0,
+        confidence: "pinned",
     }
 }
 
@@ -150,8 +255,10 @@ pub fn project_rows(
 fn window_layout(
     lines: &[boop_turnvis::LogicalLine],
     located: &[boop_turnvis::VisibleTurn],
+    pins: &[String],
     rows: usize,
     window: PaneWindow,
+    options: &Options,
 ) -> Option<Layout> {
     let height = window.height.min(rows);
     if height == 0 {
@@ -167,11 +274,12 @@ fn window_layout(
         .iter()
         .map(|turn| boop_turnstrip::rows_of(lines, turn, viewport))
         .collect();
-    Some(boop_turnstrip::layout(
+    Some(boop_turnstrip::layout_pinned(
         &turn_rows,
+        pins,
         viewport,
         viewport.top,
-        &boop_turnstrip::Options::default(),
+        options,
     ))
 }
 
@@ -184,16 +292,25 @@ pub fn sources_of(turns: &[LocatedTurn]) -> Vec<String> {
 }
 
 /// Read the pane and the store, once, and build the frame the socket carries.
-pub fn project(session: &str, target: &str, socket: Option<&str>) -> Result<Strip, String> {
+pub fn project(
+    session: &str,
+    target: &str,
+    socket: Option<&str>,
+    options: &Options,
+) -> Result<Strip, String> {
     let rows = capture_lines(target, socket)?;
     // A pane that predates this process's tmux still captures; only the window
     // read can come back empty, and then the frame carries spans without a
     // layout rather than no frame at all.
     let window = pane_window(target, socket).ok();
     let turns = read_turns(session)?;
-    let strip = project_rows(session, &rows, turns, BTreeMap::new(), window);
+    let strip = project_rows(session, &rows, turns, BTreeMap::new(), window, options);
+    // The band's turns carry marks too: a pinned prompt is exactly the square a
+    // reader hovers to see what they asked, so its tags ride the same read.
+    let mut sources = sources_of(&strip.turns);
+    sources.extend(sources_of(&strip.pinned));
     let tags = open_store_ro()?
-        .tags_for_many(&sources_of(&strip.turns))
+        .tags_for_many(&sources)
         .map_err(|error| error.to_string())?;
     Ok(Strip { tags, ..strip })
 }
@@ -249,6 +366,7 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
     // idle when its strip attaches — a finished turn, a viewer onto a quiet
     // session — would otherwise show nothing until it next wrote, which on a
     // settled pane is never.
+    let options = args.options.merged();
     let mut wait_for_a_write = false;
     loop {
         if wait_for_a_write {
@@ -261,7 +379,7 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
         }
         wait_for_a_write = true;
         let started = Instant::now();
-        match project(&args.session, &args.target, args.socket.as_deref()) {
+        match project(&args.session, &args.target, args.socket.as_deref(), &options) {
             Ok(strip) => {
                 let _ = publish(&host, &strip);
             }
@@ -320,6 +438,7 @@ mod tests {
             turns,
             tags.clone(),
             Some(PaneWindow { height: 3, scroll: 0 }),
+            &Options::default(),
         );
 
         assert_eq!(strip.session, "s1");
@@ -335,21 +454,26 @@ mod tests {
         }
         let layout = strip.layout.expect("a pane height in means a layout out");
         assert_eq!(
-            layout.squares.len(),
-            strip.turns.len(),
-            "one square per pushed turn"
-        );
-        assert_eq!(
-            layout.squares.iter().filter(|square| square.active).count(),
+            layout.squares().iter().filter(|square| square.active).count(),
             1,
             "exactly one square is the one being read: {:?}",
-            layout.squares
+            layout.squares()
         );
-        assert!(
-            layout.block.height >= boop_turnstrip::Options::default().block_min,
-            "the window never vanishes: {:?}",
-            layout.block
-        );
+        // Three rows of a five-row capture: the prompt on row 0 is above the
+        // window, so it is the band's, not a row's, and only the turn the
+        // matcher saw on these rows draws on a row of its own.
+        assert_eq!(layout.band(), 1, "squares: {:?}", layout.squares());
+        assert_eq!(layout.squares()[0].id, "s1:1");
+        assert_eq!(sources_of(&strip.pinned), ["turn:s1:1"]);
+        let drawn: Vec<&str> = layout.squares()[layout.band()..]
+            .iter()
+            .map(|square| square.id.as_str())
+            .collect();
+        assert_eq!(drawn, ["s1:2"]);
+        let Layout::Relative(relative) = layout else {
+            panic!("a relative strip unless the reader asked otherwise");
+        };
+        assert_eq!(relative.rows, 3.0, "the window's own height, in rows");
     }
 
     #[test]
@@ -360,11 +484,56 @@ mod tests {
             Vec::new(),
             BTreeMap::new(),
             Some(PaneWindow { height: 10, scroll: 0 }),
+            &Options::default(),
         );
         assert_eq!(strip.rows, 0);
         assert!(strip.turns.is_empty());
+        assert!(strip.pinned.is_empty());
         assert!(strip.tags.is_empty());
         assert!(strip.layout.is_none(), "an empty capture has no first row to measure from");
+    }
+
+    /// A prompt that scrolled out of the capture is still the reader's, so it
+    /// rides the frame and the band draws it: the strip never loses the turns a
+    /// reader navigates by.
+    #[test]
+    fn a_prompt_above_the_capture_rides_the_frame_as_a_pin() {
+        let rows: Vec<String> = ["⏺ done", "", "❯ and again", "", "⏺ working"]
+            .iter()
+            .map(|row| (*row).to_owned())
+            .collect();
+        let turns = vec![
+            turn("s1", 1, "user", "the prompt nobody can see any more"),
+            turn("s1", 2, "assistant", "done"),
+            turn("s1", 3, "user", "and again"),
+            turn("s1", 4, "assistant", "working"),
+        ];
+        let strip = project_rows(
+            "s1",
+            &rows,
+            turns,
+            BTreeMap::new(),
+            Some(PaneWindow { height: 5, scroll: 0 }),
+            &Options::default(),
+        );
+
+        assert_eq!(
+            sources_of(&strip.pinned),
+            ["turn:s1:1"],
+            "the first prompt is above the capture: {:?}",
+            strip.pinned
+        );
+        assert_eq!(strip.pinned[0].confidence, "pinned");
+        assert_eq!(strip.pinned[0].buffer_start, 0);
+        let layout = strip.layout.expect("layout");
+        assert_eq!(layout.band(), 1);
+        assert_eq!(layout.squares()[0].id, "s1:1");
+        assert_eq!(layout.squares()[0].y, 0.0, "a band square counts places, not rows");
+        assert!(!layout.squares()[0].active);
+        assert!(
+            !layout.squares()[1..].iter().any(|square| square.id == "s1:1"),
+            "a pinned turn is not drawn twice"
+        );
     }
 
     /// The composer is the harness's own row range, not a turn: the projection
@@ -382,6 +551,7 @@ mod tests {
             turns,
             BTreeMap::new(),
             Some(PaneWindow { height: 4, scroll: 0 }),
+            &Options::default(),
         );
         for found in &strip.turns {
             assert!(
@@ -413,48 +583,85 @@ mod tests {
             turn("s1", 1, "user", "alpha one\nalpha two\nalpha three\nalpha four"),
             turn("s1", 2, "assistant", "beta one\nbeta two\nbeta three\nbeta four"),
         ];
-        let at = |height: usize, scroll: usize| {
+        let at = |height: usize, scroll: usize, options: &Options| {
             project_rows(
                 "s1",
                 &rows,
                 turns.clone(),
                 BTreeMap::new(),
                 Some(PaneWindow { height, scroll }),
+                options,
             )
         };
-        let active = |strip: &Strip| {
+        let ids = |strip: &Strip| -> Vec<String> {
+            let layout = strip.layout.as_ref().expect("layout");
+            layout.squares()[layout.band()..]
+                .iter()
+                .map(|square| square.id.clone())
+                .collect()
+        };
+        let active_id = |strip: &Strip| -> Option<String> {
             strip
                 .layout
                 .as_ref()
                 .expect("layout")
-                .squares
+                .squares()
                 .iter()
-                .position(|square| square.active)
+                .find(|square| square.active)
+                .map(|square| square.id.clone())
+        };
+        let relative = Options::default();
+        let map = Options {
+            mode: Mode::Map,
+            ..Options::default()
         };
 
-        let whole = at(8, 0);
-        let tail = at(4, 0);
-        let scrolled = at(4, 4);
+        let whole = at(8, 0, &relative);
+        let tail = at(4, 0, &relative);
+        let scrolled = at(4, 4, &relative);
 
         assert_eq!(whole.turns.len(), 2, "both turns matched: {:?}", whole.turns);
-        assert_eq!(active(&whole), Some(0), "the whole capture reads from its first turn");
-        assert_eq!(active(&tail), Some(1), "the live tail reads the newer turn");
+        // The window is the rows the reader is looking at, so the squares on
+        // rows are the turns the matcher found on them and nothing else: the
+        // tail holds the newer turn, four rows up holds the older one, and the
+        // whole pane holds both. The older turn is still on the strip either
+        // way, in the band, because it is the reader's own prompt.
+        assert_eq!(ids(&whole), ["s1:1", "s1:2"]);
+        assert_eq!(ids(&tail), ["s1:2"]);
+        assert_eq!(ids(&scrolled), ["s1:1"]);
+        assert_eq!(active_id(&whole).as_deref(), Some("s1:1"));
+        assert_eq!(active_id(&tail).as_deref(), Some("s1:2"));
+        assert_eq!(active_id(&scrolled).as_deref(), Some("s1:1"));
         assert_eq!(
-            active(&scrolled),
-            Some(0),
-            "four rows up from the tail reads the older turn again"
+            tail.layout.as_ref().unwrap().band(),
+            1,
+            "the prompt above the tail is the band's"
         );
+
+        // The map is the one mode with a block, and the block is what a scroll
+        // moves: the two numbers the server read off tmux, nothing from the
+        // client.
+        let whole = at(8, 0, &map);
+        let tail = at(4, 0, &map);
+        let scrolled = at(4, 4, &map);
+        let block = |strip: &Strip| {
+            let layout = strip.layout.as_ref().expect("layout");
+            let Layout::Map(map) = layout else {
+                panic!("map mode asked for, a relative strip came back");
+            };
+            map.block
+        };
         assert!(
-            tail.layout.as_ref().unwrap().block.top > whole.layout.as_ref().unwrap().block.top,
+            block(&tail).top > block(&whole).top,
             "the block moves down with the window"
         );
         assert_eq!(
-            scrolled.layout.as_ref().unwrap().block.top,
-            whole.layout.as_ref().unwrap().block.top,
+            block(&scrolled).top,
+            block(&whole).top,
             "scrolling four rows over a four-row pane puts the window back on the capture's first row"
         );
         assert!(
-            scrolled.layout.unwrap().block.height < whole.layout.unwrap().block.height,
+            block(&scrolled).height < block(&whole).height,
             "the window is four rows either way: the block maps those rows, so it stays shorter"
         );
     }

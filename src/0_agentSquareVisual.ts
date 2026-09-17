@@ -28,6 +28,17 @@ export const SQUARE_MOVE_MS = 260
 
 export type SquareKind = "user" | "agent" | "tool" | "other"
 
+/** The shape a kind draws with, after its colour: the reader's own turns are
+ *  circles, an agent's the rounded square the strip started with, a tool's a
+ *  sharp mark, and anything else sits between them. `Record` keyed by kind, so a
+ *  new kind is a type error rather than a square drawn at the default. */
+const SQUARE_SHAPES: Record<SquareKind, string> = {
+  user: "50%",
+  agent: "2.4px",
+  tool: "1px",
+  other: "3px",
+}
+
 /** What identifies a square before it has a position or an active flag. */
 export type SquareSeed = {
   id: string
@@ -94,8 +105,13 @@ export function reseedSquare(visual: SquareVisual, seed: SquareSeed) {
  * How strong a square sits relative to the active one. The active square is
  * full, its immediate neighbours are full, and everything past them dims, which
  * is what makes the strip read as a stack with a position rather than a list.
+ *
+ * A turn the reader wrote is never dimmed: it is the reader's own place in the
+ * stack, so it stays at full strength wherever the mode put it, and in the band
+ * it is not a position at all.
  */
-export function strengthAt(index: number, active: number): number {
+export function strengthAt(index: number, active: number, kind: SquareKind): number {
+  if (kind === "user") return 1
   if (active < 0) return SQUARE_DIM
   return Math.abs(index - active) <= SQUARE_NEIGHBOURS ? 1 : SQUARE_DIM
 }
@@ -126,6 +142,6 @@ export function squareVars(state: SquareState): Record<string, string> {
     "--asq-scale": `${state.scale * (state.active ? SQUARE_SCALE : 1)}`,
     "--asq-strength": `${state.strength}`,
     "--asq-color": squareColor(state.kind, state.hue),
-    "--asq-shape": state.kind === "tool" ? "1.6px" : "2.4px",
+    "--asq-shape": SQUARE_SHAPES[state.kind],
   }
 }

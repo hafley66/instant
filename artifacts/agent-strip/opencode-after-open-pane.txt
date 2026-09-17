@@ -1,0 +1,42 @@
+agent-claude.%1 dead=0 cmd=boop
+agent-codex.%0 dead=0 cmd=boop
+agent-opencode.%2 dead=0 cmd=boop
+
+                                                                                                                                           
+  ┃                                                                                                FIXED_TERMINAL_REPLY                    
+  ┃  render the terminal flow                                                                                                              
+  ┃                                                                                                Context                                 
+                                                                                                   30 tokens                               
+     FIXED_TERMINAL_REPLY                                                                          0% used                                 
+                                                                                                   $0.00 spent                             
+     flowchart LR                                                                                                                          
+       PTY --> tmux                                                                                LSP                                     
+       tmux --> xterm                                                                              LSPs are disabled                       
+       xterm --> Markdown                                                                                                                  
+                                                                                                                                           
+     ▣  Build · Mock Model · 972ms                                                                                                         
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+                                                                                                                                           
+  ┃                                                                                                                                        
+  ┃                                                                                                                                        
+  ┃                                                                                                /private/tmp/instant-agent-47821/       
+  ┃  Build · Mock Model llmock                                                                     workspace                               
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                            
+   /private/tmp/instant-agent-47821/workspace                               30  ctrl+p commands    • OpenCode 1.18.31                      
+                                                                                                                                           

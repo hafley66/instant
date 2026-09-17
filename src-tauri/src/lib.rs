@@ -767,9 +767,19 @@ fn squares_watch(
     session: String,
     target: String,
     socket: Option<String>,
+    options: Option<squares::SquaresOptions>,
 ) -> Result<(), String> {
     let h: Arc<dyn host::Host> = Arc::new(host::TauriHost(app));
-    squares::squares_watch_impl(h, squares::SquaresWatchArgs { pty, session, target, socket })
+    squares::squares_watch_impl(
+        h,
+        squares::SquaresWatchArgs {
+            pty,
+            session,
+            target,
+            socket,
+            options: options.unwrap_or_default(),
+        },
+    )
 }
 
 #[tauri::command]

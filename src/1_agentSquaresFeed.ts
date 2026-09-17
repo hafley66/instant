@@ -9,7 +9,12 @@
 import { filter, type Observable } from "rxjs"
 import { invoke } from "./generated/native"
 import { nativeEvent$ } from "./reactive/nativeTransport"
+import type { SquaresOptions } from "./0_agentSquaresSettings"
 import type { SquareKind } from "./0_agentSquareVisual"
+
+/** The reader's choices ride the watch call; the settings module owns the type
+ *  and the values, so a strip and a toolbar cannot disagree about either. */
+export type { SquaresOptions }
 
 /** The event the server pushes a projection on. Mirrors `SQUARES_EVENT` in
  *  `src-tauri/src/1_squares.rs` — change both. */
@@ -30,7 +35,9 @@ export type StripTurn = {
   bufferEnd: number
   anchorStart: number
   anchorEnd: number
-  confidence: "anchored" | "extended"
+  /** `pinned` is a turn above the capture: it has no rows in the pane at all,
+   *  so it says so rather than claiming an anchor, and its four offsets are 0. */
+  confidence: "anchored" | "extended" | "pinned"
 }
 
 /** One pushed frame. `tags` is keyed by source (`turn:<session>:<turn>`) and
@@ -47,6 +54,10 @@ export type Strip = {
   at: number
   rows: number
   turns: StripTurn[]
+  /** The reader's own turns above the capture, oldest first: the turns the band
+   *  squares refer to, which `turns` does not carry because the matcher never
+   *  saw them. Their spans are all 0. */
+  pinned: StripTurn[]
   tags: Record<string, string[]>
   layout: StripLayout | null
 }
@@ -61,13 +72,30 @@ export type SquareLayout = {
   active: boolean
 }
 
-/** The strip itself: every square, the window's total, and the on-screen range. */
-export type StripLayout = {
-  squares: SquareLayout[]
-  /** Estimated rows the whole window occupies: the strip's denominator. */
-  span: number
-  block: { top: number; height: number }
-}
+/** The strip itself, in whichever space the mode placed its squares.
+ *
+ *  Both variants: `squares[0 .. band]` are the reader's own turns the mode
+ *  placed nothing for, oldest first, `y` counting places in the band rather than
+ *  rows and `active` always false; the rest are the mode's own, oldest first,
+ *  exactly one active. The tag is on the wire, so a client branches once on
+ *  which space `y` is in and never has to guess. */
+export type StripLayout =
+  | {
+      mode: "relative"
+      squares: SquareLayout[]
+      band: number
+      /** The reader's window in rows: what a square's `y` is measured in. */
+      rows: number
+    }
+  | {
+      mode: "map"
+      squares: SquareLayout[]
+      band: number
+      /** Estimated rows the whole window occupies: the strip's denominator. */
+      span: number
+      /** The reader's rows, in the map's own space. */
+      block: { top: number; height: number }
+    }
 
 export type SquaresWatch = {
   /** The pane's own id: the pty stream wakes the feed on this. */
@@ -86,10 +114,13 @@ export function squaresFeed(session: string, frames: Observable<Strip> = nativeE
 }
 
 /**
- * Start the server watching a pane. The returned function stops it, and the
- * caller owns it: a disposed tab must not leave a thread capturing its pane.
+ * Start the server watching a pane. The options ride the same call as the
+ * target: a mode change is a different projection, so the watcher restarts
+ * rather than the server holding a reader's choice between calls. The returned
+ * function stops it, and the caller owns it: a disposed tab must not leave a
+ * thread capturing its pane.
  */
-export async function watchSquares(input: SquaresWatch, send: typeof invoke = invoke): Promise<() => Promise<void>> {
-  await send("squares_watch", { ...input })
+export async function watchSquares(input: SquaresWatch, options: SquaresOptions, send: typeof invoke = invoke): Promise<() => Promise<void>> {
+  await send("squares_watch", { ...input, options })
   return () => send("squares_unwatch", { pty: input.pty })
 }

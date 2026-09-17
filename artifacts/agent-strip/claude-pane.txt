@@ -1,0 +1,41 @@
+agent-claude.%1 dead=0 cmd=boop
+agent-codex.%0 dead=0 cmd=boop
+
+
+ ▐▛███▛█   Claude Code v2.1.274
+▝▜██████▀  Sonnet 4.5 · API Usage Billing
+  ▝▝ ▝▝    /private/tmp/instant-agent-47821/workspace
+
+⚠ Safe mode: all customizations are disabled (CLAUDE.md, skills, plugins, hooks, MCP, agents, and more)
+  Restart without --safe-mode to re-enable
+
+❯ render the terminal flow                                                                                                                 
+
+⏺ FIXED_TERMINAL_REPLY
+  mermaid
+  flowchart LR
+    PTY --> tmux
+    tmux --> xterm
+    xterm --> Markdown
+
+✻ Churned for 0s · done 3:53 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                     tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ don't ask on (shift+tab to cycle) · ← for agents

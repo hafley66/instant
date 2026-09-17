@@ -9,6 +9,10 @@ import {
   TerminalScanShift,
 } from "./0_terminalRowGeometry";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
+// Type only: the card reaches `favorites` and through it the app's DOM modules,
+// and this overlay is imported by pure node unit tests (`rowTags`, `turnHue`,
+// `shiftSpans`), so the class is loaded when a reader first clicks a row.
+import type { TurnPanel } from "./1_turnPanel";
 
 export { shiftSpans };
 
@@ -91,6 +95,9 @@ export class TerminalTurnDebugOverlay {
   frame = 0;
   pointerRow: number | null = null;
   scan: TerminalScanShift;
+  /** The turn card a row opens, made on the first click and kept: it is placed
+   *  from that click and never moved, so it is not rebuilt per frame. */
+  panel: TurnPanel | null = null;
 
   constructor(
     readonly term: Terminal,
@@ -164,6 +171,10 @@ export class TerminalTurnDebugOverlay {
     while (this.nodes.length < tags.length) {
       const node = document.createElement("div");
       node.className = "term-turn-debug-row";
+      // The layer is pointer-transparent so the terminal keeps its own mouse; a
+      // row is the exception, since clicking one is how a turn's card opens.
+      node.style.pointerEvents = "auto";
+      node.addEventListener("click", (event) => { void this.openPanel(node, event); });
       this.root.appendChild(node);
       this.nodes.push(node);
     }
@@ -197,11 +208,62 @@ export class TerminalTurnDebugOverlay {
     }
   }
 
+  /** One turn's card, opened from the row that carries it. The row names its
+   *  turn id; the turn itself comes from the projection those rows were
+   *  labelled from, so the card shows the text the rows drew. */
+  async openPanel(row: HTMLElement, event: MouseEvent) {
+    const id = row.dataset.turnId ?? "";
+    if (!id) return;
+    const turn = this.projection.visible.find((candidate) => candidate.id === id) ?? null;
+    // A row whose turn left the projection between the paint and the click still
+    // carries its number, and every turn this overlay draws belongs to the pane's
+    // one session. A row with neither cannot name a source, so it opens nothing.
+    const session = turn?.session ?? this.projection.visible[0]?.session ?? "";
+    const number = turn ? turn.turn : Number(row.dataset.turn);
+    if (!session || !number) return;
+    const source = `turn:${session}:${number}`;
+    // The header the strip's own card wears (`label` in 1_agentSquaresModel), so
+    // both entry points read alike. A row with no turn behind it falls back to
+    // the text the row drew, timestamp and all missing.
+    const when = turn
+      ? new Date(turn.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "";
+    const at = turn ? `${turn.role} · turn ${turn.turn} · ${when}` : row.textContent ?? "";
+    const preview = turn ? turn.said : row.textContent ?? "";
+    // The turn itself, so the star writes the row the overlay already holds
+    // rather than reading the session's recent window back for it.
+    const payload = turn
+      ? {
+          session: turn.session,
+          harness: turn.harness,
+          turn: turn.turn,
+          ts: turn.ts,
+          role: turn.role,
+          said: turn.said,
+        }
+      : undefined;
+    // The click point in the pane's own coordinates, read before the load below
+    // so the card opens where the reader clicked and not where the pointer ended.
+    const box = this.host.getBoundingClientRect();
+    const x = event.clientX - box.left;
+    const y = event.clientY - box.top;
+    // Loaded here rather than at the top of the file: the card reaches
+    // `favorites`, whose graph reads localStorage through the app's persisted
+    // settings, and this module is imported by node-environment unit tests that
+    // stub no globals (`0_turnDebugOverlay.test.ts`). One click deep, and the
+    // module is cached after the first.
+    const { cachedMarks, TurnPanel } = await import("./1_turnPanel");
+    if (!this.panel) this.panel = new TurnPanel(this.host);
+    this.panel.open({ id, source, at, preview, marks: cachedMarks(source), turn: payload, x, y });
+  }
+
   dispose() {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.subscription.unsubscribe();
     this.disposables.forEach((disposable) => disposable.dispose());
     this.nodes.length = 0;
     this.root.remove();
+    this.panel?.dispose();
+    this.panel = null;
   }
 }

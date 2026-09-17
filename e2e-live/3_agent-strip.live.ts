@@ -37,11 +37,17 @@ declare global {
       session: string;
       rows: number;
       turns: Array<{ id: string; role: string; said: string }>;
+      pinned: Array<{ id: string; role: string; said: string }>;
       tags: Record<string, string[]>;
-      layout: { squares: Array<{ id: string; y: number; scale: number; active: boolean }>; span: number; block: { top: number; height: number } } | null;
+      layout:
+        | { mode: "relative"; squares: Square[]; band: number; rows: number }
+        | { mode: "map"; squares: Square[]; band: number; span: number; block: { top: number; height: number } }
+        | null;
     }>;
   }
 }
+
+type Square = { id: string; kind: string; y: number; scale: number; active: boolean };
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = join(repo, "fixtures", "transcripts", "provider", "0_terminal-flow.yaml");
@@ -310,12 +316,14 @@ for (const adapter of liveAgentAdapters) {
 
     // The tab has to bind the pane before any frame can exist. Asserted first so
     // a binding failure reads as itself instead of as a frame timeout.
-    await expect
+    const bound = await expect
       .poll(() => boundSession(session), {
         timeout: 90_000,
         message: `no session bound to pane ${session}`,
       })
-      .not.toBeNull();
+      .not.toBeNull()
+      .then(() => boundSession(session));
+    expect(bound, `no session bound to pane ${session}`).not.toBeNull();
 
     // Second dump, after the app attached: `dead=1` here is the app's own
     // attach having taken the pane down, which no later assertion can see.
@@ -328,15 +336,23 @@ for (const adapter of liveAgentAdapters) {
       })
       .toBeGreaterThan(0);
 
-    // The newest frame that carries this reply. A previous test's watcher can
-    // still be pushing its own session's strip into this page — the server keeps
-    // watching a pty until it is told to stop, and a page that closes without
-    // unwatching leaves that feed running — so "the last frame" is not
-    // necessarily this harness's.
-    const frame = await page.evaluate((marker) => {
-      const frames = window.__squaresFrames ?? [];
-      return frames.filter((f) => f.turns.some((turn) => turn.said.includes(marker))).pop() ?? null;
-    }, liveAgentReplyMarker);
+    // The newest frame of THIS session that carries this reply. Two filters,
+    // both needed: a previous test's watcher keeps pushing its own session's
+    // strip into this page (the server watches a pty until it is told to stop,
+    // and a page that closes without unwatching leaves that feed running), and
+    // the reply marker is the same string for every harness — so "the last frame
+    // carrying the marker" can be another harness's, in another mode.
+    const frame = await page.evaluate(
+      ([marker, sessionId]) => {
+        const frames = window.__squaresFrames ?? [];
+        return (
+          frames
+            .filter((f) => f.session === sessionId && f.turns.some((turn) => turn.said.includes(marker)))
+            .pop() ?? null
+        );
+      },
+      [liveAgentReplyMarker, bound],
+    );
     expect(frame, `no frame ever carried the reply for ${adapter.harness}`).not.toBeNull();
     const replied = frame.turns.filter((turn) => turn.said.includes(liveAgentReplyMarker));
     expect(replied, `the pane's reply was never attributed: ${JSON.stringify(frame.turns.map((t) => t.id))}`).not.toHaveLength(0);
@@ -348,24 +364,60 @@ for (const adapter of liveAgentAdapters) {
     // layout is a subset of the frame's turns rather than a copy. What it must
     // hold: every square is one of those turns, exactly one is active, and the
     // reply — which is on screen by construction — is placed.
-    const placedIds = frame.layout!.squares.map((square) => square.id);
+    const relative = frame.layout;
+    expect(relative?.mode, "the strip starts in the relative mode").toBe("relative");
+    // Two sets, and they are not the same set: the band's squares are the
+    // reader's own turns the window does not hold (the frame carries them in
+    // `pinned`, not in `turns`), and the rest are rows of the window, which by
+    // definition are turns the matcher found on the pane.
+    const allIds = relative!.squares.map((square) => square.id);
+    const drawnIds = relative!.squares.slice(relative!.band).map((square) => square.id);
     const turnIds = frame.turns.map((turn) => turn.id);
-    expect(new Set(placedIds).size, "a square was placed twice").toBe(placedIds.length);
-    for (const id of placedIds) expect(turnIds, `square ${id} is not in the frame`).toContain(id);
-    expect(placedIds, "the pane's reply was never placed").toContain(replied[0].id);
-    expect(frame.layout!.squares.filter((square) => square.active)).toHaveLength(1);
+    expect(new Set(allIds).size, "a square was placed twice").toBe(allIds.length);
+    for (const id of drawnIds) expect(turnIds, `square ${id} is not in the frame`).toContain(id);
+    expect(drawnIds, "the pane's reply was never placed").toContain(replied[0].id);
+    expect(relative!.squares.filter((square) => square.active)).toHaveLength(1);
+
+    // The reader's own prompts stay on the strip whatever the mode places: the
+    // band is the turns a reader navigates by, and a band square is by
+    // definition not a turn the window holds.
+    const pinnedIds = frame.pinned.map((turn) => turn.id);
+    const bandIds = relative!.squares.slice(0, relative!.band).map((square) => square.id);
+    for (const id of bandIds) {
+      expect(pinnedIds, `band square ${id} is not a pinned turn`).toContain(id);
+      expect(turnIds, `band square ${id} is on the pane after all`).not.toContain(id);
+    }
 
     // 3. what the client drew from that frame.
     await expect
       .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the strip drew no squares" })
-      .toBe(placedIds.length);
+      .toBe(allIds.length);
     await expect(page.locator(".asq[data-active='true']")).toHaveCount(1);
+    await expect(page.locator(".asq[data-band='true']")).toHaveCount(relative!.band);
     await expect(page.locator(".term-host.asq-open")).toHaveCount(1);
-    const placed = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>(".asq")].map((square) => Number.parseFloat(square.style.getPropertyValue("--asq-y"))),
-    );
-    expect(placed).toEqual([...placed].sort((a, b) => a - b));
-    expect(Math.max(...placed)).toBeGreaterThan(0);
+    const mapping = await page.evaluate(() => {
+      const host = document.querySelector<HTMLElement>(".term-host.asq-open")
+      const screen = host?.querySelector<HTMLElement>(".xterm-screen")
+      const rows = Number(host?.dataset.rows ?? 0)
+      return {
+        cell: screen && rows ? screen.clientHeight / rows : 0,
+        squares: [...document.querySelectorAll<HTMLElement>(".asq:not([data-band='true'])")].map((square) => ({
+          id: square.dataset.turn ?? "",
+          y: Number.parseFloat(square.style.getPropertyValue("--asq-y")),
+        })),
+      }
+    });
+    // Relative mode draws a square on its own row, so the px it lands on is the
+    // server's row times the pane's own row height. That is the whole contract
+    // of this mode, and nothing else checks it: a square at the wrong px still
+    // looks like a square.
+    expect(mapping.cell, "the pane reports its own row height").toBeGreaterThan(0);
+    expect(mapping.squares.length).toBe(drawnIds.length);
+    for (const drawn of mapping.squares) {
+      const placed = relative!.squares.find((square) => square.id === drawn.id);
+      expect(placed, `${drawn.id} drew a square the layout does not place`).toBeDefined();
+      expect(drawn.y, `${drawn.id} is not on its own row`).toBeCloseTo(placed!.y * mapping.cell, 1);
+    }
 
     // The reply's own square carries the reply, on hover.
     const replySquare = page.locator(`.asq[data-turn='${replied[0].id}']`);
@@ -379,5 +431,67 @@ for (const adapter of liveAgentAdapters) {
     const png = join(shots, `${adapter.harness}-strip.png`);
     await page.screenshot({ path: png });
     await testInfo.attach(`${adapter.harness}-strip`, { path: png, contentType: "image/png" });
+
+    // 4. A click opens the turn's own card, and the card keeps its place while
+    //    the strip re-projects under it: the pane writes, a frame lands, and the
+    //    squares move while the card does not.
+    await replySquare.click();
+    const card = page.locator(".turn-panel");
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toContainText(liveAgentReplyMarker);
+    const box = await card.boundingBox();
+    expect(box, "the card has a box").not.toBeNull();
+    const frameCount = () => page.evaluate(() => (window.__squaresFrames ?? []).length);
+    const seen = await frameCount();
+    tmux(["send-keys", "-t", `${session}:`, "-l", " "]);
+    await expect
+      .poll(frameCount, { timeout: 60_000, message: "the pane's write never produced a frame" })
+      .toBeGreaterThan(seen);
+    await expect(card).toBeVisible();
+    expect(await card.boundingBox(), "the card moved with the squares").toEqual(box);
+    const panelPng = join(shots, `${adapter.harness}-panel.png`);
+    await page.screenshot({ path: panelPng });
+    await testInfo.attach(`${adapter.harness}-panel`, { path: panelPng, contentType: "image/png" });
+    await page.keyboard.press("Escape");
+    await expect(card).toBeHidden();
+
+    // 5. The other mode. The reader picks it in the toolbar, the server answers
+    //    with the map's own shape, and the block is what a scroll moves.
+    await page.selectOption("#squares-mode", "map");
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            (sessionId) =>
+              (window.__squaresFrames ?? []).filter((f) => f.session === sessionId && f.layout?.mode === "map").length,
+            bound,
+          ),
+        { timeout: 60_000, message: "no map frame after the reader asked for one" },
+      )
+      .toBeGreaterThan(0);
+    const mapFrame = await page.evaluate(
+      (sessionId) =>
+        (window.__squaresFrames ?? [])
+          .filter((f) => f.session === sessionId && f.layout?.mode === "map")
+          .pop() ?? null,
+      bound,
+    );
+    const map = mapFrame?.layout;
+    expect(map?.mode, "the frame that arrived after the switch").toBe("map");
+    if (!map || map.mode !== "map") throw new Error("no map frame to read");
+    expect(map.span, "a map with no rows in it").toBeGreaterThan(0);
+    expect(map.block.height, "a block with no height").toBeGreaterThan(0);
+    expect(map.squares.length).toBeGreaterThan(0);
+    await expect
+      .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the map drew no squares" })
+      .toBe(map.squares.length);
+    const blockHeight = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>(".asq-window");
+      return block ? Number.parseFloat(block.style.getPropertyValue("--asq-win-height")) : 0;
+    });
+    expect(blockHeight, "the map drew no window block").toBeGreaterThan(0);
+    const mapPng = join(shots, `${adapter.harness}-map.png`);
+    await page.screenshot({ path: mapPng });
+    await testInfo.attach(`${adapter.harness}-map`, { path: mapPng, contentType: "image/png" });
   });
 }

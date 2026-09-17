@@ -357,3 +357,101 @@ Committed on `.boop-worktrees/feat/agent-squares`; the crate is committed in
    come back one low for the turn holding it. The clamps absorb it (never fewer
    rows than lines, never more than `kappa_max`), but the count is worth a
    check on a scrolled pane.
+
+## Two modes, the band and the card (2026-09-17)
+
+The strip grew a second placement, a lane for the reader's own turns, and a
+click-opened card. This section is the design record for that; where it
+contradicts an earlier table above, this one is what the code does.
+
+### The two modes
+
+`boop-turnstrip::Mode` picks one, and `Layout` is a serde-tagged enum over the
+two shapes (`tag = "mode"`), so the client branches once and never guesses which
+space a `y` is in:
+
+| | `relative` (default) | `map` |
+|---|---|---|
+| the strip *is* | the reader's window | the rolling window of turns |
+| `y` counts | rows inside the window (`0..rows-1`) | estimated buffer rows (`0..span`) |
+| draws | only turns the matcher saw on these rows | every turn the window holds, measured or not |
+| a scroll | moves every square by the rows scrolled | moves the block, leaves the squares |
+| block | none: the strip is the window | `block` = the reader's rows, in map rows |
+| px | `y * cellHeight`, track `rows * cellHeight` | `y / span * track`, track = the CSS `--asq-track` |
+
+Relative's top square is the turn the reader's top row is inside, whatever its
+role: `window_row` reads `Placement.visible` — the rows the matcher attributed,
+clipped to the viewport — and never the placement's estimate, because an
+estimate points at text that is not the turn's own. That field is also what made
+a prompt above the window stop being drawn in the wrong place; it is a band
+square now instead.
+
+`show_tools: false` removes tool turns from the layout entirely: no square, no
+band slot, no map row.
+
+### The band
+
+`Options::user_keep` (default 4) of the reader's own turns stay on the strip
+whatever the mode places. The server hands the crate every user turn it read
+(newest `user_keep`, oldest first) and the crate drops the ones a square already
+carries, so the rule needs no per-mode logic. They are the head of
+`Layout::squares`, `band` of them, `y` counting places in the band rather than
+rows; the client draws them in their own lane at the gutter's left. A pinned
+turn rides the frame in `Strip.pinned` (a `LocatedTurn` with zero spans and
+`confidence: "pinned"`), and its tags are read in the same statement as the
+window's.
+
+### The card
+
+A press on a square (`pointerup`, because this app's pointerdown handlers run
+between a press and its release and a click can land on the pane instead) or on
+a turn's debug rect opens `TurnPanel`: a card appended to the pane element,
+positioned at the press point, clamped inside the pane, and **never moved
+again** — a frame that moves the squares leaves it where it is. It carries the
+turn's favorite state and tags through the same calls the right-click menu uses
+(`favoriteBoopTurn`, `askTags` + `applyTags`), seeded from the frame's own turn
+so a band square older than the ledger window still writes a favorite. Escape
+(listened for on `window` in the capture phase: xterm consumes Escape at its
+textarea) and an outside pointerdown close it, as does a second press on the
+same square.
+
+### What the reader picks
+
+`#squares-toggle` keeps its button; beside it a mode `<select>` and a tools
+checkbox appear while the strip is on, persisted through `setting()` as
+`agentSquares.mode` / `.showTools` / `.userKeep`. Any change calls
+`syncAgentSquares()`, which `retarget`s the strip by value (a mode change
+restarts the watcher, an equal pair costs nothing).
+
+### Verification (2026-09-17)
+
+- `cargo test -p boop-turnstrip` — 8 + 15 + 1 doc, both modes, the band, the tool
+  filter, the map's block on a scroll, relative's top square for a user and for
+  an agent owner.
+- `cargo test --lib squares` — 5, including a prompt above the capture riding
+  the frame as a pin and the window following the pane's height and scroll.
+- `pnpm exec tsc --noEmit` clean; `pnpm exec vitest run` 113 files / 728 tests;
+  `pnpm run build`; `cargo build --bin instant-serve`.
+- `e2e-live/3_agent-strip.live.ts` — claude, codex, opencode and kimi all pass
+  against real CLIs on the pinned mock provider, asserting: the band's squares
+  are pinned turns and not window turns, each window square's px is its row times
+  the pane's own row height, a press opens `.turn-panel` and its bounding box is
+  identical after a frame lands, Escape closes it, and switching the select
+  produces a map frame whose block has a height. Three PNGs per harness
+  (`-strip`, `-panel`, `-map`) in `artifacts/agent-strip/`.
+- `e2e-real/readme-screenshots.spec.ts` test 5 passes and re-captured
+  `07-turn-strip.png` / `08-turn-strip-popover.png` (test 4 `roster` fails
+  independently of this work: it fails with this spec stashed too).
+
+### Open after this
+
+1. **`data-rows` vs the crate's `rows`.** The client measures a row as
+   `.xterm-screen` over `el.dataset.rows` (written from `term.rows`); the crate's
+   `rows` is tmux's `#{pane_height}`. They agree unless tmux draws a status line,
+   which is worth a measurement on a pane that has one.
+2. **`props.band` is the server's count, not the drawn one.** A band square whose
+   turn the frame failed to carry would make the DOM count disagree.
+3. **Band placement.** The lane sits 6px from the gutter's left with the main
+   column centred; that is a first cut, not a measurement.
+4. **Exit animation**, the estimator constants and the copy-mode indicator row
+   from the earlier list are all still open.

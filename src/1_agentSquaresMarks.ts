@@ -13,11 +13,13 @@ export type TurnMark = {
   tags: string[]
 }
 
-/** One mark per turn the frame carries, keyed by turn id. */
+/** One mark per turn the frame carries, keyed by turn id. A pinned turn is one
+ *  of those: the band's squares are the reader's own prompts, and the frame read
+ *  their tags in the same statement as the rest. */
 export function marksOf(frame: Strip): Map<string, TurnMark> {
   const favorites = new Set(boopFavorites.map((favorite) => favorite.source))
   const marks = new Map<string, TurnMark>()
-  for (const turn of frame.turns) {
+  for (const turn of [...frame.turns, ...frame.pinned]) {
     const source = `turn:${turn.session}:${turn.turn}`
     marks.set(turn.id, {
       favorite: favorites.has(source),

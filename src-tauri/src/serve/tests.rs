@@ -111,6 +111,7 @@ async fn the_strip_rides_the_events_channel() {
         Vec::new(),
         tags,
         Some(crate::boop_tmux::PaneWindow { height: 2, scroll: 0 }),
+        &boop_turnstrip::Options::default(),
     );
     let host: Arc<dyn Host> = host;
     crate::squares::publish(&host, &strip).expect("publish");

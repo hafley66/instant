@@ -2,8 +2,7 @@
 // are ordinary `events` payloads, so a Subject stands in for the transport.
 import { Subject } from "rxjs"
 import { describe, expect, it } from "vitest"
-import { invoke } from "./generated/native"
-import { squaresFeed, watchSquares, type Strip } from "./1_agentSquaresFeed"
+import { squaresFeed, type Strip } from "./1_agentSquaresFeed"
 
 const frame = (session: string, rows: number): Strip => ({
   session,
@@ -25,11 +24,31 @@ const frame = (session: string, rows: number): Strip => ({
       confidence: "anchored",
     },
   ],
-  tags: { [`turn:${session}:2`]: ["rust"] },
+  pinned: [
+    {
+      session,
+      harness: "claude",
+      turn: 1,
+      ts: 1_699_999_000_000,
+      role: "user",
+      said: "the prompt above the window",
+      id: `${session}:1`,
+      bufferStart: 0,
+      bufferEnd: 0,
+      anchorStart: 0,
+      anchorEnd: 0,
+      confidence: "pinned",
+    },
+  ],
+  tags: { [`turn:${session}:2`]: ["rust"], [`turn:${session}:1`]: ["strip"] },
   layout: {
-    squares: [{ id: `${session}:2`, kind: "agent", y: 0, scale: 1, active: true }],
-    span: 3,
-    block: { top: 0, height: 6 },
+    mode: "relative",
+    rows: 24,
+    band: 1,
+    squares: [
+      { id: `${session}:1`, kind: "user", y: 0, scale: 1, active: false },
+      { id: `${session}:2`, kind: "agent", y: 5, scale: 1.1, active: true },
+    ],
   },
 })
 
@@ -48,24 +67,48 @@ describe("the strip's feed", () => {
         {
           "at": 1700000000000,
           "layout": {
-            "block": {
-              "height": 6,
-              "top": 0,
-            },
-            "span": 3,
+            "band": 1,
+            "mode": "relative",
+            "rows": 24,
             "squares": [
+              {
+                "active": false,
+                "id": "s1:1",
+                "kind": "user",
+                "scale": 1,
+                "y": 0,
+              },
               {
                 "active": true,
                 "id": "s1:2",
                 "kind": "agent",
-                "scale": 1,
-                "y": 0,
+                "scale": 1.1,
+                "y": 5,
               },
             ],
           },
+          "pinned": [
+            {
+              "anchorEnd": 0,
+              "anchorStart": 0,
+              "bufferEnd": 0,
+              "bufferStart": 0,
+              "confidence": "pinned",
+              "harness": "claude",
+              "id": "s1:1",
+              "role": "user",
+              "said": "the prompt above the window",
+              "session": "s1",
+              "ts": 1699999000000,
+              "turn": 1,
+            },
+          ],
           "rows": 3,
           "session": "s1",
           "tags": {
+            "turn:s1:1": [
+              "strip",
+            ],
             "turn:s1:2": [
               "rust",
             ],
@@ -91,24 +134,48 @@ describe("the strip's feed", () => {
         {
           "at": 1700000000000,
           "layout": {
-            "block": {
-              "height": 6,
-              "top": 0,
-            },
-            "span": 3,
+            "band": 1,
+            "mode": "relative",
+            "rows": 24,
             "squares": [
+              {
+                "active": false,
+                "id": "s1:1",
+                "kind": "user",
+                "scale": 1,
+                "y": 0,
+              },
               {
                 "active": true,
                 "id": "s1:2",
                 "kind": "agent",
-                "scale": 1,
-                "y": 0,
+                "scale": 1.1,
+                "y": 5,
               },
             ],
           },
+          "pinned": [
+            {
+              "anchorEnd": 0,
+              "anchorStart": 0,
+              "bufferEnd": 0,
+              "bufferStart": 0,
+              "confidence": "pinned",
+              "harness": "claude",
+              "id": "s1:1",
+              "role": "user",
+              "said": "the prompt above the window",
+              "session": "s1",
+              "ts": 1699999000000,
+              "turn": 1,
+            },
+          ],
           "rows": 4,
           "session": "s1",
           "tags": {
+            "turn:s1:1": [
+              "strip",
+            ],
             "turn:s1:2": [
               "rust",
             ],
@@ -133,21 +200,5 @@ describe("the strip's feed", () => {
         },
       ]
     `)
-  })
-
-  it("starts one watcher and stops it on teardown", async () => {
-    const calls: Array<[string, Record<string, unknown>]> = []
-    const send: typeof invoke = async (command, args) => {
-      calls.push([command, args ?? {}])
-      return undefined as never
-    }
-
-    const stop = await watchSquares({ pty: "p1", session: "s1", target: "lane-a:0.0" }, send)
-    await stop()
-
-    expect(calls).toEqual([
-      ["squares_watch", { pty: "p1", session: "s1", target: "lane-a:0.0" }],
-      ["squares_unwatch", { pty: "p1" }],
-    ])
   })
 })

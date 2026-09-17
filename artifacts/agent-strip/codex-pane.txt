@@ -1,0 +1,40 @@
+agent-codex.%0 dead=0 cmd=boop
+
+╭───────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                            │
+│                                                       │
+│ model:     mock-model   /model to change              │
+│ directory: /private/tmp/instant-agent-47821/workspace │
+╰───────────────────────────────────────────────────────╯
+
+  Tip: New Build faster with the Desktop app. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true
+
+
+› render the terminal flow
+
+
+⚠ Model metadata for `mock-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.
+
+• FIXED_TERMINAL_REPLY
+
+  flowchart LR
+    PTY --> tmux
+    tmux --> xterm
+    xterm --> Markdown
+ 
+ 
+› Ask Codex to do anything
+ 
+  mock-model default · /private/tmp/instant-agent-47821/workspace                
+
+
+
+
+
+
+
+
+
+
+
+

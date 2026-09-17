@@ -596,11 +596,16 @@ test("5. squares: one square per turn in the terminal's right margin", async ({ 
     )
     .toBe("32px");
   // The squares are placed along the strip's track, not stacked at its origin.
+  // The band lane is not the track, and the nodes are kept across frames, so
+  // their DOM order is the order they first appeared rather than the order they
+  // sit in: what the picture has to show is a spread.
   const spread = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>(".asq")].map((square) => Number.parseFloat(square.style.getPropertyValue("--asq-y"))),
+    [...document.querySelectorAll<HTMLElement>(".asq:not([data-band='true'])")].map((square) =>
+      Number.parseFloat(square.style.getPropertyValue("--asq-y")),
+    ),
   );
   expect(Math.max(...spread)).toBeGreaterThan(0);
-  expect(spread).toEqual([...spread].sort((a, b) => a - b));
+  expect(new Set(spread).size).toBeGreaterThan(1);
   await page.waitForTimeout(700);
   await shot(page, "07-turn-strip");
 

@@ -12,7 +12,7 @@ import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
 import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
 import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
 import { turnDebug } from "./0_turnDebugSettings";
-import { agentSquares } from "./0_agentSquaresSettings";
+import { agentSquares, squaresOptions } from "./0_agentSquaresSettings";
 import { TerminalAgentSquares } from "./1_agentSquares";
 import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue, type PromptContextItem } from "./1a_terminalContextQueue";
@@ -156,6 +156,13 @@ export function syncTurnDebugOverlays() {
   for (const tab of tabs.values()) applyTurnDebugOverlay(tab);
 }
 
+/// The strip measures in the pane's own rows and has no terminal handle, so the
+/// pane carries the count xterm is on: one row is then `.xterm-screen` over that
+/// count, the same cell math `termCellPoint` uses, in either mode.
+function stampPaneRows(el: HTMLElement, term: Terminal) {
+  el.dataset.rows = String(term.rows);
+}
+
 // The strip is on for a terminal whose pane has a boop session. The feed reads
 // the pane the pty already streams (`squares_watch`), so a tab with no tmux —
 // graphics, a dead pane, a shell that never bound — has nothing to watch and
@@ -165,11 +172,14 @@ function applyAgentSquares(tab: Tab) {
   const session = tab.paneSession?.session;
   if (agentSquares.on.$() && !tab.graphics && session) {
     const input = { pty: tab.id, session, target: tab.tmuxTarget ?? tab.name, socket: undefined };
+    const options = squaresOptions();
     if (tab.agentSquares) {
-      void tab.agentSquares.retarget(input);
+      // A settings change arrives here too: the strip compares the options and
+      // restarts its watcher only when they differ from the ones it holds.
+      void tab.agentSquares.retarget(input, options);
       return;
     }
-    const strip = new TerminalAgentSquares(tab.el, input);
+    const strip = new TerminalAgentSquares(tab.el, input, options);
     tab.agentSquares = strip;
     void strip.start().catch((error) => console.warn("[squares] watch failed", error));
     return;
@@ -796,6 +806,8 @@ export function openTab(
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(el);
+  // Before the first fit: a strip frame can land the moment the pane binds.
+  stampPaneRows(el, term);
 
   // Graphics sessions (awrit) get an overlay canvas for kitty-graphics frames
   // forwarded by the Rust proxy, and skip tmux (which filters graphics APCs).
@@ -1169,9 +1181,10 @@ export function openTab(
     focusedTermAt = performance.now();
     invoke("write_pty", { id, data }).catch(console.error);
   });
-  term.onResize(({ cols, rows }) =>
-    invoke("resize_pty", { id, cols, rows, ...cellDims(term) }).catch(console.error),
-  );
+  term.onResize(({ cols, rows }) => {
+    stampPaneRows(el, term);
+    void invoke("resize_pty", { id, cols, rows, ...cellDims(term) }).catch(console.error);
+  });
 
   // iTerm2-style word/line editing. xterm doesn't emit these by default on mac,
   // so we intercept and write the readline/emacs control sequences the shell
