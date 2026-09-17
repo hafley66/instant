@@ -365,10 +365,28 @@ async function main() {
   refreshRogue();
   setInterval(refreshRogue, 8000);
 
+  // Flow control: the Rust reader stops draining a pty past 64 unacked chunks
+  // (pty.rs FLOW_HIGH). xterm.js runs write callbacks in order, so one ack on
+  // the batch's last chunk per session covers the whole batch.
   await listenNativeEvent<{ chunks: { id: string; chunk: string }[] }>("pty-data-batch", (e) => {
+    const perSession = new Map<string, number>();
+    for (const chunk of e.payload.chunks) {
+      perSession.set(chunk.id, (perSession.get(chunk.id) ?? 0) + 1);
+    }
+    const remaining = new Map(perSession);
     for (const chunk of e.payload.chunks) {
       observeTerminalOutput(chunk.id, chunk.chunk);
-      tabs.get(chunk.id)?.term.write(chunk.chunk);
+      const left = remaining.get(chunk.id)! - 1;
+      remaining.set(chunk.id, left);
+      const term = tabs.get(chunk.id)?.term;
+      const ack = () =>
+        invoke("pty_ack", { id: chunk.id, chunks: perSession.get(chunk.id) }).catch(() => {});
+      if (!term) {
+        if (left === 0) ack();
+        continue;
+      }
+      if (left === 0) term.write(chunk.chunk, ack);
+      else term.write(chunk.chunk);
     }
   });
 

@@ -13,6 +13,7 @@ export type CommandName =
   | "list_sessions"
   | "open_session"
   | "write_pty"
+  | "pty_ack"
   | "resize_pty"
   | "close_pty"
   | "kill_session"
@@ -152,6 +153,7 @@ export namespace commands {
     export const listSessions = "list_sessions";
     export const openSession = "open_session";
     export const writePty = "write_pty";
+    export const ptyAck = "pty_ack";
     export const resizePty = "resize_pty";
     export const closePty = "close_pty";
     export const killSession = "kill_session";

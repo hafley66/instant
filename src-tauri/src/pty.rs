@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, LazyLock, Mutex};
+use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -756,12 +757,14 @@ pub fn open_session_impl(
         if !graphics {
             // Fast path: plain terminal, no graphics parsing.
             loop {
+                flow_wait(&id);
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         pending.extend_from_slice(&buf[..n]);
                         let chunk = drain_utf8(&mut pending);
                         if !chunk.is_empty() {
+                            flow_sent(&id);
                             let _ = events.send(PtyData {
                                 id: id.clone(),
                                 chunk,
@@ -770,11 +773,13 @@ pub fn open_session_impl(
                     }
                 }
             }
+            flow_clear(&id);
             return;
         }
         // Graphics path: split kitty APC frames out of the byte stream.
         let mut scanner = KittyScanner::default();
         loop {
+            flow_wait(&id);
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
@@ -786,6 +791,7 @@ pub fn open_session_impl(
                                 if chunk.is_empty() {
                                     continue;
                                 }
+                                flow_sent(&id);
                                 let _ = events.send(PtyData {
                                     id: id.clone(),
                                     chunk,
@@ -824,6 +830,47 @@ pub fn open_session_impl(
     });
 
     Ok(())
+}
+
+/// Chunks emitted to the webview and not yet parsed by xterm.js, per session.
+/// Past FLOW_HIGH the reader stops draining the pty so the child blocks; a
+/// stalled ack releases after FLOW_STALL.
+static FLOW: LazyLock<(Mutex<HashMap<String, u64>>, Condvar)> =
+    LazyLock::new(|| (Mutex::new(HashMap::new()), Condvar::new()));
+const FLOW_HIGH: u64 = 64;
+const FLOW_STALL: Duration = Duration::from_millis(500);
+
+fn flow_sent(id: &str) {
+    *FLOW.0.lock().unwrap().entry(id.to_string()).or_insert(0) += 1;
+}
+
+fn flow_wait(id: &str) {
+    let mut unacked = FLOW.0.lock().unwrap();
+    while unacked.get(id).copied().unwrap_or(0) > FLOW_HIGH {
+        let (guard, timeout) = FLOW.1.wait_timeout(unacked, FLOW_STALL).unwrap();
+        unacked = guard;
+        if timeout.timed_out() {
+            unacked.insert(id.to_string(), 0);
+        }
+    }
+}
+
+fn flow_clear(id: &str) {
+    FLOW.0.lock().unwrap().remove(id);
+    FLOW.1.notify_all();
+}
+
+#[tauri::command]
+pub fn pty_ack(id: String, chunks: u64) {
+    pty_ack_impl(id, chunks);
+}
+
+pub fn pty_ack_impl(id: String, chunks: u64) {
+    let mut unacked = FLOW.0.lock().unwrap();
+    if let Some(count) = unacked.get_mut(&id) {
+        *count = count.saturating_sub(chunks);
+    }
+    FLOW.1.notify_all();
 }
 
 #[tauri::command]
@@ -885,6 +932,7 @@ pub fn close_pty(services: State<Arc<Services>>, id: String) {
 }
 
 pub fn close_pty_impl(services: &Services, id: String) {
+    flow_clear(&id);
     if let Some(mut h) = services.pty.0.lock().unwrap().remove(&id) {
         if let Some(mut child) = h.child.take() {
             let _ = child.kill();

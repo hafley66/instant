@@ -49,6 +49,11 @@ pub fn dispatch(
             let p: WritePtyArgs = parse(name, params)?;
             res(crate::pty::write_pty_impl(&services, p.id, p.data))
         }
+        "pty_ack" => {
+            let p: PtyAckArgs = parse(name, params)?;
+            crate::pty::pty_ack_impl(p.id, p.chunks);
+            ok(())
+        }
         "resize_pty" => {
             let p: ResizePtyArgs = parse(name, params)?;
             res(crate::pty::resize_pty_impl(&services, p.id, p.cols, p.rows, p.cell_w, p.cell_h))
@@ -471,6 +476,12 @@ struct OpenSessionArgs {
 struct WritePtyArgs {
     id: String,
     data: String,
+}
+
+#[derive(Deserialize)]
+struct PtyAckArgs {
+    id: String,
+    chunks: u64,
 }
 
 #[derive(Deserialize)]
