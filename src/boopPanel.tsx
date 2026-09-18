@@ -1,6 +1,7 @@
 // Boop rail panel: lane roster (master table) with the mail stream drawn by
 // @hafley66/marbler; a lane is a line, a mail is a dot, filtered = disabled.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Observable } from "rxjs";
 import { useSignal } from "@hafley66/signals/react";
 import { commandEndpoint, invoke } from "./generated/native";
 import { TreeTable, type TreeColumn } from "./treetable";
@@ -119,17 +120,42 @@ const POLL_MS = 1000;
 // Full history on first paint; after that only the tail, merged in memory.
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
+// The graph query is a module singleton so it starts at app boot, not at the
+// boop panel's first mount: the read walks the process table and tmux (~3s),
+// and an arriving visitor should paint the last poll immediately while the
+// next tick refreshes in the background. staleTime = GRAPH_POLL_MS keeps a
+// remount from refiring an immediate fetch one tick after the last poll;
+// cacheTime: Infinity keeps the cache entry for the app's lifetime. The
+// lookback anchor is module load, i.e. boot time.
+const SINCE_TS = Date.now() - LOOKBACK_MS;
+export const graphQuery = GRAPH_QUERY.createQuery(
+  { historySinceMs: SINCE_TS },
+  { refetchInterval: GRAPH_POLL_MS, staleTime: GRAPH_POLL_MS, cacheTime: Infinity },
+);
+
+// The one warm pin: keeps the query's refcount above zero from app start so
+// the poll loop runs before any panel mounts. warmBoopGraph is idempotent; a
+// second call is a no-op. The teardown stays named unsubscribe and is never
+// called; this is the app-entry boundary the subscription law sanctions.
+let warmPin: { unsubscribe: () => void } | null = null;
+export function warmBoopGraph(source$: Observable<unknown> = graphQuery.$): void {
+  if (warmPin) return;
+  warmPin = source$.subscribe();
+}
+
+// Test boundary only: drops the warm pin so a suite can exercise warmBoopGraph
+// again against a fresh counting source or the real query.
+export function resetBoopGraphWarmForTest(): void {
+  warmPin?.unsubscribe();
+  warmPin = null;
+}
+
 export function BoopPanelV2() {
-  const sinceTs = useRef(Date.now() - LOOKBACK_MS);
-  const graphQuery = useMemo(
-    () => GRAPH_QUERY.createQuery({ historySinceMs: sinceTs.current }, { refetchInterval: GRAPH_POLL_MS }),
-    [],
-  );
   const graphState = useSignal(graphQuery.$);
   const graph = graphState.data ?? null;
   const [events, setEvents] = useState<BoopLaneEvent[]>([]);
   const onlyActive = useSignal(settings.boopOnlyActive.$);
-  const roots = useMemo(() => (graph ? buildGraphTree(graph, sinceTs.current) : []), [graph]);
+  const roots = useMemo(() => (graph ? buildGraphTree(graph, SINCE_TS) : []), [graph]);
   // Active-only is a projection, not a root filter: a live agent under an
   // inactive ancestor hoists to its nearest live ancestor (or becomes a root),
   // so no inactive row is painted and no live agent is dropped.

@@ -4,7 +4,7 @@
 // to its lazy data refresh.
 import { registerPlugin } from "./plugin";
 import { TmuxPanelV2, WorktreesPanelV2, ActivityPanelV2 } from "./tablepanels";
-import { BoopPanelV2 } from "./boopPanel";
+import { BoopPanelV2, warmBoopGraph } from "./boopPanel";
 import { BoopSelectionPanel } from "./1_boopSelection";
 import { BoopSearchPanel } from "./1_boopSearch";
 import { StatusPanelV2, registerBuiltinStatus } from "./status";
@@ -17,6 +17,9 @@ import { registerFavoritesPlugin } from "./favorites";
 import { settings } from "./0_settings";
 
 export function registerBuiltin() {
+  // Warm the boop graph at boot: the query's first backend read costs ~3s, and
+  // this pin keeps its poll loop alive before the panel ever mounts.
+  warmBoopGraph();
   registerPlugin({
     id: "builtin",
     // Config-panel toggles. Effects live in store.subscribe(applyToolbar /
