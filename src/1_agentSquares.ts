@@ -23,6 +23,7 @@ import {
   createSquareVisual,
   placeSquare,
   reseedSquare,
+  SQUARE_STEP,
   squareVars,
   strengthAt,
   type SquareSeed,
@@ -31,7 +32,7 @@ import {
 import { liveProbe } from "./0_liveProbe"
 import { squaresFeed, watchSquares, type Strip, type StripTurn } from "./1_agentSquaresFeed"
 import { marksOf, type TurnMark } from "./1_agentSquaresMarks"
-import { squaresOf, type AgentSquare, type SquareGeometry } from "./1_agentSquaresModel"
+import { recentOffset, squaresOf, type AgentSquare, type AgentSquaresProps, type SquareGeometry } from "./1_agentSquaresModel"
 import { TurnPanel, type TurnPanelTarget } from "./1_turnPanel"
 
 /** What the server needs to start watching a pane: the pty stream it wakes on,
@@ -91,6 +92,19 @@ export class TerminalAgentSquares {
    *  reader saying they are done with its card, so the strip closes the panel it
    *  opened rather than opening the card again at the same spot. */
   private panelId?: string
+  /** The recent block's scroll, in px, held between frames and re-clamped on
+   *  each one (a new frame can shrink the block). A view fact: the server never
+   *  learns it. */
+  private recentOffsetPx = 0
+  /** The wheel's raw delta, accumulated across events in the same frame and
+   *  applied once on the next animation frame, so a burst of wheel events lands
+   *  as one clamp instead of a clamp per event. */
+  private wheelPending = 0
+  /** The last projected frame, so the wheel can repaint without waiting on a
+   *  server push: a quiet pane sends no `squares-update` (a fingerprint-identical
+   *  projection is not pushed), and the scroll has to move on screen anyway. */
+  private lastFrame?: Strip
+  private wheelFrame = 0
 
   constructor(
     private el: HTMLElement,
@@ -107,6 +121,12 @@ export class TerminalAgentSquares {
     this.gap.hidden = true
     this.strip.append(this.gap)
     this.host.append(this.strip)
+    // The host is `pointer-events: none` so the terminal keeps its own wheel;
+    // the strip's own scroll only takes the wheel when the block overflows
+    // (`data-scrollable`, set per frame), and this listener passes it through
+    // otherwise. `passive: false` because the handler calls `preventDefault`
+    // only in the overflow case.
+    this.host.addEventListener("wheel", this.onWheel, { passive: false })
   }
 
   /** Subscribe first, then start the watcher: a frame that lands between the two
@@ -150,6 +170,8 @@ export class TerminalAgentSquares {
     this.disposed = true
     this.frames?.unsubscribe()
     this.frames = undefined
+    this.host.removeEventListener("wheel", this.onWheel)
+    this.lastFrame = undefined
     const stop = this.stop
     this.stop = undefined
     for (const entry of this.entries.values()) {
@@ -192,8 +214,11 @@ export class TerminalAgentSquares {
   }
 
   private render(frame: Strip): void {
+    this.lastFrame = frame
     const pane = this.el.getBoundingClientRect()
-    const props = squaresOf(frame, this.geometry(frame))
+    const geometry = this.geometry(frame)
+    const props = squaresOf(frame, geometry, this.recentOffsetPx)
+    this.syncScroll(frame, props, geometry)
     this.gap.hidden = !props.gap
     if (props.gap) this.gap.style.transform = `translateY(${props.gap.y}px)`
     // One sample per drawn frame, through the app's own probe: this is the only
@@ -270,6 +295,50 @@ export class TerminalAgentSquares {
       cellHeight: screen && rows > 0 ? screen.clientHeight / rows : Math.round(pane.height / Math.max(1, rows)),
       track: screen?.clientHeight || pane.height,
     }
+  }
+
+  /** Keep the held recent offset honest against this frame: re-clamp it (a new
+   *  frame can shrink the block), and tell the host whether it may take the
+   *  wheel at all — only a recent block taller than the track scrolls, so only
+   *  then does `data-scrollable` lift the host's `pointer-events` off `none`
+   *  and let the wheel land. Anything else — a fitting recent strip, a relative
+   *  strip, a strip with no layout — keeps today's pass-through to the terminal
+   *  and drops whatever scroll was being held. */
+  private syncScroll(frame: Strip, props: AgentSquaresProps, geometry: SquareGeometry): void {
+    if (frame.layout?.mode !== "recent") {
+      this.recentOffsetPx = 0
+      delete this.host.dataset.scrollable
+      return
+    }
+    const block = (props.squares.length - 1) * SQUARE_STEP
+    this.recentOffsetPx = recentOffset(this.recentOffsetPx, geometry.track, block)
+    if (block > geometry.track) this.host.dataset.scrollable = "true"
+    else delete this.host.dataset.scrollable
+  }
+
+  /** The recent block scrolls from the gutter wheel, like the terminal's own
+   *  scroller, but nothing else does: the strip gives up the wheel to the
+   *  terminal whenever `data-scrollable` is absent, so this never runs. The
+   *  events coalesce on the animation frame and land as one clamp. */
+  private onWheel = (event: WheelEvent): void => {
+    if (!this.host.dataset.scrollable) return
+    event.preventDefault()
+    // The offset is px and `SQUARE_STEP` is the px between places, so a line
+    // delta converts to the same spacing the strip itself uses.
+    this.wheelPending +=
+      event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? event.deltaY : event.deltaY * SQUARE_STEP
+    if (this.wheelFrame) return
+    this.wheelFrame = requestAnimationFrame(() => {
+      this.wheelFrame = 0
+      const delta = this.wheelPending
+      this.wheelPending = 0
+      this.recentOffsetPx += delta
+      // Repaint from the last frame so the moved block shows immediately: a
+      // quiet pane sends no server push, so this is the only frame that knows
+      // the offset changed. `render` re-runs the same clamp, so this is the
+      // server frame's own paint path, not a second one.
+      if (this.lastFrame) this.render(this.lastFrame)
+    })
   }
 
   private clear(): void {

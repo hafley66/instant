@@ -1,10 +1,41 @@
 // The strip's own arithmetic: what the server's units become once the pane's row
 // height is known, and what a turn's text looks like before it reaches a
 // popover. Both are the client's only numbers — everything else is forwarded.
-import { describe, expect, it } from "vitest"
+/** @vitest-environment jsdom */
+import { describe, expect, it, vi } from "vitest"
 import { SQUARE_STEP, type SquareKind } from "./0_agentSquareVisual"
-import { previewOf, squaresOf } from "./1_agentSquaresModel"
+import { previewOf, recentOffset, squaresOf } from "./1_agentSquaresModel"
+import { TerminalAgentSquares } from "./1_agentSquares"
 import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
+
+// The wheel test drives the strip through its real component, so the feed and
+// the turn panel are stubbed at the module seam: the feed hands the component a
+// controllable frame stream and the panel is a no-op, keeping the test off the
+// native transport and off React.
+const feedMock = vi.hoisted(() => ({ frames: null as unknown as import("rxjs").Subject<Strip> }))
+vi.mock("./1_agentSquaresFeed", async () => {
+  const { Subject } = await import("rxjs")
+  feedMock.frames = new Subject<Strip>()
+  return {
+    squaresFeed: () => feedMock.frames,
+    watchSquares: async () => async () => {},
+  }
+})
+vi.mock("./1_turnPanel", () => {
+  class TurnPanel {
+    isOpen = false
+    open() {}
+    close() {}
+    dispose() {}
+  }
+  return { TurnPanel }
+})
+// `marksOf` reaches `favorites` and through it the whole app (reactdock, the
+// panel grid, pdfjs), which is not a unit-test surface: an empty marks map is
+// all the component test draws popovers from.
+vi.mock("./1_agentSquaresMarks", () => ({
+  marksOf: () => new Map(),
+}))
 
 const turn = (id: string, role: string, said: string, ts: number): StripTurn => ({
   session: "s1",
@@ -195,3 +226,117 @@ describe("the strip's own numbers", () => {
     `)
   })
 })
+
+describe("the recent block's scroll", () => {
+  it("clamps the held offset to what the track can show", () => {
+    // Dragging toward the newer tail stops when the newest square reaches the
+    // pane's bottom: `track - block`.
+    expect(recentOffset(-1000, 320, 663)).toBe(320 - 663)
+    // Dragging back toward the older top stops at 0.
+    expect(recentOffset(50, 320, 663)).toBe(0)
+    // A block that fits the track cannot scroll at all.
+    expect(recentOffset(-50, 320, 68)).toBe(0)
+  })
+
+it("moves the recent block by the offset without reordering it", () => {
+    const base = squaresOf(recentFrame(40), { cellHeight: 17, track: 320 }, 0)
+    const shifted = squaresOf(recentFrame(40), { cellHeight: 17, track: 320 }, -200)
+    // Same squares, same order, every `y` moved by the offset; recent has no
+    // band, so none appears.
+    expect(shifted.squares.map((square) => square.id)).toEqual(base.squares.map((square) => square.id))
+    expect(shifted.squares.map((square) => square.y)).toEqual(base.squares.map((square) => square.y - 200))
+    expect(shifted.band).toBe(0)
+  })
+
+  it("scrolls an overflowing recent block from the gutter wheel", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      cb()
+      return 1
+    })
+    const { el } = mountPane(320)
+    const component = new TerminalAgentSquares(
+      el,
+      { pty: "p1", session: "s1", target: "t1" },
+      { mode: "recent", userKeep: 4 },
+      () => {},
+    )
+    await component.start()
+    const overflow = recentFrame(40)
+    feedMock.frames!.next(overflow)
+    const host = el.querySelector<HTMLElement>(".asq-host")!
+    expect(host.dataset.scrollable).toBe("true")
+    const oldest = el.querySelector<HTMLElement>(".asq")!
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("0px")
+    // A wheel toward the tail is consumed and repaints from the last frame (the
+    // wheel's own `requestAnimationFrame` re-runs `render`), so the drawn block
+    // shifts even though no new server frame follows.
+    const wheel = new WheelEvent("wheel", { deltaY: -200, deltaMode: 0, cancelable: true })
+    host.dispatchEvent(wheel)
+    expect(wheel.defaultPrevented).toBe(true)
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("-200px")
+    await component.dispose()
+  })
+
+  it("lets the wheel pass through when the recent block fits", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      cb()
+      return 1
+    })
+    const { el } = mountPane(320)
+    const component = new TerminalAgentSquares(
+      el,
+      { pty: "p1", session: "s1", target: "t1" },
+      { mode: "recent", userKeep: 4 },
+      () => {},
+    )
+    await component.start()
+    const small = recentFrame(5)
+    feedMock.frames!.next(small)
+    const host = el.querySelector<HTMLElement>(".asq-host")!
+    expect(host.dataset.scrollable).toBeUndefined()
+    const oldest = el.querySelector<HTMLElement>(".asq")!
+    const before = oldest.style.getPropertyValue("--asq-y")
+    const wheel = new WheelEvent("wheel", { deltaY: -200, deltaMode: 0, cancelable: true })
+    host.dispatchEvent(wheel)
+    expect(wheel.defaultPrevented).toBe(false)
+    feedMock.frames!.next(small)
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe(before)
+    await component.dispose()
+  })
+})
+
+/** A recent frame with `count` uniform agent squares, all in the frame's turns,
+ *  so every one of them draws. */
+function recentFrame(count: number): Strip {
+  const squares = Array.from({ length: count }, (_, index) => ({
+    id: `s1:${index + 1}`,
+    kind: "agent" as SquareKind,
+    y: index,
+    scale: 1,
+    active: false,
+  }))
+  const turns = squares.map((square, index) =>
+    turn(square.id, "assistant", "a reply", 1_699_999_000_000 + index),
+  )
+  return frame({ mode: "recent", rows: 40, squares }, [], turns)
+}
+
+/** A pane the strip can measure in jsdom: `getBoundingClientRect` is a no-op
+ *  there, so the strip's track (which reads the pane's box) is pinned to the
+ *  height the test chooses. */
+function mountPane(height: number): { el: HTMLElement } {
+  const el = document.createElement("div")
+  el.dataset.rows = "40"
+  vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+    top: 0,
+    left: 0,
+    bottom: height,
+    right: 32,
+    width: 32,
+    height,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  })
+  return { el }
+}
