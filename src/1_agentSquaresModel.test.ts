@@ -114,7 +114,7 @@ describe("the strip's own numbers", () => {
     expect(Object.keys(props).sort()).toEqual(["active", "band", "squares", "track"])
   })
 
-  it("rides the reader: the active recent square sits on the reader's line", () => {
+  it("centers the recent block independently of which squares are active", () => {
     const turns = [
       turn("s1:1", "user", "the opening prompt", 1_699_999_000_000),
       turn("s1:2", "agent", "line one\nline two", 1_700_000_000_000),
@@ -144,14 +144,14 @@ describe("the strip's own numbers", () => {
     // The reader's line is the pane's bottom edge, and the turn being read sits
     // on it: the older turn above, the newer one below. A centred block would
     // put the same squares 60px higher and never move them.
-    const line = 320 - SQUARE_STEP / 2
+    const line = 320 / 2
     expect(props.squares.map((square) => square.y)).toEqual([line - SQUARE_STEP, line, line + SQUARE_STEP])
     // Scrolling back one turn restacks the block around the new anchor, so the
     // square that is newer than the turn being read slides toward the edge.
     expect(squaresOf(recentFrame(0), { cellHeight: 17, track: 320 }).squares.map((square) => square.y)).toEqual([
+      line - SQUARE_STEP,
       line,
       line + SQUARE_STEP,
-      line + 2 * SQUARE_STEP,
     ])
     // Uniform: a recent square's size is never its turn's, and none is pinned.
     expect(props.squares.map((square) => square.scale)).toEqual([1, 1, 1])

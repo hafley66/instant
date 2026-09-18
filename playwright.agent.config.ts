@@ -36,6 +36,7 @@ export default defineConfig({
   timeout: 240_000,
   outputDir: "test-results/agent-strip",
   use: {
+    actionTimeout: 10_000,
     baseURL: `http://127.0.0.1:${port}`,
     viewport: { width: 1440, height: 960 },
     trace: "retain-on-failure",
@@ -50,7 +51,7 @@ export default defineConfig({
     command:
       `rm -rf ${dataDir} && ` +
       `env -u TMUX HOME=${home} TMUX_TMPDIR=${tmuxDir} PATH=${path.dirname(process.env.BOOP_BIN ?? path.join(process.env.HOME ?? "", ".cargo/bin/boop"))}:$PATH ` +
-      `INSTANT_NO_GLOBALS=1 INSTANT_TMUX_SOCKET= BOOP_DB=${boopDb} BOOP_MAIL_DIR=${boopDir} BOOP_NO_SYNC=1 ` +
+      `INSTANT_NO_GLOBALS=1 INSTANT_SQUARES_PROFILE=1 INSTANT_TMUX_SOCKET= BOOP_DB=${boopDb} BOOP_MAIL_DIR=${boopDir} BOOP_NO_SYNC=1 ` +
       `${serve} --port ${port} --data-dir ${dataDir} --dist ${path.join(root, "dist")}`,
     url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: !!process.env.INSTANT_AGENT_REUSE,

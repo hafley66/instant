@@ -290,6 +290,7 @@ export class TerminalTurnVisibilityV2 {
   readonly changes: Observable<TurnVisibilityEvent> = this.updates;
   visible: VisibleTurn[] = [];
   generation = 0;
+  viewportRevision = 0;
   frame = 0;
   disposed = false;
   scanning = false;
@@ -306,6 +307,7 @@ export class TerminalTurnVisibilityV2 {
     readonly locate?: TurnLocator,
   ) {
     const changes = viewport.changes.pipe(share());
+    this.subscription.add(changes.subscribe(() => { this.viewportRevision += 1; }));
     this.subscription.add(changes.pipe(
       filter((event) => event.kind === "write" || event.kind === "scroll"),
     ).subscribe(() => {
@@ -359,11 +361,12 @@ export class TerminalTurnVisibilityV2 {
     // Trim before either locator sees the rows: boop-turnvis answers over IPC
     // and the local matcher is only the fallback, so a fix applied inside one
     // of them is dead code in the other.
+    const viewportRevision = this.viewportRevision;
     const paneLines = dropTmuxStatusRow(this.viewport.readVisibleLogicalLines(), tmuxCapture);
     const harness = turns.reduce((latest, turn) => turn.ts >= latest.ts ? turn : latest, turns[0])?.harness ?? "";
     const lines = dropTerminalInputRows(paneLines, harness);
     const next = await this.located(lines, turns, tmuxCapture);
-    if (this.disposed || generation !== this.generation) return;
+    if (this.disposed || generation !== this.generation || viewportRevision !== this.viewportRevision) return;
     const before = new Map(this.visible.map((turn) => [turn.id, turn]));
     const after = new Map(next.map((turn) => [turn.id, turn]));
     const entered = next.filter((turn) => !before.has(turn.id));

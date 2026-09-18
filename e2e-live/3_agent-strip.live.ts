@@ -33,6 +33,7 @@ import {
 
 declare global {
   interface Window {
+    __echoProbe?: { enabled: boolean; pending?: { at: number; id: string; text: string }; samples: number[] };
     __squaresFrames?: Array<{
       session: string;
       rows: number;
@@ -50,7 +51,7 @@ declare global {
 type Square = { id: string; kind: string; y: number; scale: number; active: boolean };
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
-const fixture = join(repo, "fixtures", "transcripts", "provider", "0_terminal-flow.yaml");
+const fixture = join(repo, "fixtures", "transcripts", "provider", "2_terminal-scroll.yaml");
 const shots = join(repo, "artifacts", "agent-strip");
 const llmockExecutable = resolveLlmockExecutable(repo);
 const BOOP = process.env.BOOP_BIN ?? join(process.env.HOME ?? "", ".cargo/bin/boop");
@@ -137,7 +138,7 @@ function paneText(session: string): string {
 async function waitForPaneText(session: string, wanted: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (paneText(session).includes(wanted)) return;
+    if (tmux(["capture-pane", "-p", "-J", "-S", "-200", "-t", session]).stdout.includes(wanted)) return;
     await sleep(250);
   }
   throw new Error(`pane ${session} never printed ${wanted}\n--- pane ---\n${paneText(session)}`);
@@ -170,6 +171,17 @@ async function boot(page: Page): Promise<void> {
 /// than the drawing. The transport assigns `socket.onmessage`.
 async function hookFrames(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    window.__echoProbe = { enabled: false, samples: [] };
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      try {
+        const frame = JSON.parse(String(data));
+        if (window.__echoProbe!.enabled && frame.method === "write_pty" && /^[a-z0-9]$/.test(frame.params?.data)) {
+          window.__echoProbe!.pending = { at: performance.now(), id: frame.params.id, text: frame.params.data };
+        }
+      } catch {}
+      return send.call(this, data);
+    };
     window.__squaresFrames = [];
     const descriptor = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
     Object.defineProperty(WebSocket.prototype, "onmessage", {
@@ -180,6 +192,12 @@ async function hookFrames(page: Page): Promise<void> {
         const wrapped = function (this: WebSocket, event: MessageEvent) {
           try {
             const frame = JSON.parse(String(event.data));
+            const pending = window.__echoProbe?.pending;
+            if (pending && frame?.params?.event === "pty-data-batch"
+              && frame.params.payload.chunks.some((chunk: { id: string; chunk: string }) => chunk.id === pending.id && chunk.chunk.includes(pending.text))) {
+              window.__echoProbe!.samples.push(performance.now() - pending.at);
+              delete window.__echoProbe!.pending;
+            }
             if (frame?.params?.event === "squares-update") window.__squaresFrames!.push(frame.params.payload);
           } catch {}
           listener.call(this, event);
@@ -412,7 +430,7 @@ for (const adapter of liveAgentAdapters) {
     expect(new Set(allIds).size, "a square was placed twice").toBe(allIds.length);
     for (const id of drawnIds) expect(turnIds, `square ${id} is not in the frame`).toContain(id);
     expect(drawnIds, "the pane's reply was never placed").toContain(replied[0].id);
-    expect(relative!.squares.filter((square) => square.active)).toHaveLength(1);
+    expect(relative!.squares.filter((square) => square.active).map((square) => square.id)).toEqual(drawnIds);
 
     // The reader's own prompts stay on the strip whatever the mode places: the
     // band is the turns a reader navigates by, and a band square is by
@@ -428,7 +446,7 @@ for (const adapter of liveAgentAdapters) {
     await expect
       .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the strip drew no squares" })
       .toBe(allIds.length);
-    await expect(page.locator(".asq[data-active='true']")).toHaveCount(1);
+    await expect(page.locator(".asq[data-active='true']")).toHaveCount(drawnIds.length);
     await expect(page.locator(".asq[data-band='true']")).toHaveCount(relative!.band);
     await expect(page.locator(".term-host.asq-open")).toHaveCount(1);
     const mapping = await page.evaluate(() => {
@@ -474,13 +492,18 @@ for (const adapter of liveAgentAdapters) {
     expect(mapping.squares.length).toBe(drawnIds.length);
     for (const drawn of mapping.squares) {
       const placed = relative!.squares.find((square) => square.id === drawn.id);
-      expect(placed, `${drawn.id} drew a square the layout does not place`).toBeDefined();
+      expect(placed?.id, `${drawn.id} drew a square the layout does not place`).toBe(drawn.id);
       expect(drawn.y, `${drawn.id} is not on its own row`).toBeCloseTo(placed!.y * mapping.cell, 1);
     }
 
     // The reply's own square carries the reply, on hover.
     const replySquare = page.locator(`.asq[data-turn='${replied[0].id}']`);
     await expect(replySquare).toHaveCount(1);
+    fs.writeFileSync(join(shots, `${adapter.harness}-hit-target.json`), JSON.stringify(await replySquare.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return { box: box.toJSON(), own: node.outerHTML, hit: hit?.outerHTML.slice(0, 1000) };
+    }), null, 2));
     await replySquare.hover();
     const pop = page.locator(".asq:hover .asq-pop");
     await expect(pop).toBeVisible({ timeout: 10_000 });
@@ -504,8 +527,18 @@ for (const adapter of liveAgentAdapters) {
     expect(shown.cold, "a square the pointer is not over").not.toBeNull();
     // How much it magnifies is the stylesheet's business; that it magnifies the
     // square under the pointer and nothing else is this test's.
-    expect(shown.hovered!.drawn, "the hovered square is magnified").toBeGreaterThan(shown.hovered!.own * 1.1);
+    expect(shown.hovered!.drawn, "the hovered square is magnified").toBeCloseTo(shown.hovered!.own * 1.1, 2);
     expect(shown.cold!.drawn, "a cold square draws at its own size").toBeCloseTo(shown.cold!.own, 1);
+    const popGeometry = await pop.evaluate((node) => {
+      const element = node as HTMLElement;
+      const pane = element.closest(".term-host")!;
+      const owner = element.closest(".asq")!;
+      const parentScale = Number.parseFloat(getComputedStyle(owner).transform.slice(7).split(",")[0]);
+      return { scale: Number.parseFloat(getComputedStyle(element).scale) * parentScale,
+        fraction: element.getBoundingClientRect().width / pane.getBoundingClientRect().width };
+    });
+    expect(popGeometry.scale).toBeCloseTo(1, 2);
+    expect(popGeometry.fraction).toBeCloseTo(0.36, 2);
 
     const png = join(shots, `${adapter.harness}-strip.png`);
     await page.screenshot({ path: png });
@@ -613,9 +646,8 @@ for (const adapter of liveAgentAdapters) {
     expect(block.squares.length).toBe(recent.squares.length);
     const read = block.squares.findIndex((square) => square.active);
     expect(read, "the square the reader is inside is on the strip").toBeGreaterThanOrEqual(0);
-    const line = Math.max(0, block.tracks - block.step / 2);
-    const shift = Math.max(0, read * block.step - line);
-    expect(block.squares[read].y, "the reader's square is on the reader's line").toBeCloseTo(line + shift, 0);
+    const start = Math.max(0, (block.tracks - (block.squares.length - 1) * block.step) / 2);
+    expect(block.squares.map((square) => square.y)).toEqual(block.squares.map((_, index) => start + index * block.step));
     const stacked = [...block.squares].sort((left, right) => left.y - right.y);
     for (let index = 1; index < stacked.length; index += 1) {
       expect(stacked[index].y - stacked[index - 1].y, "a square per step").toBeCloseTo(block.step, 0);
@@ -623,5 +655,46 @@ for (const adapter of liveAgentAdapters) {
     const recentPng = join(shots, `${adapter.harness}-recent.png`);
     await page.screenshot({ path: recentPng });
     await testInfo.attach(`${adapter.harness}-recent`, { path: recentPng, contentType: "image/png" });
+
+    // Exercise the actual wheel path and keyboard echo in this private pane.
+    tmux(["send-keys", "-t", session, "-X", "cancel"]);
+    const terminal = page.locator(".term-host .xterm-screen:visible");
+    await terminal.click();
+    const beforeWheel = paneText(session);
+    const terminalMode = tmux(["display-message", "-p", "-t", session,
+      "#{alternate_on} #{history_size} #{mouse_any_flag}"]).stdout.trim();
+    if (adapter.harness === "claude") expect(terminalMode).toBe("1 0 1");
+    await page.mouse.wheel(0, -480);
+    await expect.poll(() => paneText(session), { timeout: 10_000 }).not.toBe(beforeWheel);
+    tmux(["send-keys", "-t", session, "-X", "cancel"]);
+    await page.mouse.wheel(0, 4000);
+    const echoes: Array<{ squares: boolean; milliseconds: number; perKeyMs: number[] }> = [];
+    for (const enabled of [true, false, true]) {
+      const toggle = page.locator("#squares-toggle");
+      if ((await toggle.getAttribute("aria-pressed")) !== String(enabled)) await toggle.click();
+      await terminal.click();
+      await page.keyboard.press("Control+u");
+      const marker = `ASQ_INPUT_${echoes.length}_0123456789`;
+      const started = performance.now();
+      await page.keyboard.insertText(marker);
+      await expect.poll(() => paneText(session), { intervals: [10], timeout: 2000 }).toContain(marker);
+      const milliseconds = Math.round(performance.now() - started);
+      await page.evaluate(() => { window.__echoProbe = { enabled: true, samples: [] }; });
+      for (const character of "abcdefgh") {
+        const count = await page.evaluate(() => window.__echoProbe!.samples.length);
+        await page.keyboard.press(character);
+        await expect.poll(() => page.evaluate(() => window.__echoProbe!.samples.length), { intervals: [10], timeout: 2000 }).toBe(count + 1);
+      }
+      const perKeyMs = await page.evaluate(() => {
+        window.__echoProbe!.enabled = false;
+        return window.__echoProbe!.samples.map((value) => Math.round(value * 10) / 10);
+      });
+      echoes.push({ squares: enabled, milliseconds, perKeyMs });
+      await page.keyboard.press("Control+u");
+    }
+    await testInfo.attach("keyboard-echo", { body: JSON.stringify(echoes), contentType: "application/json" });
+    fs.writeFileSync(join(shots, `${adapter.harness}-echo.json`), JSON.stringify({ echoes, popGeometry, terminalMode }, null, 2));
+    dumpEvidence(`${adapter.harness}-verified`, session);
+    expect(echoes.every((sample) => sample.milliseconds < 500), JSON.stringify(echoes)).toBe(true);
   });
 }

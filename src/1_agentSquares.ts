@@ -81,6 +81,7 @@ function markLine(mark: TurnMark): string {
 export class TerminalAgentSquares {
   private host = document.createElement("div")
   private strip = document.createElement("div")
+  private gap = document.createElement("div")
   private entries = new Map<string, Entry>()
   private frames?: Subscription
   private stop?: () => Promise<void>
@@ -102,6 +103,9 @@ export class TerminalAgentSquares {
   ) {
     this.host.className = "asq-host"
     this.strip.className = "asq-strip"
+    this.gap.className = "asq-tool-gap"
+    this.gap.hidden = true
+    this.strip.append(this.gap)
     this.host.append(this.strip)
   }
 
@@ -190,6 +194,8 @@ export class TerminalAgentSquares {
   private render(frame: Strip): void {
     const pane = this.el.getBoundingClientRect()
     const props = squaresOf(frame, this.geometry(frame))
+    this.gap.hidden = !props.gap
+    if (props.gap) this.gap.style.transform = `translateY(${props.gap.y}px)`
     // One sample per drawn frame, through the app's own probe: this is the only
     // place that knows how many squares a projection ended up drawing and where.
     liveProbe.record({
@@ -222,7 +228,7 @@ export class TerminalAgentSquares {
       kept.add(square.id)
       const entry = this.entryFor(square)
       reseedSquare(entry.visual, seedOf(square))
-      placeSquare(entry.visual, square.y, square.scale, strengthAt(index, props.active, square.kind))
+      placeSquare(entry.visual, square.y, square.scale, strengthAt(index, square.active ? index : props.active, square.kind))
       activateSquare(entry.visual, square.active)
       // A square low enough that its popover would run past the pane's bottom
       // edge opens upward instead, and one close enough to the top that a
@@ -267,6 +273,7 @@ export class TerminalAgentSquares {
   }
 
   private clear(): void {
+    this.gap.hidden = true
     for (const entry of this.entries.values()) {
       entry.subscription.unsubscribe()
       entry.el.remove()

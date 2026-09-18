@@ -9,11 +9,23 @@ export type TurnMatch = {
 
 const characterCount = (text: string) => [...text].length;
 
+/** The default Boop delivery envelope; ordinary brackets and XML stay literal. */
+export function boopContent(text: string): string {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("[boop ")) return text;
+  const end = trimmed.indexOf("]");
+  if (end < 0) return text;
+  if (end + 1 < trimmed.length && !/\s/.test(trimmed[end + 1])) return text;
+  const parts = trimmed.slice(6, end).split(" from ");
+  if (parts.length !== 2 || parts.some((part) => !part || /\s|\[|\]/.test(part))) return text;
+  return trimmed.slice(end + 1).trimStart();
+}
+
 export function normalizeTurnLine(line: string): string {
-  const lowered = line.toLowerCase();
-  const hasCardGutter = /^\s*│/.test(lowered);
-  const content = lowered.replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬✨✳✻⎿━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "");
-  return (hasCardGutter ? content.replace(/^\$\s*/, "") : content)
+  const hasCardGutter = /^\s*│/.test(line);
+  const content = line.replace(/^\s*[│┃┆┊╎╏┌└├┬╭╰>*•●◉⏺⏵◆›❯»▶🭬✨✳✻⎿━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬]+\s*/, "");
+  return boopContent(hasCardGutter ? content.replace(/^\$\s*/, "") : content)
+    .toLowerCase()
     .replace(/[`_*~#]/g, "")
     .replace(/[━─┏┓┗┛┠┨┯┷┼╂╄╅╆╇╈╉╊═║╔╗╚╝╠╣╦╩╬|│┃┆┊╎╏┌┐└┘├┤┬┴]/g, " ")
     .replace(/\s+/g, " ")
@@ -21,6 +33,7 @@ export function normalizeTurnLine(line: string): string {
 }
 
 export function sourceLines(turn: BoopTurn): string[] {
+  if (turn.role === "user") return boopContent(turn.said).split("\n");
   const separator = turn.said.indexOf("\n");
   if (turn.role !== "tool" || separator < 0) return turn.said.split("\n");
   const toolName = turn.said.slice(0, separator);

@@ -105,7 +105,7 @@
    as a glitch and not as a magnifier. */
 .asq:hover,
 .asq:focus-visible {
-  --asq-hover: 2;
+  --asq-hover: 1.1;
   z-index: 2;
 }
 
@@ -170,7 +170,9 @@
   position: absolute;
   right: calc(100% + 10px);
   top: 50%;
-  width: min(360px, calc(var(--asq-pane-w, 360px) - 16px));
+  width: calc(var(--asq-pane-w, 1000px) * 0.36);
+  scale: calc(1 / (var(--asq-scale, 1) * var(--asq-hover, 1)));
+  transform-origin: right center;
   max-height: min(220px, calc(var(--asq-pane, 220px) - 16px));
   overflow: hidden;
   padding: 6px 8px;
@@ -196,6 +198,14 @@
   display: block;
   margin-bottom: 4px;
   color: #9a9aa2;
+}
+
+.asq-tool-gap {
+  position: absolute;
+  width: 16px;
+  height: 1px;
+  background: #a8a8a8;
+  pointer-events: none;
 }
 
 .asq:hover .asq-pop,

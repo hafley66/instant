@@ -19,6 +19,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, LazyLock, Mutex};
+#[path = "0a_squaresTiming.rs"]
+mod timing;
 use std::time::{Duration, Instant};
 
 use boop_store::ident::Store;
@@ -139,7 +141,7 @@ pub struct Strip {
 pub fn capture_lines(target: &str, socket: Option<&str>, depth: u32) -> Result<Vec<String>, String> {
     let start = format!("-{depth}");
     let output = tmux_command(socket)
-        .args(["capture-pane", "-p", "-J", "-S", &start, "-t", target])
+        .args(["capture-pane", "-p", "-S", &start, "-t", target])
         .output()
         .map_err(|error| format!("capture {target}: {error}"))?;
     if !output.status.success() {
@@ -400,15 +402,27 @@ pub fn project(
     socket: Option<&str>,
     options: &Options,
 ) -> Result<Strip, String> {
+    project_timed(session, target, socket, options).map(|(strip, _)| strip)
+}
+
+fn project_timed(session: &str, target: &str, socket: Option<&str>, options: &Options)
+    -> Result<(Strip, timing::ProjectionTiming), String> {
+    let mut clock = Instant::now();
+    let mut timing = timing::ProjectionTiming::default();
     // The window is read first: it decides how deep the capture has to go. A
     // pane that predates this process's tmux still captures; only the window
     // read can come back empty, and then the frame carries spans without a
     // layout rather than no frame at all.
     let window = pane_window(target, socket).ok();
+    timing.window_ms = timing::elapsed_ms(&mut clock);
     let rows = capture_lines(target, socket, capture_depth(window.as_ref()))?;
+    timing.capture_ms = timing::elapsed_ms(&mut clock);
     let store = open_store_ro()?;
+    timing.store_ms = timing::elapsed_ms(&mut clock);
     let turns = current_conversation(turns_from(&store, session)?, reset_from(&store, session)?);
+    timing.turns_ms = timing::elapsed_ms(&mut clock);
     let strip = project_rows(session, &rows, turns, BTreeMap::new(), window, options);
+    timing.match_ms = timing::elapsed_ms(&mut clock);
     // The band's turns carry marks too: a pinned prompt is exactly the square a
     // reader hovers to see what they asked, so its tags ride the same read.
     let mut sources = sources_of(&strip.turns);
@@ -416,7 +430,8 @@ pub fn project(
     let tags = store
         .tags_for_many(&sources)
         .map_err(|error| error.to_string())?;
-    Ok(Strip { tags, ..strip })
+    timing.tags_ms = timing::elapsed_ms(&mut clock);
+    Ok((Strip { tags, ..strip }, timing))
 }
 
 /// Push one frame. The same call serves the Tauri window and the serve binary:
@@ -601,8 +616,13 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
         }
         wait_for_a_write = true;
         let started = Instant::now();
-        match project(&args.session, &args.target, args.socket.as_deref(), &options) {
-            Ok(strip) => {
+        match project_timed(&args.session, &args.target, args.socket.as_deref(), &options) {
+            Ok((strip, timing)) => {
+                if std::env::var_os("INSTANT_SQUARES_PROFILE").is_some() {
+                    log_event(host.as_ref(), "INFO", "squares_projection", serde_json::json!({
+                        "session": args.session, "rows": strip.rows, "stages": timing,
+                    }));
+                }
                 stat.rows += strip.rows as u64;
                 stat.turns += (strip.turns.len() + strip.pinned.len()) as u64;
                 stat.text_bytes += strip
@@ -637,7 +657,9 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
             std::thread::sleep(FLUSH_INTERVAL - spent);
             // Everything that landed during the flush is one more projection,
             // not one per write.
-            while listener.try_recv().is_ok() {}
+            while listener.try_recv().is_ok() {
+                wait_for_a_write = false;
+            }
         }
     }
 }

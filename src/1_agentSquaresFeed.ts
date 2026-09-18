@@ -80,6 +80,7 @@ export type SquareLayout = {
 export type StripLayout =
   | {
       mode: "relative"
+      gap?: ToolGap | null
       squares: SquareLayout[]
       /** How many leading squares are the reader's own turns the mode placed
        *  nothing for: `y` counts places in the band rather than rows, and
@@ -90,10 +91,18 @@ export type StripLayout =
     }
   | {
       mode: "recent"
+      gap?: ToolGap | null
       squares: SquareLayout[]
       /** The reader's window in rows, which is what centred the block. */
       rows: number
     }
+
+export type ToolGap = {
+  beforeId: string | null
+  afterId: string | null
+  startRow: number
+  endRow: number
+}
 
 export type SquaresWatch = {
   /** The pane's own id: the pty stream wakes the feed on this. */

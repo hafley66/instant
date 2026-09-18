@@ -8,16 +8,110 @@ import {
   TerminalTurnVisibilityV2,
   type BoopTurn,
 } from "./0_terminalTurnVisibility";
-import type { LogicalLine, XtermViewport } from "./00a_terminalIntersection";
+import type { LogicalLine, ViewportChange, XtermViewport } from "./00a_terminalIntersection";
 import ompChaotic from "../labs/turn-identity/fixtures/omp-chaotic.json";
 import ompChaoticGolden from "../labs/turn-identity/fixtures/omp-chaotic.golden.json";
 import ompChaoticTurns from "../labs/turn-identity/fixtures/omp-chaotic.turns.json";
+import { boopContent, sourceLines } from "./0a_terminalTurnMatching";
 
 const turn = (turn: number, said: string): BoopTurn => ({
   session: "session-a", harness: "codex", turn, ts: turn, role: "assistant", said,
 });
 
 describe("terminal turn visibility v2", () => {
+  it("matches and counts user content after the verified Boop envelope", () => {
+    const raw = "[boop m1 from coordinator]\nactual user text\nsecond line";
+    const user = { ...turn(1, raw), role: "user" };
+    const plain = { ...turn(2, "[ordinary brackets] user XML <example>kept</example>"), role: "user" };
+    const only = { ...turn(3, "[boop m2 from feature/tls]"), role: "user" };
+    const lines = ["❯ [boop m1 from coordinator] actual user text", "second line"]
+      .map((text, index) => ({ text, start: index, end: index }));
+    expect({
+      source: sourceLines(user),
+      matched: locateVisibleTurns(lines, [user, only]).map(({ turn, anchorStart, anchorEnd }) => ({ turn, anchorStart, anchorEnd })),
+      prefixOnly: boopContent(only.said),
+      literal: boopContent(plain.said),
+      supportedXml: boopContent("<system-reminder>injected</system-reminder>"),
+      durableRaw: user.said,
+    }).toMatchInlineSnapshot(`
+      {
+        "durableRaw": "[boop m1 from coordinator]
+      actual user text
+      second line",
+        "literal": "[ordinary brackets] user XML <example>kept</example>",
+        "matched": [
+          {
+            "anchorEnd": 1,
+            "anchorStart": 0,
+            "turn": 1,
+          },
+        ],
+        "prefixOnly": "",
+        "source": [
+          "actual user text",
+          "second line",
+        ],
+        "supportedXml": "<system-reminder>injected</system-reminder>",
+      }
+    `);
+  });
+
+  it("discards a locator result after its physical viewport changes", async () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const receipts = [];
+    for (const kind of ["scroll", "write", "resize"] as const) {
+      const changes = new Subject<ViewportChange>();
+      const lines = [{ text: "physical viewport evidence", start: 0, end: 0 }];
+      const turns = [turn(1, lines[0].text)];
+      const spans = locateVisibleTurns(lines, turns);
+      let finish!: (value: typeof spans) => void;
+      let started!: () => void;
+      const waiting = new Promise<void>((resolve) => { started = resolve; });
+      const delayed = new Promise<typeof spans>((resolve) => { finish = resolve; });
+      const locator = vi.fn(() => { started(); return delayed; });
+      const visibility = new TerminalTurnVisibilityV2({
+        changes, readVisibleLogicalLines: () => lines,
+        bufferRowAtClientY: () => 0, dispose: () => {},
+      }, async () => turns, undefined, locator);
+      const scan = visibility.scan(turns);
+      await waiting;
+      changes.next({ kind, cols: 80, rows: 20, viewportY: 1, bufferLength: 21 });
+      finish(spans);
+      await scan;
+      const stale = visibility.visible.map((span) => span.id);
+      await visibility.scan(turns);
+      receipts.push({ kind, stale, fresh: visibility.visible.map((span) => span.id) });
+      visibility.dispose();
+    }
+    expect(receipts).toMatchInlineSnapshot(`
+      [
+        {
+          "fresh": [
+            "session-a:1",
+          ],
+          "kind": "scroll",
+          "stale": [],
+        },
+        {
+          "fresh": [
+            "session-a:1",
+          ],
+          "kind": "write",
+          "stale": [],
+        },
+        {
+          "fresh": [
+            "session-a:1",
+          ],
+          "kind": "resize",
+          "stale": [],
+        },
+      ]
+    `);
+    vi.unstubAllGlobals();
+  });
+
   it("skips every scan while the viewport reports hidden, and scans again once it shows", async () => {
     vi.useFakeTimers();
     const changes = new Subject<{

@@ -52,6 +52,7 @@ export type AgentSquare = {
 }
 
 export type AgentSquaresProps = {
+  gap?: { y: number }
   squares: AgentSquare[]
   /** Index of the active square, or -1 when the strip is empty. */
   active: number
@@ -91,9 +92,6 @@ function rowY(y: number, geometry: SquareGeometry): number {
  *  because that is where a live reader's attention is — the newest turn's square
  *  belongs on it — and a reader who scrolls back into history takes the block
  *  with them. */
-function readerLine(geometry: SquareGeometry): number {
-  return Math.max(0, geometry.track - SQUARE_STEP / 2)
-}
 
 /** A recent square's px on the track: the active one sits on the reader's line
  *  and every other is `SQUARE_STEP` away from it, older above and newer below,
@@ -101,11 +99,6 @@ function readerLine(geometry: SquareGeometry): number {
  *  block is pushed down when it would run off the pane's top, which is the one
  *  edge a reader cannot scroll past: the older turns stay on the strip while the
  *  newer ones the reader has left behind fall off the bottom. */
-function ridingY(index: number, anchor: number, geometry: SquareGeometry): number {
-  const line = readerLine(geometry)
-  const shift = Math.max(0, anchor * SQUARE_STEP - line)
-  return line + (index - anchor) * SQUARE_STEP + shift
-}
 
 /**
  * One square per turn the server placed, in the order it placed them. Only the
@@ -151,13 +144,17 @@ export function squaresOf(frame: Strip, geometry: SquareGeometry): AgentSquaresP
   // place in the block does not. Without an active square — a bug rather than a
   // state — the newest is the anchor, which is where a live reader stands.
   if (layout.mode === "recent") {
-    const at = squares.findIndex((square) => square.active)
-    const anchor = at >= 0 ? at : squares.length - 1
+    const start = Math.max(0, (geometry.track - (squares.length - 1) * SQUARE_STEP) / 2)
     squares.forEach((square, index) => {
-      square.y = ridingY(index, anchor, geometry)
+      square.y = start + index * SQUARE_STEP
     })
   }
+  const before = squares.find((square) => square.id === layout.gap?.beforeId)
+  const after = squares.find((square) => square.id === layout.gap?.afterId)
+  const gapY = before && after ? (before.y + after.y) / 2
+    : before ? before.y + SQUARE_STEP / 2 : after ? after.y - SQUARE_STEP / 2 : geometry.track / 2
   return {
+    ...(layout.gap ? { gap: { y: gapY } } : {}),
     squares,
     active: squares.findIndex((square) => square.active),
     band,

@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[path = "0a_boopPresentation.rs"]
+mod presentation;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct BoopTurn {
     pub session: String,
@@ -191,7 +194,8 @@ pub(crate) fn turns_from(store: &Store, session: &str) -> Result<Vec<BoopTurn>, 
         turn_from: last_turn.map(|turn| turn.saturating_sub(TURN_WINDOW)),
         ..Default::default()
     };
-    let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    let mut rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    presentation::classify(store, &mut rows)?;
     let relations = rows
         .first()
         .map(|row| live_relations(&row.harness))
@@ -230,7 +234,8 @@ fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String>
         limit: Some(100),
         ..Default::default()
     };
-    let rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    let mut rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
+    presentation::classify(&store, &mut rows)?;
     let relations = live_relations(harness);
     Ok(rows
         .into_iter()

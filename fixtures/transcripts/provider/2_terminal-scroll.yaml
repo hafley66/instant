@@ -1,0 +1,87 @@
+rules:
+  - match: {}
+    respond:
+      content: |-
+        FIXED_TERMINAL_REPLY
+        ```mermaid
+        flowchart LR
+          PTY --> tmux
+          tmux --> xterm
+          xterm --> Markdown
+        ```
+        ```d2
+        reader -> card: open
+        card -> lightbox: zoom
+        ```
+        Viewport fixture line 001: physical row attribution remains attached to this response.
+        Viewport fixture line 002: physical row attribution remains attached to this response.
+        Viewport fixture line 003: physical row attribution remains attached to this response.
+        Viewport fixture line 004: physical row attribution remains attached to this response.
+        Viewport fixture line 005: physical row attribution remains attached to this response.
+        Viewport fixture line 006: physical row attribution remains attached to this response.
+        Viewport fixture line 007: physical row attribution remains attached to this response.
+        Viewport fixture line 008: physical row attribution remains attached to this response.
+        Viewport fixture line 009: physical row attribution remains attached to this response.
+        Viewport fixture line 010: physical row attribution remains attached to this response.
+        Viewport fixture line 011: physical row attribution remains attached to this response.
+        Viewport fixture line 012: physical row attribution remains attached to this response.
+        Viewport fixture line 013: physical row attribution remains attached to this response.
+        Viewport fixture line 014: physical row attribution remains attached to this response.
+        Viewport fixture line 015: physical row attribution remains attached to this response.
+        Viewport fixture line 016: physical row attribution remains attached to this response.
+        Viewport fixture line 017: physical row attribution remains attached to this response.
+        Viewport fixture line 018: physical row attribution remains attached to this response.
+        Viewport fixture line 019: physical row attribution remains attached to this response.
+        Viewport fixture line 020: physical row attribution remains attached to this response.
+        Viewport fixture line 021: physical row attribution remains attached to this response.
+        Viewport fixture line 022: physical row attribution remains attached to this response.
+        Viewport fixture line 023: physical row attribution remains attached to this response.
+        Viewport fixture line 024: physical row attribution remains attached to this response.
+        Viewport fixture line 025: physical row attribution remains attached to this response.
+        Viewport fixture line 026: physical row attribution remains attached to this response.
+        Viewport fixture line 027: physical row attribution remains attached to this response.
+        Viewport fixture line 028: physical row attribution remains attached to this response.
+        Viewport fixture line 029: physical row attribution remains attached to this response.
+        Viewport fixture line 030: physical row attribution remains attached to this response.
+        Viewport fixture line 031: physical row attribution remains attached to this response.
+        Viewport fixture line 032: physical row attribution remains attached to this response.
+        Viewport fixture line 033: physical row attribution remains attached to this response.
+        Viewport fixture line 034: physical row attribution remains attached to this response.
+        Viewport fixture line 035: physical row attribution remains attached to this response.
+        Viewport fixture line 036: physical row attribution remains attached to this response.
+        Viewport fixture line 037: physical row attribution remains attached to this response.
+        Viewport fixture line 038: physical row attribution remains attached to this response.
+        Viewport fixture line 039: physical row attribution remains attached to this response.
+        Viewport fixture line 040: physical row attribution remains attached to this response.
+        Viewport fixture line 041: physical row attribution remains attached to this response.
+        Viewport fixture line 042: physical row attribution remains attached to this response.
+        Viewport fixture line 043: physical row attribution remains attached to this response.
+        Viewport fixture line 044: physical row attribution remains attached to this response.
+        Viewport fixture line 045: physical row attribution remains attached to this response.
+        Viewport fixture line 046: physical row attribution remains attached to this response.
+        Viewport fixture line 047: physical row attribution remains attached to this response.
+        Viewport fixture line 048: physical row attribution remains attached to this response.
+        Viewport fixture line 049: physical row attribution remains attached to this response.
+        Viewport fixture line 050: physical row attribution remains attached to this response.
+        Viewport fixture line 051: physical row attribution remains attached to this response.
+        Viewport fixture line 052: physical row attribution remains attached to this response.
+        Viewport fixture line 053: physical row attribution remains attached to this response.
+        Viewport fixture line 054: physical row attribution remains attached to this response.
+        Viewport fixture line 055: physical row attribution remains attached to this response.
+        Viewport fixture line 056: physical row attribution remains attached to this response.
+        Viewport fixture line 057: physical row attribution remains attached to this response.
+        Viewport fixture line 058: physical row attribution remains attached to this response.
+        Viewport fixture line 059: physical row attribution remains attached to this response.
+        Viewport fixture line 060: physical row attribution remains attached to this response.
+        Viewport fixture line 061: physical row attribution remains attached to this response.
+        Viewport fixture line 062: physical row attribution remains attached to this response.
+        Viewport fixture line 063: physical row attribution remains attached to this response.
+        Viewport fixture line 064: physical row attribution remains attached to this response.
+        FIXED_TERMINAL_REPLY
+      usage:
+        prompt_tokens: 12
+        completion_tokens: 800
+      stream:
+        ttft_ms: 500
+        inter_token_ms: 0
+        chunk_by: word
