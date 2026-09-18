@@ -30,6 +30,20 @@ export const PREVIEW_CHARS = 4000
  *  how tall the strip itself draws. */
 export type SquareGeometry = { cellHeight: number; track: number }
 
+/** The pane box a projection was drawn against, rounded px: what a resize has
+ *  to move off before the strip repaints. */
+export type SquareBox = { width: number; height: number }
+
+/** Whether a pane resize asks the strip for a repaint: the observed box has
+ *  moved off the one the last render drew at. Rounded px on the way in,
+ *  because a sub-pixel drift (a font swap mid-load, the gutter's padding
+ *  transition) is not a layout change, and repainting on each one storms the
+ *  strip. No box drawn yet is no repaint: there is nothing to re-project. */
+export function boxMoved(drawn: SquareBox | undefined, width: number, height: number): boolean {
+  if (!drawn) return false
+  return Math.round(width) !== drawn.width || Math.round(height) !== drawn.height
+}
+
 /** One square, ready to draw: the server's placement in px, plus the view's own
  *  dressing. */
 export type AgentSquare = {

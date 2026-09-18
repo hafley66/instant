@@ -32,7 +32,15 @@ import {
 import { liveProbe } from "./0_liveProbe"
 import { squaresFeed, watchSquares, type Strip, type StripTurn } from "./1_agentSquaresFeed"
 import { marksOf, type TurnMark } from "./1_agentSquaresMarks"
-import { recentOffset, squaresOf, type AgentSquare, type AgentSquaresProps, type SquareGeometry } from "./1_agentSquaresModel"
+import {
+  boxMoved,
+  recentOffset,
+  squaresOf,
+  type AgentSquare,
+  type AgentSquaresProps,
+  type SquareBox,
+  type SquareGeometry,
+} from "./1_agentSquaresModel"
 import { TurnPanel, type TurnPanelTarget } from "./1_turnPanel"
 
 /** What the server needs to start watching a pane: the pty stream it wakes on,
@@ -100,11 +108,19 @@ export class TerminalAgentSquares {
    *  applied once on the next animation frame, so a burst of wheel events lands
    *  as one clamp instead of a clamp per event. */
   private wheelPending = 0
-  /** The last projected frame, so the wheel can repaint without waiting on a
-   *  server push: a quiet pane sends no `squares-update` (a fingerprint-identical
-   *  projection is not pushed), and the scroll has to move on screen anyway. */
+  /** The frame the strip last drew, held so the wheel and a pane resize can
+   *  repaint without waiting for a server push: a quiet pane sends no
+   *  `squares-update`, and the pane settling after a tab change is a view
+   *  fact the server never learns. */
   private lastFrame?: Strip
   private wheelFrame = 0
+  /** The pane box the last render projected into, rounded px: the box a resize
+   *  has to move off before the strip repaints. */
+  private drawn?: SquareBox
+  /** The pane's resize observer, and the one repaint a burst of entries
+   *  coalesces into on the next animation frame. */
+  private resize?: ResizeObserver
+  private resizeFrame = 0
 
   constructor(
     private el: HTMLElement,
@@ -114,6 +130,9 @@ export class TerminalAgentSquares {
      *  knows the gutter opened, and the terminal has to measure its columns
      *  again from here — the flip is not otherwise observable. */
     private onGutter: () => void,
+    /** The pane's resize observer arrives through a seam, the browser's own by
+     *  default, so a test can stand in for it. */
+    private newResize: typeof ResizeObserver = ResizeObserver,
   ) {
     this.host.className = "asq-host"
     this.strip.className = "asq-strip"
@@ -133,6 +152,8 @@ export class TerminalAgentSquares {
    *  is kept rather than dropped. */
   async start(): Promise<void> {
     this.frames = squaresFeed(this.input.session).subscribe((frame) => this.render(frame))
+    this.resize ??= new this.newResize((entries) => this.resized(entries))
+    this.resize.observe(this.el)
     this.panel ??= new TurnPanel(this.el)
     this.el.append(this.host)
     this.el.classList.add("asq-open")
@@ -172,6 +193,10 @@ export class TerminalAgentSquares {
     this.frames = undefined
     this.host.removeEventListener("wheel", this.onWheel)
     this.lastFrame = undefined
+    this.resize?.disconnect()
+    this.resize = undefined
+    if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame)
+    this.resizeFrame = 0
     const stop = this.stop
     this.stop = undefined
     for (const entry of this.entries.values()) {
@@ -217,6 +242,7 @@ export class TerminalAgentSquares {
     this.lastFrame = frame
     const pane = this.el.getBoundingClientRect()
     const geometry = this.geometry(frame)
+    this.drawn = { width: Math.round(pane.width), height: Math.round(pane.height) }
     const props = squaresOf(frame, geometry, this.recentOffsetPx)
     this.syncScroll(frame, props, geometry)
     this.gap.hidden = !props.gap
@@ -272,6 +298,21 @@ export class TerminalAgentSquares {
       entry.el.remove()
       this.entries.delete(id)
     }
+  }
+
+  /** The pane's box moved under a drawn strip: re-project the held frame on
+   *  the next animation frame, one per burst. This is what replaces the
+   *  pre-measure track a tab change can leave one frame behind, and it never
+   *  reaches the server: a resize is a view fact. */
+  private resized(entries: ResizeObserverEntry[]): void {
+    if (!this.lastFrame || !this.drawn) return
+    const box = entries[entries.length - 1]?.contentRect
+    if (!box || !boxMoved(this.drawn, box.width, box.height)) return
+    if (this.resizeFrame) return
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = 0
+      if (this.lastFrame) this.render(this.lastFrame)
+    })
   }
 
   /**

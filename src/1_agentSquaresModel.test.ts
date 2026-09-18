@@ -4,8 +4,8 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest"
 import { SQUARE_STEP, type SquareKind } from "./0_agentSquareVisual"
-import { previewOf, recentOffset, squaresOf } from "./1_agentSquaresModel"
 import { TerminalAgentSquares } from "./1_agentSquares"
+import { boxMoved, previewOf, recentOffset, squaresOf } from "./1_agentSquaresModel"
 import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
 
 // The wheel test drives the strip through its real component, so the feed and
@@ -340,3 +340,18 @@ function mountPane(height: number): { el: HTMLElement } {
   })
   return { el }
 }
+describe("a resize the strip answers", () => {
+  const drawn = { width: 800, height: 600 }
+  it("repaints when the pane's box moves off the one the strip drew at", () => {
+    expect(boxMoved(drawn, 700, 600)).toBe(true)
+    expect(boxMoved(drawn, 800, 640)).toBe(true)
+    expect(boxMoved(drawn, 700.5, 600)).toBe(true)
+  })
+  it("sits still while the box repeats, sub-pixel drift included", () => {
+    expect(boxMoved(drawn, 800, 600)).toBe(false)
+    expect(boxMoved(drawn, 800.4, 600.4)).toBe(false)
+  })
+  it("has nothing to re-project before the first frame", () => {
+    expect(boxMoved(undefined, 700, 600)).toBe(false)
+  })
+})
