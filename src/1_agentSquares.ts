@@ -132,7 +132,7 @@ export class TerminalAgentSquares {
     private onGutter: () => void,
     /** The pane's resize observer arrives through a seam, the browser's own by
      *  default, so a test can stand in for it. */
-    private newResize: typeof ResizeObserver = ResizeObserver,
+    private newResize: typeof ResizeObserver | undefined = globalThis.ResizeObserver,
   ) {
     this.host.className = "asq-host"
     this.strip.className = "asq-strip"
@@ -152,8 +152,12 @@ export class TerminalAgentSquares {
    *  is kept rather than dropped. */
   async start(): Promise<void> {
     this.frames = squaresFeed(this.input.session).subscribe((frame) => this.render(frame))
-    this.resize ??= new this.newResize((entries) => this.resized(entries))
-    this.resize.observe(this.el)
+    // jsdom has no ResizeObserver: the seam default reads undefined there,
+    // and a strip without one simply keeps the server-push-only repaint.
+    if (this.newResize) {
+      this.resize ??= new this.newResize((entries) => this.resized(entries))
+      this.resize.observe(this.el)
+    }
     this.panel ??= new TurnPanel(this.el)
     this.el.append(this.host)
     this.el.classList.add("asq-open")
