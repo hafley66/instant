@@ -11,9 +11,13 @@
   --asq-size: 12px;
   --asq-step: 17px;
   --asq-gutter: 32px;
-  /* What the pointer has to hit, which is not what the strip draws: the square
-     is small on purpose, the reader's finger is not. */
-  --asq-hit: 24px;
+/* What the pointer has to hit, which is not what the strip draws: the square
+   is small on purpose, the reader's finger is not. The hit targets, kept in one
+   place so the three kinds' targets stay legible next to each other: the shared
+   strip 24px, a tool 10px (it still outgrows its 5px draw, so a thin finger has
+   somewhere thin to land), and a band square 12px (it is its own lane, so it
+   needs no growth to keep its click). */
+--asq-hit: 24px;
   --asq-move: 260ms;
   --asq-ease: cubic-bezier(0.22, 0.9, 0.24, 1);
 }
@@ -153,6 +157,17 @@
   display: none;
 }
 
+/* A tool square: tiny, the same sharp 1px radius the shape already drew. Many
+   tools fly in one turn, so the mark shrinks to fit the crowd and the server's
+   own scale for them (`scale` 0.35) multiplies on top as it does for every
+   square. The width, the centring margin and the hit target all ride on
+   `--asq-size`, so re-declaring the variable sizes the drawn mark and the
+   pointer's target together instead of trusting the server's number. */
+.asq[data-kind="tool"] {
+  --asq-size: 5px;
+  --asq-hit: 10px;
+}
+
 @keyframes asq-in {
   from {
     opacity: 0;
@@ -198,6 +213,12 @@
   display: block;
   margin-bottom: 4px;
   color: #9a9aa2;
+}
+
+/* A tool's popover body is one word (the tool name), so the card caps low: it
+   reads as a chip, not as the tall card an agent turn earns. */
+.asq[data-kind="tool"] .asq-pop {
+  max-height: min(56px, calc(var(--asq-pane, 220px) - 16px));
 }
 
 .asq-tool-gap {

@@ -291,6 +291,9 @@ export class TerminalAgentSquares {
     el.className = "asq"
     el.tabIndex = 0
     el.dataset.turn = square.id
+    // The kind is fixed for a square's lifetime, so it is stamped once at
+    // creation and CSS keys sizing and the hit target off it.
+    el.dataset.kind = square.kind
     const pop = document.createElement("div")
     pop.className = "asq-pop"
     const meta = document.createElement("div")
