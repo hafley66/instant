@@ -114,46 +114,52 @@ describe("the strip's own numbers", () => {
     expect(Object.keys(props).sort()).toEqual(["active", "band", "squares", "track"])
   })
 
-  it("centres a recent block on the track and steps it by SQUARE_STEP", () => {
+  it("rides the reader: the active recent square sits on the reader's line", () => {
     const turns = [
       turn("s1:1", "user", "the opening prompt", 1_699_999_000_000),
       turn("s1:2", "agent", "line one\nline two", 1_700_000_000_000),
       turn("s1:3", "agent", "and the reply", 1_700_000_100_000),
     ]
-    const props = squaresOf(
+    const recentFrame = (active: number) =>
       frame(
         {
           mode: "recent",
           rows: 24,
           squares: [
-            { id: "s1:1", kind: "user", y: 0, scale: 1, active: false },
-            { id: "s1:2", kind: "agent", y: 1, scale: 1, active: true },
-            { id: "s1:3", kind: "agent", y: 2, scale: 1, active: false },
+            { id: "s1:1", kind: "user" as SquareKind, y: 0, scale: 1, active: active === 0 },
+            { id: "s1:2", kind: "agent" as SquareKind, y: 1, scale: 1, active: active === 1 },
+            { id: "s1:3", kind: "agent" as SquareKind, y: 2, scale: 1, active: active === 2 },
           ],
         },
         [],
         turns,
-      ),
-      { cellHeight: 17, track: 320 },
-    )
+      )
+    const props = squaresOf(recentFrame(1), { cellHeight: 17, track: 320 })
 
     // The whole track *is* the recent strip's space: no rows of its own to
     // convert, and no band counted in.
     expect(props.track).toBe(320)
     expect(props.band).toBe(0)
     expect(props.active).toBe(1)
-    const top = (320 - 3 * SQUARE_STEP) / 2
-    expect(props.squares.map((square) => square.y)).toEqual([
-      top,
-      top + SQUARE_STEP,
-      top + 2 * SQUARE_STEP,
+    // The reader's line is the pane's bottom edge, and the turn being read sits
+    // on it: the older turn above, the newer one below. A centred block would
+    // put the same squares 60px higher and never move them.
+    const line = 320 - SQUARE_STEP / 2
+    expect(props.squares.map((square) => square.y)).toEqual([line - SQUARE_STEP, line, line + SQUARE_STEP])
+    // Scrolling back one turn restacks the block around the new anchor, so the
+    // square that is newer than the turn being read slides toward the edge.
+    expect(squaresOf(recentFrame(0), { cellHeight: 17, track: 320 }).squares.map((square) => square.y)).toEqual([
+      line,
+      line + SQUARE_STEP,
+      line + 2 * SQUARE_STEP,
     ])
     // Uniform: a recent square's size is never its turn's, and none is pinned.
     expect(props.squares.map((square) => square.scale)).toEqual([1, 1, 1])
     expect(props.squares.some((square) => square.pinned)).toBe(false)
 
-    // A block taller than the track still starts at its top: the centring clamps
-    // rather than pushing the oldest square off the strip.
+    // A block deeper than the reader's line is pushed down rather than run off
+    // the top: the oldest square starts at the strip's own top and the newest
+    // ends up furthest down, which is the one clamp this layout has.
     const many = Array.from({ length: 40 }, (_, index) => ({
       id: `s1:${index + 1}`,
       kind: "agent" as SquareKind,

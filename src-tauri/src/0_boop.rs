@@ -169,7 +169,13 @@ fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
 const TURN_WINDOW: u64 = 300;
 
 pub(crate) fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
-    let store = open_store_ro()?;
+    turns_from(&open_store_ro()?, session)
+}
+
+/// The same read against a store the caller already holds. The strip projects
+/// several times a second while its pane writes, and the session's attribute
+/// rides the same frame, so a caller with both to read opens the store once.
+pub(crate) fn turns_from(store: &Store, session: &str) -> Result<Vec<BoopTurn>, String> {
     let last_turn: Option<u64> = store
         .connection()
         .query_row(

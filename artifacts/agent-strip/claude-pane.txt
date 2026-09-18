@@ -1,4 +1,5 @@
-agent-claude.%0 dead=0 cmd=boop
+agent-claude.%1 dead=0 cmd=boop
+agent-codex.%0 dead=0 cmd=boop
 
 
  ▐▛███▛█   Claude Code v2.1.275
@@ -16,13 +17,11 @@ agent-claude.%0 dead=0 cmd=boop
     PTY --> tmux
     tmux --> xterm
     xterm --> Markdown
+  d2
+  reader -> card: open
+  card -> lightbox: zoom
 
-✻ Worked for 0s · done 7:30 PM
-
-
-
-
-
+✻ Baked for 0s · done 8:43 PM
 
 
 
@@ -33,7 +32,9 @@ agent-claude.%0 dead=0 cmd=boop
 
 
 
-                                        tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll
+
+
+                                     tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯  
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

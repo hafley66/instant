@@ -9,7 +9,7 @@
 import { SignalCreator, type Signal } from "@hafley66/signals"
 
 /** One square's edge in px. */
-export const SQUARE_SIZE = 9
+export const SQUARE_SIZE = 12
 /** Space between two squares. */
 export const SQUARE_GAP = 5
 /** Distance between two square origins. */

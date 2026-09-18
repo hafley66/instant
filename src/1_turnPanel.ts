@@ -17,11 +17,13 @@ import { invoke } from "./generated/native"
 import { applyTags, askTags, boopFavorites, boopTurnsForSession, favoriteBoopTurn } from "./favorites"
 import type { BoopTurn } from "./0_terminalTurnVisibility"
 import type { TurnMark } from "./1_agentSquaresMarks"
-import { createElement } from "react"
+import { createElement, Fragment, useEffect, useMemo, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot, type Root } from "react-dom/client"
 import { code } from "@streamdown/code"
-import { Streamdown } from "streamdown"
+import { Streamdown, type CustomRendererProps } from "streamdown"
+import { DiagramLightbox, diagramSvgMarkup } from "@hafley66/md"
+import { renderDiagram, type DiagramLanguage } from "./0_terminalDiagrams"
 import { settings } from "./0_settings"
 import "./1_turnPanel.css"
 
@@ -71,7 +73,94 @@ const literalNewline = /\\n/g
 /// and a markdown file are drawn by one stylesheet. `streamdown/styles.css`
 /// arrives with the renderer's own import; `@hafley66/md/style.css`, which the
 /// app already loads, carries the `mdview-streamdown` rules.
+///
+/// A fence whose language is a diagram is not markdown, and streamdown's own
+/// mermaid block is not the one this app draws under a pane: both diagram
+/// languages are handed to `0_terminalDiagrams`, which is the renderer the
+/// terminal's diagram overlay uses. One d2 compile, one mermaid theme, one
+/// `.mdview-*` stylesheet, so a diagram in a card reads as the diagram the same
+/// turn wrote in the pane.
 const mdControls = { code: { copy: true, download: false }, table: false, mermaid: false }
+
+function darkMode(): boolean {
+  return settings.mode.$() === "dark"
+}
+
+/** One diagram fence, drawn at the card's width. The SVG arrives a tick after
+ *  the first paint — a d2 compile is a WASM call and mermaid fetches its bundle
+ *  on first use — so the slot stays empty until then and the renderer's own
+ *  failure message is drawn in it rather than a blank box. */
+function DiagramFence({ language, code: fence, dark }: { language: DiagramLanguage; code: string; dark: boolean }) {
+  const [svg, setSvg] = useState("")
+  const [error, setError] = useState("")
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    setSvg("")
+    setError("")
+    // `stripped` is what makes a truncated fence readable: the slice a card
+    // carries can end mid-diagram, and the renderer drops trailing lines until
+    // the rest parses rather than failing the whole block.
+    renderDiagram({ language, code: fence, start: 0, end: 0, inferred: false, stripped: true }, dark)
+      .then((rendered) => {
+        if (!disposed) setSvg(rendered.svg)
+      })
+      .catch((reason) => {
+        if (!disposed) setError(reason instanceof Error ? reason.message : "Failed to render diagram")
+      })
+    return () => {
+      disposed = true
+    }
+  }, [language, fence, dark])
+  // The markup object is memoised: a fresh one each render re-sets innerHTML and
+  // throws away the SVG the reader is looking at.
+  const markup = useMemo(() => ({ __html: diagramSvgMarkup(svg) }), [svg])
+  if (error) return createElement("pre", { className: `mdview-${language}-error` }, error)
+  return createElement(
+    Fragment,
+    null,
+    createElement("div", {
+      role: "button",
+      tabIndex: 0,
+      className: `mdview-${language}`,
+      "data-diagram-theme": dark ? "dark" : "light",
+      title: "Open diagram",
+      onClick: () => setOpen(true),
+      onKeyDown: (event: KeyboardEvent) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          setOpen(true)
+        }
+      },
+      dangerouslySetInnerHTML: markup,
+    }),
+    open
+      ? createElement(DiagramLightbox, {
+          svg,
+          label: language === "d2" ? "d2 diagram" : "Mermaid diagram",
+          language,
+          dark,
+          onClose: () => setOpen(false),
+        })
+      : null,
+  )
+}
+
+/// One component per diagram language, defined once: a renderer whose identity
+/// changed between the card's paints would remount every diagram in it, and a
+/// remount is a recompile of a component that draws an SVG.
+const MermaidFence = (props: CustomRendererProps) =>
+  createElement(DiagramFence, { language: "mermaid", code: props.code, dark: darkMode() })
+const D2Fence = (props: CustomRendererProps) =>
+  createElement(DiagramFence, { language: "d2", code: props.code, dark: darkMode() })
+
+const mdPlugins = {
+  code,
+  renderers: [
+    { language: "mermaid", component: MermaidFence },
+    { language: "d2", component: D2Fence },
+  ],
+}
 
 function messageBody(text: string) {
   return createElement(
@@ -81,7 +170,7 @@ function messageBody(text: string) {
       Streamdown,
       {
         mode: "static",
-        plugins: { code },
+        plugins: mdPlugins,
         controls: mdControls,
         shikiTheme: ["github-light", "github-dark"],
       },
@@ -203,7 +292,11 @@ export class TurnPanel {
   }
 
   private readonly onKey = (event: KeyboardEvent) => {
-    if (event.key === "Escape") this.close()
+    // A diagram the card drew zooms into the package's own lightbox, which
+    // listens for Escape on the same phase and was registered later: closing the
+    // card here would unmount the diagram the reader is zooming instead of
+    // closing the lightbox over it.
+    if (event.key === "Escape" && !document.querySelector(".diagram-lightbox")) this.close()
   }
 
   private readonly onDown = (event: PointerEvent) => {
@@ -218,6 +311,10 @@ export class TurnPanel {
     const node = event.target
     if (!(node instanceof Element)) return false
     if (this.card.contains(node)) return true
+    // The diagram lightbox is a portal on the body, not a child of this card, so
+    // a pointerdown inside it would otherwise read as a click somewhere else and
+    // close the card — taking the lightbox, which the card's tree owns, with it.
+    if (node.closest(".diagram-lightbox")) return true
     const id = this.target?.id
     if (!id) return false
     const rect = node.closest<HTMLElement>("[data-turn], [data-turn-id]")
@@ -258,9 +355,13 @@ export class TurnPanel {
     }
     // The message is drawn, not printed: the same markdown renderer the mdview
     // panel uses, so a turn's code fences, lists and headings read as they were
-    // written. Synchronous, because `place` measures the card right after this
-    // and a body rendered a frame later would be clamped against an empty one.
-    const text = target.preview.replace(escapeText, "").replace(literalNewline, "\n")
+    // written. The card is the reading surface, so it draws the whole turn it
+    // was handed; the slice a frame carries is sized for the popover, which is
+    // the same text at hover size. Synchronous, because `place` measures the
+    // card right after this and a body rendered a frame later would be clamped
+    // against an empty one.
+    const said = target.turn?.said ?? target.preview
+    const text = said.replace(escapeText, "").replace(literalNewline, "\n")
     this.md ??= createRoot(this.body)
     flushSync(() => this.md?.render(messageBody(text)))
   }

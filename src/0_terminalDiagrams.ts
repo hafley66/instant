@@ -8,7 +8,7 @@ import { liveProbe } from "./0_liveProbe";
 import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
 import type { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
 
-type DiagramLanguage = "mermaid" | "d2";
+export type DiagramLanguage = "mermaid" | "d2";
 export type DiagramFence = {
   language: DiagramLanguage;
   code: string;

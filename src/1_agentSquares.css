@@ -8,9 +8,12 @@
    Popovers are CSS-only. The pointer writes no state, no handler runs, and the
    body was rendered with the square, so a hover costs one class match. */
 :root {
-  --asq-size: 9px;
-  --asq-step: 14px;
+  --asq-size: 12px;
+  --asq-step: 17px;
   --asq-gutter: 32px;
+  /* What the pointer has to hit, which is not what the strip draws: the square
+     is small on purpose, the reader's finger is not. */
+  --asq-hit: 24px;
   --asq-move: 260ms;
   --asq-ease: cubic-bezier(0.22, 0.9, 0.24, 1);
 }
@@ -95,11 +98,27 @@
 }
 
 /* The pointer magnifies what it is over, the way a Dock magnifies the icon under
-   it: the hovered square grows to the active square's own multiplier on top of
-   whatever the scroll intersection gave it, on the strip's existing transition,
-   so nothing relayouts and no handler runs. */
-.asq:hover {
-  --asq-hover: 1.55;
+   it: the hovered square grows past the reader's own square's multiplier, on top
+   of whatever the scroll intersection gave it, on the strip's existing
+   transition, so nothing relayouts and no handler runs. It also rises above its
+   neighbours, because a magnified square that a later square paints over reads
+   as a glitch and not as a magnifier. */
+.asq:hover,
+.asq:focus-visible {
+  --asq-hover: 2;
+  z-index: 2;
+}
+
+/* The reader's finger is not 12px wide. A pseudo-element is part of its element
+   for hit testing and takes no layout, so a `--asq-hit` target rides on the
+   small mark. Half of it stays inside `--asq-step`, which is what keeps one
+   square's target from covering its neighbour's centre: every square keeps its
+   own click. The band's own lane is 6px from the main column, so the band keeps
+   the square it draws. */
+.asq:not([data-band="true"])::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--asq-size) - var(--asq-hit)) / 2);
 }
 
 .asq:focus-visible {
@@ -121,6 +140,10 @@
   width: 7px;
   height: 7px;
   margin-left: 0;
+  /* Its own lane, so it keeps its own clicks: a main square's 24px target
+     reaches into this column wherever the two line up, and a band square that
+     lost its click to a neighbour would be a mark the reader cannot open. */
+  z-index: 1;
 }
 
 /* A band square keeps its title and its click, but not a hover popover: the

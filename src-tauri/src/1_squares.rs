@@ -21,6 +21,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use boop_store::ident::Store;
 use boop_turnstrip::{
     drawn_at_all, kind_of, Layout, ListedTurn, Mode, Options, TurnKind, TurnRow, Viewport,
 };
@@ -28,10 +29,10 @@ use boop_turnvis::locate_visible_turns;
 use serde::{Deserialize, Serialize};
 
 use crate::boop::{
-    from_visible, input_region, now_ms, open_store_ro, read_turns, to_turnvis, BoopTurn, LocatedTurn,
+    from_visible, input_region, now_ms, open_store_ro, to_turnvis, turns_from, BoopTurn, LocatedTurn,
 };
 use crate::boop_tmux::{pane_window, tmux_command, PaneWindow};
-use crate::host::Host;
+use crate::host::{log_event, Host};
 
 /// The event the strip listens on.
 pub const SQUARES_EVENT: &str = "squares-update";
@@ -50,8 +51,14 @@ fn capture_depth(window: Option<&PaneWindow>) -> u32 {
     let wanted = window.scroll.saturating_add(window.height);
     CAPTURE_LINES.max(u32::try_from(wanted).unwrap_or(u32::MAX))
 }
-/// One reconcile per window at most. The pane can outrun a projection.
-const FLUSH_INTERVAL: Duration = Duration::from_millis(120);
+/// One reconcile per window at most. The pane can outrun a projection, and a
+/// projection is not cheap: each one spawns `tmux capture-pane` (~30ms measured
+/// on this machine), reads the session's window out of the store and matches it
+/// against the pane, so the interval is what a reader pays while a pane writes.
+/// A quarter second is under the eye's threshold for a square that moves with a
+/// 260ms transition (`--asq-move`), and it halves the work of the 120ms this
+/// started at. The loop's own rate is reported once a second — see [`FeedStat`].
+const FLUSH_INTERVAL: Duration = Duration::from_millis(250);
 /// Idle wait between polls of the dirty bit. A timeout is not a flush.
 const IDLE_WAIT: Duration = Duration::from_millis(1000);
 
@@ -362,6 +369,30 @@ pub fn sources_of(turns: &[LocatedTurn]) -> Vec<String> {
         .collect()
 }
 
+/// The store's own answer to when this session's conversation was last dropped,
+/// in the same milliseconds a turn carries. `None` when the harness never wrote
+/// one. Read through a handle the caller already holds, for the same reason the
+/// turns are.
+fn reset_from(store: &Store, session: &str) -> Result<Option<i64>, String> {
+    Ok(store
+        .session_attr(session, boop_store::RESET_ATTR_KEY)
+        .map_err(|error| error.to_string())?
+        .and_then(|value| value.parse::<i64>().ok()))
+}
+
+/// The turns of the conversation the reader is in: everything after the newest
+/// boundary, when the harness wrote one. A harness can drop a conversation in
+/// place — omp's `/clear` keeps the session, its file and its turns — and the
+/// store keeps both sides as history, so the boundary is what separates the
+/// conversation from what came before it. A turn stamped exactly at the boundary
+/// belongs to the dropped side: the boundary precedes the next turn.
+fn current_conversation(turns: Vec<BoopTurn>, boundary: Option<i64>) -> Vec<BoopTurn> {
+    match boundary {
+        Some(boundary) => turns.into_iter().filter(|turn| turn.ts > boundary).collect(),
+        None => turns,
+    }
+}
+
 /// Read the pane and the store, once, and build the frame the socket carries.
 pub fn project(
     session: &str,
@@ -375,13 +406,14 @@ pub fn project(
     // layout rather than no frame at all.
     let window = pane_window(target, socket).ok();
     let rows = capture_lines(target, socket, capture_depth(window.as_ref()))?;
-    let turns = read_turns(session)?;
+    let store = open_store_ro()?;
+    let turns = current_conversation(turns_from(&store, session)?, reset_from(&store, session)?);
     let strip = project_rows(session, &rows, turns, BTreeMap::new(), window, options);
     // The band's turns carry marks too: a pinned prompt is exactly the square a
     // reader hovers to see what they asked, so its tags ride the same read.
     let mut sources = sources_of(&strip.turns);
     sources.extend(sources_of(&strip.pinned));
-    let tags = open_store_ro()?
+    let tags = store
         .tags_for_many(&sources)
         .map_err(|error| error.to_string())?;
     Ok(Strip { tags, ..strip })
@@ -433,19 +465,137 @@ pub fn note_output(pty: &str) {
     }
 }
 
+/// What one watcher's loop has done in the last second. The strip is a poll, so
+/// its cost is how often it runs — the rate a slow terminal has to be read
+/// against, and the number nothing else in the app reports. Counted here and
+/// logged once a second by [`FeedStat::report`].
+#[derive(Default)]
+struct FeedStat {
+    flushes: u64,
+    pushed: u64,
+    unchanged: u64,
+    failed: u64,
+    project_ms: u64,
+    worst_ms: u64,
+    rows: u64,
+    turns: u64,
+    text_bytes: u64,
+    since: Option<Instant>,
+}
+
+impl FeedStat {
+    /// One line a second: how many projections the loop ran, how many of them
+    /// were worth sending, how long each took, and how much turn text they read.
+    /// The pane is named, because the number that matters is per pane: a reader
+    /// with several terminals open pays this once for each.
+    fn report(&mut self, host: &Arc<dyn Host>, pty: &str, session: &str) {
+        let now = Instant::now();
+        let elapsed = match self.since {
+            Some(at) => at.elapsed().as_secs_f64(),
+            None => 0.0,
+        };
+        if elapsed < 1.0 {
+            return;
+        }
+        self.since = Some(now);
+        let flushes = std::mem::take(&mut self.flushes);
+        if flushes == 0 && self.pushed == 0 {
+            return;
+        }
+        log_event(
+            host.as_ref(),
+            "INFO",
+            "squares_feed",
+            serde_json::json!({
+                "pty": pty,
+                "session": session,
+                "seconds": (elapsed * 100.0).round() / 100.0,
+                "flushes": flushes,
+                "per_second": ((flushes as f64 / elapsed) * 10.0).round() / 10.0,
+                "pushed": std::mem::take(&mut self.pushed),
+                "unchanged": std::mem::take(&mut self.unchanged),
+                "failed": std::mem::take(&mut self.failed),
+                "project_ms": std::mem::take(&mut self.project_ms),
+                "worst_ms": std::mem::take(&mut self.worst_ms),
+                "rows": std::mem::take(&mut self.rows),
+                "turns": std::mem::take(&mut self.turns),
+                "text_bytes": std::mem::take(&mut self.text_bytes),
+            }),
+        );
+    }
+}
+
+/// What the client draws from one frame, as one string: the fields a square is
+/// placed, sized and labelled by, the tags it wears, and the *length* of each
+/// turn's text rather than the text itself. Hashing the whole payload would cost
+/// as much as sending it — a session's window is hundreds of turns of prose —
+/// and a streaming turn's text only grows, so its length already changes on
+/// every frame its content does.
+fn frame_fingerprint(strip: &Strip) -> String {
+    let mut out = String::with_capacity(2048);
+    out.push_str(&strip.session);
+    out.push_str(&format!("|rows={}|", strip.rows));
+    if let Some(layout) = &strip.layout {
+        out.push_str(&serde_json::to_string(layout).unwrap_or_default());
+    }
+    out.push('|');
+    for turn in strip.turns.iter().chain(strip.pinned.iter()) {
+        out.push_str(&format!(
+            "{}:{}:{}:{}:{}:{}:{}:{};",
+            turn.id,
+            turn.role,
+            turn.ts,
+            turn.said.len(),
+            turn.buffer_start,
+            turn.anchor_start,
+            turn.anchor_end,
+            turn.confidence,
+        ));
+    }
+    out.push('|');
+    for (source, tags) in &strip.tags {
+        out.push_str(source);
+        out.push('=');
+        out.push_str(&tags.join(","));
+        out.push(';');
+    }
+    out
+}
+
 fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
     // The first projection does not wait for a write. A pane that is already
     // idle when its strip attaches — a finished turn, a viewer onto a quiet
     // session — would otherwise show nothing until it next wrote, which on a
     // settled pane is never.
     let options = args.options.merged();
+    log_event(
+        host.as_ref(),
+        "INFO",
+        "squares_feed_started",
+        serde_json::json!({
+            "pty": args.pty,
+            "session": args.session,
+            "target": args.target,
+            "mode": format!("{:?}", options.mode).to_lowercase(),
+        }),
+    );
+    let mut stat = FeedStat {
+        since: Some(Instant::now()),
+        ..FeedStat::default()
+    };
     let mut wait_for_a_write = false;
+    // The last frame's fingerprint: a projection identical to it is not sent, so
+    // a pane that redraws without moving a square costs the client nothing.
+    let mut last: Option<String> = None;
     loop {
         if wait_for_a_write {
             match listener.recv_timeout(IDLE_WAIT) {
                 Ok(()) => {}
                 // A quiet pane projects nothing: only a write wakes this.
-                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Timeout) => {
+                    stat.report(&host, &args.pty, &args.session);
+                    continue;
+                }
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         }
@@ -453,11 +603,36 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
         let started = Instant::now();
         match project(&args.session, &args.target, args.socket.as_deref(), &options) {
             Ok(strip) => {
-                let _ = publish(&host, &strip);
+                stat.rows += strip.rows as u64;
+                stat.turns += (strip.turns.len() + strip.pinned.len()) as u64;
+                stat.text_bytes += strip
+                    .turns
+                    .iter()
+                    .chain(strip.pinned.iter())
+                    .map(|turn| turn.said.len() as u64)
+                    .sum::<u64>();
+                let fingerprint = frame_fingerprint(&strip);
+                if last.as_deref() == Some(fingerprint.as_str()) {
+                    stat.unchanged += 1;
+                } else {
+                    last = Some(fingerprint);
+                    stat.pushed += 1;
+                    if let Err(why) = publish(&host, &strip) {
+                        stat.failed += 1;
+                        eprintln!("squares feed for {}: {why}", args.session);
+                    }
+                }
             }
-            Err(why) => eprintln!("squares feed for {}: {why}", args.session),
+            Err(why) => {
+                stat.failed += 1;
+                eprintln!("squares feed for {}: {why}", args.session);
+            }
         }
         let spent = started.elapsed();
+        stat.flushes += 1;
+        stat.project_ms += spent.as_millis() as u64;
+        stat.worst_ms = stat.worst_ms.max(spent.as_millis() as u64);
+        stat.report(&host, &args.pty, &args.session);
         if spent < FLUSH_INTERVAL {
             std::thread::sleep(FLUSH_INTERVAL - spent);
             // Everything that landed during the flush is one more projection,
@@ -778,6 +953,75 @@ mod tests {
             shipped[2].1, "listed",
             "the turn the pane never held rides without a span: {:?}",
             shipped
+        );
+    }
+
+    /// A conversation the reader cleared is not the conversation the strip draws.
+    /// A harness that drops one in place keeps the session, its file and its
+    /// turns; the boundary is what separates the live conversation from the
+    /// history behind it, and a turn stamped at the boundary is on that side.
+    #[test]
+    fn a_cleared_conversation_stops_at_its_boundary() {
+        let turns = vec![
+            turn("s1", 1, "user", "the cleared prompt"),
+            turn("s1", 2, "assistant", "the cleared answer"),
+            turn("s1", 3, "user", "after the clear"),
+        ];
+        assert_eq!(
+            current_conversation(turns.clone(), Some(1_700_000_000_000 + 2))
+                .iter()
+                .map(|turn| turn.turn)
+                .collect::<Vec<_>>(),
+            [3],
+            "the boundary is the first turn of the new conversation"
+        );
+        assert_eq!(
+            current_conversation(turns, None).len(),
+            3,
+            "a session with no boundary is one conversation"
+        );
+    }
+    /// The fingerprint decides whether a projection is worth sending: the frame
+    /// the reader already has is not, and a frame whose turn text grew is. The
+    /// stamp is not part of it — every frame carries a fresh one, and it is the
+    /// one field a client never draws.
+    #[test]
+    fn a_frame_is_unchanged_only_when_what_the_client_draws_is() {
+        let rows: Vec<String> = ["❯ hi", "", "⏺ done"].iter().map(|row| (*row).to_owned()).collect();
+        let frame = |said: &str| {
+            project_rows(
+                "s1",
+                &rows,
+                vec![turn("s1", 1, "user", "hi"), turn("s1", 2, "assistant", said)],
+                BTreeMap::new(),
+                Some(PaneWindow { height: 3, scroll: 0 }),
+                &Options::default(),
+            )
+        };
+        let one = frame("done");
+        assert_eq!(
+            frame_fingerprint(&one),
+            frame_fingerprint(&frame("done")),
+            "the same projection is the same frame"
+        );
+        assert_ne!(
+            frame_fingerprint(&one),
+            frame_fingerprint(&frame("done, and then some more")),
+            "a turn that grew is a frame to send"
+        );
+        let mut later = frame("done");
+        later.at += 5_000;
+        assert_eq!(
+            frame_fingerprint(&one),
+            frame_fingerprint(&later),
+            "the stamp is not a reason to redraw"
+        );
+        let mut resized = frame("done");
+        resized.rows += 1;
+        assert_ne!(
+            frame_fingerprint(&one),
+            frame_fingerprint(&resized),
+            "the pane's own height moved the squares"
         );
     }
 }

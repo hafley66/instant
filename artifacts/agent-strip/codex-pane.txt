@@ -21,14 +21,14 @@ agent-codex.%0 dead=0 cmd=boop
     PTY --> tmux
     tmux --> xterm
     xterm --> Markdown
+
+  reader -> card: open
+  card -> lightbox: zoom
  
  
 › Ask Codex to do anything
  
   mock-model default · /private/tmp/instant-agent-47821/workspace                
-
-
-
 
 
 

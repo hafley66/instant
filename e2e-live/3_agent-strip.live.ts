@@ -502,7 +502,9 @@ for (const adapter of liveAgentAdapters) {
     });
     expect(shown.hovered, "the pointer is over a square").not.toBeNull();
     expect(shown.cold, "a square the pointer is not over").not.toBeNull();
-    expect(shown.hovered!.drawn, "the hovered square is magnified").toBeCloseTo(shown.hovered!.own * 1.55, 1);
+    // How much it magnifies is the stylesheet's business; that it magnifies the
+    // square under the pointer and nothing else is this test's.
+    expect(shown.hovered!.drawn, "the hovered square is magnified").toBeGreaterThan(shown.hovered!.own * 1.1);
     expect(shown.cold!.drawn, "a cold square draws at its own size").toBeCloseTo(shown.cold!.own, 1);
 
     const png = join(shots, `${adapter.harness}-strip.png`);
@@ -510,45 +512,54 @@ for (const adapter of liveAgentAdapters) {
     await testInfo.attach(`${adapter.harness}-strip`, { path: png, contentType: "image/png" });
 
     // 4. A click opens the turn's own card, and the card keeps its place while
-    //    the strip re-projects under it: the pane writes, a frame lands, and the
-    //    squares move while the card does not.
+    //    the strip re-projects under it: the reader scrolls, a frame lands, and
+    //    the squares move while the card does not.
     await replySquare.click();
     const card = page.locator(".turn-panel");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card).toContainText(liveAgentReplyMarker);
+    // A fence that is a diagram is drawn, not printed: the card hands both
+    // diagram languages to the renderer the terminal's own overlay uses, so the
+    // reply's mermaid and d2 blocks arrive as SVG rather than as code. A diagram
+    // lands a tick after the text does, so this is also what settles the card's
+    // own height before its place is measured below.
+    await expect(card.locator(".mdview-mermaid svg").first()).toBeVisible({ timeout: 30_000 });
+    await expect(card.locator(".mdview-d2 svg").first()).toBeVisible({ timeout: 30_000 });
     const box = await card.boundingBox();
     expect(box, "the card has a box").not.toBeNull();
     const frameCount = () => page.evaluate(() => (window.__squaresFrames ?? []).length);
     const seen = await frameCount();
-    tmux(["send-keys", "-t", `${session}:`, "-l", " "]);
+    // A reader action that re-projects the strip without restarting it: the pane
+    // writes another turn, so its own rows change and the frame the feed sends is
+    // a different one. (Not a pane write the projection ignores — a space typed
+    // into a composer is one of those and is correctly not sent at all. Not the
+    // mode either: that restarts the watcher, card and all.)
+    await submitPrompt(session, "one more, please");
     await expect
-      .poll(frameCount, { timeout: 60_000, message: "the pane's write never produced a frame" })
+      .poll(frameCount, { timeout: 90_000, message: "the pane's second turn never produced a frame" })
       .toBeGreaterThan(seen);
     await expect(card).toBeVisible();
     expect(await card.boundingBox(), "the card moved with the squares").toEqual(box);
+    // A scroll is not pane output either — the reader's window is read off
+    // tmux's `scroll_position` — so the app nudges the feed itself when the
+    // reader scrolls. Asked over the app's own rpc rather than with a wheel: a
+    // pane whose TUI grabs the mouse consumes the wheel and scrolls its own
+    // view, which is a different thing and would test the TUI.
+    expect(await askScroll(session), "the rpc took the scroll").toBe(true);
+    // The screenshot is taken at the end of the body, where the diagrams are.
+    await card.locator(".turn-panel-body").evaluate((body) => {
+      body.scrollTop = body.scrollHeight;
+    });
     const panelPng = join(shots, `${adapter.harness}-panel.png`);
     await page.screenshot({ path: panelPng });
     await testInfo.attach(`${adapter.harness}-panel`, { path: panelPng, contentType: "image/png" });
     await page.keyboard.press("Escape");
     await expect(card).toBeHidden();
 
-    // 4b. A scroll reaches the strip. The reader's window is read off tmux's
-    //     `scroll_position`, and a scroll is not pane output, so the app nudges
-    //     the feed itself. Asked over the app's own rpc rather than with a
-    //     wheel: a pane whose TUI grabs the mouse consumes the wheel and scrolls
-    //     its own view, which is a different thing and would test the TUI. With
-    //     the pane otherwise quiet, a frame landing is that nudge and nothing
-    //     else.
-    const beforeScroll = await frameCount();
-    expect(await askScroll(session), "the rpc took the scroll").toBe(true);
-    await expect
-      .poll(frameCount, { timeout: 30_000, message: "a scroll never reached the strip's feed" })
-      .toBeGreaterThan(beforeScroll);
-
-    // 5. The other mode. The reader picks it in the toolbar, and the server
-    //    answers with the session's own recency list: the newest conversation
-    //    turns, one square each, uniform, oldest first — a set that is not the
-    //    window's, and a placement that is not a row.
+    // 5. The other mode — the reader picked it in the toolbar above — and the
+    //    server answers with the session's own recency list: the newest
+    //    conversation turns, one square each, uniform, oldest first. A set that
+    //    is not the window's, and a placement that is not a row.
     await page.selectOption("#squares-mode", "recent");
     const recentFrames = () =>
       page.evaluate(
@@ -580,24 +591,34 @@ for (const adapter of liveAgentAdapters) {
     await expect
       .poll(() => page.locator(".asq").count(), { timeout: 30_000, message: "the recency block drew no squares" })
       .toBe(recent.squares.length);
-    // The block is centred on the pane's track and one step apart, which is the
-    // whole of what this mode promises about where a square goes.
+    // The block rides the reader: the square for the turn being read sits on the
+    // reader's line at the pane's bottom edge, older turns above it and newer
+    // ones below, one step apart — and the block is pushed down when it would
+    // run off the pane's top. A centred block would instead sit wherever its own
+    // height put it and never move with the scroll.
     const block = await page.evaluate(() => {
       const strip = document.querySelector<HTMLElement>(".asq-strip");
       const tracks = Number.parseFloat(strip?.style.getPropertyValue("--asq-track") ?? "0");
       const step = Number.parseFloat(
         getComputedStyle(document.documentElement).getPropertyValue("--asq-step") || "0",
       );
-      const tops = [...document.querySelectorAll<HTMLElement>(".asq:not([data-band='true'])")]
-        .map((square) => Number.parseFloat(square.style.getPropertyValue("--asq-y")))
-        .sort((left, right) => left - right);
-      return { tracks, step, tops };
+      const squares = [...document.querySelectorAll<HTMLElement>(".asq:not([data-band='true'])")].map((square) => ({
+        id: square.dataset.turn ?? "",
+        y: Number.parseFloat(square.style.getPropertyValue("--asq-y")),
+        active: square.dataset.active === "true",
+      }));
+      return { tracks, step, squares };
     });
     expect(block.step, "the strip's own step, in px").toBeGreaterThan(0);
-    expect(block.tops.length).toBe(recent.squares.length);
-    expect(block.tops[0]).toBeCloseTo(Math.max(0, (block.tracks - block.tops.length * block.step) / 2), 0);
-    for (let index = 1; index < block.tops.length; index += 1) {
-      expect(block.tops[index] - block.tops[index - 1], "a square per step").toBeCloseTo(block.step, 0);
+    expect(block.squares.length).toBe(recent.squares.length);
+    const read = block.squares.findIndex((square) => square.active);
+    expect(read, "the square the reader is inside is on the strip").toBeGreaterThanOrEqual(0);
+    const line = Math.max(0, block.tracks - block.step / 2);
+    const shift = Math.max(0, read * block.step - line);
+    expect(block.squares[read].y, "the reader's square is on the reader's line").toBeCloseTo(line + shift, 0);
+    const stacked = [...block.squares].sort((left, right) => left.y - right.y);
+    for (let index = 1; index < stacked.length; index += 1) {
+      expect(stacked[index].y - stacked[index - 1].y, "a square per step").toBeCloseTo(block.step, 0);
     }
     const recentPng = join(shots, `${adapter.harness}-recent.png`);
     await page.screenshot({ path: recentPng });

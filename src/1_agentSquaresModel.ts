@@ -4,7 +4,9 @@
 // here re-derives a row, estimates a height, or reads a buffer. What is left is
 // what only a view can decide — the hue a turn is drawn in, its popover header,
 // the preview slice of text the frame already carries, and the px the server's
-// own units land on once the pane's row height is known.
+// own units land on once the pane's row height is known: a row for the mode that
+// counts rows, and a restacking of the recent block around the square the reader
+// is inside.
 //
 // The chain, and where this module sits in it:
 //
@@ -14,12 +16,14 @@
 //     -> `<AgentSquaresView/>`   the strip, which draws what it is given
 import { turnHue } from "./0_turnDebugOverlay"
 import { SQUARE_STEP, type SquareKind } from "./0_agentSquareVisual"
-import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
+import type { Strip, StripTurn } from "./1_agentSquaresFeed"
 
-/** How many characters of a turn a card carries. The text is already in memory,
- *  so a big cap costs nothing at open time and never fetches; the card is a
- *  reader and shows what a turn actually said, while the hover popover clips the
- *  same slice in CSS. */
+/** How many characters of a turn the *popover* carries, and what the frame
+ *  slices per square. A projection runs several times a second while the pane
+ *  writes, so this is a per-frame cost and stays small: the card, which is what
+ *  a reader opens to actually read a turn, draws the whole turn it was handed
+ *  (`TurnPanelTarget.turn`), and only falls back to this slice when the caller
+ *  has no turn. */
 export const PREVIEW_CHARS = 4000
 
 /** The pane's own px, which only the view can measure: one row's height, and
@@ -75,14 +79,32 @@ export function previewOf(said: string): string {
     .slice(0, PREVIEW_CHARS)
 }
 
-/** One square's px along the track, from the units its mode counts in. Relative
- *  counts rows inside the reader's window, so a square moves with the scroll;
- *  recent counts places in a block of the newest turns, which sits centred on
- *  the track and does not move with it. */
-function trackY(layout: StripLayout, y: number, geometry: SquareGeometry): number {
-  if (layout.mode === "relative") return y * geometry.cellHeight
-  const block = layout.squares.length * SQUARE_STEP
-  return Math.max(0, (geometry.track - block) / 2) + y * SQUARE_STEP
+/** One square's px along the track in the mode that counts rows: a row inside
+ *  the reader's window, so a square moves with the scroll. `recent` counts
+ *  places in a block instead, and `ridingY` places that block. */
+function rowY(y: number, geometry: SquareGeometry): number {
+  return y * geometry.cellHeight
+}
+
+/** The reader's own line: where the square for the turn they are reading sits,
+ *  and the line the rest of the block is stacked around. The pane's bottom edge,
+ *  because that is where a live reader's attention is — the newest turn's square
+ *  belongs on it — and a reader who scrolls back into history takes the block
+ *  with them. */
+function readerLine(geometry: SquareGeometry): number {
+  return Math.max(0, geometry.track - SQUARE_STEP / 2)
+}
+
+/** A recent square's px on the track: the active one sits on the reader's line
+ *  and every other is `SQUARE_STEP` away from it, older above and newer below,
+ *  so a scroll drags the whole block instead of leaving it where it was. The
+ *  block is pushed down when it would run off the pane's top, which is the one
+ *  edge a reader cannot scroll past: the older turns stay on the strip while the
+ *  newer ones the reader has left behind fall off the bottom. */
+function ridingY(index: number, anchor: number, geometry: SquareGeometry): number {
+  const line = readerLine(geometry)
+  const shift = Math.max(0, anchor * SQUARE_STEP - line)
+  return line + (index - anchor) * SQUARE_STEP + shift
 }
 
 /**
@@ -118,12 +140,23 @@ export function squaresOf(frame: Strip, geometry: SquareGeometry): AgentSquaresP
       preview: previewOf(turn.said),
       // A band square is a place in the band, not a row: the server counts it in
       // band positions, so it lands that many steps down its own lane.
-      y: pinned ? index * SQUARE_STEP : trackY(layout, square.y, geometry),
+      y: pinned ? index * SQUARE_STEP : rowY(square.y, geometry),
       scale: square.scale,
       active: square.active,
       pinned,
     })
   })
+  // The recency block rides the reader: it is restacked around whichever square
+  // the reader's window is inside, which is the one fact a frame carries that a
+  // place in the block does not. Without an active square — a bug rather than a
+  // state — the newest is the anchor, which is where a live reader stands.
+  if (layout.mode === "recent") {
+    const at = squares.findIndex((square) => square.active)
+    const anchor = at >= 0 ? at : squares.length - 1
+    squares.forEach((square, index) => {
+      square.y = ridingY(index, anchor, geometry)
+    })
+  }
   return {
     squares,
     active: squares.findIndex((square) => square.active),

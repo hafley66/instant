@@ -18,16 +18,16 @@
      markdown — a code block, a table, a heading — without the reader scrolling
      a keyhole. `place` clamps it into the pane, so the caps are what keeps it
      findable on a small panel. */
-  min-width: min(420px, 92%);
-  max-width: min(680px, 92%);
-  max-height: min(70%, 640px);
-  padding: 9px 11px 10px;
+  min-width: min(560px, 94%);
+  max-width: min(920px, 94%);
+  max-height: min(82%, 860px);
+  padding: 12px 14px 12px;
   border: 1px solid var(--frame-dark);
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--panel-fg);
   box-shadow: 0 6px 22px rgb(0 0 0 / .34);
-  font: 13px/1.5 Menlo, Monaco, monospace;
+  font: 14px/1.55 Menlo, Monaco, monospace;
 }
 
 .turn-panel-head {
@@ -106,7 +106,7 @@
 .turn-panel-body {
   min-height: 0;
   overflow: auto;
-  padding: 6px 7px;
+  padding: 10px 12px;
   border-left: 2px solid color-mix(in srgb, var(--panel-fg) 30%, transparent);
   background: color-mix(in srgb, var(--term-bg) 85%, transparent);
   color: color-mix(in srgb, var(--term-fg) 88%, transparent);
