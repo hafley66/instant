@@ -64,8 +64,9 @@
   width: var(--asq-size);
   /* The track every square's px is measured on, written per frame from the
      pane's own box: in relative mode it is the window's rows, in recent mode the
-     pane itself, with the block centred on it. `320px` is where a strip with no
-     frame yet stands. */
+     pane itself, with the block centred on it. `320px` is the pre-measure
+     stand-in a strip with no frame yet stands at; the pane's resize observer
+     re-projects the held frame and writes the real value over it. */
   height: var(--asq-track, 320px);
 }
 

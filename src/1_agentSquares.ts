@@ -31,7 +31,7 @@ import {
 import { liveProbe } from "./0_liveProbe"
 import { squaresFeed, watchSquares, type Strip, type StripTurn } from "./1_agentSquaresFeed"
 import { marksOf, type TurnMark } from "./1_agentSquaresMarks"
-import { squaresOf, type AgentSquare, type SquareGeometry } from "./1_agentSquaresModel"
+import { boxMoved, squaresOf, type AgentSquare, type SquareBox, type SquareGeometry } from "./1_agentSquaresModel"
 import { TurnPanel, type TurnPanelTarget } from "./1_turnPanel"
 
 /** What the server needs to start watching a pane: the pty stream it wakes on,
@@ -91,6 +91,18 @@ export class TerminalAgentSquares {
    *  reader saying they are done with its card, so the strip closes the panel it
    *  opened rather than opening the card again at the same spot. */
   private panelId?: string
+  /** The frame the strip last drew, held so a pane resize can re-project the
+   *  strip without waiting for the server's next push. A resize is a view
+   *  fact: the server learns nothing of it, the same law the recent offset
+   *  obeys. */
+  private lastFrame?: Strip
+  /** The pane box the last render projected into, rounded px: the box a resize
+   *  has to move off before the strip repaints. */
+  private drawn?: SquareBox
+  /** The pane's resize observer, and the one repaint a burst of entries
+   *  coalesces into on the next animation frame. */
+  private resize?: ResizeObserver
+  private resizeFrame = 0
 
   constructor(
     private el: HTMLElement,
@@ -100,6 +112,9 @@ export class TerminalAgentSquares {
      *  knows the gutter opened, and the terminal has to measure its columns
      *  again from here — the flip is not otherwise observable. */
     private onGutter: () => void,
+    /** The pane's resize observer arrives through a seam, the browser's own by
+     *  default, so a test can stand in for it. */
+    private newResize: typeof ResizeObserver = ResizeObserver,
   ) {
     this.host.className = "asq-host"
     this.strip.className = "asq-strip"
@@ -113,6 +128,8 @@ export class TerminalAgentSquares {
    *  is kept rather than dropped. */
   async start(): Promise<void> {
     this.frames = squaresFeed(this.input.session).subscribe((frame) => this.render(frame))
+    this.resize ??= new this.newResize((entries) => this.resized(entries))
+    this.resize.observe(this.el)
     this.panel ??= new TurnPanel(this.el)
     this.el.append(this.host)
     this.el.classList.add("asq-open")
@@ -150,6 +167,10 @@ export class TerminalAgentSquares {
     this.disposed = true
     this.frames?.unsubscribe()
     this.frames = undefined
+    this.resize?.disconnect()
+    this.resize = undefined
+    if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame)
+    this.resizeFrame = 0
     const stop = this.stop
     this.stop = undefined
     for (const entry of this.entries.values()) {
@@ -192,7 +213,9 @@ export class TerminalAgentSquares {
   }
 
   private render(frame: Strip): void {
+    this.lastFrame = frame
     const pane = this.el.getBoundingClientRect()
+    this.drawn = { width: Math.round(pane.width), height: Math.round(pane.height) }
     const props = squaresOf(frame, this.geometry(frame))
     this.gap.hidden = !props.gap
     if (props.gap) this.gap.style.transform = `translateY(${props.gap.y}px)`
@@ -247,6 +270,21 @@ export class TerminalAgentSquares {
       entry.el.remove()
       this.entries.delete(id)
     }
+  }
+
+  /** The pane's box moved under a drawn strip: re-project the held frame on
+   *  the next animation frame, one per burst. This is what replaces the
+   *  pre-measure track a tab change can leave one frame behind, and it never
+   *  reaches the server: a resize is a view fact. */
+  private resized(entries: ResizeObserverEntry[]): void {
+    if (!this.lastFrame || !this.drawn) return
+    const box = entries[entries.length - 1]?.contentRect
+    if (!box || !boxMoved(this.drawn, box.width, box.height)) return
+    if (this.resizeFrame) return
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = 0
+      if (this.lastFrame) this.render(this.lastFrame)
+    })
   }
 
   /**

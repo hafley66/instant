@@ -3,7 +3,7 @@
 // popover. Both are the client's only numbers — everything else is forwarded.
 import { describe, expect, it } from "vitest"
 import { SQUARE_STEP, type SquareKind } from "./0_agentSquareVisual"
-import { previewOf, squaresOf } from "./1_agentSquaresModel"
+import { boxMoved, previewOf, squaresOf } from "./1_agentSquaresModel"
 import type { Strip, StripLayout, StripTurn } from "./1_agentSquaresFeed"
 
 const turn = (id: string, role: string, said: string, ts: number): StripTurn => ({
@@ -193,5 +193,21 @@ describe("the strip's own numbers", () => {
       "INFO 2026-09-17T18:51:02Z
       next line done"
     `)
+  })
+})
+
+describe("a resize the strip answers", () => {
+  const drawn = { width: 800, height: 600 }
+  it("repaints when the pane's box moves off the one the strip drew at", () => {
+    expect(boxMoved(drawn, 700, 600)).toBe(true)
+    expect(boxMoved(drawn, 800, 640)).toBe(true)
+    expect(boxMoved(drawn, 700.5, 600)).toBe(true)
+  })
+  it("sits still while the box repeats, sub-pixel drift included", () => {
+    expect(boxMoved(drawn, 800, 600)).toBe(false)
+    expect(boxMoved(drawn, 800.4, 600.4)).toBe(false)
+  })
+  it("has nothing to re-project before the first frame", () => {
+    expect(boxMoved(undefined, 700, 600)).toBe(false)
   })
 })
