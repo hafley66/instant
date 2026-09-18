@@ -150,19 +150,19 @@ mod tests {
             [
                 (1, "user", "okay now try"),
                 (2, "thinking", ""),
-                (3, "tool", ""),
-                (4, "tool", ""),
+                (3, "tool", "mcp__bewpp__browser_status"),
+                (4, "tool", "mcp__bewpp__tabs_list"),
                 (5, "thinking", ""),
-                (6, "tool", ""),
+                (6, "tool", "mcp__bewpp__page_navigate"),
                 (7, "thinking", ""),
-                (8, "tool", ""),
+                (8, "tool", "Bash"),
                 (
                     9,
                     "assistant",
                     "Blocked at the extension. Navigation requires site permission."
                 ),
                 (10, "assistant", "Reading the extension configuration."),
-                (11, "tool", ""),
+                (11, "tool", "Read"),
                 (12, "assistant", ""),
             ]
         );
