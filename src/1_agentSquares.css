@@ -90,7 +90,7 @@
   margin-left: calc(var(--asq-size) / -2);
   border-radius: var(--asq-shape, 2.4px);
   background: var(--asq-color, #888);
-  transform: translateX(var(--asq-dx, 0px)) translateY(var(--asq-y, 0))
+  transform: translateX(var(--asq-dx, 0px)) translateY(calc(var(--asq-y, 0) + var(--asq-push, 0px)))
     scale(calc(var(--asq-scale, 1) * var(--asq-hover, 1)));
   transform-origin: center;
   opacity: var(--asq-strength, 0.42);
@@ -114,7 +114,15 @@
    of whatever the scroll intersection gave it, on the strip's existing
    transition, so nothing relayouts and no handler runs. It also rises above its
    neighbours, because a magnified square that a later square paints over reads
-   as a glitch and not as a magnifier. */
+   as a glitch and not as a magnifier.
+
+   The growth is the dock problem too: the hovered square's own target grows
+   into its neighbours', which are exactly what a finger reaching for it brushes
+   first. So the hover pushes the adjacent squares aside (`--asq-push`, added to the
+   transform's `translateY`): each neighbouring square's centre moves out of the
+   hovered target's reach while its own hit box stays on its own pitch, so every
+   square keeps a click under the same bigger finger. The band never takes the
+   push, because its squares have their own lane rule below. */
 .asq:hover,
 .asq:focus-visible {
   --asq-hover: 1.1;
@@ -125,12 +133,33 @@
    for hit testing and takes no layout, so a `--asq-hit` target rides on the
    small mark. Half of it stays inside `--asq-step`, which is what keeps one
    square's target from covering its neighbour's centre: every square keeps its
-   own click. The band's own lane is 6px from the main column, so the band keeps
-   the square it draws. */
+   own click. The hover's push only widens that gap, so the two numbers agree —
+   the `--asq-push` below is a multiple of this half-hit, and a magnified
+   square's own target still cannot reach a pushed neighbour's centre. The
+   band's own lane is 6px from the main column, so the band keeps the square it
+   draws. */
 .asq:not([data-band="true"])::after {
   content: "";
   position: absolute;
   inset: calc((var(--asq-size) - var(--asq-hit)) / 2);
+}
+
+/* The hover pushes the adjacent squares apart so their centres stay clear of the
+   magnified target: `--asq-push` (default 0px, added to `translateY`) moves
+   the one below down and the one above up by `--asq-push`; the first neighbour
+   moves 6px (a quarter of the 24px hit box, which is what clears its centre),
+   the second 2px, so the push decays across the strip like the magnification does. */
+.asq:not([data-band="true"]):hover + .asq:not([data-band="true"]) {
+  --asq-push: 6px;
+}
+.asq:not([data-band="true"]):hover + .asq + .asq:not([data-band="true"]) {
+  --asq-push: 2px;
+}
+.asq:not([data-band="true"]):has(+ .asq:hover:not([data-band="true"])) {
+  --asq-push: -6px;
+}
+.asq:not([data-band="true"]):has(+ .asq + .asq:hover:not([data-band="true"])) {
+  --asq-push: -2px;
 }
 
 .asq:focus-visible {
