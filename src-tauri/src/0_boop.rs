@@ -2,6 +2,8 @@ use boop_store::ident::{Store, TurnQuery};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 #[path = "0a_boopPresentation.rs"]
 mod presentation;
@@ -46,6 +48,31 @@ fn live_relations(harness: &str) -> HashMap<String, (String, Option<String>)> {
             )
         })
         .collect()
+}
+
+// Relation discovery reads harness registries and, for Codex, opens its live
+// thread database. The squares feed can project several panes concurrently,
+// so doing this once per projection turns a background sidebar into repeated
+// process/database work. Session identity changes are infrequent compared with
+// feed frames; refresh the cache periodically while keeping the first lookup
+// authoritative.
+static LIVE_RELATIONS_CACHE: OnceLock<
+    Mutex<HashMap<String, (Instant, HashMap<String, (String, Option<String>)>)>>,
+> = OnceLock::new();
+
+fn cached_live_relations(harness: &str) -> HashMap<String, (String, Option<String>)> {
+    let cache = LIVE_RELATIONS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((at, relations)) = cache.get(harness) {
+        if at.elapsed() < Duration::from_secs(5) {
+            return relations.clone();
+        }
+    }
+    let relations = live_relations(harness);
+    cache.insert(harness.to_owned(), (Instant::now(), relations.clone()));
+    relations
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -198,7 +225,7 @@ pub(crate) fn turns_from(store: &Store, session: &str) -> Result<Vec<BoopTurn>, 
     presentation::classify(store, &mut rows)?;
     let relations = rows
         .first()
-        .map(|row| live_relations(&row.harness))
+        .map(|row| cached_live_relations(&row.harness))
         .unwrap_or_default();
     Ok(rows
         .into_iter()
