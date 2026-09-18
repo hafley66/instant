@@ -13,6 +13,9 @@
 // entry keyframe runs once per turn rather than once per frame. Per-square state
 // is a `SignalCreator` tree (`0_agentSquareVisual`); a frame writes one field per
 // square that moved.
+
+// One pause in the immediacy: while the reader is in the strip (pointer or
+// focus), an incoming frame is held and only the newest one paints on the way out.
 //
 // The one thing the pointer writes is the turn panel: a click on a square opens
 // it, and a second click on the same square closes it. Hover stays CSS-only.
@@ -113,6 +116,11 @@ export class TerminalAgentSquares {
    *  `squares-update`, and the pane settling after a tab change is a view
    *  fact the server never learns. */
   private lastFrame?: Strip
+  /** The reader's presence in the strip: a frame landing while either presence
+   *  holds is stored, not drawn, and paints once on the way out. */
+  private pointerIn = false
+  private focusIn = false
+  private held?: Strip
   private wheelFrame = 0
   /** The pane box the last render projected into, rounded px: the box a resize
    *  has to move off before the strip repaints. */
@@ -151,7 +159,13 @@ export class TerminalAgentSquares {
   /** Subscribe first, then start the watcher: a frame that lands between the two
    *  is kept rather than dropped. */
   async start(): Promise<void> {
-    this.frames = squaresFeed(this.input.session).subscribe((frame) => this.render(frame))
+    this.frames = squaresFeed(this.input.session).subscribe((frame) => this.onFrame(frame))
+    // The hold's listeners arm with the feed so a retarget re-arms them: they
+    // are removed in dispose, the way the wheel listener is.
+    this.host.addEventListener("pointerenter", this.onPointerEnter)
+    this.host.addEventListener("pointerleave", this.onPointerLeave)
+    this.host.addEventListener("focusin", this.onFocusIn)
+    this.host.addEventListener("focusout", this.onFocusOut)
     // jsdom has no ResizeObserver: the seam default reads undefined there,
     // and a strip without one simply keeps the server-push-only repaint.
     if (this.newResize) {
@@ -163,6 +177,24 @@ export class TerminalAgentSquares {
     this.el.classList.add("asq-open")
     this.onGutter()
     this.stop = await watchSquares(this.input, this.options)
+  }
+
+  /** One server frame in. A reader inside the strip is reading a drawing the
+   *  frame would move, so it is held, not drawn; the newest frame wins. */
+  private onFrame(frame: Strip): void {
+    if (this.pointerIn || this.focusIn) {
+      this.held = frame
+      return
+    }
+    this.render(frame)
+  }
+
+  /** The reader's presence ended: the newest held frame paints, once. */
+  private settle(): void {
+    if (this.pointerIn || this.focusIn) return
+    const frame = this.held
+    this.held = undefined
+    if (frame) this.render(frame)
   }
 
   /** The pane moved to another boop session, or the reader changed what the
@@ -196,7 +228,14 @@ export class TerminalAgentSquares {
     this.frames?.unsubscribe()
     this.frames = undefined
     this.host.removeEventListener("wheel", this.onWheel)
+    this.host.removeEventListener("pointerenter", this.onPointerEnter)
+    this.host.removeEventListener("pointerleave", this.onPointerLeave)
+    this.host.removeEventListener("focusin", this.onFocusIn)
+    this.host.removeEventListener("focusout", this.onFocusOut)
     this.lastFrame = undefined
+    this.held = undefined
+    this.pointerIn = false
+    this.focusIn = false
     this.resize?.disconnect()
     this.resize = undefined
     if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame)
@@ -304,6 +343,14 @@ export class TerminalAgentSquares {
     }
   }
 
+  /** The frame a view-side repaint (wheel, resize) projects: the held frame
+   *  while the reader is in the strip. Taking it pays the hold's debt. */
+  private takeFrame(): Strip | undefined {
+    const frame = this.held ?? this.lastFrame
+    this.held = undefined
+    return frame
+  }
+
   /** The pane's box moved under a drawn strip: re-project the held frame on
    *  the next animation frame, one per burst. This is what replaces the
    *  pre-measure track a tab change can leave one frame behind, and it never
@@ -315,7 +362,8 @@ export class TerminalAgentSquares {
     if (this.resizeFrame) return
     this.resizeFrame = requestAnimationFrame(() => {
       this.resizeFrame = 0
-      if (this.lastFrame) this.render(this.lastFrame)
+      const frame = this.takeFrame()
+      if (frame) this.render(frame)
     })
   }
 
@@ -378,12 +426,26 @@ export class TerminalAgentSquares {
       const delta = this.wheelPending
       this.wheelPending = 0
       this.recentOffsetPx += delta
-      // Repaint from the last frame so the moved block shows immediately: a
-      // quiet pane sends no server push, so this is the only frame that knows
-      // the offset changed. `render` re-runs the same clamp, so this is the
-      // server frame's own paint path, not a second one.
-      if (this.lastFrame) this.render(this.lastFrame)
+      // Repaint so the moved block shows immediately: a quiet pane sends no
+      // server push, and this is the frame that knows the offset changed.
+      const frame = this.takeFrame()
+      if (frame) this.render(frame)
     })
+  }
+
+  private onPointerEnter = (): void => {
+    this.pointerIn = true
+  }
+  private onPointerLeave = (): void => {
+    this.pointerIn = false
+    this.settle()
+  }
+  private onFocusIn = (): void => {
+    this.focusIn = true
+  }
+  private onFocusOut = (): void => {
+    this.focusIn = false
+    this.settle()
   }
 
   private clear(): void {

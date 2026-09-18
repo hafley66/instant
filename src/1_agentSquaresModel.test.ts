@@ -305,6 +305,92 @@ it("moves the recent block by the offset without reordering it", () => {
   })
 })
 
+describe("a frame held while the reader is in the strip", () => {
+  it("draws nothing while the pointer is inside, then the newest frame once", async () => {
+    const { el } = mountPane(320)
+    const component = new TerminalAgentSquares(
+      el,
+      { pty: "p1", session: "s1", target: "t1" },
+      { mode: "recent", userKeep: 4 },
+      () => {},
+    )
+    await component.start()
+    feedMock.frames!.next(recentFrame(5))
+    const host = el.querySelector<HTMLElement>(".asq-host")!
+    const oldest = el.querySelector<HTMLElement>(".asq")!
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("126px")
+    host.dispatchEvent(new Event("pointerenter"))
+    // Each pushed frame is stored, not drawn: the strip keeps its places and
+    // keeps the squares the first frame made.
+    feedMock.frames!.next(recentFrame(6))
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("126px")
+    expect(el.querySelectorAll(".asq").length).toBe(5)
+    feedMock.frames!.next(recentFrame(7))
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("126px")
+    // Leaving paints the newest held frame once: the middle frame's places
+    // never reach the strip.
+    host.dispatchEvent(new Event("pointerleave"))
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("109px")
+    expect(el.querySelectorAll(".asq").length).toBe(7)
+    await component.dispose()
+  })
+
+  it("keeps the hold while either presence stays, and paints when both go", async () => {
+    const { el } = mountPane(320)
+    const component = new TerminalAgentSquares(
+      el,
+      { pty: "p1", session: "s1", target: "t1" },
+      { mode: "recent", userKeep: 4 },
+      () => {},
+    )
+    await component.start()
+    feedMock.frames!.next(recentFrame(5))
+    const host = el.querySelector<HTMLElement>(".asq-host")!
+    const oldest = el.querySelector<HTMLElement>(".asq")!
+    host.dispatchEvent(new Event("pointerenter"))
+    host.dispatchEvent(new FocusEvent("focusin"))
+    feedMock.frames!.next(recentFrame(7))
+    // The pointer left, but keyboard focus is still in the strip: held.
+    host.dispatchEvent(new Event("pointerleave"))
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("126px")
+    host.dispatchEvent(new FocusEvent("focusout"))
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("109px")
+    await component.dispose()
+  })
+
+  it("keeps the wheel live during the hold, repainting the held frame", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      cb()
+      return 1
+    })
+    const { el } = mountPane(320)
+    const component = new TerminalAgentSquares(
+      el,
+      { pty: "p1", session: "s1", target: "t1" },
+      { mode: "recent", userKeep: 4 },
+      () => {},
+    )
+    await component.start()
+    feedMock.frames!.next(recentFrame(40))
+    const host = el.querySelector<HTMLElement>(".asq-host")!
+    const oldest = el.querySelector<HTMLElement>(".asq")!
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("0px")
+    host.dispatchEvent(new Event("pointerenter"))
+    // Held, not drawn: only this frame marks the newest square active.
+    feedMock.frames!.next(withActiveTail(recentFrame(40)))
+    const newest = el.querySelector<HTMLElement>('[data-turn="s1:40"]')!
+    expect(newest.dataset.active).toBe("false")
+    const wheel = new WheelEvent("wheel", { deltaY: -200, deltaMode: 0, cancelable: true })
+    host.dispatchEvent(wheel)
+    expect(wheel.defaultPrevented).toBe(true)
+    // The scroll repainted the held frame: the block moved and the active
+    // mark landed with it.
+    expect(oldest.style.getPropertyValue("--asq-y")).toBe("-200px")
+    expect(newest.dataset.active).toBe("true")
+    await component.dispose()
+  })
+})
+
 /** A recent frame with `count` uniform agent squares, all in the frame's turns,
  *  so every one of them draws. */
 function recentFrame(count: number): Strip {
@@ -319,6 +405,17 @@ function recentFrame(count: number): Strip {
     turn(square.id, "assistant", "a reply", 1_699_999_000_000 + index),
   )
   return frame({ mode: "recent", rows: 40, squares }, [], turns)
+}
+
+/** A copy of a recent `frame` with the newest square active, so a paint of
+ *  exactly this frame is observable in `data-active`. */
+function withActiveTail(base: Strip): Strip {
+  const layout = base.layout as Extract<StripLayout, { mode: "recent" }>
+  layout.squares = layout.squares.map((square, index) => ({
+    ...square,
+    active: index === layout.squares.length - 1,
+  }))
+  return base
 }
 
 /** A pane the strip can measure in jsdom: `getBoundingClientRect` is a no-op
