@@ -59,6 +59,18 @@
   contain: layout;
 }
 
+/* The recent block taller than the pane scrolls from the gutter wheel, and the
+   wheel has to land on this box to see it — but the host is `pointer-events:
+   none` so the terminal keeps its own scroll everywhere else. `data-scrollable`
+   is set per frame (in the model's clamp) only when a recent block actually
+   overflows the track, so this lifts the pass-through for exactly that case and
+   leaves every other strip giving the wheel to the terminal. The strip's own
+   hit targets sit on top of the host, so a square keeps its click under the
+   pointer regardless. */
+.asq-host[data-scrollable="true"] {
+  pointer-events: auto;
+}
+
 .asq-strip {
   position: relative;
   width: var(--asq-size);

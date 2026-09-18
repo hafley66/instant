@@ -98,7 +98,25 @@ function rowY(y: number, geometry: SquareGeometry): number {
  *  so a scroll drags the whole block instead of leaving it where it was. The
  *  block is pushed down when it would run off the pane's top, which is the one
  *  edge a reader cannot scroll past: the older turns stay on the strip while the
- *  newer ones the reader has left behind fall off the bottom. */
+ *  newer ones the reader has left behind fall off the bottom.
+ *
+ *  A block taller than the pane is the one place a reader has to work for the
+ *  tail, so it scrolls from the gutter wheel. The offset is a view fact: the
+ *  server keeps counting places and never learns a scroll, and the strip passes
+ *  its held px straight through `squaresOf` so the whole block slides together.
+ *  The clamp is the same idea as the push-down above, pointed the other way:
+ *  `track - block` is where the newest square reaches the pane's bottom, so
+ *  that is as far as the reader may drag the tail into view. */
+
+/** The recent block's scroll offset in px, clamped to what the track can show.
+ *  Only a block taller than the track scrolls at all: a block that fits is
+ *  pinned, and its legal range collapses to 0. `want` is the wheel's accumulated
+ *  delta; positive (scroll down) is clamped to 0, negative is clamped to
+ *  `track - block`, which is the most the newest square can move before it
+ *  reaches the pane's bottom. */
+export function recentOffset(want: number, track: number, block: number): number {
+  return Math.min(0, Math.max(track - block, want))
+}
 
 /**
  * One square per turn the server placed, in the order it placed them. Only the
@@ -110,7 +128,7 @@ function rowY(y: number, geometry: SquareGeometry): number {
  * dropped rather than drawn blank: the layout is derived from these turns, so
  * that combination is a server bug, not a state to render.
  */
-export function squaresOf(frame: Strip, geometry: SquareGeometry): AgentSquaresProps {
+export function squaresOf(frame: Strip, geometry: SquareGeometry, recent = 0): AgentSquaresProps {
   const layout = frame.layout
   if (!layout) return { squares: [], active: -1, band: 0, track: geometry.track }
   // A band square refers to a turn the matcher never saw, so the frame carries
@@ -144,7 +162,8 @@ export function squaresOf(frame: Strip, geometry: SquareGeometry): AgentSquaresP
   // place in the block does not. Without an active square — a bug rather than a
   // state — the newest is the anchor, which is where a live reader stands.
   if (layout.mode === "recent") {
-    const start = Math.max(0, (geometry.track - (squares.length - 1) * SQUARE_STEP) / 2)
+    const block = (squares.length - 1) * SQUARE_STEP
+    const start = Math.max(0, (geometry.track - block) / 2) + recentOffset(recent, geometry.track, block)
     squares.forEach((square, index) => {
       square.y = start + index * SQUARE_STEP
     })
