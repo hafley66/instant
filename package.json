@@ -26,10 +26,11 @@
     "test:replay": "pnpm test:replay:corpus && pnpm test:replay:terminal && pnpm test:replay:conversation && pnpm test:replay:agents"
   },
   "dependencies": {
+    "@hafley66/grapht-model": "0.1.0-dev.1789779216703",
     "@hafley66/grid": "0.1.7",
     "@hafley66/json-rx": "0.1.2",
     "@hafley66/marbler": "0.0.3",
-    "@hafley66/md": "0.1.2",
+    "@hafley66/md": "0.1.2-dev.1789779450136",
     "@hafley66/signals": "0.1.1-dev.1788884795413",
     "@oddbird/css-anchor-positioning": "^0.9.0",
     "@react95/icons": "^2.5.0",
@@ -96,7 +97,6 @@
       "streamdown>mermaid": "$mermaid"
     },
     "patchedDependencies": {
-      "@hafley66/md@0.1.2": "patches/@hafley66__md@0.1.2.patch",
       "@hafley66/marbler@0.0.3": "patches/@hafley66__marbler@0.0.3.patch"
     }
   }

@@ -13,14 +13,14 @@ patchedDependencies:
   '@hafley66/marbler@0.0.3':
     hash: 00679fe1371bccd09d311557fec9434b66ac12cb24f50d7f20708ea5b4ecc034
     path: patches/@hafley66__marbler@0.0.3.patch
-  '@hafley66/md@0.1.2':
-    hash: fba4f87245d0174a1dc09c3bf4d807fef71dd7c8ba17099d4e768e557cc3de3a
-    path: patches/@hafley66__md@0.1.2.patch
 
 importers:
 
   .:
     dependencies:
+      '@hafley66/grapht-model':
+        specifier: 0.1.0-dev.1789779216703
+        version: 0.1.0-dev.1789779216703
       '@hafley66/grid':
         specifier: 0.1.7
         version: 0.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
@@ -31,8 +31,8 @@ importers:
         specifier: 0.0.3
         version: 0.0.3(patch_hash=00679fe1371bccd09d311557fec9434b66ac12cb24f50d7f20708ea5b4ecc034)(vite@8.1.5)
       '@hafley66/md':
-        specifier: 0.1.2
-        version: 0.1.2(patch_hash=fba4f87245d0174a1dc09c3bf4d807fef71dd7c8ba17099d4e768e557cc3de3a)(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)
+        specifier: 0.1.2-dev.1789779450136
+        version: 0.1.2-dev.1789779450136(@hafley66/grapht-model@0.1.0-dev.1789779216703)(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
       '@hafley66/signals':
         specifier: 0.1.1-dev.1788884795413
         version: 0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)
@@ -388,6 +388,9 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
+  '@hafley66/grapht-model@0.1.0-dev.1789779216703':
+    resolution: {integrity: sha512-89hsClZV0t2oSk2gQlBygMCtHYJGQ20nt27CizABAZJ01bHf4CLdso3aKMAh0JXHPd0+V1iNYmGkFYbBMjR1oA==}
+
   '@hafley66/grid@0.1.7':
     resolution: {integrity: sha512-Ny+T0FFUGjWcEnYj/cF9Ae4dWWqSsmrNsoyhnT5Hffwf4fF0mQFS0xCQLdN7JlAjBrVXrSKTlpSgwv+CTa4voA==}
     peerDependencies:
@@ -413,9 +416,14 @@ packages:
   '@hafley66/marbler@0.0.3':
     resolution: {integrity: sha512-oQX82T8Knjw52YFR+NMql6HhFTizcvJ0uKJk2MjPu3vUWg9fNFdhtktGQVy0HF45vfQN6xHDpnS7XdFH/9U62Q==}
 
-  '@hafley66/md@0.1.2':
-    resolution: {integrity: sha512-Iwl0fAmRfHLd0dAmnNkcgLKHXHAoCBx90a7cG2ZLR6oGKDSjynBXor5kZ5nMlIfZIxGIP7DwqaNUJ042C4XLqg==}
+  '@hafley66/md@0.1.2-dev.1789779450136':
+    resolution: {integrity: sha512-RvYjwxwvVRkZsRv+NixwjXviFKaDwKvy37Rx7InTwBtLqPWrkbyhOR7/usPI8VgNNphnd2uM5hx6bLGdFdhmOg==}
     peerDependencies:
+      '@hafley66/d2': '>=0.1.0'
+      '@hafley66/grapht': '>=0.1.0'
+      '@hafley66/grapht-model': '>=0.1.0'
+      '@hafley66/grapht-render-cytoscape': '>=0.1.0'
+      '@hafley66/mmd': '>=0.1.0'
       '@hafley66/signals': '>=0.1.0'
       '@streamdown/code': '>=1.1.1'
       dockview: '>=6.6.1'
@@ -423,9 +431,7 @@ packages:
       react: '>=19.2.7'
       react-dom: '>=19.2.7'
       react-resizable-panels: '>=3.0.6 <4'
-      remark-parse: '>=11.0.0'
       streamdown: '>=2.5.0'
-      unified: '>=11.0.5'
 
   '@hafley66/path@0.1.0':
     resolution: {integrity: sha512-aNzb/lDLk1xk7F1J93qAx48KtehsJD27xbP5p4JSGNAeDJgwWWvw+0v7qeZIuDV91jTnxcruvSkL7BaN7ZDZaw==}
@@ -2973,6 +2979,14 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
+  '@hafley66/grapht-model@0.1.0-dev.1789779216703':
+    dependencies:
+      remark-parse: 11.0.0
+      unified: 11.0.5
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
   '@hafley66/grid@0.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0
@@ -3043,8 +3057,9 @@ snapshots:
     transitivePeerDependencies:
       - vite
 
-  '@hafley66/md@0.1.2(patch_hash=fba4f87245d0174a1dc09c3bf4d807fef71dd7c8ba17099d4e768e557cc3de3a)(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(remark-parse@11.0.0)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(unified@11.0.5)':
+  '@hafley66/md@0.1.2-dev.1789779450136(@hafley66/grapht-model@0.1.0-dev.1789779216703)(@hafley66/signals@0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))':
     dependencies:
+      '@hafley66/grapht-model': 0.1.0-dev.1789779216703
       '@hafley66/signals': 0.1.1-dev.1788884795413(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
       '@terrastruct/d2': 0.1.33
@@ -3053,9 +3068,7 @@ snapshots:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
       react-resizable-panels: 3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      remark-parse: 11.0.0
       streamdown: 2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      unified: 11.0.5
 
   '@hafley66/path@0.1.0':
     dependencies:
