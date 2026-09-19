@@ -1042,6 +1042,7 @@ pub fn run() {
             pty::resize_pty,
             pty::close_pty,
             pty::kill_session,
+            pty::reap_dead_target,
             pty::scroll_session,
             pty::tmux_buffer,
             pty::rename_session_window,

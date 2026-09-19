@@ -358,7 +358,7 @@ fn harness_command(command: &str) -> Option<String> {
         let executable = word.rsplit('/').next()?.trim_end_matches(".exe");
         match executable {
             "claude" | "ccz" => Some("claude".to_string()),
-            "codex" | "opencode" | "kimi" => Some(executable.to_string()),
+            "codex" | "opencode" | "kimi" | "omp" => Some(executable.to_string()),
             _ => None,
         }
     })
@@ -979,6 +979,35 @@ pub async fn tmux_buffer() -> Result<String, String> {
             .output()
             .map_err(|e| e.to_string())?;
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Kill a target only when its pane is already dead under `remain-on-exit`; a
+/// live pane is untouched. Takes a pane id (`%509`), which kill_session cannot.
+#[tauri::command]
+pub async fn reap_dead_target(target: String) -> Result<bool, String> {
+    if direct_pty_mode() || target.trim().is_empty() {
+        return Ok(false);
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = path_env();
+        let out = tmux_cmd()
+            .args(["display-message", "-p", "-t", &target, "#{pane_dead}"])
+            .env("PATH", &path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        // A target tmux cannot resolve is already gone; nothing to reap.
+        if !out.status.success() || String::from_utf8_lossy(&out.stdout).trim() != "1" {
+            return Ok(false);
+        }
+        tmux_cmd()
+            .args(["kill-pane", "-t", &target])
+            .env("PATH", &path)
+            .status()
+            .map_err(|e| e.to_string())?;
+        Ok(true)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -67,6 +67,10 @@ pub fn dispatch(
             let p: KillSessionArgs = parse(name, params)?;
             res(crate::pty::kill_session_impl(&services, p.name))
         }
+        "reap_dead_target" => {
+            let p: ReapDeadTargetArgs = parse(name, params)?;
+            res(wait(crate::pty::reap_dead_target(p.target)))
+        }
         "scroll_session" => {
             let p: ScrollSessionArgs = parse(name, params)?;
             wait(crate::pty::scroll_session(p.name, p.up, p.lines));
@@ -512,6 +516,11 @@ struct ClosePtyArgs {
 #[serde(rename_all = "camelCase")]
 struct KillSessionArgs {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct ReapDeadTargetArgs {
+    target: String,
 }
 
 #[derive(Deserialize)]

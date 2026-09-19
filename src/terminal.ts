@@ -1426,9 +1426,12 @@ export function onTermClosed(id: string) {
     order: nextClosedOrder(),
   });
   forgetTab(id); // don't reattach a tab the user closed
-  // Detach only: the tmux session keeps running for reattach. Kill stays
-  // explicit (sidebar ×, agent-menu Kill); closeChain fences same-name recreates.
-  closeChain = closeChain.then(() => invoke("close_pty", { id }).catch(() => {}));
+  // Detach a live pane (it keeps running for reattach); reap an already-dead one
+  // so remain-on-exit does not leak it. Kill of a live pane stays explicit.
+  const target = t.tmuxTarget ?? name;
+  closeChain = closeChain
+    .then(() => invoke("close_pty", { id }).catch(() => {}))
+    .then(() => invoke("reap_dead_target", { target }).catch(() => {}));
   if (activeId() === id) {
     const next = tabs.keys().next();
     const nextId = next.done ? null : next.value;
