@@ -293,12 +293,16 @@ function darkBackground(host: HTMLElement): boolean {
 }
 
 type RenderedDiagram = { svg: string; code: string; lineCount: number };
+const MAX_TAIL_RECOVERY_ATTEMPTS = 16;
+const MAX_RENDER_CACHE_ENTRIES = 32;
+const MAX_LIGHTBOX_ENTRIES = 32;
 
 export async function renderDiagram(fence: DiagramFence, dark: boolean): Promise<RenderedDiagram> {
   if (fence.language === "d2") {
     const lines = fence.code.split("\n");
     let lastError: unknown;
-    for (let length = lines.length; length > 0; length--) {
+    const minimum = Math.max(1, lines.length - MAX_TAIL_RECOVERY_ATTEMPTS + 1);
+    for (let length = lines.length; length >= minimum; length--) {
       try {
         const code = lines.slice(0, length).join("\n");
         const rendered = await renderD2(code, dark);
@@ -323,10 +327,12 @@ export async function renderDiagram(fence: DiagramFence, dark: boolean): Promise
     flowchart: { htmlLabels: false },
     securityLevel: "strict",
     suppressErrorRendering: true,
+    maxEdges: 2_000,
   });
   const lines = fence.code.split("\n");
   let lastError: unknown;
-  for (let length = lines.length; length >= 2; length--) {
+  const minimum = Math.max(lines.length === 1 ? 1 : 2, lines.length - MAX_TAIL_RECOVERY_ATTEMPTS + 1);
+  for (let length = lines.length; length >= minimum; length--) {
     const code = lines.slice(0, length).join("\n");
     try {
       const rendered = await mermaid.render(`instant-terminal-mermaid-${mermaidId++}`, code);
@@ -388,6 +394,7 @@ export class TerminalDiagramOverlay {
   lightboxMount: HTMLDivElement | null = null;
   lightboxEntries: DiagramLightboxEntry[] = [];
   lightboxActive = 0;
+  lightboxSequence = 0;
   hideRequested = false;
   lastPaintedFingerprint = "";
   retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -632,6 +639,10 @@ export class TerminalDiagramOverlay {
       if (!pending) {
         pending = renderDiagram(fence, dark);
         this.cache.set(key, pending);
+        if (this.cache.size > MAX_RENDER_CACHE_ENTRIES) {
+          const oldest = this.cache.keys().next().value;
+          if (oldest !== undefined) this.cache.delete(oldest);
+        }
       }
       try {
         const result = await pending;
@@ -644,7 +655,7 @@ export class TerminalDiagramOverlay {
           : fence;
         return { fence: renderedFence, svg: result.svg, error: "" };
       } catch (reason) {
-        this.cache.delete(key);
+        if (this.cache.get(key) === pending) this.cache.delete(key);
         return { fence, svg: "", error: reason instanceof Error ? reason.message : `Failed to render ${fence.language}` };
       }
     }));
@@ -721,6 +732,7 @@ export class TerminalDiagramOverlay {
   openLarge(entry: DiagramLightboxEntry) {
     this.closeLarge();
     this.lightboxEntries.push(entry);
+    if (this.lightboxEntries.length > MAX_LIGHTBOX_ENTRIES) this.lightboxEntries.shift();
     this.lightboxActive = this.lightboxEntries.length - 1;
     const mount = document.createElement("div");
     document.body.appendChild(mount);
@@ -751,7 +763,7 @@ export class TerminalDiagramOverlay {
     );
     if (!target) return null;
     return {
-      id: `${target.dataset.diagramKey}:${this.lightboxEntries.length}`,
+      id: `${target.dataset.diagramKey}:${this.lightboxSequence++}`,
       svg: target.innerHTML,
       language: target.dataset.language as DiagramLanguage,
       dark: target.dataset.diagramTheme === "dark",
@@ -794,7 +806,9 @@ export class TerminalDiagramOverlay {
     this.recoveryEvents.complete();
     this.generation++;
     this.disposables.forEach((disposable) => disposable.dispose());
+    this.cache.clear();
     this.elementCache.clear();
+    this.lightboxEntries.length = 0;
     this.closeLarge();
     this.root.remove();
   }

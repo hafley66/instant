@@ -68,7 +68,10 @@ const stubFromPoint = (returnValue: Element) => {
   };
 };
 
-afterEach(async () => { await act(async () => { closeNavMenu(); }); });
+afterEach(async () => {
+  await act(async () => { closeNavMenu(); });
+  vi.useRealTimers();
+});
 
 describe("the menu, rendered by React", () => {
   it("paints a row per entry with its subtext and a submenu arrow", async () => {
@@ -137,7 +140,7 @@ describe("hold to reorder", () => {
   }
 
   it("moves an item within its group after the hold and persists the order", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     const persist = persistence();
     await openSub(persist);
     await fire(rowsOf(1)[0], "pointerdown");
@@ -146,22 +149,20 @@ describe("hold to reorder", () => {
     await fire(rowsOf(1)[1], "pointerup");
     expect(persist.order.$().items.opencode).toEqual(["pro4", "flash4"]);
     expect(idsOf(1)).toEqual(["pro4", "flash4", "opus"]);
-    vi.useRealTimers();
   });
 
   it("leaves the order alone when the pointer never held", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     const persist = persistence();
     await openSub(persist);
     await fire(rowsOf(1)[0], "pointerdown");
     await fire(rowsOf(1)[1], "pointermove");
     await fire(rowsOf(1)[1], "pointerup");
     expect(persist.order.$()).toEqual(empty_nav_order);
-    vi.useRealTimers();
   });
 
   it("refuses a move that would take an item out of its group", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     const persist = persistence();
     await openSub(persist);
     await fire(rowsOf(1)[0], "pointerdown");
@@ -169,7 +170,6 @@ describe("hold to reorder", () => {
     await fire(rowsOf(1)[2], "pointermove");
     await fire(rowsOf(1)[2], "pointerup");
     expect(persist.order.$()).toEqual(empty_nav_order);
-    vi.useRealTimers();
   });
 });
 

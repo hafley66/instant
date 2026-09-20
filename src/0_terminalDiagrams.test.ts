@@ -195,6 +195,29 @@ describe("Mermaid rendering", () => {
     `);
     vi.unstubAllGlobals();
   });
+
+  it("bounds tail recovery for large malformed inferred sources", async () => {
+    const render = vi.fn().mockRejectedValue(new Error("parse failure"));
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render } });
+    const code = ["flowchart LR", ...Array.from({ length: 999 }, (_, index) => `  n${index} --> broken prose`)].join("\n");
+
+    await expect(renderDiagram({ language: "mermaid", code, start: 1, end: 1000, inferred: true }, false))
+      .rejects.toThrow("parse failure");
+    expect(render.mock.calls).toHaveLength(16);
+    expect(render.mock.calls.map(([, source]) => source.split("\n").length)).toEqual(
+      Array.from({ length: 16 }, (_, index) => 1000 - index),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("attempts a one-line explicit Mermaid source once", async () => {
+    const render = vi.fn().mockRejectedValue(new Error("single-line failure"));
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render } });
+    await expect(renderDiagram({ language: "mermaid", code: "flowchart LR", start: 1, end: 1, inferred: false }, false))
+      .rejects.toThrow("single-line failure");
+    expect(render).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("svgAspectRatio", () => {

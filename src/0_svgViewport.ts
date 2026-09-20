@@ -1,5 +1,3 @@
-import { clampPanZoom } from "./0_PanZoomViewport";
-
 export type SvgBox = { x: number; y: number; width: number; height: number };
 
 const SVG_HTML_ENTITIES: Record<string, string> = {
@@ -30,10 +28,26 @@ export function normalizeSvgEntities(source: string): string {
 }
 
 export function svgSourceBox(source: string): SvgBox | null {
-  const match = source.match(/\bviewBox\s*=\s*["']\s*([-\d.]+)[ ,]+([-\d.]+)[ ,]+([-\d.]+)[ ,]+([-\d.]+)\s*["']/i);
-  if (!match) return null;
-  const [, x, y, width, height] = match.map(Number);
-  return width > 0 && height > 0 ? { x, y, width, height } : null;
+  const root = source.match(/<svg\b[^>]*>/i)?.[0];
+  if (!root) return null;
+  const values = root.match(/\bviewBox\s*=\s*["']([^"']+)["']/i)?.[1].trim().split(/[ ,\s]+/).map(Number);
+  if (values?.length === 4 && values.every(Number.isFinite)) {
+    const [x, y, width, height] = values;
+    if (width > 0 && height > 0) return { x, y, width, height };
+  }
+  const dimension = (name: string) => {
+    const value = root.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*["']([+\\d.eE-]+)(?:px)?["']`, "i"))?.[1];
+    return value ? Number(value) : NaN;
+  };
+  const width = dimension("width"), height = dimension("height");
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? { x: 0, y: 0, width, height } : null;
+}
+
+export { svgPaintBox, svgNeedsRepaint, svgCssTransform, svgFitBox } from "@hafley66/md";
+
+export function svgMinimumZoom(native: SvgBox, fitted: SvgBox): number {
+  return Math.min(0.1, native.width / fitted.width);
 }
 
 export function svgNativeBox(original: SvgBox, viewportWidth: number, viewportHeight: number): SvgBox {
@@ -48,7 +62,7 @@ export function svgNativeBox(original: SvgBox, viewportWidth: number, viewportHe
 }
 
 export function svgBoxAtZoom(original: SvgBox, current: SvgBox, nextZoom: number, focusX = 0.5, focusY = 0.5): SvgBox {
-  const zoom = clampPanZoom(nextZoom);
+  const zoom = Math.min(64, Math.max(Number.EPSILON, nextZoom));
   const width = original.width / zoom;
   const height = original.height / zoom;
   return {

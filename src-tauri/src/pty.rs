@@ -991,26 +991,38 @@ pub async fn reap_dead_target(target: String) -> Result<bool, String> {
     if direct_pty_mode() || target.trim().is_empty() {
         return Ok(false);
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = path_env();
-        let out = tmux_cmd()
-            .args(["display-message", "-p", "-t", &target, "#{pane_dead}"])
-            .env("PATH", &path)
-            .output()
-            .map_err(|e| e.to_string())?;
-        // A target tmux cannot resolve is already gone; nothing to reap.
-        if !out.status.success() || String::from_utf8_lossy(&out.stdout).trim() != "1" {
-            return Ok(false);
-        }
-        tmux_cmd()
-            .args(["kill-pane", "-t", &target])
-            .env("PATH", &path)
-            .status()
-            .map_err(|e| e.to_string())?;
-        Ok(true)
-    })
+    tauri::async_runtime::spawn_blocking(move || reap_dead_target_on_socket(&target, None))
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn reap_dead_target_on_socket(target: &str, socket: Option<&str>) -> Result<bool, String> {
+    let path = path_env();
+    let out = tmux_cmd_for_socket(socket)
+        .args([
+            "display-message", "-p", "-t", target,
+            "#{pane_id}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{window_linked}",
+        ])
+        .env("PATH", &path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    // Removing any pane from a shared session either reflows its live siblings
+    // or changes the window selected by attached clients. Preserve those
+    // viewports; the dead pane can be reaped after the shared layout is gone.
+    let fields: Vec<_> = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .split('\t')
+        .map(str::to_owned)
+        .collect();
+    if !out.status.success() || fields.len() != 5 || fields[1..] != ["1", "1", "1", "0"] {
+        return Ok(false);
+    }
+    let status = tmux_cmd_for_socket(socket)
+        .args(["kill-pane", "-t", &fields[0]])
+        .env("PATH", &path)
+        .status()
+        .map_err(|e| e.to_string())?;
+    Ok(status.success())
 }
 
 /// Kill a tmux session outright (ends the shell/agent inside) and drop its pty.
@@ -1176,6 +1188,7 @@ fn rogue_agent_sessions_blocking() -> Vec<RogueSession> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
     use super::*;
 
     // path_env() reads the real process PATH, so this test owns mutating it and
@@ -1305,6 +1318,106 @@ mod tests {
             .arg("kill-server")
             .status();
         assert!(tmux_target_session_on_socket(&pane, Some(&socket)).is_err());
+    }
+
+    #[test]
+    fn dead_pane_reaping_preserves_shared_layouts() {
+        let socket = format!("instant-reap-layout-test-{}", std::process::id());
+        let session = format!("instant-reap-layout-session-{}", std::process::id());
+        let created = tmux_cmd_for_socket(Some(&socket))
+            .args(["new-session", "-d", "-s", &session, "-x", "120", "-y", "40"])
+            .status();
+        assert!(created.expect("start private tmux server").success());
+        let run = || -> Result<(), String> {
+            tmux_cmd_for_socket(Some(&socket))
+                .args(["set-window-option", "-t", &format!("={session}:0"), "remain-on-exit", "on"])
+                .status().map_err(|error| error.to_string())?;
+            tmux_cmd_for_socket(Some(&socket))
+                .args(["split-window", "-d", "-h", "-t", &format!("={session}:0")])
+                .status().map_err(|error| error.to_string())?;
+            let panes = tmux_cmd_for_socket(Some(&socket))
+                .args(["list-panes", "-t", &format!("={session}:0"), "-F", "#{pane_id}\t#{pane_width}"])
+                .output().map_err(|error| error.to_string())?;
+            let text = String::from_utf8_lossy(&panes.stdout);
+            let rows: Vec<Vec<&str>> = text.lines().map(|line| line.split('\t').collect()).collect();
+            let dead = rows[0][0];
+            let live = rows[1][0];
+            let width = rows[1][1];
+            tmux_cmd_for_socket(Some(&socket))
+                .args(["send-keys", "-t", dead, "exit", "Enter"])
+                .status().map_err(|error| error.to_string())?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let state = tmux_cmd_for_socket(Some(&socket))
+                    .args(["display-message", "-p", "-t", dead, "#{pane_dead}"])
+                    .output().map_err(|error| error.to_string())?;
+                if state.status.success() && String::from_utf8_lossy(&state.stdout).trim() == "1" {
+                    break;
+                }
+                if Instant::now() >= deadline { return Err("pane did not exit".into()); }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+
+            assert!(!reap_dead_target_on_socket(dead, Some(&socket))?);
+            let state = tmux_cmd_for_socket(Some(&socket))
+                .args(["display-message", "-p", "-t", live, "#{pane_width}\t#{window_panes}"])
+                .output().map_err(|error| error.to_string())?;
+            assert_eq!(String::from_utf8_lossy(&state.stdout).trim(), format!("{width}\t2"));
+            Ok(())
+        };
+        let result = run();
+        let _ = tmux_cmd_for_socket(Some(&socket)).arg("kill-server").status();
+        result.unwrap();
+    }
+
+    #[test]
+    fn dead_pane_reaping_removes_an_isolated_session() {
+        let socket = format!("instant-reap-single-test-{}", std::process::id());
+        let session = format!("instant-reap-single-session-{}", std::process::id());
+        let created = tmux_cmd_for_socket(Some(&socket))
+            .args(["new-session", "-d", "-s", &session])
+            .status();
+        assert!(created.expect("start private tmux server").success());
+        let run = || -> Result<(), String> {
+            tmux_cmd_for_socket(Some(&socket))
+                .args(["set-window-option", "-t", &format!("={session}:0"), "remain-on-exit", "on"])
+                .status().map_err(|error| error.to_string())?;
+            let pane = tmux_cmd_for_socket(Some(&socket))
+                .args(["display-message", "-p", "-t", &format!("={session}:0"), "#{pane_id}"])
+                .output().map_err(|error| error.to_string())?;
+            let pane = String::from_utf8_lossy(&pane.stdout).trim().to_string();
+            tmux_cmd_for_socket(Some(&socket))
+                .args(["send-keys", "-t", &pane, "exit", "Enter"])
+                .status().map_err(|error| error.to_string())?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let state = tmux_cmd_for_socket(Some(&socket))
+                    .args(["display-message", "-p", "-t", &pane, "#{pane_dead}"])
+                    .output().map_err(|error| error.to_string())?;
+                if state.status.success() && String::from_utf8_lossy(&state.stdout).trim() == "1" {
+                    break;
+                }
+                if Instant::now() >= deadline { return Err("pane did not exit".into()); }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+
+            let linked_session = format!("{session}-linked");
+            assert!(tmux_cmd_for_socket(Some(&socket))
+                .args(["new-session", "-d", "-s", &linked_session, "-t", &session])
+                .status().map_err(|error| error.to_string())?.success());
+            assert!(!reap_dead_target_on_socket(&pane, Some(&socket))?);
+            assert!(tmux_cmd_for_socket(Some(&socket))
+                .args(["kill-session", "-t", &format!("={linked_session}")])
+                .status().map_err(|error| error.to_string())?.success());
+            assert!(reap_dead_target_on_socket(&pane, Some(&socket))?);
+            assert!(!tmux_cmd_for_socket(Some(&socket))
+                .args(["has-session", "-t", &format!("={session}")])
+                .output().map_err(|error| error.to_string())?.status.success());
+            Ok(())
+        };
+        let result = run();
+        let _ = tmux_cmd_for_socket(Some(&socket)).arg("kill-server").status();
+        result.unwrap();
     }
 
     #[test]

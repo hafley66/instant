@@ -1475,21 +1475,20 @@ export function termSelectionText(id: string): string {
   return tab?.term.getSelection() || tab?.pinnedSelection?.text() || "";
 }
 
-/// Queue the live selection for the next message and show the queue.
-///
-/// The context queue already owns this: it accumulates several selections,
-/// gives each an editable textarea to annotate, and sends the lot with its own
-/// button. Writing a second, one-shot body straight to the pty was a duplicate
-/// of that subsystem with no annotate step, so this feeds the queue instead.
-export function askAboutSelection(id: string) {
+/// Capture before a menu can blur the terminal or a TUI repaint clears the pin.
+export function terminalSelectionSnapshot(id: string) {
   const tab = tabs.get(id);
   const text = termSelectionText(id);
-  if (!tab?.contextQueue || !text) return;
+  if (!tab?.contextQueue || !text) return null;
   const rows = selectionRows(tab);
-  const queued = tab.contextQueue.addSelection(tab.contextQueue.snapshotFor(text, rows[0], rows[1]));
+  return tab.contextQueue.snapshotFor(text, rows[0], rows[1]);
+}
+
+export function askAboutSelection(id: string, snapshot = terminalSelectionSnapshot(id)) {
+  const tab = tabs.get(id);
+  if (!tab?.contextQueue || !snapshot) return;
+  const queued = tab.contextQueue.addSelection(snapshot);
   tab.pinnedSelection?.clear();
-  // Caret goes to the new slice's note so the annotation can be typed at once;
-  // the terminal keeps focus only when nothing was queued.
   if (queued) tab.contextQueue.focusNote(queued);
   else tab.term.focus();
 }

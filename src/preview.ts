@@ -3,8 +3,6 @@
 // node and renders into it; reactdock hosts the node. No untitled buffers: every
 // preview names a path.
 import { invoke } from "./generated/native";
-import { createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { codeToHtml } from "shiki";
 import { routePath } from "./plugin";
 import {
@@ -21,18 +19,13 @@ import {
 } from "./reactdock";
 import { savePluginState } from "./pluginState";
 import { claimFsWatch } from "./fsWatch";
-import { baseName, escapeHtml, getHomeDir, tildify, IMAGE_EXTS } from "./core";
-import { FileImageViewer } from "./1_FileImageViewer";
-import { renderD2 } from "@hafley66/md";
-import { resolveD2Preview } from "./0_d2Preview";
+import { baseName, escapeHtml, getHomeDir, tildify } from "./core";
 import { browserFileUrl, expandHome } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
 import { openExternal, openExternalUrl } from "./0_openExternal";
 import { isKnownInstantKind, opensExternally } from "./0_externalKinds";
-import { MonacoCodeViewer } from "./0_MonacoCodeViewer";
 import { shareReplay, type Subscription } from "rxjs";
 import { visibleFileWatch$ } from "./0_visibleFileWatch";
-import { liveProbe } from "./0_liveProbe";
 import { settings } from "./0_settings";
 
 export type PreviewInst = { el: HTMLElement; line?: number };
@@ -40,17 +33,8 @@ export type PreviewInst = { el: HTMLElement; line?: number };
 // share the theme-sync re-render loop below (preserves the v1 single-map behavior).
 export const previewInsts = new Map<string, PreviewInst>();
 
-// Raw text of the currently-rendered text preview, keyed by its content node, so
-// the meta-bar "copy" button can grab it without re-reading the file. Images
-// have no entry (and no copy button).
-const previewTextByNode = new WeakMap<HTMLElement, string>();
-const previewMediaRoots = new WeakMap<HTMLElement, Root>();
-
-// Internal routing: which panel a file preview was opened FROM (an rg results
-// panel), so the preview's "← back" returns there. Keyed by preview path, value
-// is the origin panel key (e.g. `rg:<query>`). Set by the rg hit click before
-// openPreviewPanel renders.
-export const previewOrigin = new Map<string, string>();
+import { disposePreview, previewOrigin, previewTextByNode, renderPathInto } from "./2_previewRenderer";
+export { previewOrigin } from "./2_previewRenderer";
 
 // Open (or focus) the preview tab for `path`. A `line` (>0) selects the
 // line-numbered source view scrolled to that row; otherwise the rendered view
@@ -62,12 +46,13 @@ export function openPreviewPanel(
   direction: "within" | "right" = "within",
 ) {
   if (!line && routePath(path)) return;
+  const reuse = isPreviewOpen(path) && previewInsts.get(path)?.line === line;
   const inst = ensureInst(path, line);
   addPreviewPanel(path, path.split("/").pop() ?? path, inst.el, direction, {
     ...(line ? { line } : {}),
   });
   watchPreview(path);
-  renderPathInto(inst.el, path, line);
+  if (!reuse) void renderPathInto(inst.el, path, line);
 }
 
 // read_text is the only file-read command (ipc/commands.json) and has no
@@ -221,7 +206,13 @@ function watchPreview(path: string) {
         void renderPathInto(inst.el, path, inst.line);
       }, WATCH_DEBOUNCE_MS);
     }),
-  ).subscribe({ error: console.error });
+  ).subscribe({
+    next: () => {
+      const inst = previewInsts.get(path);
+      if (inst) void renderPathInto(inst.el, path, inst.line);
+    },
+    error: console.error,
+  });
 }
 
 function releasePreviewWatch(path: string) {
@@ -238,7 +229,13 @@ function releasePreviewWatch(path: string) {
 export function initPreviewWatch() {
   onDockChange(() => {
     for (const path of [...previewWatches.keys()]) {
-      if (!isPreviewOpen(path)) releasePreviewWatch(path);
+      if (!isPreviewOpen(path)) {
+        releasePreviewWatch(path);
+        const inst = previewInsts.get(path);
+        if (inst) disposePreview(inst.el);
+        previewInsts.delete(path);
+        previewOrigin.delete(path);
+      }
     }
   });
 }
@@ -278,150 +275,6 @@ function restorePreview(key: string, params: Record<string, unknown>): HTMLEleme
 // runs inside dockview's onReady).
 export function initPreviewRestore() {
   setPreviewRehydration({ canRestore, restore: restorePreview });
-}
-
-// Monotonic render token per content node. A watch fire and a theme flip can
-// both be mid-flight over the same node; only the newest render may write.
-const renderSeq = new WeakMap<HTMLElement, number>();
-function mountMediaViewer(node: HTMLElement, path: string, media: { url?: string; svg?: string; pdf?: string }) {
-  liveProbe.record({ kind: "mount", name: "preview.mediaViewer", scope: path, detail: { svg: Boolean(media.svg), pdf: Boolean(media.pdf), url: Boolean(media.url) } });
-  node.insertAdjacentHTML("beforeend", `<div class="fs-preview-media"></div>`);
-  const mount = node.querySelector<HTMLElement>(".fs-preview-media");
-  if (!mount) return;
-  const root = createRoot(mount);
-  previewMediaRoots.set(node, root);
-  root.render(createElement(FileImageViewer, {
-    path,
-    ...media,
-    probeRoot: node,
-    onOpenHref: (href: string) => openDocumentHrefInInstant(href, path),
-  }));
-}
-
-function mountCodeViewer(node: HTMLElement, path: string, text: string, line?: number) {
-  node.insertAdjacentHTML("beforeend", `<div class="fs-preview-code"></div>`);
-  const mount = node.querySelector<HTMLElement>(".fs-preview-code");
-  if (!mount) return;
-  const root = createRoot(mount);
-  previewMediaRoots.set(node, root);
-  root.render(createElement(MonacoCodeViewer, {
-    id: path,
-    path,
-    text,
-    line,
-    dark: settings.mode.$() === "dark",
-    onText: (value: string) => previewTextByNode.set(node, value),
-  }));
-}
-
-// Render `path` into `node`: images via read_image, markdown via marked, a
-// `line` request via the line-numbered source view, everything else via shiki.
-async function renderPathInto(node: HTMLElement, path: string, line?: number) {
-  liveProbe.record({ kind: "operation", name: "preview.renderPathInto", scope: path, detail: { line: line ?? 0 } });
-  const seq = (renderSeq.get(node) ?? 0) + 1;
-  renderSeq.set(node, seq);
-  const stale = () => renderSeq.get(node) !== seq;
-  previewMediaRoots.get(node)?.unmount();
-  previewMediaRoots.delete(node);
-  const name = path.split("/").pop() ?? path;
-  const ext = (name.includes(".") ? name.split(".").pop()! : "").toLowerCase();
-  const empty = (s: string) => `<div class="fs-preview-empty">${s}</div>`;
-  const origin = previewOrigin.get(path);
-  const back = origin
-    ? `<button class="fs-back" data-origin="${escapeHtml(origin)}" title="back to ${escapeHtml(origin)}">← back</button> `
-    : "";
-  const isImage = !line && IMAGE_EXTS.has(ext);
-  const isPdf = !line && ext === "pdf";
-  // Copy the rendered text to the clipboard (text previews only; the handler in
-  // openPreviewPanel reads previewTextByNode). Images get no button.
-  const copy = isImage || isPdf ? "" : `<button class="fs-copy" title="copy text">copy</button> `;
-  const meta =
-    `<div class="fs-preview-meta">${back}${copy}<span class="fs-preview-name">${escapeHtml(name)}</span>` +
-    `<br><span>${escapeHtml(line ? `${path}:${line}` : path)}</span></div>`;
-  previewTextByNode.delete(node); // cleared until the new text loads
-  node.innerHTML = meta + empty("loading…");
-
-  if (isPdf) {
-    try {
-      const pdf = await invoke<string>("read_image", { path });
-      if (stale()) return;
-      node.innerHTML = meta;
-      mountMediaViewer(node, path, { pdf });
-    } catch (error) {
-      if (!stale()) node.innerHTML = meta + empty(String(error));
-    }
-    return;
-  }
-
-  if (isImage && ext === "svg") {
-    try {
-      const svg = await invoke<string>("read_text", { path });
-      if (stale()) return;
-      node.innerHTML = meta;
-      mountMediaViewer(node, path, { svg });
-    } catch (error) {
-      if (!stale()) node.innerHTML = meta + empty(String(error));
-    }
-    return;
-  }
-
-  if (!line && ext === "d2") {
-    try {
-      const preview = await resolveD2Preview(
-        path,
-        (sibling) => invoke<string>("read_text", { path: sibling }),
-        (sibling) => invoke<string>("read_image", { path: sibling }),
-        async (sourcePath) => {
-          const source = await invoke<string>("read_text", { path: sourcePath });
-          const dark = settings.mode.$() === "dark";
-          const svg = await renderD2(source, dark);
-          liveProbe.record({ kind: "operation", name: "preview.renderD2", scope: sourcePath, detail: { dark, sourceBytes: source.length, svgBytes: svg.length } });
-          return { source, svg };
-        },
-      );
-      if (stale()) return;
-      if (preview.source) previewTextByNode.set(node, preview.source);
-      node.innerHTML = meta;
-      mountMediaViewer(node, preview.path, { url: preview.url, svg: preview.svg });
-    } catch (error) {
-      if (!stale()) node.innerHTML = meta + empty(String(error));
-    }
-    return;
-  }
-
-  if (isImage) {
-    try {
-      const url = await invoke<string>("read_image", { path });
-      if (stale()) return;
-      node.innerHTML = meta;
-      mountMediaViewer(node, path, { url });
-    } catch (e) {
-      if (stale()) return;
-      node.innerHTML = meta + empty(String(e));
-    }
-    return;
-  }
-
-  let text: string;
-  try {
-    text = await invoke<string>("read_text", { path });
-  } catch (e) {
-    if (stale()) return;
-    node.innerHTML = meta + empty(String(e));
-    return;
-  }
-  if (stale()) return;
-  previewTextByNode.set(node, text); // back the meta-bar copy button
-
-  if (line) {
-    if (stale()) return;
-    node.innerHTML = meta;
-    mountCodeViewer(node, path, text, line);
-    return;
-  }
-
-  node.innerHTML = meta;
-  mountCodeViewer(node, path, text);
 }
 
 // ---- working-tree diff panels ----

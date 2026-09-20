@@ -32,7 +32,7 @@ export function isKnownInstantKind(path: string): boolean {
   const ext = extOf(path);
   return (
     IMAGE_EXTS.has(ext) ||
-    ["pdf", "d2", "md", "markdown", "html", "htm", "svg"].includes(ext) ||
+    ["pdf", "d2", "mmd", "mermaid", "md", "markdown", "html", "htm", "svg"].includes(ext) ||
     SHIKI_LANG[ext] !== undefined
   );
 }

@@ -17,6 +17,7 @@ export type CommandName =
   | "resize_pty"
   | "close_pty"
   | "kill_session"
+  | "reap_dead_target"
   | "scroll_session"
   | "tmux_buffer"
   | "rogue_agent_sessions"
@@ -159,6 +160,7 @@ export namespace commands {
     export const resizePty = "resize_pty";
     export const closePty = "close_pty";
     export const killSession = "kill_session";
+    export const reapDeadTarget = "reap_dead_target";
     export const scrollSession = "scroll_session";
     export const tmuxBuffer = "tmux_buffer";
     export const rogueAgentSessions = "rogue_agent_sessions";

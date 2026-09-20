@@ -67,6 +67,7 @@ export class TerminalContextQueue {
 
   /// Why the last Send kept its rows, shown in the header until a send lands.
   sendError: string | null = null;
+  focusFrame: number | null = null;
 
   constructor(
     readonly term: Terminal,
@@ -99,7 +100,7 @@ export class TerminalContextQueue {
   ): string | null {
     if (!snapshot.text) return null;
     const source = snapshot;
-    const id = source.id ?? `selection:${Date.now()}:${this.items.size}`;
+    const id = source.id ?? `selection:${crypto.randomUUID()}`;
     this.items.set(id, {
       id,
       kind: source.kind ?? "selection",
@@ -158,9 +159,15 @@ export class TerminalContextQueue {
   /// Put the caret in a queued slice's note, so "Ask about this" types straight
   /// into "what you want done with this…" without a click.
   focusNote(id: string) {
-    this.queue
-      .querySelector<HTMLTextAreaElement>(`[data-context-id="${CSS.escape(id)}"] textarea`)
-      ?.focus();
+    if (this.focusFrame !== null) cancelAnimationFrame(this.focusFrame);
+    // React removes the menu popover after its action returns. Its focus
+    // restoration must finish before the new annotation takes keyboard input.
+    this.focusFrame = requestAnimationFrame(() => {
+      this.focusFrame = null;
+      this.queue
+        .querySelector<HTMLTextAreaElement>(`[data-context-id="${CSS.escape(id)}"] textarea`)
+        ?.focus({ preventScroll: true });
+    });
   }
 
   /// The buffer rows a pinned selection covers, tagged with the turns whose own
@@ -224,6 +231,11 @@ export class TerminalContextQueue {
   }
 
   renderQueue() {
+    const active = document.activeElement;
+    const selection = active instanceof HTMLTextAreaElement && this.queue.contains(active)
+      ? { id: active.closest<HTMLElement>("[data-context-id]")?.dataset.contextId,
+          start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection }
+      : null;
     this.queue.replaceChildren();
     if (!this.items.size) {
       this.queue.hidden = true;
@@ -305,10 +317,16 @@ export class TerminalContextQueue {
       row.append(top, quote, textbox);
       this.queue.appendChild(row);
     }
+    if (selection?.id) {
+      const note = this.queue.querySelector<HTMLTextAreaElement>(`[data-context-id="${CSS.escape(selection.id)}"] textarea`);
+      note?.focus({ preventScroll: true });
+      note?.setSelectionRange(selection.start, selection.end, selection.direction);
+    }
     this.state.$([...this.items.values()]);
   }
 
   dispose() {
+    if (this.focusFrame !== null) cancelAnimationFrame(this.focusFrame);
     this.gutterPaint.dispose();
     this.root.remove();
   }

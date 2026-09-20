@@ -14,7 +14,7 @@ export { askText } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
 import { agentSquares, type SquaresMode } from "./0_agentSquaresSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, askAboutSelection, commentForSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays, syncAgentSquares } from "./terminal";
+import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, terminalSelectionSnapshot, askAboutSelection, commentForSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays, syncAgentSquares } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   applyTags,
@@ -376,6 +376,7 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
     const projectedTurn = id
       ? tabs.get(id)?.turnVisibility?.turnAtClientPoint(lastCtxX, lastCtxY) ?? null
       : null;
+    const selection = id ? terminalSelectionSnapshot(id) : null;
     const turnItems: CtxItem[] = [];
     const noop = () => {};
     if (projectedTurn) {
@@ -426,7 +427,8 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
         // editable textarea, and sends the lot with its own button.
         {
           label: "Ask about this",
-          action: () => { if (id) askAboutSelection(id); },
+          action: () => { if (id) askAboutSelection(id, selection); },
+          doubleRightClick: true,
         } satisfies CtxItem,
         {
           label: "Copy selection",

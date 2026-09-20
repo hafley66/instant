@@ -108,7 +108,17 @@ fn spawn_summon_tap(app: AppHandle) {
                             if is_double(&mut g.last_right_down, DOUBLE_RIGHT_MS) {
                                 log_event(&app, "INFO", "double_right_click_detected", serde_json::json!({}));
                                 let handle = app.clone();
-                                let _ = app.run_on_main_thread(move || toggle_window(&handle));
+                                let _ = app.run_on_main_thread(move || {
+                                    // Focused Instant owns right-click gestures (including
+                                    // terminal annotation). The HID tap runs before the
+                                    // webview, so DOM event cancellation cannot guard this.
+                                    if handle.webview_windows().values().any(|window| {
+                                        window.is_focused().unwrap_or(false)
+                                    }) {
+                                        return;
+                                    }
+                                    toggle_window(&handle);
+                                });
                             }
                         }
                         CGEventType::FlagsChanged => {
