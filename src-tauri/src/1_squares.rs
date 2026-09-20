@@ -27,7 +27,7 @@ use boop_store::ident::Store;
 use boop_turnstrip::{
     drawn_at_all, kind_of, Layout, ListedTurn, Mode, Options, TurnKind, TurnRow, Viewport,
 };
-use boop_turnvis::locate_visible_turns;
+use boop_harness::harness::claude_summary::locate_visible_turns;
 use serde::{Deserialize, Serialize};
 
 use crate::boop::{

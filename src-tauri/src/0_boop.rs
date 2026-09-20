@@ -1047,7 +1047,7 @@ fn locate_turns(lines: Vec<LogicalLine>, turns: Vec<BoopTurn>) -> Vec<LocatedTur
         })
         .collect();
     let turns: Vec<boop_turnvis::BoopTurn> = turns.into_iter().map(to_turnvis).collect();
-    boop_turnvis::locate_visible_turns(&lines, &turns)
+    boop_harness::harness::claude_summary::locate_visible_turns(&lines, &turns)
         .into_iter()
         .map(from_visible)
         .collect()
