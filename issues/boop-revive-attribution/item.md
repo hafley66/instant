@@ -34,6 +34,16 @@ Persistent affected instance identified as `codex-20` on pane `%4`. The old Inst
 
 Persistent reported case verified and fixed: codex-20 pane%4 was incorrectly resolved to staleOMP01a0b6e0 (144turns). Validated route precedence now checks matchingpane and livefrontendPID before nativebreadcrumbs. Locked boop-harness tests224pass2ignored. Rebuilt Instant backend read-onlyRPC against actual%4 returned Codex01a0bb9d-cbbd-7bd2-9202-06d38d6f53af and301 homogeneous turns. Fix committed/pushed hafley-rs/main0080597a and signed boop0.0.10(0080597a) installed atomically. Same live.rs patch applied to originalhafley-rs pathdependency consumedby./instant. No chat/desktopprocess stopped; temporaryverificationserver stopped. Existing desktopprocess may require normal devreload to load updatedRust.
 
+### 2026-09-20T18:43:09Z · @codex
+
+CI follow-up: hafley-rs boundary guard found Claude summary dispatch inside generic boop-turnvis. Sequential Luna lane 1 moved the grammar and anchoring into boop-harness, with a generic callback seam. Instant companion worktree instant-ci-luna/instant migrates both production matcher callers to retain collapsed-tool attribution. Targeted harness, turnvis, turnstrip and screen tests pass; companion application checks are underway. Main and the running app remain unchanged during verification.
+
+### 2026-09-20T19:09:33Z · @codex
+
+Sequential follow-up completed with four GPT-5.6 Luna high agents and parent diff review. hafley-rs main ecd522e7 fixes the four known CI failures: Claude summary ownership, missing OMP mock recipe, per-harness typed readiness, and shared fixture isolation. Instant companion 4d4e2111 preserves both existing matcher callers. Combined boundary (2), live-harness recipe/submission (3), isolation rail (2), command environment (1), and Claude summary (1) tests pass, as do turnvis/turnstrip suites and boop no-default-features check. Real OMP fixture passes against loopback llmock on its private tmux socket, including distinct sessions, dead-pane lookup and resume. Instant check/build/cargo-check, 8 square tests and locator golden test pass; final cargo-check in ./instant also passes. hafley-rs pushed; Instant push follows. Existing app process was not restarted.
+
+
+
 
 
 
