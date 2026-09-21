@@ -38,6 +38,17 @@ describe("favoriteBoopTurn", () => {
     await favoriteBoopTurn(turn);
     expect(invoke.mock.calls[0]![1]).toEqual({ turn, note: "" });
   });
+
+  it("accepts a user-role turn from terminal attribution", async () => {
+    const userTurn: BoopTurn = {
+      ...turn,
+      turn: 7,
+      role: "user",
+      said: "please track the financial product outputs",
+    };
+    await favoriteBoopTurn(userTurn);
+    expect(invoke.mock.calls[0]![1]).toEqual({ turn: userTurn, note: "" });
+  });
 });
 
 describe("favoriteBoopTurn tags", () => {

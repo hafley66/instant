@@ -184,6 +184,19 @@ pub fn repo_root_for(cwd: &str) -> Option<String> {
     }
 }
 
+/// Return the nearest Git root for a file or directory path supplied by the
+/// renderer. Markdown paths are files, so walk from their parent directory.
+#[tauri::command]
+pub fn repo_root(path: String) -> Option<String> {
+    let candidate = Path::new(&path);
+    let directory = if candidate.is_dir() {
+        candidate
+    } else {
+        candidate.parent().unwrap_or_else(|| Path::new("."))
+    };
+    repo_root_for(&directory.to_string_lossy())
+}
+
 /// Search hits ranked the way an exact tail match deserves: a path ending with
 /// the whole token beats one that only shares a filename, shallower beats deeper.
 pub fn rank_exact(rel: &str, entries: &[IndexEntry]) -> Vec<(String, bool)> {
@@ -714,9 +727,25 @@ pub fn clear_ref_index() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     const HOME: &str = "/Users/me";
     const REPO: &str = "/Users/me/projects/instant";
+
+    #[test]
+    fn repo_root_accepts_a_file_path() {
+        let scratch = tempfile::tempdir().unwrap();
+        let root = scratch.path().join("repo");
+        let docs = root.join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(root.join(".git"), "gitdir: test").unwrap();
+        let file = docs.join("guide.md");
+
+        assert_eq!(
+            repo_root(file.to_string_lossy().into_owned()),
+            Some(root.to_string_lossy().into_owned())
+        );
+    }
 
     fn file(path: &str) -> IndexEntry {
         IndexEntry {

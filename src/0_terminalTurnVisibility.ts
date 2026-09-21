@@ -173,21 +173,25 @@ export function locateVisibleTurns(lines: LogicalLine[], turns: BoopTurn[], tmux
     return { turn, id, normalized };
   });
 
+  const isMarkedUser = (match: TurnMatch) => match.source.turn.role === "user"
+    && match.hits.some((hit) => hit.text.trimStart().startsWith("❯"));
   const matches = sources
     .map((source) => monotonicTurnMatch(screen, source))
     .filter((match): match is TurnMatch => match !== null)
-    .sort((left, right) =>
-      right.hits.length - left.hits.length
-      || left.sourceSpan - right.sourceSpan
-      || left.source.normalized.length - right.source.normalized.length
-      || right.source.turn.ts - left.source.turn.ts
-    );
+    .sort((left, right) => {
+      return Number(isMarkedUser(right)) - Number(isMarkedUser(left))
+        || right.hits.length - left.hits.length
+        || left.sourceSpan - right.sourceSpan
+        || left.source.normalized.length - right.source.normalized.length
+        || right.source.turn.ts - left.source.turn.ts;
+    });
   const rowOwners = matchRowOwners(matches);
   const claimedRows = new Set<number>();
   const visible: VisibleTurn[] = [];
   for (const { source, hits } of matches) {
     const unclaimed = hits.filter((hit) => !claimedRows.has(hit.start));
-    if (unclaimed.length * 2 < hits.length || !hasDiscriminatingHit(unclaimed, screen, source, rowOwners)) continue;
+    if (unclaimed.length * 2 < hits.length
+      || (source.turn.role === "tool" && !hasDiscriminatingHit(unclaimed, screen, source, rowOwners))) continue;
     const anchorStart = Math.min(...unclaimed.map((hit) => hit.start));
     const anchorEnd = Math.max(...unclaimed.map((hit) => hit.end));
     if (visible.some((turn) => anchorStart <= turn.anchorEnd && turn.anchorStart <= anchorEnd)) continue;

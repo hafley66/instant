@@ -1099,6 +1099,7 @@ pub fn run() {
             resolve_ref,
             refresolve::clear_ref_index,
             refresolve::read_git_blob,
+            refresolve::repo_root,
             fs_watch_claim,
             fs_watch::fs_watch_release,
             harness::harness_session,

@@ -299,6 +299,42 @@ describe("terminal turn visibility v2", () => {
     `);
   });
 
+  it("keeps a marked user prompt when the following assistant quotes it", () => {
+    const located = locateVisibleTurns([
+      { text: "❯ please track the financial product outputs of a research agent yes", start: 1, end: 1 },
+      { text: "", start: 2, end: 2 },
+      { text: "The research agent output is now tracked.", start: 3, end: 3 },
+    ], [
+      { ...turn(1, "please track the financial product outputs of a research agent yes"), role: "user" },
+      turn(2, "please track the financial product outputs of a research agent yes\nThe research agent output is now tracked."),
+    ]);
+    expect(located.map(({ turn: number, role, anchorStart, anchorEnd }) => ({
+      turn: number,
+      role,
+      anchorStart,
+      anchorEnd,
+    }))).toMatchInlineSnapshot(`
+      [
+        {
+          "anchorEnd": 1,
+          "anchorStart": 1,
+          "role": "user",
+          "turn": 1,
+        },
+        {
+          "anchorEnd": 3,
+          "anchorStart": 3,
+          "role": "assistant",
+          "turn": 2,
+        },
+      ]
+    `);
+    expect(locateVisibleTurns(
+      [{ text: "❯ quoted syntax in an assistant answer", start: 8, end: 8 }],
+      [turn(3, "❯ quoted syntax in an assistant answer")],
+    ).map(({ turn: number }) => number)).toEqual([3]);
+  });
+
   it("uses cwd-wide candidates only until a pane-bound session has turns", () => {
     const candidates = [{ ...turn(229, "embedded parent transcript"), session: "guardian", role: "user" }];
     const direct = [{ ...turn(214, "parent prompt"), session: "parent", role: "user" }];

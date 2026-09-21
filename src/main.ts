@@ -33,7 +33,7 @@ import { forkRender } from "./0_forkRenderSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
-import { installMdviewHost } from "./mdview/ports";
+import { installMdviewHost, type MdviewHost } from "./mdview/ports";
 import { registerPaint } from "./paintPanel";
 import { openRustdocBrowser } from "./0_rustdoc";
 import { isFilePickerOpen } from "./overlayGuard";
@@ -294,8 +294,11 @@ async function main() {
   registerNav();
   // mdview (src/mdview/) has no `../` imports of its own; every app coupling
   // it needs flows through this one host object (src/mdview/ports.ts).
-  installMdviewHost({
+  const mdviewHost: MdviewHost & {
+    repoRootFor(path: string): Promise<string | null>;
+  } = {
     readText: (path) => invoke<string>("read_text", { path }),
+    repoRootFor: (path) => invoke<string | null>("repo_root", { path }),
     readImage: (path) => invoke<string>("read_image", { path }),
     listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
     openHref: openDocumentHrefInInstant,
@@ -318,7 +321,8 @@ async function main() {
     openMdPanel: addMdPanel,
     mdPanelId,
     registerPlugin,
-  });
+  };
+  installMdviewHost(mdviewHost);
   registerMdview(); // md panels open via routing (preview/clickrules), no rail button
   registerPaint();
   registerV2Bridges();

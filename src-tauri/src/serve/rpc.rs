@@ -222,6 +222,10 @@ pub fn dispatch(
             let p: ReadGitBlobArgs = parse(name, params)?;
             res(wait(crate::refresolve::read_git_blob(p.repo, p.rev, p.path)))
         }
+        "repo_root" => {
+            let p: ReadPathArgs = parse(name, params)?;
+            ok(crate::refresolve::repo_root(p.path))
+        }
         "read_image" => {
             let p: ReadPathArgs = parse(name, params)?;
             res(wait(crate::fs::read_image(p.path)))

@@ -59,6 +59,7 @@ export type CommandName =
   | "resolve_ref"
   | "clear_ref_index"
   | "read_git_blob"
+  | "repo_root"
   | "read_image"
   | "read_text"
   | "save_text"
@@ -226,6 +227,7 @@ export namespace commands {
     export const resolveRef = "resolve_ref";
     export const clearRefIndex = "clear_ref_index";
     export const readGitBlob = "read_git_blob";
+    export const repoRoot = "repo_root";
     export const readImage = "read_image";
     export const readText = "read_text";
     export const saveText = "save_text";
