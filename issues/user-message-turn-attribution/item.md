@@ -4,6 +4,9 @@ updated: 2026-09-21
 type: bug
 status: testing
 priority: high
+commits:
+- hash: 21df0994
+  summary: preserve marked user turns and favorite coverage
 ---
 
 # Track user-message turns for favorites and remind

@@ -4,6 +4,9 @@ updated: 2026-09-21
 type: task
 status: testing
 priority: high
+commits:
+- hash: 21df0994
+  summary: expose repo_root IPC and markdown host bridge
 ---
 
 # Expose Git root metadata to markdown panels
