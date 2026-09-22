@@ -231,6 +231,11 @@ impl Proc {
         })
     }
 
+    /// Run to completion, returning the exit status. Reaped before returning.
+    pub fn status(self) -> Result<ExitStatus, ProcError> {
+        self.run().map(|output| output.status)
+    }
+
     /// Run to completion and require a zero exit. Stderr rides the error.
     pub fn ok(self) -> Result<(), ProcError> {
         let label = self.label.name();

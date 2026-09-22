@@ -1,14 +1,8 @@
 use boop_mux::{Multiplexer, Tmux};
-use std::io::Write;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub(crate) fn tmux_command(socket: Option<&str>) -> Command {
-    let mut command = Command::new("tmux");
-    if let Some(socket) = socket {
-        command.args(["-L", socket]);
-    }
-    command
+pub(crate) fn tmux_command(socket: Option<&str>) -> crate::proc::Proc {
+    crate::proc::Proc::tmux_bare(socket, crate::proc::Label::TmuxControl)
 }
 
 #[tauri::command]
@@ -69,7 +63,7 @@ pub(crate) fn pane_window(target: &str, socket: Option<&str>) -> Result<PaneWind
             target,
             "#{pane_height}|#{scroll_position}",
         ])
-        .output()
+        .run()
         .map_err(|error| error.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -91,7 +85,7 @@ pub(crate) fn pane_window(target: &str, socket: Option<&str>) -> Result<PaneWind
 fn leave_copy_mode(socket: Option<&str>, pane: &str) -> Result<bool, String> {
     let out = tmux_command(socket)
         .args(["display-message", "-p", "-t", pane, "#{pane_in_mode}"])
-        .output()
+        .run()
         .map_err(|error| error.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -163,20 +157,9 @@ fn paste_body(socket: Option<&str>, pane: &str, body: &str) -> Result<(), String
         std::process::id(),
         PASTE_SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let mut child = tmux_command(socket)
+    let loaded = crate::proc::Proc::tmux_bare(socket, crate::proc::Label::TmuxPaste)
         .args(["load-buffer", "-b", &buffer, "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    child
-        .stdin
-        .take()
-        .ok_or("tmux load-buffer stdin")?
-        .write_all(body.as_bytes())
-        .map_err(|error| error.to_string())?;
-    let loaded = child.wait_with_output().map_err(|error| error.to_string())?;
+        .feed(body.as_bytes())?;
     if !loaded.status.success() {
         return Err(String::from_utf8_lossy(&loaded.stderr).trim().to_string());
     }
@@ -190,15 +173,11 @@ fn paste_body(socket: Option<&str>, pane: &str, body: &str) -> Result<(), String
         pane,
     ]));
     if pasted.is_err() {
-        let _ = tmux_command(socket).args(["delete-buffer", "-b", &buffer]).output();
+        let _ = tmux_command(socket).args(["delete-buffer", "-b", &buffer]).run();
     }
     pasted
 }
 
-fn run(command: &mut Command) -> Result<(), String> {
-    let output = command.output().map_err(|error| error.to_string())?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+fn run(command: crate::proc::Proc) -> Result<(), String> {
+    Ok(command.ok()?)
 }

@@ -790,7 +790,7 @@ mod tests {
         std::fs::write(lab.join(".gitignore"), "out\n").unwrap();
         std::fs::write(lab.join("out").join("timeline.txt"), "0.371s span>\n").unwrap();
         std::fs::write(root.join("README.md"), "root\n").unwrap();
-        let ok = std::process::Command::new("git")
+        let ok = crate::proc::Proc::new("git", crate::proc::Label::Git)
             .arg("-C")
             .arg(&root)
             .args(["init", "-q"])
@@ -1133,7 +1133,7 @@ mod tests {
 
     fn git(tree: &Tree, rel: &str, args: &[&str]) -> String {
         let repo = tree.0.join(rel);
-        let out = std::process::Command::new("git")
+        let out = crate::proc::Proc::new("git", crate::proc::Label::Git)
             .arg("-C")
             .arg(&repo)
             .args(args)
@@ -1141,7 +1141,7 @@ mod tests {
             .env("GIT_AUTHOR_EMAIL", "t@t")
             .env("GIT_COMMITTER_NAME", "t")
             .env("GIT_COMMITTER_EMAIL", "t@t")
-            .output()
+            .run()
             .unwrap();
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }

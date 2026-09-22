@@ -22,13 +22,13 @@ fn magick_bin() -> &'static str {
 }
 
 fn is_on_path(name: &str) -> bool {
-    std::process::Command::new(name)
+    crate::proc::Proc::new(name, crate::proc::Label::Other)
         .arg("-version")
         // GUI apps don't inherit the login shell PATH (no /opt/homebrew/bin),
         // so a plain lookup misses a brew-installed magick/convert. Reuse the
         // same PATH-prepend logic the pty module uses rather than duplicating it.
         .env("PATH", crate::pty::path_env())
-        .output()
+        .run()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -55,10 +55,10 @@ const INSTALL_TAIL_LINES: usize = 20;
 static INSTALLING: AtomicBool = AtomicBool::new(false);
 
 fn brew_available() -> bool {
-    std::process::Command::new("brew")
+    crate::proc::Proc::new("brew", crate::proc::Label::Other)
         .arg("--version")
         .env("PATH", crate::pty::path_env())
-        .output()
+        .run()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -80,10 +80,10 @@ fn run_brew_install() -> Result<String, String> {
                 .to_string(),
         );
     }
-    let out = std::process::Command::new("brew")
+    let out = crate::proc::Proc::new("brew", crate::proc::Label::Other)
         .args(["install", "imagemagick"])
         .env("PATH", crate::pty::path_env())
-        .output()
+        .run()
         .map_err(|e| format!("failed to run brew: {e}"))?;
     let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
     combined.push_str(&String::from_utf8_lossy(&out.stderr));
@@ -116,11 +116,10 @@ pub async fn install_imagemagick() -> Result<String, String> {
     outcome?
 }
 
-fn build_magick(args: &[String]) -> std::process::Command {
-    let mut cmd = std::process::Command::new(magick_bin());
-    cmd.args(args);
-    cmd.env("PATH", crate::pty::path_env());
-    cmd
+fn build_magick(args: &[String]) -> crate::proc::Proc {
+    crate::proc::Proc::new(magick_bin(), crate::proc::Label::Other)
+        .args(args)
+        .env("PATH", crate::pty::path_env())
 }
 
 #[derive(serde::Serialize)]
@@ -159,10 +158,10 @@ pub async fn magick_run(args: Vec<String>) -> Result<MagickResult, String> {
 fn magick_run_blocking(args: Vec<String>) -> Result<MagickResult, String> {
     // Verify ImageMagick is available.
     let bin = magick_bin();
-    let probe = std::process::Command::new(bin)
+    let probe = crate::proc::Proc::new(bin, crate::proc::Label::Other)
         .arg("-version")
         .env("PATH", crate::pty::path_env())
-        .output()
+        .run()
         .map_err(|e| format!("cannot run '{bin}': {e}. Is ImageMagick installed?"))?;
     if !probe.status.success() {
         return Err(format!(
@@ -172,7 +171,7 @@ fn magick_run_blocking(args: Vec<String>) -> Result<MagickResult, String> {
 
     let display = command_display(&args);
     let out = build_magick(&args)
-        .output()
+        .run()
         .map_err(|e| format!("failed to run ImageMagick: {e}"))?;
 
     Ok(MagickResult {

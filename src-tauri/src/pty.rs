@@ -110,21 +110,8 @@ fn pixel_dims(cols: u16, rows: u16, cell_w: Option<u16>, cell_h: Option<u16>) ->
 /// default socket, so the running dev instance is unchanged. Every tmux call in
 /// this file goes through here, including the new-session in the pty itself, so
 /// the isolation is total. Discriminated by cfg!(debug_assertions).
-fn tmux_cmd_for_socket(socket: Option<&str>) -> std::process::Command {
-    let mut c = std::process::Command::new("tmux");
-    // A release app is launched by macOS rather than a login shell, so its
-    // locale can be absent or non-UTF-8. tmux otherwise replaces wide/Unicode
-    // cells with underscores before those bytes ever reach xterm. Force UTF-8
-    // on every client, including clients attaching to an already-live server.
-    c.arg("-u");
-    let configured_socket = socket.map(str::to_owned).or_else(configured_tmux_socket);
-    if !cfg!(debug_assertions) && configured_socket.is_none() {
-        c.args(["-L", "instant-prod"]);
-    }
-    if let Some(socket) = configured_socket {
-        c.args(["-L", &socket]);
-    }
-    c
+fn tmux_cmd_for_socket(socket: Option<&str>) -> crate::proc::Proc {
+    crate::proc::Proc::tmux(socket, crate::proc::Label::TmuxControl)
 }
 
 /// The tmux server `INSTANT_TMUX_SOCKET` names, if any. The offline graph read
@@ -134,7 +121,7 @@ pub(crate) fn configured_tmux_socket() -> Option<String> {
     std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty())
 }
 
-pub(crate) fn tmux_cmd() -> std::process::Command {
+pub(crate) fn tmux_cmd() -> crate::proc::Proc {
     tmux_cmd_for_socket(None)
 }
 
@@ -150,7 +137,7 @@ fn tmux_target_session_on_socket(target: &str, socket: Option<&str>) -> Result<S
     let out = tmux_cmd_for_socket(socket)
         .args(["display-message", "-p", "-t", target, "#{session_name}"])
         .env("PATH", path_env())
-        .output()
+        .run()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(format!("tmux target '{target}' is not running"));
@@ -199,7 +186,7 @@ fn list_sessions_blocking() -> Vec<Session> {
             "#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{session_created}",
         ])
         .env("PATH", path_env())
-        .output();
+        .run();
 
     let (mut paths, mut commands, mut titles) = session_pane_info();
     let Ok(out) = out else { return Vec::new() };
@@ -266,7 +253,7 @@ fn session_pane_info() -> SessionPaneInfo {
             "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{window_active}\t#{pane_active}\t#{window_name}\t#{pane_title}\t#{host_short}\t#{host}",
         ])
         .env("PATH", path_env())
-        .output();
+        .run();
     let mut paths: HashMap<String, Vec<String>> = HashMap::new();
     let mut commands: HashMap<String, Vec<String>> = HashMap::new();
     let mut titles: HashMap<String, String> = HashMap::new();
@@ -334,9 +321,9 @@ struct ProcessRow {
 }
 
 fn process_snapshot() -> Vec<ProcessRow> {
-    let Ok(output) = std::process::Command::new("/bin/ps")
+    let Ok(output) = crate::proc::Proc::new("/bin/ps", crate::proc::Label::Other)
         .args(["-axo", "pid=,ppid=,command="])
-        .output()
+        .run()
     else {
         return Vec::new();
     };
@@ -445,13 +432,12 @@ fn enable_mouse(name: &str, respawn: Option<&str>) {
         if let Ok(out) = tmux_cmd()
             .args(["display-message", "-p", "-t", &name, "#{pane_dead}"])
             .env("PATH", path_env())
-            .output()
+            .run()
         {
             if String::from_utf8_lossy(&out.stdout).trim() == "1" {
-                let mut c = tmux_cmd();
-                c.args(["respawn-pane", "-k", "-t", &name]);
+                let mut c = tmux_cmd().args(["respawn-pane", "-k", "-t", &name]);
                 if let Some(cmd) = respawn.as_deref().filter(|s| !s.trim().is_empty()) {
-                    c.arg(cmd);
+                    c = c.arg(cmd);
                 }
                 let _ = c.env("PATH", path_env()).status();
             }
@@ -548,9 +534,9 @@ fn keep_scroll_after_copy() {
 /// and blocking new launches. Reap them on startup. Targets the main browser
 /// process (not the CEF Helper subprocesses, which exit with their parent).
 pub fn reap_orphan_graphics() {
-    let Ok(out) = std::process::Command::new("ps")
+    let Ok(out) = crate::proc::Proc::new("ps", crate::proc::Label::Other)
         .args(["-axo", "pid=,ppid=,command="])
-        .output()
+        .run()
     else {
         return;
     };
@@ -717,6 +703,12 @@ pub fn open_session_impl(
     let child = if graphics || direct_pty_mode() {
         Some(child)
     } else {
+        // Not ours to own, but dropping the handle leaves the client a zombie
+        // holding a task port for the life of the app. Wait on it off-thread.
+        let mut orphan = child;
+        std::thread::spawn(move || {
+            let _ = orphan.wait();
+        });
         None
     };
 
@@ -976,7 +968,7 @@ pub async fn tmux_buffer() -> Result<String, String> {
         let out = tmux_cmd()
             .args(["show-buffer"])
             .env("PATH", path_env())
-            .output()
+            .run()
             .map_err(|e| e.to_string())?;
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     })
@@ -1004,7 +996,7 @@ fn reap_dead_target_on_socket(target: &str, socket: Option<&str>) -> Result<bool
             "#{pane_id}\t#{pane_dead}\t#{session_windows}\t#{window_panes}\t#{window_linked}",
         ])
         .env("PATH", &path)
-        .output()
+        .run()
         .map_err(|e| e.to_string())?;
     // Removing any pane from a shared session either reflows its live siblings
     // or changes the window selected by attached clients. Preserve those
@@ -1110,15 +1102,15 @@ pub struct RogueSession {
 /// own isolated sessions for rogue ones). Bare device names, not "/dev/...".
 fn tmux_ttys() -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
-    let mut cmds = vec![std::process::Command::new("tmux")];
+    let mut cmds = vec![crate::proc::Proc::new("tmux", crate::proc::Label::TmuxControl)];
     if !cfg!(debug_assertions) {
         cmds.push(tmux_cmd());
     }
-    for mut c in cmds {
+    for c in cmds {
         let Ok(out) = c
             .args(["list-panes", "-a", "-F", "#{pane_tty}"])
             .env("PATH", path_env())
-            .output()
+            .run()
         else {
             continue;
         };
@@ -1134,9 +1126,9 @@ fn tmux_ttys() -> std::collections::HashSet<String> {
 /// cwd of a running pid via `lsof` (macOS has no /proc). Best-effort: None on
 /// any failure (permission, process exited mid-scan, lsof missing).
 fn process_cwd(pid: i32) -> Option<String> {
-    let out = std::process::Command::new("lsof")
+    let out = crate::proc::Proc::new("lsof", crate::proc::Label::Other)
         .args(["-p", &pid.to_string(), "-a", "-d", "cwd", "-Fn"])
-        .output()
+        .run()
         .ok()?;
     String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -1155,9 +1147,9 @@ pub async fn rogue_agent_sessions() -> Vec<RogueSession> {
 
 fn rogue_agent_sessions_blocking() -> Vec<RogueSession> {
     let known_ttys = tmux_ttys();
-    let Ok(out) = std::process::Command::new("ps")
+    let Ok(out) = crate::proc::Proc::new("ps", crate::proc::Label::Other)
         .args(["-axo", "pid=,tty=,args="])
-        .output()
+        .run()
     else {
         return Vec::new();
     };
@@ -1286,7 +1278,7 @@ mod tests {
 
         let pane = tmux_cmd_for_socket(Some(&socket))
             .args(["display-message", "-p", "#{pane_id}"])
-            .output()
+            .run()
             .ok()
             .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
         let Some(pane) = pane.filter(|pane| !pane.is_empty()) else {
@@ -1337,7 +1329,7 @@ mod tests {
                 .status().map_err(|error| error.to_string())?;
             let panes = tmux_cmd_for_socket(Some(&socket))
                 .args(["list-panes", "-t", &format!("={session}:0"), "-F", "#{pane_id}\t#{pane_width}"])
-                .output().map_err(|error| error.to_string())?;
+                .run().map_err(|error| error.to_string())?;
             let text = String::from_utf8_lossy(&panes.stdout);
             let rows: Vec<Vec<&str>> = text.lines().map(|line| line.split('\t').collect()).collect();
             let dead = rows[0][0];
@@ -1350,7 +1342,7 @@ mod tests {
             loop {
                 let state = tmux_cmd_for_socket(Some(&socket))
                     .args(["display-message", "-p", "-t", dead, "#{pane_dead}"])
-                    .output().map_err(|error| error.to_string())?;
+                    .run().map_err(|error| error.to_string())?;
                 if state.status.success() && String::from_utf8_lossy(&state.stdout).trim() == "1" {
                     break;
                 }
@@ -1361,7 +1353,7 @@ mod tests {
             assert!(!reap_dead_target_on_socket(dead, Some(&socket))?);
             let state = tmux_cmd_for_socket(Some(&socket))
                 .args(["display-message", "-p", "-t", live, "#{pane_width}\t#{window_panes}"])
-                .output().map_err(|error| error.to_string())?;
+                .run().map_err(|error| error.to_string())?;
             assert_eq!(String::from_utf8_lossy(&state.stdout).trim(), format!("{width}\t2"));
             Ok(())
         };
@@ -1384,7 +1376,7 @@ mod tests {
                 .status().map_err(|error| error.to_string())?;
             let pane = tmux_cmd_for_socket(Some(&socket))
                 .args(["display-message", "-p", "-t", &format!("={session}:0"), "#{pane_id}"])
-                .output().map_err(|error| error.to_string())?;
+                .run().map_err(|error| error.to_string())?;
             let pane = String::from_utf8_lossy(&pane.stdout).trim().to_string();
             tmux_cmd_for_socket(Some(&socket))
                 .args(["send-keys", "-t", &pane, "exit", "Enter"])
@@ -1393,7 +1385,7 @@ mod tests {
             loop {
                 let state = tmux_cmd_for_socket(Some(&socket))
                     .args(["display-message", "-p", "-t", &pane, "#{pane_dead}"])
-                    .output().map_err(|error| error.to_string())?;
+                    .run().map_err(|error| error.to_string())?;
                 if state.status.success() && String::from_utf8_lossy(&state.stdout).trim() == "1" {
                     break;
                 }
@@ -1412,7 +1404,7 @@ mod tests {
             assert!(reap_dead_target_on_socket(&pane, Some(&socket))?);
             assert!(!tmux_cmd_for_socket(Some(&socket))
                 .args(["has-session", "-t", &format!("={session}")])
-                .output().map_err(|error| error.to_string())?.status.success());
+                .run().map_err(|error| error.to_string())?.status.success());
             Ok(())
         };
         let result = run();

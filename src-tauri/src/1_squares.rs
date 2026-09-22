@@ -142,7 +142,7 @@ pub fn capture_lines(target: &str, socket: Option<&str>, depth: u32) -> Result<V
     let start = format!("-{depth}");
     let output = tmux_command(socket)
         .args(["capture-pane", "-p", "-S", &start, "-t", target])
-        .output()
+        .run()
         .map_err(|error| format!("capture {target}: {error}"))?;
     if !output.status.success() {
         let why = String::from_utf8_lossy(&output.stderr).trim().to_owned();

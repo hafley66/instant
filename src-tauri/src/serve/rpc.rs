@@ -457,11 +457,7 @@ pub fn dispatch(
             .into_owned())),
         "log_reveal" => {
             let path = crate::host::state_dir(&*host)?.join("instant.log");
-            std::process::Command::new("/usr/bin/open")
-                .arg("-R")
-                .arg(&path)
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg("-R").arg(&path).handoff()?;
             ok(())
         }
 
@@ -1014,11 +1010,10 @@ fn screenshot_impl() -> Result<String, String> {
         .as_millis();
     let path = std::env::temp_dir().join(format!("instant-shot-{ts}.png"));
     // Absolute path: a GUI context without /usr/sbin in PATH silently fails.
-    std::process::Command::new("/usr/sbin/screencapture")
+    let _ = crate::proc::Proc::new("/usr/sbin/screencapture", crate::proc::Label::Screencapture)
         .arg("-i")
         .arg(&path)
-        .status()
-        .map_err(|e| e.to_string())?;
+        .run()?;
     if path.exists() {
         Ok(path.to_string_lossy().into_owned())
     } else {
@@ -1071,20 +1066,14 @@ fn open_target_impl(target: String, cwd: String) -> Result<String, String> {
         } else {
             t.to_string()
         };
-        std::process::Command::new("/usr/bin/open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg(&url).handoff()?;
         return Ok("url".into());
     }
     let path = resolve_path(strip_line_suffix(t), &cwd)?;
     if !path.exists() {
         return Err(format!("not found: {}", path.display()));
     }
-    std::process::Command::new("/usr/bin/open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg(&path).handoff()?;
     Ok("path".into())
 }
 
@@ -1093,13 +1082,12 @@ fn run_click_impl(command: String, cwd: String) -> Result<String, String> {
         "" => std::env::var("HOME").unwrap_or_else(|_| ".".into()),
         c => c.to_string(),
     };
-    let out = std::process::Command::new("/bin/sh")
+    let out = crate::proc::Proc::new("/bin/sh", crate::proc::Label::Shell)
         .arg("-c")
         .arg(&command)
-        .current_dir(&dir)
+        .cwd(&dir)
         .env("PATH", crate::pty::path_env())
-        .output()
-        .map_err(|e| e.to_string())?;
+        .run()?;
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     const CAP: usize = 200_000;
     if s.len() > CAP {

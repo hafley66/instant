@@ -342,7 +342,7 @@ fn tmux_live_ids() -> std::collections::HashSet<String> {
         let output = crate::pty::tmux_cmd()
             .args(["list-panes", "-a", "-F", format])
             .env("PATH", crate::pty::path_env())
-            .output();
+            .run();
         if let Ok(out) = output {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 ids.insert(line.to_string());
