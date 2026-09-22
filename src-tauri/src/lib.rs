@@ -370,10 +370,10 @@ fn reactivate_prev_app() {
         return;
     };
     std::thread::spawn(move || {
-        let _ = std::process::Command::new("/usr/bin/open")
+        let _ = crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open)
             .arg("-a")
             .arg(&name)
-            .output();
+            .run();
     });
 }
 
@@ -483,10 +483,7 @@ fn open_target_blocking(app: AppHandle, target: String, cwd: String) -> Result<S
         } else {
             t.to_string()
         };
-        std::process::Command::new("/usr/bin/open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg(&url).handoff()?;
         hide_window();
         return Ok("url".into());
     }
@@ -494,10 +491,7 @@ fn open_target_blocking(app: AppHandle, target: String, cwd: String) -> Result<S
     if !path.exists() {
         return Err(format!("not found: {}", path.display()));
     }
-    std::process::Command::new("/usr/bin/open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg(&path).handoff()?;
     hide_window();
     Ok("path".into())
 }
@@ -519,13 +513,12 @@ fn run_click_blocking(command: String, cwd: String) -> Result<String, String> {
         "" => std::env::var("HOME").unwrap_or_else(|_| ".".into()),
         c => c.to_string(),
     };
-    let out = std::process::Command::new("/bin/sh")
+    let out = crate::proc::Proc::new("/bin/sh", crate::proc::Label::Shell)
         .arg("-c")
         .arg(&command)
-        .current_dir(&dir)
+        .cwd(&dir)
         .env("PATH", pty::path_env())
-        .output()
-        .map_err(|e| e.to_string())?;
+        .run()?;
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     const CAP: usize = 200_000;
     if s.len() > CAP {
@@ -635,11 +628,7 @@ async fn log_reveal(app: AppHandle) -> Result<(), String> {
 
 fn log_reveal_blocking(app: AppHandle) -> Result<(), String> {
     let p = log_file_path(&app)?;
-    std::process::Command::new("/usr/bin/open")
-        .arg("-R")
-        .arg(&p)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg("-R").arg(&p).handoff()?;
     Ok(())
 }
 
@@ -662,11 +651,10 @@ fn screenshot_blocking() -> Result<String, String> {
     let path = std::env::temp_dir().join(format!("instant-shot-{ts}.png"));
     // Absolute path: GUI apps don't get /usr/sbin in PATH, so a bare
     // "screencapture" silently fails to launch (nothing happens on click).
-    std::process::Command::new("/usr/sbin/screencapture")
+    let _ = crate::proc::Proc::new("/usr/sbin/screencapture", crate::proc::Label::Screencapture)
         .arg("-i")
         .arg(&path)
-        .status()
-        .map_err(|e| e.to_string())?;
+        .run()?;
     if path.exists() {
         Ok(path.to_string_lossy().into_owned())
     } else {

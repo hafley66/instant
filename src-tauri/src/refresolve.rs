@@ -385,7 +385,12 @@ fn git_probe_repos(rel: &str, cwd: &str, repo_root: Option<&str>, boundary: &str
 }
 
 fn git_out(repo: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("git").arg("-C").arg(repo).args(args).output().ok()?;
+    let output = crate::proc::Proc::new("git", crate::proc::Label::Git)
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .run()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

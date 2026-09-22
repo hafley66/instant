@@ -76,7 +76,7 @@ pub struct CdpStore(Mutex<HashMap<String, CdpTab>>);
 /// The shared headless Chrome process. Launched lazily on the first cdp_open and
 /// reused by every tab; killed on app exit via kill_engine().
 #[derive(Default)]
-pub struct ChromeEngine(Mutex<Option<std::process::Child>>);
+pub struct ChromeEngine(Mutex<Option<crate::proc::Handle>>);
 
 #[derive(Clone, Serialize)]
 struct FrameEvent {
@@ -133,12 +133,13 @@ fn ensure_profile(dest: &Path) -> Result<(), String> {
 
     // cp -c uses clonefile() on APFS: a COW clone of the whole Default tree,
     // instant and free. Falls back to a normal copy off-APFS.
-    let status = std::process::Command::new("cp")
+    let status = crate::proc::Proc::new("cp", crate::proc::Label::Other)
         .args(["-c", "-R"])
         .arg(src.join("Default"))
         .arg(dest.join("Default"))
-        .status()
-        .map_err(|e| format!("cp: {e}"))?;
+        .run()
+        .map_err(|e| format!("cp: {e}"))?
+        .status;
     if !status.success() {
         return Err("cp failed cloning Chrome profile".into());
     }
@@ -167,9 +168,9 @@ fn clear_session(profile: &Path) {
 /// after a SIGTERM that skipped the exit handler. Matched by OUR debug port so a
 /// dev instance never reaps the prod instance's Chrome (and vice versa).
 pub fn reap_orphans() {
-    let _ = std::process::Command::new("pkill")
+    let _ = crate::proc::Proc::new("pkill", crate::proc::Label::Other)
         .args(["-f", &format!("remote-debugging-port={}", debug_port())])
-        .status();
+        .run();
 }
 
 fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -294,7 +295,7 @@ fn ensure_engine(host: &dyn Host, engine: &ChromeEngine) -> Result<(), String> {
     ensure_profile(&profile)?;
     clear_session(&profile); // don't restore the user's real tabs each launch
 
-    let child = std::process::Command::new(CHROME)
+    let child = crate::proc::Proc::new(CHROME, crate::proc::Label::Chrome)
         .args([
             "--headless=new",
             &format!("--remote-debugging-port={}", debug_port()),
@@ -315,7 +316,7 @@ fn ensure_engine(host: &dyn Host, engine: &ChromeEngine) -> Result<(), String> {
             "--disable-background-timer-throttling",
         ])
         .arg(format!("--user-data-dir={}", profile.display()))
-        .spawn()
+        .detach()
         .map_err(|e| format!("launch chrome: {e}"))?;
 
     *engine.0.lock().unwrap() = Some(child);
@@ -325,8 +326,8 @@ fn ensure_engine(host: &dyn Host, engine: &ChromeEngine) -> Result<(), String> {
 /// Kill the shared Chrome (called on app exit).
 pub fn kill_engine(services: &Services) {
     let child = services.chrome_engine.0.lock().unwrap().take();
-    if let Some(mut c) = child {
-        let _ = c.kill();
+    if let Some(handle) = child {
+        handle.kill();
     }
 }
 

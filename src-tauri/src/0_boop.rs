@@ -606,11 +606,10 @@ pub fn parse_presets(json: &str) -> Result<Vec<BoopPreset>, String> {
 }
 
 fn read_presets() -> Result<Vec<BoopPreset>, String> {
-    let output = std::process::Command::new("boop")
+    let output = crate::proc::Proc::new("boop", crate::proc::Label::Boop)
         .args(["config", "presets", "--format", "json"])
         .env("PATH", crate::pty::path_env())
-        .output()
-        .map_err(|error| error.to_string())?;
+        .run()?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }

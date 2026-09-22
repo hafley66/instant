@@ -53,12 +53,12 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
         Ok(p) => format!("{EXTRA_PATH}:{p}"),
         Err(_) => EXTRA_PATH.to_string(),
     };
-    let out = std::process::Command::new("git")
+    let out = crate::proc::Proc::new("git", crate::proc::Label::Git)
         .arg("-C")
         .arg(repo)
         .args(args)
         .env("PATH", path)
-        .output()
+        .run()
         .map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())

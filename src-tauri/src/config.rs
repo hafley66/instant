@@ -287,10 +287,9 @@ pub fn config_open_impl(services: &Services) -> Result<(), String> {
         let cfg = state.config.lock().unwrap().clone();
         write_file(&state.path, &cfg).map_err(|e| e.to_string())?;
     }
-    std::process::Command::new("/usr/bin/open")
+    crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open)
         .arg(&state.path)
-        .status()
-        .map_err(|e| e.to_string())?;
+        .ok()?;
     Ok(())
 }
 
