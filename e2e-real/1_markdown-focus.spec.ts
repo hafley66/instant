@@ -5,11 +5,11 @@ import { boot, cmdClickToken, killAllSessions, mkRepo, openSessionTab, typeLine 
 test("Markdown headings, grid controls and keyboard focus work beside a terminal", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const dir = mkRepo({ "focus.md": `# Focus regression
+  const dir = mkRepo({ "focus.md": `# Focus regression with a deliberately long section heading that exceeds the available Markdown pane width
 
-A rendered paragraph with an [ordinary link](https://example.com).
+A rendered paragraph with an [ordinary link](https://example.com) and \`inline_code()\`.
 
-| Name | Value |
+| Name | Value with a deliberately long column header that exceeds its available width |
 | --- | --- |
 | beta | 2 |
 | alpha | 1 |
@@ -35,6 +35,20 @@ const answer = 42;
     await expect(content.locator('[data-streamdown="code-block-body"]')).toContainText("const answer = 42;");
     await expect(content.locator(".sg-cell")).toHaveText(["beta", "2", "alpha", "1"]);
 
+    await expect(content.locator(".mdview-title")).toHaveAttribute("title", /Focus regression with a deliberately long section heading/);
+    const longHeader = content.locator(".mdview-table-header-label").nth(1);
+    await expect(longHeader).toHaveAttribute("title", "Value with a deliberately long column header that exceeds its available width");
+    expect(await longHeader.evaluate((el) => ({
+      clipped: el.scrollWidth > el.clientWidth,
+      overflow: getComputedStyle(el).textOverflow,
+      wrap: getComputedStyle(el).whiteSpace,
+    }))).toEqual({ clipped: true, overflow: "ellipsis", wrap: "nowrap" });
+    await expect(content.locator(".sg-cell").first()).toHaveCSS("padding-top", "1px");
+    await expect(content.locator(".sg-cell").first()).toHaveCSS("padding-left", "4px");
+
+    await expect(content.locator(".sg-cell").first()).toHaveCSS("align-items", "center");
+    await expect(content.locator(".mdview-table-grid")).toHaveCSS("--sg-row-h", "28px");
+
     const name = content.locator('.sg-head-cell[data-col-id="column-0"]');
     await name.hover();
     await name.getByRole("button", { name: "Sort column ascending", exact: true }).first().click();
@@ -55,10 +69,24 @@ const answer = 42;
     await expect(content).toHaveCSS("zoom", "1");
 
     await page.locator(".term-host .xterm-screen").click();
+    // terminal.ts schedules a second focus at 60ms after activation. Let that
+    // user action finish before programmatically moving focus back to Markdown.
+    await page.waitForTimeout(100);
     await content.getByRole("link", { name: "ordinary link" }).focus();
     await expect(content.getByRole("link", { name: "ordinary link" })).toBeFocused();
     await page.keyboard.press("Meta+Equal");
     await expect(content).toHaveCSS("zoom", "1.1");
+    expect(errors).toEqual([]);
+    if (!(await page.locator("body").evaluate((body) => body.classList.contains("xp-pixel")))) {
+      await page.keyboard.press("Meta+Shift+p");
+      await page.locator(".cmdp-input").fill("Super XP");
+      await page.locator(".cmdp-input").press("Enter");
+    }
+    await expect(page.locator("body")).toHaveClass(/xp-pixel/);
+    const inlineCode = content.locator("code").filter({ hasText: "inline_code()" });
+    await expect(inlineCode).toHaveCSS("font-family", '"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace');
+    await expect(inlineCode).toHaveCSS("-webkit-font-smoothing", "antialiased");
+
     expect(errors).toEqual([]);
     await testInfo.attach("markdown-focus", { body: await page.screenshot(), contentType: "image/png" });
   } finally {
