@@ -1,3 +1,4 @@
+#![deny(clippy::disallowed_methods)]
 mod activity;
 #[path = "0_proc.rs"]
 pub mod proc;

@@ -1,6 +1,8 @@
 //! The only module that names `std::process`. Every exit here reaps; a `Child`
 //! dropped without `wait()` is a zombie holding a task port until the parent exits.
 
+#![allow(clippy::disallowed_methods)]
+
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
