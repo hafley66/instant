@@ -204,7 +204,15 @@ test("Super XP does not style markdown source snippets", async ({ page }) => {
   await expect(code.first()).toContainText("POST /arrivals");
 
   const styles = {
-    font: await code.first().evaluate((element) => getComputedStyle(element).font),
+    font: await code.first().evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        family: style.fontFamily,
+        size: Number.parseFloat(style.fontSize),
+        // Chromium and WebKit serialize fractional line-height differently.
+        lineHeight: Math.round(Number.parseFloat(style.lineHeight) * 100) / 100,
+      };
+    }),
     descendantFonts: await scroller.first().evaluate((element) =>
       [...element.querySelectorAll("pre, code, span")]
         .map((child) => getComputedStyle(child).fontFamily)
@@ -215,7 +223,11 @@ test("Super XP does not style markdown source snippets", async ({ page }) => {
     scrollbarButton: await scroller.first().evaluate((element) => getComputedStyle(element, "::-webkit-scrollbar-button").display),
   };
   expect(styles).toEqual({
-    font: '12px / 17.4px "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace',
+    font: {
+      family: '"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace',
+      size: 13,
+      lineHeight: 21.45,
+    },
     descendantFonts: ['"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace'],
     nestedOverflow: "visible",
     horizontalScrollbar: "8px",
