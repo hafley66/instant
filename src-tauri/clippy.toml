@@ -1,0 +1,5 @@
+disallowed-methods = [
+  { path = "std::process::Command::spawn", reason = "use crate::proc::Proc — its exits reap" },
+  { path = "std::process::Command::output", reason = "use crate::proc::Proc::run / text" },
+  { path = "std::process::Command::status", reason = "use crate::proc::Proc::ok" },
+]

@@ -1,4 +1,6 @@
 mod activity;
+#[path = "0_proc.rs"]
+pub mod proc;
 #[path = "0_boop.rs"]
 mod boop;
 #[path = "1_boop_search.rs"]
