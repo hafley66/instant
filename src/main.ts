@@ -334,13 +334,14 @@ async function main() {
   store.subscribe(updateFavBadge, ["aiFavs"]);
   updateFavBadge();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail
-  // exists, so the polyfill discovers the .rail-tip anchors. useAnimationFrame
-  // keeps anchored elements positioned as layout/scroll changes. Gate on the
+  // exists, so the polyfill discovers the .rail-tip anchors. It repositions on
+  // scroll and resize. Never useAnimationFrame: it re-measures every anchor on
+  // every frame, so WebKit paints 60 fps while the app sits idle. Gate on the
   // anchor() FUNCTION, not just the anchor-name property: WebKit may parse the
   // property while lacking positioning, which would skip the polyfill and leave
   // the tooltip stuck at the top.
   if (!CSS.supports("left: anchor(--x right)")) {
-    anchorPolyfill({ useAnimationFrame: true }).catch(console.error);
+    anchorPolyfill({ useAnimationFrame: false }).catch(console.error);
   }
   wireChrome();
   wireDomCmdClick(); // ⌘-click search inside preview / rg panels (not just terminals)
