@@ -10,7 +10,7 @@ import "./0_stfuButton.css";
 import "./1_agentSquares.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
-import { listenNativeEvent } from "./reactive/nativeTransport";
+import { hasTauriInternals, listenNativeEvent } from "./reactive/nativeTransport";
 import { runtimePorts } from "./reactive/ports";
 // CSS Anchor Positioning isn't in WebKit yet (Tauri = WKWebView); this shims
 // `anchor-name`/`position-anchor`/`anchor()`/`position-area` so tooltips and
@@ -38,6 +38,7 @@ import { registerPaint } from "./paintPanel";
 import { openRustdocBrowser } from "./0_rustdoc";
 import { isFilePickerOpen } from "./overlayGuard";
 import { installKeymap, type Command } from "./keymap";
+import { browserKeyNotices } from "./0_browserKeyNotice";
 import { openPalette, isPaletteOpen } from "./palette";
 import { openJumpPalette, isJumpOpen } from "./jumpPalette";
 import { type GraphicsFrame } from "./graphics";
@@ -51,6 +52,7 @@ import {
   togglePanel,
   setDockHooks,
   onDockChange,
+  activeGroupEl,
   addMdPanel,
   mdPanelId,
 } from "./reactdock";
@@ -506,7 +508,16 @@ async function main() {
     group: "Agent",
     run: () => void openJumpPalette(),
   };
-  installKeymap([...TAB_COMMANDS, ...pluginCommands(), ...panelCommands, jumpCommand]);
+  const commands = [...TAB_COMMANDS, ...pluginCommands(), ...panelCommands, jumpCommand];
+  const notices = hasTauriInternals()
+    ? undefined
+    : browserKeyNotices(commands, flashStatus, sessionStorage, /Mac|iPod|iPhone|iPad/.test(navigator.platform));
+  installKeymap(commands, window, notices?.onFire);
+  // The dock's first React commit wipes #dock, so the startup toast waits for a group.
+  if (notices) {
+    if (activeGroupEl()) notices.startup();
+    else onDockChange(notices.startup);
+  }
 
   // Overlay: re-apply on any change to its config or the frontmost app, then once
   // now so a persisted mini/fade/follow is restored on boot.

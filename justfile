@@ -74,6 +74,11 @@ voice-setup:
 web:
     corepack pnpm@10.12.4 run dev
 
+# app in a plain browser tab: build dist, serve it + /ws via instant-serve (extra args: --data-dir, --doc-root)
+serve-browser port="47777" *args:
+    corepack pnpm@10.12.4 run build
+    cargo run --manifest-path src-tauri/Cargo.toml --bin instant-serve -- --port {{port}} --dist "{{justfile_directory()}}/dist" {{args}}
+
 # typecheck + production frontend build
 build:
     corepack pnpm@10.12.4 run build

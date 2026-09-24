@@ -30,16 +30,31 @@ export function tauriTransport(): NativeTransport {
   };
 }
 
-export const DEFAULT_WS_URL = "ws://127.0.0.1:47777";
+// instant-serve's default port and its JSON-RPC route (src-tauri/src/serve/mod.rs).
+export const DEFAULT_WS_URL = "ws://127.0.0.1:47777/ws";
 
 export function hasTauriInternals(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+export type WsLocation = Pick<Location, "protocol" | "host" | "search">;
+
+// `?ws=` wins; a built bundle over http(s) came from instant-serve, which mounts
+// `/ws` on the same origin. Vite dev and non-http origins use the default port.
+export function deriveWsUrl(loc: Partial<WsLocation> | undefined, dev: boolean): string {
+  const param = loc?.search ? new URLSearchParams(loc.search).get("ws") : null;
+  if (param) return param;
+  if (!dev && loc?.host && (loc.protocol === "http:" || loc.protocol === "https:")) {
+    return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/ws`;
+  }
+  return DEFAULT_WS_URL;
+}
+
+// Vite sets import.meta.env in dev; a production bundle reads DEV as false.
+const viteDev = (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
+
 function wsUrl(): string {
-  return typeof location !== "undefined"
-    ? new URLSearchParams(location.search).get("ws") ?? DEFAULT_WS_URL
-    : DEFAULT_WS_URL;
+  return deriveWsUrl(typeof location !== "undefined" ? location : undefined, viteDev);
 }
 
 // One connection per page: the ws instance is memoized by url so repeated
