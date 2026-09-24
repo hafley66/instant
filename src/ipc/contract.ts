@@ -4,18 +4,21 @@ import type { Call, Client, Contract } from "./client";
 import { createClient } from "./client";
 import { invoke } from "../generated/native";
 
-export type RefSource = "touched" | "absolute" | "cwd" | "repo" | "ancestor" | "ignored" | "sibling" | "search" | "fuzzy";
+export type RefSource = "touched" | "absolute" | "cwd" | "session" | "repo" | "worktree" | "ancestor" | "ignored" | "sibling" | "search" | "fuzzy";
 export type ResolvedRef = { path: string; line?: number; source: RefSource };
 export type ResolveResult =
   | { kind: "hit"; ref: ResolvedRef }
-  | { kind: "choices"; paths: string[]; line?: number; via: "exact" | "fuzzy" }
+  | { kind: "choices"; paths: string[]; line?: number; via: "exact" | "fuzzy" | "worktree"; worktrees?: string[] }
   | { kind: "absent"; repo: string; rev: string; path: string; subject: string }
   | { kind: "miss" };
 
+// The tmux client cell a click landed on (boop_harness::click::ClickCell).
+export type ClickCell = { session: string; socket: string | null; col: number; row: number };
+
 export type ClickContract = {
-  // src-tauri/src/refresolve.rs
-  // sessions: the pane's agent session ids; what they touched is the first rung.
-  resolve_ref: Call<{ token: string; cwd: string; sessions?: string[] }, ResolveResult>;
+  // boop_harness::click::resolve_click. With a cell, boop finds the pane, its
+  // sessions and roots; `cwd` and `sessions` are the fallback without one.
+  resolve_ref: Call<{ token: string; cwd: string; sessions?: string[]; cell?: ClickCell }, ResolveResult>;
   clear_ref_index: Call<void, void>;
   read_git_blob: Call<{ repo: string; rev: string; path: string }, string>;
   // src-tauri/src/shell.rs

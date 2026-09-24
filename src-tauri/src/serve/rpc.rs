@@ -212,7 +212,7 @@ pub fn dispatch(
         }
         "resolve_ref" => {
             let p: ResolveRefArgs = parse(name, params)?;
-            res(wait(crate::refresolve::resolve_ref_impl(p.token, p.cwd, p.sessions)))
+            res(wait(crate::refresolve::resolve_ref_impl(p.token, p.cwd, p.sessions, p.cell)))
         }
         "clear_ref_index" => {
             crate::refresolve::clear_ref_index();
@@ -706,6 +706,7 @@ struct ResolveRefArgs {
     token: String,
     cwd: String,
     sessions: Option<Vec<String>>,
+    cell: Option<boop_harness::click::ClickCell>,
 }
 
 #[derive(Deserialize)]

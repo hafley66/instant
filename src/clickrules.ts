@@ -10,8 +10,8 @@ import { addPreviewPanel } from "./reactdock";
 import { escapeHtml, flashStatus, shQuote } from "./core";
 import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
 import { getFocusedTermId, tabMetaById } from "./terminal";
-import { splitLineRef, tokenAtColumn } from "./termTokens";
-import { looksLikePath, resolveRef } from "./refResolve";
+import { tokenAtColumn } from "./termTokens";
+import { resolveRef, type ClickCell } from "./refResolve";
 import { RefChoicesPanel } from "./refChoicesPanel";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
 import { launcherOf } from "./0_clickLaunchers";
@@ -29,39 +29,26 @@ export function clickRuleFor(rawToken: string): ClickRule | null {
 export function clickIntent(rawToken: string): string {
   const token = rawToken.trim();
   if (/^(?:https?:\/\/|www\.)/i.test(token)) return "open URL";
-  if (looksLikePath(token)) return "open/preview file";
   return clickRuleFor(token) ? "run configured action from terminal cwd" : "search from terminal cwd";
-}
-
-// The immediate guess for a token: cwd-joined, no filesystem access. The hover
-// card paints this while resolveRef (which does touch the filesystem, and finds
-// repo-relative and bare filenames) settles.
-export function resolveReference(rawToken: string, cwd: string): { path: string; line?: number } | null {
-  const token = rawToken.trim().replace(/^['"`]|['"`]$/g, "");
-  if (!token || !looksLikePath(token)) return null;
-  const { path: bare, line } = splitLineRef(token);
-  if (!bare) return null;
-  if (bare.startsWith("/") || bare.startsWith("~/")) return { path: bare, line };
-  return { path: cwd ? `${cwd.replace(/\/$/, "")}/${bare}` : bare, line };
 }
 
 export const cmdClickRouter = new CmdClickRouter();
 
 cmdClickRouter.register({
   id: "file",
-  async handle({ token, cwd, sessions, fallback }) {
+  async handle({ token, cwd, sessions, fallback, cell }) {
   // A path-shaped token goes to the resolver, which checks the cwd, the repo
   // root, and finally a filename search: agent output prints repo-relative
   // paths and bare filenames that do not exist under the shell's directory.
-  let result = await resolveRef(token, cwd, sessions ?? []);
+  let result = await resolveRef(token, cwd, sessions ?? [], cell);
   // A widened token that names nothing was prose after all: the bare word
   // under the pointer gets the same ladder.
   if (result.kind === "miss" && fallback) {
     token = fallback;
-    result = await resolveRef(token, cwd, sessions ?? []);
+    result = await resolveRef(token, cwd, sessions ?? [], cell);
   }
   if (result.kind === "choices") {
-    openRefChoices(token, result.paths, result.line, cwd, result.via);
+    openRefChoices(token, result.paths, result.line, cwd, result.via, result.worktrees);
     return true;
   }
   // A file we located opens in Instant: markdown in the mdview tab, everything
@@ -136,8 +123,8 @@ async function openGitBlobPanel(
   });
 }
 
-export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown", sessions: string[] = [], fallback?: string) {
-  return cmdClickRouter.dispatch({ token: rawToken, cwd, source, sessions, fallback });
+export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown", sessions: string[] = [], fallback?: string, cell?: ClickCell) {
+  return cmdClickRouter.dispatch({ token: rawToken, cwd, source, sessions, fallback, cell });
 }
 
 // cwd to search from when a ⌘-click happens outside a terminal: the focused
@@ -228,7 +215,8 @@ function openRefChoices(
   paths: string[],
   line: number | undefined,
   cwd: string,
-  via: "exact" | "fuzzy" = "exact",
+  via: "exact" | "fuzzy" | "worktree" = "exact",
+  worktrees: string[] = [],
 ) {
   const key = `rg:${token}`;
   const el = clickPanelNode(key);
@@ -244,6 +232,7 @@ function openRefChoices(
       paths,
       line,
       via,
+      worktrees,
       onOpen: (path: string, at?: number) => {
         previewOrigin.set(path, key); // record before render so "← back" shows
         void openPathInInstant(path, at);

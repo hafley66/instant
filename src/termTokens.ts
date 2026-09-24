@@ -33,10 +33,6 @@ const CALL_SQUARE = /^([A-Za-z_$][\w.$-]*)\[([^\][]*)\]$/;
 // `[label](target)` — a markdown link. The target is the openable half.
 const MD_LINK = /^\[([^\]]*)\]\(([^()]*)\)$/;
 
-// A `path:line` / `path:line:col` suffix stays part of the token: the preview
-// tab uses it to scroll to the row.
-const LINE_SUFFIX = /:(\d+)(?::\d+)?$/;
-
 // Peel one envelope layer off `text` (already narrowed to a whitespace run),
 // returning the inner span as an offset into `text`. Returns null when the run
 // carries no envelope.
@@ -146,17 +142,6 @@ export function scanLineTokens(line: string): TokenSpan[] {
 // ⌘-click miss path so both agree with the underline the link provider drew.
 export function tokenAtColumn(line: string, col: number): TokenSpan | null {
   return scanLineTokens(line).find((s) => col >= s.start && col < s.end) ?? null;
-}
-
-// Split a `path:line:col` token into its parts. `path` keeps whatever form the
-// token had (absolute, relative, bare name); resolution happens in refResolve.
-export function splitLineRef(token: string): { path: string; line?: number } {
-  const m = token.match(LINE_SUFFIX);
-  if (!m) return { path: token };
-  const path = token.slice(0, m.index);
-  // `C:\src` style drive letters and `http://host:8080` are not line refs.
-  if (!path || /^[A-Za-z]$/.test(path) || /:\/\/[^/]*$/.test(path)) return { path: token };
-  return { path, line: Number(m[1]) };
 }
 
 // An unquoted path with spaces: `/var/folders/x/Screenshot 2026-09-04 at 8.24.07 PM.png`.

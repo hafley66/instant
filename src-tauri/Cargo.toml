@@ -52,7 +52,6 @@ boop-turnstrip = { path = "../../hafley-rs/crates/boop-turnstrip" }
 hafley-observe = { path = "../../hafley-rs/crates/hafley-observe" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
-nucleo-matcher = "0.3"
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 percent-encoding = "2"

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scanLineTokens, tokenAtColumn, unwrapToken, splitLineRef, widenAcrossSpaces } from "./termTokens";
+import { scanLineTokens, tokenAtColumn, unwrapToken, widenAcrossSpaces } from "./termTokens";
 
 // The span a caller would highlight, rendered against the source line, so a
 // failure shows the drift instead of two column numbers.
@@ -192,20 +192,6 @@ describe("quote pairing", () => {
   });
 });
 
-describe("splitLineRef", () => {
-  it("splits line and column suffixes", () => {
-    expect(splitLineRef("src/main.ts:42")).toEqual({ path: "src/main.ts", line: 42 });
-    expect(splitLineRef("src/main.ts:42:7")).toEqual({ path: "src/main.ts", line: 42 });
-  });
-
-  it("leaves a bare path alone", () => {
-    expect(splitLineRef("src/main.ts")).toEqual({ path: "src/main.ts" });
-  });
-
-  it("does not split a url port", () => {
-    expect(splitLineRef("http://localhost:5173")).toEqual({ path: "http://localhost:5173" });
-  });
-});
 
 describe("widenAcrossSpaces", () => {
   const line = "saved '/tmp/a.png' and /var/folders/z2/T/Screenshot 2026-09-04 at 8.24.07 PM.png (done)";

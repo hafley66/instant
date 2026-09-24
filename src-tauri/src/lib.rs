@@ -738,8 +738,9 @@ async fn resolve_ref(
     token: String,
     cwd: String,
     sessions: Option<Vec<String>>,
-) -> Result<refresolve::ResolveResult, String> {
-    refresolve::resolve_ref_impl(token, cwd, sessions).await
+    cell: Option<boop_harness::click::ClickCell>,
+) -> Result<boop_harness::click::ResolveResult, String> {
+    refresolve::resolve_ref_impl(token, cwd, sessions, cell).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

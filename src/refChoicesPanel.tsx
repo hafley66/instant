@@ -101,14 +101,15 @@ export interface RefChoicesPanelProps {
   token: string;
   paths: string[];
   line?: number;
-  via: "exact" | "fuzzy";
+  via: "exact" | "fuzzy" | "worktree";
+  worktrees?: string[];
   onOpen: (path: string, line?: number) => void;
   onGrep: () => void;
   onConfig: () => void;
 }
 
 export function RefChoicesPanel(props: RefChoicesPanelProps) {
-  const { token, paths, via } = props;
+  const { token, paths, via, worktrees = [] } = props;
   const { root, rows } = useMemo(() => buildChoiceRows(paths), [paths]);
   const [listings, setListings] = useState<Record<string, FsEntry[]>>({});
 
@@ -159,7 +160,8 @@ export function RefChoicesPanel(props: RefChoicesPanelProps) {
   ];
 
   const count = `${paths.length} candidate${paths.length === 1 ? "" : "s"}`;
-  const command = `${via === "fuzzy" ? "fzf" : "resolve"} ${token} (${count})`;
+  const tags = worktrees.length ? ` on ${worktrees.join(", ")}` : "";
+  const command = `${via === "fuzzy" ? "fzf" : "resolve"} ${token} (${count}${tags})`;
   return (
     <>
       <div className="rg-head">

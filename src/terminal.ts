@@ -49,7 +49,7 @@ import {
   activePanelChangedTime,
   termPanelId,
 } from "./reactdock";
-import { cmdClickRouter, dispatchClick, clickIntent, resolveReference } from "./clickrules";
+import { cmdClickRouter, dispatchClick, clickIntent } from "./clickrules";
 import { openExternal, revealExternal } from "./0_openExternal";
 import { tokenAtColumn, widenAcrossSpaces } from "./termTokens";
 import {
@@ -60,7 +60,8 @@ import {
   MAX_WRAP_ROWS,
   type WrapRow,
 } from "./termWrapJoin";
-import { resolveRef } from "./refResolve";
+import { resolveRef, type ClickCell } from "./refResolve";
+import { termCellAt } from "./0_termCell";
 import { bracketedPaste } from "./promptQuote";
 import {
   registerZoomKind,
@@ -632,14 +633,8 @@ function wordAt(id: string, clientX: number, clientY: number): string {
 function wordSpanAt(id: string, clientX: number, clientY: number): { wide: string; narrow: string } {
   const t = tabs.get(id);
   if (!t) return { wide: "", narrow: "" };
-  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
-  const rect = screen.getBoundingClientRect();
-  const cellH = rect.height / t.term.rows || 1;
-  const cellW = rect.width / t.term.cols || 1;
-  const row = Math.max(0, Math.min(t.term.rows - 1, Math.floor((clientY - rect.top) / cellH)));
-  const col = Math.max(0, Math.min(t.term.cols - 1, Math.floor((clientX - rect.left) / cellW)));
+  const { col, bufferRow } = cellOf(t, clientX, clientY);
   const buf = t.term.buffer.active;
-  const bufferRow = buf.viewportY + row;
   const softRows = softPathRows(id, bufferRow);
   const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
   if (soft && col >= soft.range.startCol && col < soft.range.endCol) {
@@ -659,6 +654,21 @@ function wordSpanAt(id: string, clientX: number, clientY: number): { wide: strin
   if (!span) return { wide: "", narrow: "" };
   const wide = widenAcrossSpaces(joined.text, span);
   return { wide: wide.text, narrow: span.text };
+}
+
+function cellOf(t: { el: HTMLElement; term: Terminal }, clientX: number, clientY: number) {
+  const screen = (t.el.querySelector(".xterm-screen") as HTMLElement | null) ?? t.el;
+  const { left, top, width, height } = screen.getBoundingClientRect();
+  const { viewportY, baseY } = t.term.buffer.active;
+  return termCellAt({ left, top, width, height, cols: t.term.cols, rows: t.term.rows, viewportY, baseY }, clientX, clientY);
+}
+
+// The tmux client cell under the pointer; boop maps it to the pane and its roots.
+function clickCellAt(id: string, clientX: number, clientY: number): ClickCell | undefined {
+  const t = tabs.get(id);
+  if (!t) return undefined;
+  const { col, clientRow } = cellOf(t, clientX, clientY);
+  return clientRow === null ? undefined : { session: t.tmuxTarget ?? t.name, socket: null, col, row: clientRow };
 }
 
 // opts let a Space override the agent command and launch cwd; plain sessions
@@ -1078,23 +1088,18 @@ export function openTab(
       if (inspector.dataset.token === token) return;
       inspectorSend("pointer-enter-token");
       if (!inspectorState.visible) return;
-      // First paint uses the cheap guess (cwd-joined) so the card appears with
-      // the pointer; the resolver then replaces the path with the file it
-      // actually found, which for agent output is often under the repo root
-      // rather than the shell's directory.
-      const guess = resolveReference(token, cwd);
       inspectorToken = token;
       inspectorCwd = cwd;
-      inspectorRef = guess;
+      inspectorRef = null;
       inspector.dataset.token = token;
       const request = ++inspectorRequest;
-      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(guess?.path ?? (cwd || "home"))}</small>`;
+      inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(cwd || "home")}</small>`;
       const inspectorW = Math.min(620, window.innerWidth - 16);
       const inspectorH = Math.min(260, window.innerHeight - 16);
       inspector.style.left = `${Math.max(8, Math.min(e.clientX + 12, window.innerWidth - inspectorW - 8))}px`;
       inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
-      void tabSessionIds(id).then((sessions) => resolveRef(token, cwd, sessions)).then((result) => {
+      void resolveRef(token, cwd, [], clickCellAt(id, e.clientX, e.clientY)).then((result) => {
         if (request !== inspectorRequest) return;
         if (result.kind === "choices") {
           inspectorRef = null;
@@ -1118,7 +1123,7 @@ export function openTab(
           if (request !== inspectorRequest) return;
           return inlineSnippetHtml(ref.path, text, settings.mode.$() === "dark").then((html) => {
             if (request !== inspectorRequest) return;
-            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>${escapeHtml(clickIntent(token))}</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button><button data-inspector-action="external">open external</button><button data-inspector-action="reveal">reveal</button></div>`;
+            inspector.innerHTML = `<strong>${escapeHtml(token)}</strong><span>open/preview file</span><small>${escapeHtml(ref.path)}</small>${html}<div class="term-inspector-actions"><button data-inspector-action="preview">preview</button><button data-inspector-action="search">search</button><button data-inspector-action="copy">copy path</button><button data-inspector-action="external">open external</button><button data-inspector-action="reveal">reveal</button></div>`;
           });
         });
       }).catch(() => {});
@@ -1158,7 +1163,7 @@ export function openTab(
     e.stopImmediatePropagation();
     const fallback = pendingNarrow && pendingNarrow !== word ? pendingNarrow : undefined;
     pendingNarrow = "";
-    void tabSessionIds(id).then((sessions) => dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", sessions, fallback));
+    void dispatchClick(word, tabMetaById(id)?.cwd ?? "", "terminal", [], fallback, clickCellAt(id, e.clientX, e.clientY));
     // The click opens the file elsewhere, so the preview of it goes away here
     // rather than waiting for a hover that a hidden terminal never receives.
     inspectorSend("click-dispatched");

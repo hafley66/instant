@@ -1,4 +1,5 @@
 import { Subject } from "rxjs";
+import type { ClickCell } from "./ipc/contract";
 
 export type CmdClickSource = "terminal" | "preview" | "results" | "markdown" | "diagram" | "unknown";
 
@@ -10,6 +11,8 @@ export type CmdClickRequest = {
   sessions?: string[];
   /** The bare word under the pointer when `token` was widened across spaces. */
   fallback?: string;
+  /** The tmux client cell of a terminal click; boop resolves pane, sessions and roots from it. */
+  cell?: ClickCell;
 };
 
 export type CmdClickRoute = {
