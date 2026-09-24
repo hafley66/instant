@@ -30,6 +30,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+file-rotate = "0.8"
 portable-pty = "0.9"
 mouse_position = "0.1"
 core-graphics = "0.25"
