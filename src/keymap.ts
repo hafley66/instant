@@ -32,24 +32,31 @@ export function paletteCommands(): Command[] {
 let unbind: (() => void) | null = null;
 // Single-press bindings flattened for the per-event matcher (xterm passthrough).
 // Sequences (multi-press) are window-only and skipped here.
-let presses: { press: KeybindingPress; run: () => void }[] = [];
+let presses: { press: KeybindingPress; command: Command; key: string }[] = [];
+
+// Called with the command and the binding string on every keyboard fire, before
+// `run`. Browser mode uses it to announce overridden browser defaults.
+export type KeymapFire = (command: Command, key: string) => void;
+let onFire: KeymapFire | undefined;
 
 // Bind every command on `target` (default window). ignore:() => false so combos
 // fire even while a form/terminal element is focused — the xterm handler then
 // stops propagation for matched combos so they don't double-run.
-export function installKeymap(commands: Command[], target: Window = window): void {
+export function installKeymap(commands: Command[], target: Window = window, fire?: KeymapFire): void {
   unbind?.();
   registered = commands;
+  onFire = fire;
   const map: Record<string, (e: KeyboardEvent) => void> = {};
   presses = [];
   for (const c of commands) {
     for (const k of c.keys) {
       map[k] = (e) => {
         e.preventDefault();
+        onFire?.(c, k);
         c.run();
       };
       const seq = parseKeybinding(k);
-      if (seq.length === 1) presses.push({ press: seq[0], run: c.run });
+      if (seq.length === 1) presses.push({ press: seq[0], command: c, key: k });
     }
   }
   unbind = tinykeys(target, map, { ignore: () => false });
@@ -59,10 +66,11 @@ export function installKeymap(commands: Command[], target: Window = window): voi
 // run it and return true so the caller swallows the key (no pty write) and
 // stops it bubbling to the window listener (no double-run).
 export function runMatchingCommand(e: KeyboardEvent): boolean {
-  for (const { press, run } of presses) {
+  for (const { press, command, key } of presses) {
     if (matchKeybindingPress(e, press)) {
       e.preventDefault();
-      run();
+      onFire?.(command, key);
+      command.run();
       return true;
     }
   }

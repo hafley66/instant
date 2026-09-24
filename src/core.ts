@@ -73,7 +73,7 @@ export function sanitizePaste(data: string): string {
 // active so it always shows over the tab the gesture came from.
 let toastEl: HTMLElement | null = null;
 let toastTimer: number | null = null;
-export function flashStatus(msg: string) {
+export function flashStatus(msg: string, ms = 1800) {
   if (!toastEl) {
     toastEl = document.createElement("div");
     toastEl.className = "app-toast";
@@ -86,7 +86,7 @@ export function flashStatus(msg: string) {
   void toastEl.offsetWidth;
   toastEl.classList.add("on");
   if (toastTimer !== null) clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl?.classList.remove("on"), 1800);
+  toastTimer = window.setTimeout(() => toastEl?.classList.remove("on"), ms);
 }
 
 // ---- files: glyphs + language table shared by the tree and previews ----
