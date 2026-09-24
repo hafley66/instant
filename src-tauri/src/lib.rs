@@ -2,6 +2,8 @@
 mod activity;
 #[path = "0_proc.rs"]
 pub mod proc;
+#[path = "0_observe.rs"]
+pub mod observe;
 #[path = "0_boop.rs"]
 mod boop;
 #[path = "1_boop_search.rs"]
@@ -109,7 +111,7 @@ fn spawn_summon_tap(app: AppHandle) {
                         }
                         CGEventType::RightMouseDown => {
                             if is_double(&mut g.last_right_down, DOUBLE_RIGHT_MS) {
-                                log_event(&app, "INFO", "double_right_click_detected", serde_json::json!({}));
+                                tracing::info!("double_right_click_detected");
                                 let handle = app.clone();
                                 let _ = app.run_on_main_thread(move || {
                                     // Focused Instant owns right-click gestures (including
@@ -130,7 +132,7 @@ fn spawn_summon_tap(app: AppHandle) {
                             // counts.
                             let rcmd = event.get_flags().bits() & RCMD_BIT != 0;
                             if rcmd && !g.right_cmd_down && is_double(&mut g.last_right_cmd, DOUBLE_RCMD_MS) {
-                                log_event(&app, "INFO", "double_right_command_detected", serde_json::json!({}));
+                                tracing::info!("double_right_command_detected");
                                 let handle = app.clone();
                                 let _ = app.run_on_main_thread(move || toggle_window(&handle));
                             }
@@ -142,25 +144,23 @@ fn spawn_summon_tap(app: AppHandle) {
                 },
                 || {
                     alive.store(true, Ordering::Relaxed);
-                    log_event(&app, "INFO", "summon_tap_active", serde_json::json!({}));
+                    tracing::info!("summon_tap_active");
                     CFRunLoop::run_current()
                 },
             );
             if created.is_err() {
-                log_event(
-                    &app,
-                    "ERROR",
-                    "summon_tap_create_failed",
-                    serde_json::json!({ "reason": "grant Accessibility / Input Monitoring permission" }),
+                tracing::error!(
+                    reason = "grant Accessibility / Input Monitoring permission",
+                    "summon_tap_create_failed"
                 );
                 eprintln!("summon gestures disabled: event tap creation failed (grant Accessibility / Input Monitoring permission)");
                 return;
             }
             if alive.load(Ordering::Relaxed) {
-                log_event(&app, "WARN", "summon_tap_runloop_ended", serde_json::json!({}));
+                tracing::warn!("summon_tap_runloop_ended");
                 return;
             }
-            log_event(&app, "WARN", "summon_tap_disabled", serde_json::json!({}));
+            tracing::warn!("summon_tap_disabled");
         }
     });
 }
@@ -169,10 +169,6 @@ fn spawn_summon_tap(app: AppHandle) {
 // reactivate it so focus lands back where the user was (e.g. Chrome) instead of
 // the desktop — an accessory app's hidden window doesn't restore focus itself.
 static PREV_APP: Mutex<Option<String>> = Mutex::new(None);
-
-// Serialize append/truncate cycles so concurrent frontend and native events
-// cannot reorder bytes or truncate a newer write.
-static LOG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Build a filled-circle tray icon in `color`, transparent outside the disc.
 fn dot_icon(color: [u8; 3]) -> tauri::image::Image<'static> {
@@ -261,43 +257,26 @@ fn activate_window(_win: &tauri::WebviewWindow) -> serde_json::Value {
 /// Toggle the summon window. When showing, anchor it to the mouse cursor.
 fn toggle_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
-        log_event(
-            app,
-            "ERROR",
-            "toggle_window_missing",
-            serde_json::json!({ "label": "main" }),
-        );
+        tracing::error!(label = "main", "toggle_window_missing");
         return;
     };
 
     let visible = match win.is_visible() {
         Ok(value) => {
-            log_event(
-                app,
-                "INFO",
-                "toggle_window_visibility",
-                serde_json::json!({ "visible": value }),
-            );
+            tracing::info!(visible = value, "toggle_window_visibility");
             value
         }
         Err(error) => {
-            log_event(
-                app,
-                "ERROR",
-                "toggle_window_visibility_failed",
-                serde_json::json!({ "error": format!("{error:?}") }),
-            );
+            tracing::error!(error = ?error, "toggle_window_visibility_failed");
             false
         }
     };
     if visible {
         let result = win.hide(); // focus-lost handler demotes us out of the switcher
-        log_event(
-            app,
-            if result.is_ok() { "INFO" } else { "ERROR" },
-            "toggle_window_hide",
-            serde_json::json!({ "result": result.as_ref().map(|_| "ok").unwrap_or("error"), "error": result.err().map(|e| format!("{e:?}")) }),
-        );
+        match result {
+            Ok(()) => tracing::info!(result = "ok", "toggle_window_hide"),
+            Err(error) => tracing::error!(result = "error", error = ?error, "toggle_window_hide"),
+        }
         reactivate_prev_app();
         return;
     }
@@ -316,32 +295,19 @@ fn toggle_window(app: &AppHandle) {
     }
 
     set_switcher_visible(app, true);
-    let show_result = win.show();
-    log_event(
-        app,
-        if show_result.is_ok() { "INFO" } else { "ERROR" },
-        "toggle_window_show",
-        serde_json::json!({ "result": show_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": show_result.err().map(|e| format!("{e:?}")) }),
-    );
-    let focus_result = win.set_focus();
-    log_event(
-        app,
-        if focus_result.is_ok() {
-            "INFO"
-        } else {
-            "ERROR"
-        },
-        "toggle_window_focus",
-        serde_json::json!({ "result": focus_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": focus_result.err().map(|e| format!("{e:?}")) }),
-    );
+    match win.show() {
+        Ok(()) => tracing::info!(result = "ok", "toggle_window_show"),
+        Err(error) => tracing::error!(result = "error", error = ?error, "toggle_window_show"),
+    }
+    match win.set_focus() {
+        Ok(()) => tracing::info!(result = "ok", "toggle_window_focus"),
+        Err(error) => tracing::error!(result = "error", error = ?error, "toggle_window_focus"),
+    }
     // Tell the front to play its entrance animation + refocus the active term.
-    let emit_result = win.emit("summoned", ());
-    log_event(
-        app,
-        if emit_result.is_ok() { "INFO" } else { "ERROR" },
-        "toggle_window_emit_summoned",
-        serde_json::json!({ "result": emit_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": emit_result.err().map(|e| format!("{e:?}")) }),
-    );
+    match win.emit("summoned", ()) {
+        Ok(()) => tracing::info!(result = "ok", "toggle_window_emit_summoned"),
+        Err(error) => tracing::error!(result = "error", error = ?error, "toggle_window_emit_summoned"),
+    }
 }
 
 // Poll the frontmost app and emit `frontmost-app` (the owner name) on every
@@ -553,64 +519,14 @@ pub fn state_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 fn log_file_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    Ok(state_dir(app)?.join("instant.log"))
+    Ok(state_dir(app)?.join(crate::observe::LOG_FILE))
 }
 
-fn log_timestamp_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
-}
-
-/// Write a structured native event to the same file used by frontend errors.
-/// The fields remain JSON so stack traces and backend errors cannot corrupt the
-/// one-event-per-line format.
-fn log_event(app: &AppHandle, level: &str, event: &str, fields: serde_json::Value) {
-    let line = format!(
-        "ts={} level={} target=instant event={} fields={}",
-        log_timestamp_ms(),
-        level,
-        event,
-        serde_json::to_string(&fields).unwrap_or_else(|_| "{}".to_string()),
-    );
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || log_append_blocking(app, line));
-}
-
-/// Append one line to app_data_dir/instant.log. The webview has no console a user
-/// can reach, so errors/events are mirrored here. Best-effort: logging never
-/// throws back into the app. Caps the file so it can't grow unbounded.
+/// The webview has no console a user can reach; its lines join the native
+/// events under target `instant::frontend`.
 #[tauri::command]
-async fn log_append(app: AppHandle, line: String) {
-    let _ = tauri::async_runtime::spawn_blocking(move || log_append_blocking(app, line)).await;
-}
-
-fn log_append_blocking(app: AppHandle, line: String) {
-    let _guard = LOG_LOCK.lock().unwrap();
-    let Ok(path) = log_file_path(&app) else {
-        return;
-    };
-    // Trim from the front if it crosses the cap (cheap: rewrite tail on overflow).
-    const CAP: u64 = 2_000_000;
-    if std::fs::metadata(&path)
-        .map(|m| m.len() > CAP)
-        .unwrap_or(false)
-    {
-        if let Ok(data) = std::fs::read(&path) {
-            let keep = data.len().saturating_sub(CAP as usize / 2);
-            let _ = std::fs::write(&path, &data[keep..]);
-        }
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        use std::io::Write;
-        let _ = f.write_all(line.as_bytes());
-        let _ = f.write_all(b"\n");
-    }
+async fn log_append(line: String) {
+    tracing::info!(target: "instant::frontend", "{line}");
 }
 
 /// Absolute path of the log file, for display / tailing.
@@ -819,13 +735,11 @@ fn capture_set_enabled(app: AppHandle, services: tauri::State<Arc<services::Serv
 
 #[tauri::command]
 async fn resolve_ref(
-    app: AppHandle,
     token: String,
     cwd: String,
     sessions: Option<Vec<String>>,
 ) -> Result<refresolve::ResolveResult, String> {
-    let h = host::TauriHost(app);
-    refresolve::resolve_ref_impl(&h, token, cwd, sessions).await
+    refresolve::resolve_ref_impl(token, cwd, sessions).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -868,18 +782,15 @@ pub fn run() {
         )
         .setup(move |app| {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
-            log_event(
-                app.handle(),
-                "INFO",
-                "startup",
-                serde_json::json!({
-                    "isolated": isolated,
-                    "no_globals": no_globals,
-                    "skip_shared_globals": skip_shared_globals,
-                    "debug_assertions": cfg!(debug_assertions),
-                }),
-            );
             let data_dir = state_dir(app.handle())?;
+            crate::observe::init("instant", &data_dir, Vec::new());
+            tracing::info!(
+                isolated,
+                no_globals,
+                skip_shared_globals,
+                debug_assertions = cfg!(debug_assertions),
+                "startup"
+            );
             let services = crate::services::Services::boot(&data_dir)?;
             let services = Arc::new(services);
             let host: Arc<dyn crate::host::Host> =
@@ -942,21 +853,16 @@ pub fn run() {
                 // No tray, so show directly. INSTANT_ISOLATED
                 // still has its separate Cmd+Shift+Space global shortcut.
                 if let Some(win) = app.get_webview_window("main") {
-                    let show_result = win.show();
-                    log_event(
-                        app.handle(),
-                        if show_result.is_ok() { "INFO" } else { "ERROR" },
-                        "startup_window_show",
-                        serde_json::json!({ "result": show_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": show_result.err().map(|e| format!("{e:?}")) }),
-                    );
+                    match win.show() {
+                        Ok(()) => tracing::info!(result = "ok", "startup_window_show"),
+                        Err(error) => tracing::error!(result = "error", error = ?error, "startup_window_show"),
+                    }
                     let focus_result = win.set_focus();
-                    let native_focus = activate_window(&win);
-                    log_event(
-                        app.handle(),
-                        if focus_result.is_ok() { "INFO" } else { "ERROR" },
-                        "startup_window_focus",
-                        serde_json::json!({ "result": focus_result.as_ref().map(|_| "ok").unwrap_or("error"), "error": focus_result.err().map(|e| format!("{e:?}")), "native": native_focus }),
-                    );
+                    let native = activate_window(&win);
+                    match focus_result {
+                        Ok(()) => tracing::info!(result = "ok", native = %native, "startup_window_focus"),
+                        Err(error) => tracing::error!(result = "error", error = ?error, native = %native, "startup_window_focus"),
+                    }
                 }
                 return Ok(());
             }
@@ -1157,6 +1063,9 @@ pub fn run() {
         .run(|app, event| {
             // Tear down the shared headless Chrome when the app exits so it
             // doesn't linger holding its profile/port.
+            if let tauri::RunEvent::Exit = event {
+                hafley_observe::shutdown();
+            }
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 cdp::kill_engine(&app.state::<Arc<services::Services>>());
                 app.state::<Arc<services::Services>>()

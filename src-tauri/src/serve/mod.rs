@@ -8,7 +8,7 @@ mod rpc;
 #[cfg(test)]
 mod tests;
 
-pub use host::ServeHost;
+pub use host::{LogSink, ServeHost, LOG_STREAM_VARIABLE};
 pub use rpc::dispatch;
 pub use crate::services::Services;
 

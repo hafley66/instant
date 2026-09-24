@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use clap::Parser;
 
-use instant_lib::serve::{router, ServeHost, ServeState, Services};
+use hafley_observe::Sink;
+use instant_lib::serve::{router, LogSink, ServeHost, ServeState, Services, LOG_STREAM_VARIABLE};
 
 #[derive(Parser)]
 #[command(about = "instant backend over HTTP + a JSON-RPC WebSocket, no Tauri")]
@@ -40,6 +41,12 @@ fn default_dist() -> PathBuf {
         .join("../dist")
 }
 
+/// Exit after hafley-observe flushes; every exit past `observe::init` goes here.
+fn exit(code: i32) -> ! {
+    hafley_observe::shutdown();
+    std::process::exit(code)
+}
+
 fn main() {
     let args = Args::parse();
     let data_dir = args.data_dir.unwrap_or_else(default_data_dir);
@@ -58,6 +65,16 @@ fn main() {
         eprintln!("cannot create data dir {}: {e}", data_dir.display());
         std::process::exit(1);
     }
+    let host = Arc::new(ServeHost::new(data_dir.clone()));
+    let sinks: Vec<Arc<dyn Sink>> = if std::env::var_os(LOG_STREAM_VARIABLE).is_some() {
+        vec![Arc::new(LogSink(host.clone()))]
+    } else {
+        Vec::new()
+    };
+    match host.state_dir() {
+        Ok(dir) => instant_lib::observe::init("instant-serve", &dir, sinks),
+        Err(e) => eprintln!("no state dir under {}: {e}", data_dir.display()),
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -67,10 +84,9 @@ fn main() {
             Ok(s) => Arc::new(s),
             Err(e) => {
                 eprintln!("boot failed in {}: {e}", data_dir.display());
-                std::process::exit(1);
+                exit(1);
             }
         };
-        let host = Arc::new(ServeHost::new(data_dir.clone()));
         services.pty_events.start(host.clone());
         // Register the same root with the loopback doc service the `rustdoc_open`
         // command uses, so the palette and file-open paths work over HTTP here
@@ -78,7 +94,7 @@ fn main() {
         if let Some(root) = doc_root.as_deref() {
             if let Err(e) = services.doc_service.register(root) {
                 eprintln!("--doc-root {e}");
-                std::process::exit(1);
+                exit(1);
             }
         }
         let state = Arc::new(ServeState { host, services, rustdoc_root: doc_root });
@@ -87,14 +103,15 @@ fn main() {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("bind 127.0.0.1:{} failed: {e}", args.port);
-                std::process::exit(1);
+                exit(1);
             }
         };
         let port = listener.local_addr().expect("local addr").port();
         println!("listening http://127.0.0.1:{port}");
         if let Err(e) = axum::serve(listener, app).await {
             eprintln!("server error: {e}");
-            std::process::exit(1);
+            exit(1);
         }
     });
+    hafley_observe::shutdown();
 }

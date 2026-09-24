@@ -212,7 +212,7 @@ pub fn dispatch(
         }
         "resolve_ref" => {
             let p: ResolveRefArgs = parse(name, params)?;
-            res(wait(crate::refresolve::resolve_ref_impl(&*host, p.token, p.cwd, p.sessions)))
+            res(wait(crate::refresolve::resolve_ref_impl(p.token, p.cwd, p.sessions)))
         }
         "clear_ref_index" => {
             crate::refresolve::clear_ref_index();
@@ -448,15 +448,15 @@ pub fn dispatch(
         }
         "log_append" => {
             let p: LogAppendArgs = parse(name, params)?;
-            log_append_impl(&*host, p.line);
+            tracing::info!(target: "instant::frontend", "{}", p.line);
             ok(())
         }
         "log_path" => Ok(serde_json::Value::String(crate::host::state_dir(&*host)?
-            .join("instant.log")
+            .join(crate::observe::LOG_FILE)
             .to_string_lossy()
             .into_owned())),
         "log_reveal" => {
-            let path = crate::host::state_dir(&*host)?.join("instant.log");
+            let path = crate::host::state_dir(&*host)?.join(crate::observe::LOG_FILE);
             crate::proc::Proc::new("/usr/bin/open", crate::proc::Label::Open).arg("-R").arg(&path).handoff()?;
             ok(())
         }
@@ -1101,28 +1101,4 @@ fn run_click_impl(command: String, cwd: String) -> Result<String, String> {
         return Err(format!("exit {code}: {}\n{}", tail.join("\n").trim(), s.trim()).trim().to_string());
     }
     Ok(s)
-}
-
-fn log_append_impl(host: &dyn Host, line: String) {
-    let Ok(dir) = crate::host::state_dir(host) else { return };
-    let path = dir.join("instant.log");
-    const CAP: u64 = 2_000_000;
-    if std::fs::metadata(&path)
-        .map(|m| m.len() > CAP)
-        .unwrap_or(false)
-    {
-        if let Ok(data) = std::fs::read(&path) {
-            let keep = data.len().saturating_sub(CAP as usize / 2);
-            let _ = std::fs::write(&path, &data[keep..]);
-        }
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        use std::io::Write;
-        let _ = f.write_all(line.as_bytes());
-        let _ = f.write_all(b"\n");
-    }
 }
