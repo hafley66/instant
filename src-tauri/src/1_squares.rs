@@ -34,7 +34,7 @@ use crate::boop::{
     from_visible, input_region, now_ms, open_store_ro, to_turnvis, turns_from, BoopTurn, LocatedTurn,
 };
 use crate::boop_tmux::{pane_window, tmux_command, PaneWindow};
-use crate::host::{log_event, Host};
+use crate::host::Host;
 
 /// The event the strip listens on.
 pub const SQUARES_EVENT: &str = "squares-update";
@@ -503,7 +503,7 @@ impl FeedStat {
     /// were worth sending, how long each took, and how much turn text they read.
     /// The pane is named, because the number that matters is per pane: a reader
     /// with several terminals open pays this once for each.
-    fn report(&mut self, host: &Arc<dyn Host>, pty: &str, session: &str) {
+    fn report(&mut self, pty: &str, session: &str) {
         let now = Instant::now();
         let elapsed = match self.since {
             Some(at) => at.elapsed().as_secs_f64(),
@@ -517,25 +517,21 @@ impl FeedStat {
         if flushes == 0 && self.pushed == 0 {
             return;
         }
-        log_event(
-            host.as_ref(),
-            "INFO",
-            "squares_feed",
-            serde_json::json!({
-                "pty": pty,
-                "session": session,
-                "seconds": (elapsed * 100.0).round() / 100.0,
-                "flushes": flushes,
-                "per_second": ((flushes as f64 / elapsed) * 10.0).round() / 10.0,
-                "pushed": std::mem::take(&mut self.pushed),
-                "unchanged": std::mem::take(&mut self.unchanged),
-                "failed": std::mem::take(&mut self.failed),
-                "project_ms": std::mem::take(&mut self.project_ms),
-                "worst_ms": std::mem::take(&mut self.worst_ms),
-                "rows": std::mem::take(&mut self.rows),
-                "turns": std::mem::take(&mut self.turns),
-                "text_bytes": std::mem::take(&mut self.text_bytes),
-            }),
+        tracing::info!(
+            pty,
+            session,
+            seconds = (elapsed * 100.0).round() / 100.0,
+            flushes,
+            per_second = ((flushes as f64 / elapsed) * 10.0).round() / 10.0,
+            pushed = std::mem::take(&mut self.pushed),
+            unchanged = std::mem::take(&mut self.unchanged),
+            failed = std::mem::take(&mut self.failed),
+            project_ms = std::mem::take(&mut self.project_ms),
+            worst_ms = std::mem::take(&mut self.worst_ms),
+            rows = std::mem::take(&mut self.rows),
+            turns = std::mem::take(&mut self.turns),
+            text_bytes = std::mem::take(&mut self.text_bytes),
+            "squares_feed"
         );
     }
 }
@@ -583,16 +579,12 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
     // session — would otherwise show nothing until it next wrote, which on a
     // settled pane is never.
     let options = args.options.merged();
-    log_event(
-        host.as_ref(),
-        "INFO",
-        "squares_feed_started",
-        serde_json::json!({
-            "pty": args.pty,
-            "session": args.session,
-            "target": args.target,
-            "mode": format!("{:?}", options.mode).to_lowercase(),
-        }),
+    tracing::info!(
+        pty = args.pty,
+        session = args.session,
+        target = args.target,
+        mode = format!("{:?}", options.mode).to_lowercase(),
+        "squares_feed_started"
     );
     let mut stat = FeedStat {
         since: Some(Instant::now()),
@@ -608,7 +600,7 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
                 Ok(()) => {}
                 // A quiet pane projects nothing: only a write wakes this.
                 Err(RecvTimeoutError::Timeout) => {
-                    stat.report(&host, &args.pty, &args.session);
+                    stat.report(&args.pty, &args.session);
                     continue;
                 }
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -619,9 +611,12 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
         match project_timed(&args.session, &args.target, args.socket.as_deref(), &options) {
             Ok((strip, timing)) => {
                 if std::env::var_os("INSTANT_SQUARES_PROFILE").is_some() {
-                    log_event(host.as_ref(), "INFO", "squares_projection", serde_json::json!({
-                        "session": args.session, "rows": strip.rows, "stages": timing,
-                    }));
+                    tracing::info!(
+                        session = args.session,
+                        rows = strip.rows,
+                        stages = %serde_json::json!(timing),
+                        "squares_projection"
+                    );
                 }
                 stat.rows += strip.rows as u64;
                 stat.turns += (strip.turns.len() + strip.pinned.len()) as u64;
@@ -652,7 +647,7 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
         stat.flushes += 1;
         stat.project_ms += spent.as_millis() as u64;
         stat.worst_ms = stat.worst_ms.max(spent.as_millis() as u64);
-        stat.report(&host, &args.pty, &args.session);
+        stat.report(&args.pty, &args.session);
         if spent < FLUSH_INTERVAL {
             std::thread::sleep(FLUSH_INTERVAL - spent);
             // Everything that landed during the flush is one more projection,

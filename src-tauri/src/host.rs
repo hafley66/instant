@@ -5,7 +5,6 @@
 // never AppHandle.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
@@ -93,60 +92,13 @@ pub fn state_dir(host: &dyn Host) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-// Serialize append/truncate cycles for host-driven logging (commands that hold
-// only a &dyn Host, e.g. resolve_ref) so concurrent writers cannot reorder
-// bytes or truncate a newer write.
-static LOG_LOCK: Mutex<()> = Mutex::new(());
-
-fn log_timestamp_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
-}
-
-/// Append one structured line to app_data_dir/instant.log, mirroring lib.rs's
-/// event log for commands that no longer hold an AppHandle. Best-effort: a
-/// logging failure never throws back into the caller.
-pub fn log_event(host: &dyn Host, level: &str, event: &str, fields: serde_json::Value) {
-    let line = format!(
-        "ts={} level={} target=instant event={} fields={}",
-        log_timestamp_ms(),
-        level,
-        event,
-        serde_json::to_string(&fields).unwrap_or_else(|_| "{}".to_string()),
-    );
-    let Ok(dir) = state_dir(host) else { return };
-    let path = dir.join("instant.log");
-    let _guard = LOG_LOCK.lock().unwrap();
-    const CAP: u64 = 2_000_000;
-    if std::fs::metadata(&path)
-        .map(|m| m.len() > CAP)
-        .unwrap_or(false)
-    {
-        if let Ok(data) = std::fs::read(&path) {
-            let keep = data.len().saturating_sub(CAP as usize / 2);
-            let _ = std::fs::write(&path, &data[keep..]);
-        }
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        use std::io::Write;
-        let _ = f.write_all(line.as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::favorites::fav_add_impl;
     use crate::services::Services;
     use std::sync::atomic::{AtomicBool, AtomicU64};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     // A recording Host: emit pushes (event, payload) into a Vec; everything
     // else is a no-op that the command under test never reaches.

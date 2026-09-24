@@ -663,10 +663,9 @@ fn resolve_ref_with(
     }
 }
 
-/// Every ⌘-click resolution lands in instant.log as one `resolve_ref` event:
+/// Every ⌘-click resolution lands in the trace as one `resolve_ref` event:
 /// what was asked, what the ledger offered, which rung answered, how long.
 pub async fn resolve_ref_impl(
-    host: &dyn crate::host::Host,
     token: String,
     cwd: String,
     sessions: Option<Vec<String>>,
@@ -692,23 +691,19 @@ pub async fn resolve_ref_impl(
         ResolveResult::Absent { repo, rev, .. } => ("absent", format!("{repo}@{rev}"), "", "", 0),
         ResolveResult::Miss => ("miss", String::new(), "", "", 0),
     };
-    crate::host::log_event(
-        host,
-        "INFO",
-        "resolve_ref",
-        serde_json::json!({
-            "token": token,
-            "cwd": cwd,
-            "sessions": sessions,
-            "evidence_paths": evidence_paths,
-            "evidence_dirs": evidence_dirs,
-            "result": kind,
-            "path": path,
-            "source": source,
-            "via": via,
-            "count": count,
-            "ms": started.elapsed().as_millis() as u64,
-        }),
+    tracing::info!(
+        token,
+        cwd,
+        sessions = ?sessions,
+        evidence_paths,
+        evidence_dirs,
+        result = kind,
+        path,
+        source,
+        via,
+        count,
+        ms = started.elapsed().as_millis() as u64,
+        "resolve_ref"
     );
     Ok(result)
 }
