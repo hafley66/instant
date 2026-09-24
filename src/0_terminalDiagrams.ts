@@ -1,7 +1,7 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { debounceTime, Subject, type Subscription } from "rxjs";
+import { debounceTime, merge, Subject, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
@@ -404,13 +404,15 @@ export class TerminalDiagramOverlay {
     readonly term: Terminal,
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
-    readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes" | "scanning">,
+    readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes" | "settled" | "scanning">,
     readonly enabled: () => boolean = () => true,
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
     host.appendChild(this.root);
-    if (projection) this.activitySubscription = projection.changes.subscribe(() => this.scheduleFrame());
+    // renderPlan() holds stripped fences back while a scan runs, so the scan's
+    // end repaints even when it emitted no visibility change.
+    if (projection) this.activitySubscription = merge(projection.changes, projection.settled).subscribe(() => this.scheduleFrame());
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(80),
     ).subscribe(() => {

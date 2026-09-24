@@ -448,6 +448,7 @@ describe("diagram overlay flicker (diagnostic lane)", () => {
     const projection = {
       visible: [],
       changes: new Subject<TurnVisibilityEvent>(),
+      settled: new Subject<void>(),
       scanning: false,
     };
     const overlay = new TerminalDiagramOverlay(term, host, undefined, projection);
@@ -516,8 +517,9 @@ describe("mermaid bundle loader", () => {
   });
 });
 
-function overlayRig(rows: string[]) {
-  vi.stubGlobal("requestAnimationFrame", () => 9);
+function overlayRig(rows: string[], scanning = false) {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
   vi.stubGlobal("getComputedStyle", () => ({ backgroundColor: "rgb(24, 24, 24)" }));
   const created: Array<Record<string, any>> = [];
   vi.stubGlobal("document", {
@@ -561,12 +563,14 @@ function overlayRig(rows: string[]) {
     onScroll: () => ({ dispose() {} }),
     onResize: () => ({ dispose() {} }),
   } as unknown as Terminal;
-  const overlay = new TerminalDiagramOverlay(term, host, undefined, {
+  const projection = {
     visible: [],
     changes: new Subject<TurnVisibilityEvent>(),
-    scanning: false,
-  });
-  return { overlay, write: () => onWrite!(), elements: created };
+    settled: new Subject<void>(),
+    scanning,
+  };
+  const overlay = new TerminalDiagramOverlay(term, host, undefined, projection);
+  return { overlay, projection, frames, write: () => onWrite!(), elements: created };
 }
 
 describe("diagram overlay idle render", () => {
@@ -648,6 +652,51 @@ describe("diagram overlay scroll debounce", () => {
     await overlay.paint();
     expect(overlay.scrolling).toBe(false);
     expect(overlay.root.hidden).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("diagram overlay scan settle", () => {
+  it("paints a stripped fence once the scan that suppressed it settles", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const { overlay, projection, frames, write, elements } = overlayRig(["• mermaid", "  flowchart LR", "    A --> B"], true);
+    const painted = () => elements
+      .filter((element) => String(element.className).split(" ").includes("term-diagram"))
+      .map((element) => ({ language: element.dataset.language, code: element.dataset.diagramCode, rows: `${element.dataset.bufferStart}-${element.dataset.bufferEnd}` }));
+    const flush = async () => {
+      while (frames.length) {
+        frames.shift()!(0);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+
+    await flush();
+    write();
+    await flush();
+    expect({ fingerprint: overlay.lastPaintedFingerprint, painted: painted() }).toMatchInlineSnapshot(`
+      {
+        "fingerprint": "true:0:",
+        "painted": [],
+      }
+    `);
+
+    projection.scanning = false;
+    projection.settled.next();
+    await flush();
+    expect({ fingerprint: overlay.lastPaintedFingerprint, painted: painted() }).toMatchInlineSnapshot(`
+      {
+        "fingerprint": "true:0:true:mermaid:flowchart lr
+      a --> b#22",
+        "painted": [
+          {
+            "code": "flowchart LR
+        A --> B",
+            "language": "mermaid",
+            "rows": "0-2",
+          },
+        ],
+      }
+    `);
     vi.unstubAllGlobals();
   });
 });

@@ -292,6 +292,10 @@ export function attachTurnRegions(
 export class TerminalTurnVisibilityV2 {
   updates = new Subject<TurnVisibilityEvent>();
   readonly changes: Observable<TurnVisibilityEvent> = this.updates;
+  // Fires each time a scan finishes, emitted or discarded. Consumers that gate
+  // on `scanning` read it as false here and repaint what the scan held back.
+  settles = new Subject<void>();
+  readonly settled: Observable<void> = this.settles;
   visible: VisibleTurn[] = [];
   generation = 0;
   viewportRevision = 0;
@@ -348,6 +352,9 @@ export class TerminalTurnVisibilityV2 {
       this.scanning = true;
       void this.scan().finally(() => {
         this.scanning = false;
+        // Before the rescan: its frame then queues behind the consumer's, so
+        // the consumer's paint still reads scanning === false.
+        this.settles.next();
         if (!this.rescanPending) return;
         this.rescanPending = false;
         this.schedule();
@@ -417,5 +424,6 @@ export class TerminalTurnVisibilityV2 {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.subscription.unsubscribe();
     this.updates.complete();
+    this.settles.complete();
   }
 }
