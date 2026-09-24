@@ -775,6 +775,118 @@ describe("terminal turn visibility v2", () => {
     vi.unstubAllGlobals();
   });
 
+  it("ingests on the write debounce and each leased tick while shown, and never while hidden", async () => {
+    vi.useFakeTimers();
+    const changes = new Subject<{ kind: "write"; cols: number; rows: number; viewportY: number; bufferLength: number }>();
+    let shown = true;
+    const viewport: XtermViewport = {
+      changes,
+      readVisibleLogicalLines: () => [],
+      bufferRowAtClientY: () => null,
+      dispose: () => {},
+      visible: () => shown,
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const ingest = vi.fn();
+    const visibility = new TerminalTurnVisibilityV2(viewport, async () => [], undefined, undefined, ingest);
+    visibility.schedule = vi.fn();
+    const write = () => changes.next({ kind: "write", cols: 120, rows: 40, viewportY: 0, bufferLength: 40 });
+
+    const atConstruction = ingest.mock.calls.length;
+    write();
+    await vi.advanceTimersByTimeAsync(120);
+    const afterWriteDebounce = ingest.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_880);
+    const afterLease = ingest.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const afterQuiet = ingest.mock.calls.length;
+    shown = false;
+    write();
+    await vi.advanceTimersByTimeAsync(6_000);
+    const whileHidden = ingest.mock.calls.length;
+
+    expect({ atConstruction, afterWriteDebounce, afterLease, afterQuiet, whileHidden }).toMatchInlineSnapshot(`
+      {
+        "afterLease": 6,
+        "afterQuiet": 6,
+        "afterWriteDebounce": 1,
+        "atConstruction": 0,
+        "whileHidden": 6,
+      }
+    `);
+    visibility.dispose();
+    changes.complete();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // The native locator drops the composer itself. Trimming here as well let
+  // its detector take the next frame up — a kimi transcript card — as the
+  // composer and delete the turn inside it.
+  it("hands the native locator untrimmed rows and trims the composer only for the local fallback", async () => {
+    const texts = [
+      "╭──────────────────────────────────────────────────╮",
+      "│ the transcript card carries this answer line     │",
+      "╰──────────────────────────────────────────────────╯",
+      "",
+      "╭──────────────────────────────────────────────────╮",
+      "│ > typing a new prompt                            │",
+      "╰──────────────────────────────────────────────────╯",
+    ];
+    const lines: LogicalLine[] = texts.map((text, row) => ({ text, start: row, end: row }));
+    const viewport: XtermViewport = {
+      changes: EMPTY,
+      readVisibleLogicalLines: () => lines,
+      bufferRowAtClientY: () => null,
+      dispose: () => {},
+    };
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const kimi = { ...turn(7, "the transcript card carries this answer line"), harness: "kimi" };
+    const nativeRows: number[][] = [];
+    const native = new TerminalTurnVisibilityV2(viewport, async () => [], undefined, async (rows) => {
+      nativeRows.push(rows.map((row) => row.start));
+      return [];
+    });
+    await native.scan([kimi]);
+    native.dispose();
+    const fallback = new TerminalTurnVisibilityV2(viewport, async () => [], undefined, () => Promise.reject(new Error("ipc down")));
+    await fallback.scan([kimi]);
+    fallback.dispose();
+
+    expect({
+      nativeRows,
+      fallback: fallback.visible.map(({ id, anchorStart, anchorEnd, bufferStart, bufferEnd }) => ({
+        id, anchorStart, anchorEnd, bufferStart, bufferEnd,
+      })),
+    }).toMatchInlineSnapshot(`
+      {
+        "fallback": [
+          {
+            "anchorEnd": 1,
+            "anchorStart": 1,
+            "bufferEnd": 2,
+            "bufferStart": 0,
+            "id": "session-a:7",
+          },
+        ],
+        "nativeRows": [
+          [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+          ],
+        ],
+      }
+    `);
+    vi.unstubAllGlobals();
+  });
+
   it("emits when the same span identity changes role while the pointer row stays fixed", async () => {
     const lines: LogicalLine[] = [{ text: "same rendered row", start: 41, end: 41 }];
     const viewport: XtermViewport = {

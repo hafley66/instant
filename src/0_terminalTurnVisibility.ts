@@ -309,6 +309,10 @@ export class TerminalTurnVisibilityV2 {
     // boop-turnvis runs the same algorithm off the render thread. Absent it,
     // and whenever it errors, the TypeScript matcher answers instead.
     readonly locate?: TurnLocator,
+    // Transcript ingestion for this pane's session. It rides the same write
+    // and activity-lease streams as the scans, so a pane that is writing
+    // ingests its own turns while it writes and for the lease after it stops.
+    readonly ingest?: () => void,
   ) {
     const changes = viewport.changes.pipe(share());
     this.subscription.add(changes.subscribe(() => { this.viewportRevision += 1; }));
@@ -323,14 +327,27 @@ export class TerminalTurnVisibilityV2 {
     this.subscription.add(changes.pipe(
       filter((event) => event.kind === "write"),
       debounceTime(120),
-    ).subscribe(() => this.schedule()));
+    ).subscribe(() => {
+      this.ingestVisible();
+      this.schedule();
+    }));
     // Transcript ingestion and the one-second turn cache can trail the parsed
     // terminal output. Keep reconciling while output or scrolling is active,
     // then stop after five quiet seconds.
     this.subscription.add(turnActivityClock.pipe(
       filter(() => performance.now() - this.activityAt <= TURN_ACTIVITY_LEASE_MS),
-    ).subscribe(() => this.schedule()));
+    ).subscribe(() => {
+      this.ingestVisible();
+      this.schedule();
+    }));
     this.schedule();
+  }
+
+  // Same visibility gate as a scan: a hidden pane keeps its lease and ingests
+  // nothing until it shows again.
+  ingestVisible() {
+    if (this.disposed || this.viewport.visible?.() === false) return;
+    this.ingest?.();
   }
 
   schedule() {
@@ -362,14 +379,14 @@ export class TerminalTurnVisibilityV2 {
       this.tmux?.captureVisible().catch(() => "") ?? Promise.resolve(""),
     ]);
     if (this.disposed || generation !== this.generation) return;
-    // Trim before either locator sees the rows: boop-turnvis answers over IPC
-    // and the local matcher is only the fallback, so a fix applied inside one
-    // of them is dead code in the other.
+    // The tmux status row is trimmed before either locator sees the rows. The
+    // composer is dropped by exactly one side per locator: boop-turnvis drops
+    // it natively (`locate_turns` in src-tauri/src/0_boop.rs), so `located`
+    // hands it the untrimmed rows and trims only for the local fallback.
     const viewportRevision = this.viewportRevision;
     const paneLines = dropTmuxStatusRow(this.viewport.readVisibleLogicalLines(), tmuxCapture);
     const harness = turns.reduce((latest, turn) => turn.ts >= latest.ts ? turn : latest, turns[0])?.harness ?? "";
-    const lines = dropTerminalInputRows(paneLines, harness);
-    const next = await this.located(lines, turns, tmuxCapture);
+    const next = await this.located(paneLines, turns, tmuxCapture, harness);
     if (this.disposed || generation !== this.generation || viewportRevision !== this.viewportRevision) return;
     const before = new Map(this.visible.map((turn) => [turn.id, turn]));
     const after = new Map(next.map((turn) => [turn.id, turn]));
@@ -383,9 +400,15 @@ export class TerminalTurnVisibilityV2 {
     if (entered.length || exited.length || changed) this.updates.next({ visible: next, entered, exited });
   }
 
-  async located(lines: LogicalLine[], turns: BoopTurn[], tmuxCapture: string): Promise<VisibleTurn[]> {
+  // A second composer drop over already-trimmed rows finds the next matching
+  // frame above it — a kimi tool card (╭…╰), a claude prompt between two rules
+  // — and deletes real transcript rows. The native locator gets the pane's
+  // rows as they are; the composer-trimmed rows serve only the local matcher
+  // and region projection.
+  async located(paneLines: LogicalLine[], turns: BoopTurn[], tmuxCapture: string, harness = ""): Promise<VisibleTurn[]> {
+    const lines = dropTerminalInputRows(paneLines, harness);
     if (!this.locate) return locateVisibleTurns(lines, turns, tmuxCapture);
-    return this.locate(lines, turns)
+    return this.locate(paneLines, turns)
       .then((spans) => attachTurnRegions(spans, lines, tmuxConfirms(lines, tmuxCapture)))
       .catch(() => locateVisibleTurns(lines, turns, tmuxCapture));
   }

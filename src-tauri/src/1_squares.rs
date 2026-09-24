@@ -2,7 +2,7 @@
 // server computes, the socket carries: nothing here is asked for on scroll and
 // nothing is asked for per square.
 //
-//   pty output  ->  one dirty bit  ->  capture-pane -p -J  ->  boop-turnvis
+//   pty output  ->  one dirty bit  ->  capture-pane -p  ->  boop-turnvis
 //               ->  boop-turnstrip (rows, placement, geometry)
 //               ->  one tags_for_many  ->  host.emit("squares-update")
 //
@@ -136,12 +136,12 @@ pub struct Strip {
     pub layout: Option<Layout>,
 }
 
-/// The pane's own lines. `-J` joins a wrapped row onto the line it continues,
-/// so one entry is one logical line and its row number is its own index.
+/// The pane's own physical rows, without `-J`: a wrapped line stays one entry
+/// per screen row, so an entry's index is the row the pane draws it on and the
+/// strip's squares line up with the pane's rows (bb6c4ed3).
 pub fn capture_lines(target: &str, socket: Option<&str>, depth: u32) -> Result<Vec<String>, String> {
-    let start = format!("-{depth}");
     let output = tmux_command(socket)
-        .args(["capture-pane", "-p", "-S", &start, "-t", target])
+        .args(capture_args(target, depth))
         .run()
         .map_err(|error| format!("capture {target}: {error}"))?;
     if !output.status.success() {
@@ -152,6 +152,17 @@ pub fn capture_lines(target: &str, socket: Option<&str>, depth: u32) -> Result<V
         .lines()
         .map(str::to_owned)
         .collect())
+}
+
+fn capture_args(target: &str, depth: u32) -> [String; 6] {
+    [
+        "capture-pane".into(),
+        "-p".into(),
+        "-S".into(),
+        format!("-{depth}"),
+        "-t".into(),
+        target.into(),
+    ]
 }
 
 /// The projection itself: rows in, spans, marks and the strip's geometry out.
@@ -443,7 +454,15 @@ pub fn publish(host: &Arc<dyn Host>, strip: &Strip) -> Result<(), String> {
     )
 }
 
-type Feeds = Mutex<HashMap<String, SyncSender<()>>>;
+/// One watcher's wake-up: the session it projects and its dirty bit. The
+/// session is what a store write names, so an ingest can wake the strip of a
+/// pane that has stopped writing.
+struct Feed {
+    session: String,
+    dirty: SyncSender<()>,
+}
+
+type Feeds = Mutex<HashMap<String, Feed>>;
 
 /// One registry per process: registering a feed twice replaces it, and the
 /// dropped sender stops the older thread.
@@ -456,7 +475,13 @@ pub fn squares_watch_impl(host: Arc<dyn Host>, args: SquaresWatchArgs) -> Result
     FEEDS
         .lock()
         .map_err(|_| "squares feed lock poisoned".to_string())?
-        .insert(args.pty.clone(), dirty);
+        .insert(
+            args.pty.clone(),
+            Feed {
+                session: args.session.clone(),
+                dirty,
+            },
+        );
     std::thread::spawn(move || run(host, args, listener));
     Ok(())
 }
@@ -475,8 +500,20 @@ pub fn note_output(pty: &str) {
     let Ok(feeds) = FEEDS.lock() else {
         return;
     };
-    if let Some(dirty) = feeds.get(pty) {
-        let _ = dirty.try_send(());
+    if let Some(feed) = feeds.get(pty) {
+        let _ = feed.dirty.try_send(());
+    }
+}
+
+/// The store gained or lost turns for `session`. A projection reads the
+/// store fresh, so the same dirty bit a write sets is the whole signal; a
+/// quiet pane whose transcript landed after its last write re-projects once.
+pub fn note_session(session: &str) {
+    let Ok(feeds) = FEEDS.lock() else {
+        return;
+    };
+    for feed in feeds.values().filter(|feed| feed.session == session) {
+        let _ = feed.dirty.try_send(());
     }
 }
 
@@ -667,6 +704,42 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// bb6c4ed3 dropped `-J` so a capture entry is one physical pane row; a
+    /// joined capture would shift every square below a wrapped line.
+    #[test]
+    fn capture_reads_physical_rows_without_joining_wraps() {
+        assert_eq!(
+            capture_args("instant:1.0", 120),
+            ["capture-pane", "-p", "-S", "-120", "-t", "instant:1.0"].map(String::from),
+        );
+    }
+
+    /// An ingest names a session, not a pty: every feed projecting that
+    /// session gets one dirty bit, and a feed for another session gets none.
+    #[test]
+    fn a_session_ingest_wakes_only_that_sessions_feeds() {
+        let (a_dirty, a_listener) = mpsc::sync_channel::<()>(1);
+        let (b_dirty, b_listener) = mpsc::sync_channel::<()>(1);
+        {
+            let mut feeds = FEEDS.lock().unwrap();
+            feeds.insert("test-wake-a".into(), Feed { session: "wake-session-a".into(), dirty: a_dirty });
+            feeds.insert("test-wake-b".into(), Feed { session: "wake-session-b".into(), dirty: b_dirty });
+        }
+        note_session("wake-session-a");
+        note_session("wake-session-a");
+        let woke = (
+            a_listener.try_recv().is_ok(),
+            a_listener.try_recv().is_ok(),
+            b_listener.try_recv().is_ok(),
+        );
+        {
+            let mut feeds = FEEDS.lock().unwrap();
+            feeds.remove("test-wake-a");
+            feeds.remove("test-wake-b");
+        }
+        assert_eq!(woke, (true, false, false));
+    }
 
     fn turn(session: &str, index: i64, role: &str, said: &str) -> BoopTurn {
         BoopTurn {
