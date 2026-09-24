@@ -178,6 +178,11 @@ fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
     match boop_harness::sync_session(&store, adapter, &candidate) {
         Ok(stat) => {
             store.commit().map_err(|error| error.to_string())?;
+            // A strip reprojects only on pty writes; turns that land after
+            // the pane went quiet would otherwise never reach it.
+            if stat.written > 0 || stat.dropped > 0 {
+                crate::squares::note_session(session);
+            }
             Ok(BoopSyncStat {
                 found: true,
                 written: stat.written,
@@ -1098,6 +1103,77 @@ mod tests {
 
     /// The IPC boundary is where a correct matcher still ships wrong data: a
     /// missed rename or a dropped field reads as an empty pane, never a crash.
+    /// `locate_turns` is the one composer drop. Handed the pane's rows as
+    /// drawn, it drops only the bottom frame; handed rows a caller already
+    /// trimmed, the same detector takes the next frame up, which is a real
+    /// transcript turn (a claude prompt between two rules, a kimi card).
+    #[test]
+    fn the_composer_is_dropped_once_and_transcript_frames_survive() {
+        let rows = |texts: &[&str]| -> Vec<LogicalLine> {
+            texts
+                .iter()
+                .enumerate()
+                .map(|(row, text)| LogicalLine { text: (*text).into(), start: row, end: row })
+                .collect()
+        };
+        let turn = |harness: &str, index: i64, role: &str, said: &str| BoopTurn {
+            session: format!("{harness}-session"),
+            harness: harness.into(),
+            turn: index,
+            ts: index,
+            role: role.into(),
+            said: said.into(),
+            session_scope: unknown_session_scope(),
+            parent_session: None,
+        };
+        let spans = |lines: Vec<LogicalLine>, turns: Vec<BoopTurn>| -> Vec<(String, usize, usize)> {
+            locate_turns(lines, turns)
+                .into_iter()
+                .map(|found| (found.id, found.anchor_start, found.anchor_end))
+                .collect()
+        };
+        let rule = "────────────────────────────────────────";
+        let claude = [
+            rule,
+            "❯ summarize the ingest path for the pane strip",
+            rule,
+            "⏺ The pane strip ingests on every leased write tick now.",
+            "",
+            rule,
+            "❯ ",
+            rule,
+        ];
+        let claude_turns = vec![
+            turn("claude", 1, "user", "summarize the ingest path for the pane strip"),
+            turn("claude", 2, "assistant", "The pane strip ingests on every leased write tick now."),
+        ];
+        let kimi = [
+            "╭──────────────────────────────────────────────────╮",
+            "│ the transcript card carries this answer line     │",
+            "╰──────────────────────────────────────────────────╯",
+            "",
+            "╭──────────────────────────────────────────────────╮",
+            "│ > typing a new prompt                            │",
+            "╰──────────────────────────────────────────────────╯",
+        ];
+        let kimi_turns = vec![turn("kimi", 7, "assistant", "the transcript card carries this answer line")];
+
+        assert_eq!(
+            (
+                spans(rows(&claude), claude_turns.clone()),
+                spans(rows(&claude[..5]), claude_turns),
+                spans(rows(&kimi), kimi_turns.clone()),
+                spans(rows(&kimi[..4]), kimi_turns),
+            ),
+            (
+                vec![("claude-session:1".into(), 1, 1), ("claude-session:2".into(), 3, 3)],
+                vec![("claude-session:2".into(), 3, 3)],
+                vec![("kimi-session:7".into(), 1, 1)],
+                vec![],
+            ),
+        );
+    }
+
     #[test]
     fn locate_turns_serializes_to_the_shape_the_frontend_golden_records() {
         let dir = concat!(

@@ -867,6 +867,7 @@ export function openTab(
     },
     tmuxPane,
     (lines, turns) => invoke<TurnSpan[]>(commands.boop.boopLocateTurns, { lines, turns }),
+    () => void syncTurns?.(),
   );
   let syncTurnsAt = Number.NEGATIVE_INFINITY;
   let syncTurnsPending: Promise<void> | null = null;
@@ -878,7 +879,14 @@ export function openTab(
       const activeHarness = tabs.get(id)?.harness.id ?? harness.id;
       if (!session || !activeHarness) return;
       syncTurnsAt = performance.now();
-      await invoke(commands.boop.boopSyncSession, { session, harness: activeHarness });
+      const stat = await invoke<{ written: number; dropped: number }>(
+        commands.boop.boopSyncSession,
+        { session, harness: activeHarness },
+      );
+      // Ingest runs on every leased write tick; only a store change is worth
+      // a fresh read and a rescan. The native side wakes this session's
+      // squares feed on the same condition.
+      if (!stat.written && !stat.dropped) return;
       invalidateBoopTurns(session);
       turnVisibility.schedule();
     })().catch(() => {}).finally(() => {
