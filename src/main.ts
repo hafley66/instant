@@ -34,7 +34,7 @@ import { forkRender } from "./0_forkRenderSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
-import { installMdviewHost, type MdviewHost } from "./mdview/ports";
+import { installMdviewHost, setMdLogEmit, type MdviewHost } from "./mdview/ports";
 import { registerPaint } from "./paintPanel";
 import { openRustdocBrowser } from "./0_rustdoc";
 import { isFilePickerOpen } from "./overlayGuard";
@@ -329,6 +329,9 @@ async function main() {
     registerPlugin,
   };
   installMdviewHost(mdviewHost);
+  // md stage timings (read, parse, first commit, first paint, diagrams) join instant.log.
+  setMdLogEmit((category, message, fields) =>
+    logLine(`[${category.join(".")}] ${message.replace(/\{(\w+)\}/g, (_, key: string) => String(fields[key]))} ${JSON.stringify(fields)}`));
   registerMdview(); // md panels open via routing (preview/clickrules), no rail button
   registerPaint();
   registerV2Bridges();
