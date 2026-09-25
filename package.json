@@ -27,16 +27,16 @@
     "test:replay": "pnpm test:replay:corpus && pnpm test:replay:terminal && pnpm test:replay:conversation && pnpm test:replay:agents"
   },
   "dependencies": {
-    "@hafley66/grapht-model": "0.1.0-dev.1789779216703",
+    "@hafley66/grapht-model": "0.1.0-dev.1790302361706",
     "@hafley66/grid": "0.1.7",
-    "@hafley66/json-rx": "0.1.2",
+    "@hafley66/json-rx": "0.1.2-dev.1790302364181",
     "@hafley66/marbler": "0.0.3",
-    "@hafley66/md": "0.1.2-dev.1790051305804",
-    "@hafley66/path": "0.1.0",
-    "@hafley66/signal-grid": "0.1.0-dev.1790046174244",
-    "@hafley66/signals": "0.1.1-dev.1788884795413",
-    "@hafley66/trace": "0.1.0-dev.1790046122144",
-    "@hafley66/xdom": "0.1.0-dev.1790046173930",
+    "@hafley66/md": "0.1.2-dev.1790302536146",
+    "@hafley66/path": "0.1.0-dev.1790302359457",
+    "@hafley66/signal-grid": "0.1.0-dev.1790302363062",
+    "@hafley66/signals": "0.1.1-dev.1790302362050",
+    "@hafley66/trace": "0.1.0-dev.1790302360348",
+    "@hafley66/xdom": "0.1.0-dev.1790302362680",
     "@oddbird/css-anchor-positioning": "^0.9.0",
     "@react95/icons": "^2.5.0",
     "@streamdown/code": "^1.1.1",
@@ -99,7 +99,8 @@
     "overrides": {
       "@streamdown/code>shiki": "$shiki",
       "streamdown>marked": "$marked",
-      "streamdown>mermaid": "$mermaid"
+      "streamdown>mermaid": "$mermaid",
+      "@hafley66/signals": "$@hafley66/signals"
     },
     "patchedDependencies": {
       "@hafley66/marbler@0.0.3": "patches/@hafley66__marbler@0.0.3.patch"
