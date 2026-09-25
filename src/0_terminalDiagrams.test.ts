@@ -930,3 +930,52 @@ describe("diagram overlay across scans", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("inline diagram inference setting", () => {
+  const rows = [
+    "```mermaid",
+    "flowchart LR",
+    "  A --> B",
+    "```",
+    "",
+    "• mermaid",
+    "  flowchart LR",
+    "    C --> D",
+    "",
+    "     timeline",
+    "         title roadmap",
+    "         Q1 : ship",
+    "",
+  ];
+  it("detects explicit fences, then label rows, then unlabeled bodies as the setting widens", () => {
+    const terminal = terminalWithRows(rows, 0, 24);
+    expect((["explicit", "labels", "inferred"] as const).map((inference) =>
+      `${inference}: ${findDiagramFences(terminal, inference).map((fence) => `${fence.start}-${fence.end}${fence.stripped ? " stripped" : ""}${fence.inferred ? " inferred" : ""}`).join(", ")}`))
+      .toMatchInlineSnapshot(`
+        [
+          "explicit: 0-3",
+          "labels: 0-3, 5-7 stripped",
+          "inferred: 0-3, 5-7 stripped, 9-11 inferred",
+        ]
+      `);
+  });
+
+  it("paints what the overlay's inference setting allows", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const { overlay } = overlayRig(rows);
+    const painted = async (inference: "explicit" | "labels" | "inferred") => {
+      overlay.inference = () => inference;
+      overlay.activate();
+      await overlay.paint();
+      return `${inference}: ${(overlay.root.children as unknown as Array<Record<string, any>>).map((element) => element.dataset.bufferStart).join(", ")}`;
+    };
+    expect([await painted("explicit"), await painted("labels"), await painted("inferred")]).toMatchInlineSnapshot(`
+      [
+        "explicit: 0",
+        "labels: 0, 5",
+        "inferred: 0, 5, 9",
+      ]
+    `);
+    vi.unstubAllGlobals();
+  });
+});

@@ -8,6 +8,7 @@
 // saved by earlier builds load unchanged.
 import { setting } from "./0_persistedSetting";
 import type { HarnessId } from "./harnessTypes";
+import type { DiagramInference } from "./0_terminalDiagrams";
 import {
   SAFE_BOOT,
   DEFAULT_CLICK_RULES,
@@ -86,6 +87,7 @@ export const settings = {
   // the bridge would push to the system clipboard on every drag.
   clipboardFromTerminal: setting("clipboardFromTerminal", true),
   inlineDiagrams: setting("inlineDiagrams", true),
+  inlineDiagramInference: setting<DiagramInference>("inlineDiagramInference", "labels"),
   boopOnlyActive: setting("boopOnlyActive", true),
   inlineStructuredSelectors: setting("inlineStructuredSelectors", true),
 

@@ -28,6 +28,7 @@ import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
 import { mountStfuButton } from "./0_stfuButton";
 import { panic, cycleSetting, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
+import { DIAGRAM_INFERENCE } from "./0_terminalDiagrams";
 import { turnDebug } from "./0_turnDebugSettings";
 import { forkRender } from "./0_forkRenderSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
@@ -176,6 +177,7 @@ const TAB_COMMANDS: Command[] = [
   { id: "view.turnDebug", keys: [], title: "Toggle Turn Attribution Debug Overlay", group: "View", run: () => turnDebug.on.$(!turnDebug.on.$()) },
   { id: "view.forkLivePane", keys: [], title: "Toggle Comment Fork Live Pane (overlay ⇄ child pane)", group: "View", run: () => forkRender.livePane.$(!forkRender.livePane.$()) },
   { id: "view.inlineDiagrams", keys: [], title: "Toggle Inline Diagrams", group: "View", run: () => settings.inlineDiagrams.$(!settings.inlineDiagrams.$()) },
+  { id: "view.inlineDiagramInference", keys: [], title: "Cycle Inline Diagram Inference (explicit / labels / inferred)", group: "View", run: () => cycleSetting(settings.inlineDiagramInference, DIAGRAM_INFERENCE) },
   { id: "view.inlineStructuredSelectors", keys: [], title: "Toggle Table/List Selection Checkboxes", group: "View", run: () => settings.inlineStructuredSelectors.$(!settings.inlineStructuredSelectors.$()) },
   { id: "view.shot", keys: [], title: "Screenshot to Active Terminal", group: "View", run: () => captureToPrompt() },
   { id: "term.sidebar", keys: ["$mod+Shift+Backslash"], title: "Toggle Session Sidebar", group: "View", run: toggleTermSidebar },
@@ -249,6 +251,7 @@ async function main() {
   settings.skin.$.subscribe(syncSkin);
   settings.mode.$.subscribe(syncMode);
   settings.inlineDiagrams.$.subscribe(syncInlineDiagrams);
+  settings.inlineDiagramInference.$.subscribe(syncInlineDiagrams);
   settings.inlineStructuredSelectors.$.subscribe(syncInlineStructured);
   settings.showToolbar.$.subscribe(applyToolbar);
   settings.sidebar.$.subscribe(syncSidebar);

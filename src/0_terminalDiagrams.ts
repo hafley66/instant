@@ -113,7 +113,13 @@ function logicalLines(term: Terminal, from: number, through: number): LogicalLin
   return lines;
 }
 
-export function findDiagramFences(term: Terminal): DiagramFence[] {
+// What the terminal overlay treats as a diagram: only ``` fences, also a
+// stripped fence whose language label survived as its own row, or also an
+// unlabeled body that opens with a diagram keyword.
+export const DIAGRAM_INFERENCE = ["explicit", "labels", "inferred"] as const;
+export type DiagramInference = (typeof DIAGRAM_INFERENCE)[number];
+
+export function findDiagramFences(term: Terminal, inference: DiagramInference = "inferred"): DiagramFence[] {
   const buffer = term.buffer.active;
   const viewportTop = buffer.viewportY;
   const lines = logicalLines(
@@ -143,6 +149,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
       break;
     }
   }
+  if (inference === "explicit") return found;
   // Claude and Codex render Markdown fences without the backticks. The language
   // label survives as its own row, which is enough origin to distinguish a
   // diagram from arrow-shaped source code. Code rows retain Markdown's leading
@@ -188,6 +195,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
     for (let row = lines[index].start; row <= lines[end].end; row++) occupied.add(row);
     index = end;
   }
+  if (inference === "labels") return found;
   for (let index = 0; index < lines.length; index++) {
     if (occupied.has(lines[index].start)) continue;
     const first = stripTuiBullet(lines[index].text).trimStart();
@@ -426,6 +434,7 @@ export class TerminalDiagramOverlay {
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
     readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes" | "settled" | "scanning">,
     readonly enabled: () => boolean = () => true,
+    public inference: () => DiagramInference = () => "labels",
   ) {
     this.root = document.createElement("div");
     this.root.className = "term-diagrams";
@@ -600,7 +609,7 @@ export class TerminalDiagramOverlay {
     // A scan holds back a stripped fence that is not yet on screen, so a ledger
     // region can claim it first; one already drawn stays drawn, or every scan
     // during PTY activity would erase it until the scan settled.
-    const direct = findDiagramFences(this.term).filter((fence) => {
+    const direct = findDiagramFences(this.term, this.inference()).filter((fence) => {
       if (fence.stripped && this.projection?.scanning) return this.paintedKeys.has(diagramElementKey(fence, dark));
       if (!fence.inferred) return true;
       if (fence.language !== "mermaid") return false;

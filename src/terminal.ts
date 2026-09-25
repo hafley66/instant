@@ -830,6 +830,7 @@ export function openTab(
     undefined,
     turnVisibility,
     () => settings.inlineDiagrams.$(),
+    () => settings.inlineDiagramInference.$(),
   );
   const structured = graphics || !turnVisibility || !structuredOverlaysEnabled
     ? undefined

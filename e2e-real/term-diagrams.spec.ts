@@ -512,6 +512,8 @@ test("renders an opencode assistant timeline whose fence and label the TUI strip
     "",
   ].join("\n");
   const dir = scratch();
+  // An unlabeled body is content-inferred, which the default setting ("labels") leaves raw.
+  await page.addInitScript(() => localStorage.setItem("inlineDiagramInference", JSON.stringify("inferred")));
   await boot(page);
   burnClaimedPaneIds();
   const session = await silentSessionPane(page, dir, "diagram fixture ready\n", "diagram fixture ready");
