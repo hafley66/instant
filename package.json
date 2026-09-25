@@ -30,7 +30,7 @@
     "@hafley66/grapht-model": "0.1.0-dev.1790302361706",
     "@hafley66/grid": "0.1.7",
     "@hafley66/json-rx": "0.1.2-dev.1790302364181",
-    "@hafley66/marbler": "0.0.3",
+    "@hafley66/marbler": "0.0.3-dev.1790342041910",
     "@hafley66/md": "0.1.2-dev.1790340639831",
     "@hafley66/path": "0.1.0-dev.1790302359457",
     "@hafley66/signal-grid": "0.1.0-dev.1790302363062",
@@ -101,9 +101,6 @@
       "streamdown>marked": "$marked",
       "streamdown>mermaid": "$mermaid",
       "@hafley66/signals": "$@hafley66/signals"
-    },
-    "patchedDependencies": {
-      "@hafley66/marbler@0.0.3": "patches/@hafley66__marbler@0.0.3.patch"
     }
   }
 }

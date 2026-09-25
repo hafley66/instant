@@ -10,11 +10,6 @@ overrides:
   streamdown>mermaid: ^11.16.0
   '@hafley66/signals': 0.1.1-dev.1790302362050
 
-patchedDependencies:
-  '@hafley66/marbler@0.0.3':
-    hash: 00679fe1371bccd09d311557fec9434b66ac12cb24f50d7f20708ea5b4ecc034
-    path: patches/@hafley66__marbler@0.0.3.patch
-
 importers:
 
   .:
@@ -29,8 +24,8 @@ importers:
         specifier: 0.1.2-dev.1790302364181
         version: 0.1.2-dev.1790302364181(@hafley66/trace@0.1.0-dev.1790302360348)(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)(vite@8.1.5)
       '@hafley66/marbler':
-        specifier: 0.0.3
-        version: 0.0.3(patch_hash=00679fe1371bccd09d311557fec9434b66ac12cb24f50d7f20708ea5b4ecc034)(@hafley66/trace@0.1.0-dev.1790302360348)(vite@8.1.5)
+        specifier: 0.0.3-dev.1790342041910
+        version: 0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790302360348)(vite@8.1.5)
       '@hafley66/md':
         specifier: 0.1.2-dev.1790340639831
         version: 0.1.2-dev.1790340639831(@hafley66/grapht-model@0.1.0-dev.1790302361706)(@hafley66/signal-grid@0.1.0-dev.1790302363062(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790302360348)(@hafley66/xdom@0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2))(@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.7)(vite@8.1.5))(@hafley66/xdom@0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.7)(vite@8.1.5))(@streamdown/code@1.1.1(react@19.2.7))(dockview@6.6.1(react@19.2.7))(mermaid@11.16.0)(react-dom@19.2.7(react@19.2.7))(react-resizable-panels@3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(streamdown@2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
@@ -412,8 +407,8 @@ packages:
       react:
         optional: true
 
-  '@hafley66/grid@0.1.8':
-    resolution: {integrity: sha512-3G1IRSSx/TBhJVGJ1D/uKdkcMXpN+hljV8Ra6EvYKi0rMbEvdUiXR6UBVf6HO9yXCwJ1q0QLtvEHmV+kUbQJSg==}
+  '@hafley66/grid@0.1.8-dev.1790302363463':
+    resolution: {integrity: sha512-IdbcS9Whpld6XAH6ab8Jl/BzwIP8U6eu1GQu8tG+NwnnoPyfGSRIS+7EvqSju2i+KnBGmbioFpcHpuBoswdRIA==}
     peerDependencies:
       react: '>=18.0.0'
     peerDependenciesMeta:
@@ -426,8 +421,8 @@ packages:
       react: ^19.0.0
       rxjs: ^7.8.0
 
-  '@hafley66/marbler@0.0.3':
-    resolution: {integrity: sha512-oQX82T8Knjw52YFR+NMql6HhFTizcvJ0uKJk2MjPu3vUWg9fNFdhtktGQVy0HF45vfQN6xHDpnS7XdFH/9U62Q==}
+  '@hafley66/marbler@0.0.3-dev.1790342041910':
+    resolution: {integrity: sha512-iwDS0LbWqCRPoQl/O/wBXx3Tijd93iTyxiap8mpsywN/pntofrvmRRYK8d4rvWQJnFNHNz6XqXOnfg7gAqQGKA==}
 
   '@hafley66/md@0.1.2-dev.1790340639831':
     resolution: {integrity: sha512-WkJ3uGjIxAiatAD9QRM05W1Jg96bs+MWwM+nQZJYsWkL7qeiJLcPPVBTUscHZr2HPywxZSz7+uyYMI6cXgOEcA==}
@@ -496,8 +491,8 @@ packages:
       '@logtape/logtape':
         optional: true
 
-  '@hafley66/virtualizations@0.1.0':
-    resolution: {integrity: sha512-BaUcowodo89ZfgE0qVZZz6x6UF39A3z/op/3kKlvCS1bw2jpiuDjKY15YzWqMnhgJAZk3Hr8xeRC0QzlgPRY8w==}
+  '@hafley66/virtualizations@0.1.0-dev.1790302360770':
+    resolution: {integrity: sha512-/Xc4qfdADjJypN/Jnf/42yJz1BQoTQQrMHVI1muK42grXOQ6ZJzLTAH4d/CsqOMSSrw5CP95/PKYeAldx+fKNw==}
     peerDependencies:
       react: '>=18.0.0'
     peerDependenciesMeta:
@@ -3043,11 +3038,11 @@ snapshots:
       - react-dom
       - vite
 
-  '@hafley66/grid@0.1.8(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)':
+  '@hafley66/grid@0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)':
     dependencies:
-      '@hafley66/path': 0.1.0
+      '@hafley66/path': 0.1.0-dev.1790302359457
       '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.8)(vite@8.1.5)
-      '@hafley66/virtualizations': 0.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@hafley66/virtualizations': 0.1.0-dev.1790302360770(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-virtual': 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       devalue: 5.9.0
@@ -3090,9 +3085,9 @@ snapshots:
       - vite
       - vue
 
-  '@hafley66/marbler@0.0.3(patch_hash=00679fe1371bccd09d311557fec9434b66ac12cb24f50d7f20708ea5b4ecc034)(@hafley66/trace@0.1.0-dev.1790302360348)(vite@8.1.5)':
+  '@hafley66/marbler@0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790302360348)(vite@8.1.5)':
     dependencies:
-      '@hafley66/grid': 0.1.8(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)
+      '@hafley66/grid': 0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)
       '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.8)(vite@8.1.5)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       pixi.js: 8.20.1
@@ -3172,7 +3167,7 @@ snapshots:
     dependencies:
       rxjs: 7.8.2
 
-  '@hafley66/virtualizations@0.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@hafley66/virtualizations@0.1.0-dev.1790302360770(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@tanstack/react-virtual': 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     optionalDependencies:
