@@ -1,7 +1,7 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { debounceTime, merge, Subject, type Subscription } from "rxjs";
+import { debounceTime, merge, Subject, tap, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
@@ -425,6 +425,9 @@ export class TerminalDiagramOverlay {
   lastPaintedFingerprint = "";
   // Plan keys of the fences the last paint drew; a scan holds these on screen.
   paintedKeys = new Set<string>();
+  // Stripped fences on the buffer when the last scan settled. The ledger had its
+  // chance to claim them, so a later scan no longer holds them back.
+  settledKeys = new Set<string>();
   retryTimer: ReturnType<typeof setTimeout> | null = null;
   retryDelayMs = 2_000;
 
@@ -440,8 +443,18 @@ export class TerminalDiagramOverlay {
     this.root.className = "term-diagrams";
     host.appendChild(this.root);
     // renderPlan() holds stripped fences back while a scan runs, so the scan's
-    // end repaints even when it emitted no visibility change.
-    if (projection) this.activitySubscription = merge(projection.changes, projection.settled).subscribe(() => this.scheduleFrame());
+    // end repaints even when it emitted no visibility change. The repaint can
+    // queue behind a paint still rendering and run after the next scan starts,
+    // so the settle itself admits the stripped fences it saw.
+    if (projection) this.activitySubscription = merge(
+      projection.changes,
+      projection.settled.pipe(tap(() => {
+        const dark = darkBackground(this.host);
+        this.settledKeys = new Set(findDiagramFences(this.term, this.inference())
+          .filter((fence) => fence.stripped)
+          .map((fence) => diagramElementKey(fence, dark)));
+      })),
+    ).subscribe(() => this.scheduleFrame());
     this.scrollSubscription = this.scrollEvents.pipe(
       debounceTime(80),
     ).subscribe(() => {
@@ -610,7 +623,10 @@ export class TerminalDiagramOverlay {
     // region can claim it first; one already drawn stays drawn, or every scan
     // during PTY activity would erase it until the scan settled.
     const direct = findDiagramFences(this.term, this.inference()).filter((fence) => {
-      if (fence.stripped && this.projection?.scanning) return this.paintedKeys.has(diagramElementKey(fence, dark));
+      if (fence.stripped && this.projection?.scanning) {
+        const key = diagramElementKey(fence, dark);
+        return this.paintedKeys.has(key) || this.settledKeys.has(key);
+      }
       if (!fence.inferred) return true;
       if (fence.language !== "mermaid") return false;
       return !projected.some((region) =>

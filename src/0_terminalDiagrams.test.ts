@@ -929,6 +929,42 @@ describe("diagram overlay across scans", () => {
     `);
     vi.unstubAllGlobals();
   });
+
+  it("paints a stripped fence a settled scan saw even when the next scan starts before the repaint", async () => {
+    // A fresh render (a growing explicit fence) keeps a paint in flight when the
+    // scan settles, so the settle's repaint queues behind it and runs after the
+    // next scan has already started.
+    const renders: Array<() => void> = [];
+    const render = vi.fn((_id: string, _code: string) => new Promise((resolve) => {
+      renders.push(() => resolve({ svg: '<svg viewBox="0 0 30 10"></svg>' }));
+    }));
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render } });
+    const rows = ["```mermaid", "flowchart LR", "  X --> Y", "```", "", "• mermaid", "  flowchart LR", "    A --> B", "", "✻ Thinking… (1s)"];
+    const { overlay, projection, frames, write } = overlayRig(rows, true);
+    const settle = async () => {
+      for (let turn = 0; turn < 20 && (frames.length || renders.length || overlay.painting); turn++) {
+        frames.splice(0).forEach((frame) => frame(0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        renders.splice(0).forEach((resolve) => resolve());
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+    const onScreen = () => (overlay.root.children as unknown as Array<Record<string, any>>).map((element) => element.dataset.bufferStart);
+    const trace: string[][] = [];
+    for (let tick = 2; tick <= 4; tick++) {
+      rows[2] = `  X --> Y${tick}`;
+      write();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      frames.splice(0).forEach((frame) => frame(0));
+      projection.scanning = false;
+      projection.settled.next();
+      projection.scanning = true;
+      await settle();
+      trace.push(onScreen());
+    }
+    expect(trace).toEqual([["0", "5"], ["0", "5"], ["0", "5"]]);
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("inline diagram inference setting", () => {
