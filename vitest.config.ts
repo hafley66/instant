@@ -18,6 +18,8 @@ const gridLodashOrderBy: Plugin = {
 export default defineConfig({
   plugins: [gridLodashOrderBy, react(), signalsJsx()],
   test: {
+    maxWorkers: 1,
+    fileParallelism: false,
     environment: "node",
     include: ["scripts/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx", "extension/src/**/*.test.ts"],
     restoreMocks: true,

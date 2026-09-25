@@ -4,6 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // 4173 (root), 4183 (busmail), and 4197 (stripsub) — this lane gets its own so
 // another tree's vite instance never serves our sources.
 export default defineConfig({
+  workers: 1,
   testDir: "./e2e",
   testMatch: "**/waterfall.spec.ts",
   use: {

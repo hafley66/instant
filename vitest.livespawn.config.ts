@@ -7,6 +7,8 @@ import { defineConfig } from "vitest/config";
 //   LIVESPAWN_RUN=<dir>/run.json npx vitest run --config vitest.livespawn.config.ts
 export default defineConfig({
   test: {
+    maxWorkers: 1,
+    fileParallelism: false,
     environment: "node",
     include: ["labs/livespawn/*.test.ts"],
     restoreMocks: true,

@@ -4,6 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // with reuseExistingServer, which would serve their tree's sources into this
 // lane's screenshots.
 export default defineConfig({
+  workers: 1,
   testDir: "./e2e",
   testMatch: "**/mail-preview.spec.ts",
   use: {
