@@ -106,8 +106,8 @@ export function FileTree({
   }, [model, rootEntries]);
 
   useEffect(() => {
-    const subscription = model.grid.events.$.subscribe((event) => {
-      const expansion = event?.type === "expanded" ? event.expanded : undefined;
+    const subscription = model.grid.epicCtx.phase$.change.subscribe((action) => {
+      const expansion = action.type === "expanded" ? action.expanded : undefined;
       if (!expansion || typeof expansion !== "object") return;
       model.expanded.$(expansion as Record<string, boolean>);
       const rows = model.rows.$();

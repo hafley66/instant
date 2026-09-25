@@ -18,8 +18,8 @@ importers:
         specifier: 0.1.0-dev.1790302361706
         version: 0.1.0-dev.1790302361706
       '@hafley66/grid':
-        specifier: 0.1.7
-        version: 0.1.7(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.8-dev.1790302363463
+        version: 0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
       '@hafley66/json-rx':
         specifier: 0.1.2-dev.1790302364181
         version: 0.1.2-dev.1790302364181(@hafley66/trace@0.1.0-dev.1790302360348)(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)(vite@8.1.5)
@@ -399,14 +399,6 @@ packages:
   '@hafley66/grapht-model@0.1.0-dev.1790302361706':
     resolution: {integrity: sha512-+aWrhhmpBeBSI6kWwy92WWIbkexueB2UezdxH5+2zAfoBMJ4XuETcFRV3IbSPJVoS6Kz8BV9RYk/nglNGzAITA==}
 
-  '@hafley66/grid@0.1.7':
-    resolution: {integrity: sha512-Ny+T0FFUGjWcEnYj/cF9Ae4dWWqSsmrNsoyhnT5Hffwf4fF0mQFS0xCQLdN7JlAjBrVXrSKTlpSgwv+CTa4voA==}
-    peerDependencies:
-      react: '>=18.0.0'
-    peerDependenciesMeta:
-      react:
-        optional: true
-
   '@hafley66/grid@0.1.8-dev.1790302363463':
     resolution: {integrity: sha512-IdbcS9Whpld6XAH6ab8Jl/BzwIP8U6eu1GQu8tG+NwnnoPyfGSRIS+7EvqSju2i+KnBGmbioFpcHpuBoswdRIA==}
     peerDependencies:
@@ -442,9 +434,6 @@ packages:
       react-dom: '>=19.2.7'
       react-resizable-panels: '>=3.0.6 <4'
       streamdown: '>=2.5.0'
-
-  '@hafley66/path@0.1.0':
-    resolution: {integrity: sha512-aNzb/lDLk1xk7F1J93qAx48KtehsJD27xbP5p4JSGNAeDJgwWWvw+0v7qeZIuDV91jTnxcruvSkL7BaN7ZDZaw==}
 
   '@hafley66/path@0.1.0-dev.1790302359457':
     resolution: {integrity: sha512-F4mxy40LmaChJRBibu2CPaWGYouQHFmyIAS2l7dkVvMv4BXr3aLFZ73+wJAYd8QXha6VaNwsYFZxx6SXM9h8Ew==}
@@ -3020,10 +3009,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@hafley66/grid@0.1.7(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/grid@0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790302360348)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
     dependencies:
-      '@hafley66/path': 0.1.0
+      '@hafley66/path': 0.1.0-dev.1790302359457
       '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790302360348)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/virtualizations': 0.1.0-dev.1790302360770(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-virtual': 3.14.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       devalue: 5.9.0
@@ -3120,10 +3110,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@hafley66/path@0.1.0':
-    dependencies:
-      zod: 4.4.3
-
   '@hafley66/path@0.1.0-dev.1790302359457':
     dependencies:
       zod: 4.4.3
@@ -3166,6 +3152,14 @@ snapshots:
   '@hafley66/trace@0.1.0-dev.1790302360348':
     dependencies:
       rxjs: 7.8.2
+
+  '@hafley66/virtualizations@0.1.0-dev.1790302360770(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      '@tanstack/react-virtual': 3.14.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+    optionalDependencies:
+      react: 19.2.7
+    transitivePeerDependencies:
+      - react-dom
 
   '@hafley66/virtualizations@0.1.0-dev.1790302360770(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
