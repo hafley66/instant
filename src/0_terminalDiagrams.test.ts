@@ -700,3 +700,133 @@ describe("diagram overlay scan settle", () => {
     vi.unstubAllGlobals();
   });
 });
+
+// Claude Code's shape from the owner's screenshot: a stripped mermaid fence
+// whose last node row is followed, with no blank row, by a box-drawn table and
+// prose at the same indentation. Mermaid reported `Lexical error on line 13.
+// Unrecognized text. ... --> DD  G --> SQ┌──────┬──────`.
+const claudeStrippedFenceIntoTable = [
+  "● The query path, then the storage table:",
+  "  mermaid",
+  "  flowchart TD",
+  "    A[client] --> B[router]",
+  "    B --> C[planner]",
+  "    C --> D[executor]",
+  "    D --> DD[cache]",
+  "    C --> E[index]",
+  "    E --> F[scan]",
+  "    F --> G[merge]",
+  "    DD --> G",
+  "    B --> H[auth]",
+  "    H --> G",
+  "    G --> SQ",
+  "  ┌──────┬──────────────────┐",
+  "  │ key  │ meaning          │",
+  "  ├──────┼──────────────────┤",
+  "  │ A    │ client request   │",
+  "  ├──────┼──────────────────┤",
+  "  │ B    │ router           │",
+  "  ├──────┼──────────────────┤",
+  "  │ G    │ merge step       │",
+  "  └──────┴──────────────────┘",
+  "  The merge step joins the cache and the scan results before the",
+  "  final sort, so the planner never sees partial rows. Each stage",
+  "  writes its own trace span, which is how the timings above were",
+  "  collected in the first place.",
+  "  - one bullet",
+  "  - another bullet",
+  "",
+];
+
+describe("stripped fence boundaries", () => {
+  it("ends a stripped mermaid fence at a box-drawn table row", () => {
+    const fences = findDiagramFences(terminalWithRows(claudeStrippedFenceIntoTable, 0, 24));
+    expect(fences.map((fence) => ({ start: fence.start, end: fence.end, last: fence.code.split("\n").pop() })))
+      .toMatchInlineSnapshot(`
+        [
+          {
+            "end": 13,
+            "last": "  G --> SQ",
+            "start": 1,
+          },
+        ]
+      `);
+  });
+
+  it("ends stripped and inferred fences at bullet, prompt and dedented rows", () => {
+    const rows = [
+      "  mermaid",
+      "  flowchart LR",
+      "    A --> B",
+      "  • next message",
+      "  mermaid",
+      "  flowchart LR",
+      "    C --> D",
+      "  > composer prompt",
+      "    flowchart LR",
+      "      E --> F",
+      "  dedented prose",
+      "    flowchart LR",
+      "      G --> H",
+      "    * starred bullet",
+      "",
+    ];
+    expect(findDiagramFences(terminalWithRows(rows, 0, 24)).map((fence) => `${fence.start}-${fence.end}:${fence.inferred}`))
+      .toMatchInlineSnapshot(`
+        [
+          "0-2:false",
+          "4-6:false",
+          "8-9:true",
+          "11-12:true",
+        ]
+      `);
+  });
+
+  it("paints the screenshot's stripped fence over its diagram rows only", async () => {
+    const render = vi.fn(async (_id: string, source: string) => {
+      if (/[┌│└├]/.test(source) || source.includes("merge step joins")) throw new Error("Lexical error on line 13. Unrecognized text.");
+      return { svg: '<svg viewBox="0 0 30 10"></svg>' };
+    });
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render } });
+    const { overlay } = overlayRig(claudeStrippedFenceIntoTable);
+    await overlay.paint();
+    const children = overlay.root.children as unknown as Array<Record<string, any>>;
+    expect(children.map((element) => ({ className: element.className, text: element.textContent, rows: `${element.dataset.bufferStart}-${element.dataset.sourceRows}` })))
+      .toMatchInlineSnapshot(`
+        [
+          {
+            "className": "term-diagram",
+            "rows": "1-13",
+            "text": "",
+          },
+        ]
+      `);
+    vi.unstubAllGlobals();
+  });
+
+  it("paints nothing over the rows when a stripped fence fails to render", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockRejectedValue(new Error("Lexical error on line 13. Unrecognized text.")) } });
+    const { overlay } = overlayRig(claudeStrippedFenceIntoTable);
+    await overlay.paint();
+    const children = overlay.root.children as unknown as Array<Record<string, any>>;
+    expect(children.map((element) => element.textContent)).toMatchInlineSnapshot(`[]`);
+    overlay.clearRetry();
+    vi.unstubAllGlobals();
+  });
+
+  it("paints nothing over the rows when an explicit fence fails to render", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockRejectedValue(new Error("Parse error on line 2")) } });
+    const { overlay } = overlayRig(["```mermaid", "flowchart LR", "  A -->", "```"]);
+    await overlay.paint();
+    const children = overlay.root.children as unknown as Array<Record<string, any>>;
+    expect({ texts: children.map((element) => element.textContent), retry: overlay.retryTimer !== null, reason: overlay.root.dataset.diagramError }).toMatchInlineSnapshot(`
+      {
+        "reason": "Parse error on line 2",
+        "retry": true,
+        "texts": [],
+      }
+    `);
+    overlay.clearRetry();
+    vi.unstubAllGlobals();
+  });
+});

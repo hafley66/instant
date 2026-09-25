@@ -747,10 +747,9 @@ test("names the failing request when the Mermaid bundle cannot be fetched", asyn
   await page.route(/mermaid\.min/, (route) => route.abort("connectionrefused"));
   await plainPane(page, escapedLabelFlowchart, "emit --> run");
 
-  const failed = page.locator(".term-diagram-error");
-  await expect(failed).toBeVisible({ timeout: 30_000 });
-  await expect(failed).toContainText("mermaid.min");
-  await expect(failed).toContainText("did not load:");
-  await expect(failed).not.toHaveText("Mermaid bundle failed to load");
+  // A failed render draws nothing over the pane; the reason rides on the root.
+  const root = page.locator(".term-diagrams[data-diagram-error]");
+  await expect(root).toHaveAttribute("data-diagram-error", /mermaid\.min.*did not load:/, { timeout: 30_000 });
+  await expect(page.locator(".term-diagram")).toHaveCount(0);
   await shot(page, "diagrams-19-bundle-failure");
 });

@@ -169,6 +169,7 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
         continue;
       }
       if (next.length - next.trimStart().length < codeIndent) break;
+      if (endsStrippedBlock(lines[end + 1].text)) break;
       // A fresh language label opens the next diagram rather than continuing this one.
       const nextLabel = trimmed.toLowerCase();
       if (nextLabel === "mermaid" || nextLabel === "d2") break;
@@ -202,7 +203,13 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
         isD2ArrowLine(stripTuiBullet(lines[end + 1].text).trimStart())
       ) end++;
     } else {
-      while (end + 1 < lines.length && stripTuiBullet(lines[end + 1].text).trim()) end++;
+      const indent = lines[index].text.length - lines[index].text.trimStart().length;
+      while (end + 1 < lines.length) {
+        const next = lines[end + 1].text;
+        if (!next.trim() || endsStrippedBlock(next)) break;
+        if (next.length - next.trimStart().length < indent) break;
+        end++;
+      }
     }
     const block = lines.slice(index, end + 1);
     const code = dedent(block.map((line) => stripTuiBullet(line.text)));
@@ -264,6 +271,16 @@ export function diagramElementKey(fence: DiagramFence, dark: boolean): string {
 
 function stripTuiBullet(line: string): string {
   return line.replace(/^\s*[•●]\s?/, "");
+}
+
+// A fence without backticks has no closer, so the rows a TUI paints after the
+// diagram bound it: a box-drawn table or frame (U+2500-U+257F), a bullet (the
+// next message's `●`, a list item), or a prompt/composer row.
+function endsStrippedBlock(line: string): boolean {
+  const text = line.trimStart();
+  const first = text.codePointAt(0) ?? 0;
+  if (first >= 0x2500 && first <= 0x257f) return true;
+  return /^(?:[•●]|[-*>❯›$]\s)/.test(text);
 }
 
 function dedent(lines: string[]): string {
@@ -366,7 +383,7 @@ export function diagramElementAtPoint(
   clientY: number,
 ): HTMLElement | null {
   return elements.slice().reverse().find((element) => {
-    if (element.hidden || element.classList.contains("term-diagram-error")) return false;
+    if (element.hidden) return false;
     const rect = element.getBoundingClientRect();
     return (clientX === null || (rect.left <= clientX && clientX <= rect.right))
       && rect.top <= clientY
@@ -665,10 +682,16 @@ export class TerminalDiagramOverlay {
     // A content-inferred block that fails to parse is prose that happened to
     // open with a diagram keyword, so it drops silently rather than pinning an
     // error box on the pane. Only an explicit or ledger-backed failure retries.
-    const drawable = rendered.filter((entry) => !(entry.error && entry.fence.inferred));
+    // Any other failure paints nothing over the rows either: the raw source
+    // stays readable in the terminal, and an error panel would cover it.
+    const drawable = rendered.filter((entry) => !entry.error);
     // An errored render stays unpinned so idle rescans and the retry timer
     // keep attempting it; a success pins and resets the backoff.
-    if (drawable.some((entry) => entry.error)) this.scheduleRetry();
+    const failures = rendered.filter((entry) => entry.error && !entry.fence.inferred).map((entry) => entry.error);
+    // The reason stays inspectable on the root without drawing over the pane.
+    if (failures.length) this.root.dataset.diagramError = failures.join("\n");
+    else delete this.root.dataset.diagramError;
+    if (failures.length) this.scheduleRetry();
     else {
       this.lastPaintedFingerprint = fingerprint;
       this.clearRetry();
@@ -679,7 +702,7 @@ export class TerminalDiagramOverlay {
     // Duplicate fences (same locator or same direct code) collapsed onto one
     // element after the locator re-key; the occurrence suffix fixes that.
     const occurrences = new Map<string, number>();
-    const elements = drawable.map(({ fence, svg, error }) => {
+    const elements = drawable.map(({ fence, svg }) => {
       const base = diagramElementKey(fence, dark);
       const seen = occurrences.get(base) ?? 0;
       occurrences.set(base, seen + 1);
@@ -714,10 +737,7 @@ export class TerminalDiagramOverlay {
       element.dataset.allocatedRows = String(allocatedEnd - fence.start + 1);
       element.dataset.bufferStart = String(fence.start);
       element.dataset.bufferEnd = String(allocatedEnd);
-      if (error && (created || !element.classList.contains("term-diagram-error"))) {
-        element.className = "term-diagram term-diagram-error";
-        element.textContent = error;
-      } else if (!error && (created || element.classList.contains("term-diagram-error"))) {
+      if (created) {
         element.className = "term-diagram";
         element.title = "Click to expand diagram";
         element.innerHTML = diagramSvgMarkup(svg);
