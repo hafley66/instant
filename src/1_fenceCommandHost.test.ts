@@ -35,6 +35,16 @@ describe("fence command host", () => {
     expect(fenceCommandHost.mdPlugins).toHaveLength(1 + defaultMdPlugins.length);
   });
 
+  it("returns the same plugin array until the setting changes, so md keeps renderer identity", () => {
+    const first = fenceCommandHost.mdPlugins;
+    const again = fenceCommandHost.mdPlugins;
+    configured.value = [{ match: "^sql$", command: "sqlfmt $1", as: "replace" }];
+    const changed = fenceCommandHost.mdPlugins;
+    expect({ stable: first === again, changed: changed !== first, changedStable: changed === fenceCommandHost.mdPlugins }).toEqual({
+      stable: true, changed: true, changedStable: true,
+    });
+  });
+
   it("uses the default commands when the setting is null", () => {
     expect(fenceCommandHost.mdPlugins.map((plugin) => plugin.command ?? plugin.name)).toEqual([
       ...DEFAULT_FENCE_COMMANDS,
