@@ -36,16 +36,16 @@ export const cmdClickRouter = new CmdClickRouter();
 
 cmdClickRouter.register({
   id: "file",
-  async handle({ token, cwd, sessions, fallback, cell }) {
+  async handle({ token, cwd, sessions, fallback, cell, doc }) {
   // A path-shaped token goes to the resolver, which checks the cwd, the repo
   // root, and finally a filename search: agent output prints repo-relative
   // paths and bare filenames that do not exist under the shell's directory.
-  let result = await resolveRef(token, cwd, sessions ?? [], cell);
+  let result = await resolveRef(token, cwd, sessions ?? [], cell, doc);
   // A widened token that names nothing was prose after all: the bare word
   // under the pointer gets the same ladder.
   if (result.kind === "miss" && fallback) {
     token = fallback;
-    result = await resolveRef(token, cwd, sessions ?? [], cell);
+    result = await resolveRef(token, cwd, sessions ?? [], cell, doc);
   }
   if (result.kind === "choices") {
     openRefChoices(token, result.paths, result.line, cwd, result.via, result.worktrees);
@@ -123,6 +123,12 @@ async function openGitBlobPanel(
   });
 }
 
+// ⌘-click on inline code in a rendered markdown file (@hafley66/md's
+// openCodeRef): resolved from the document, searched from its directory.
+export async function openDocumentRef(token: string, doc: string): Promise<void> {
+  await cmdClickRouter.dispatch({ token, cwd: doc.slice(0, doc.lastIndexOf("/")), source: "markdown", doc });
+}
+
 export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown", sessions: string[] = [], fallback?: string, cell?: ClickCell) {
   return cmdClickRouter.dispatch({ token: rawToken, cwd, source, sessions, fallback, cell });
 }
@@ -172,7 +178,7 @@ export function svgWordAt(target: Element, x: number, y: number): string {
 // Every non-terminal surface a ⌘-click routes from. Terminals self-handle (they
 // own cell-to-pixel mapping); diagrams and SVG documents come in through here.
 const CLICK_SURFACES = ".fs-preview, .rg-panel, .mdview-root, .md-body, .term-diagrams, .svg-document-viewer";
-const CLICK_SKIP = ".fs-back, .rg-cfg, .rg-grep, .rg-file, .rg-hit, .tt-wrap, .tt-controls, a, button, input, textarea, select";
+const CLICK_SKIP = ".fs-back, .rg-cfg, .rg-grep, .rg-file, .rg-hit, .tt-wrap, .tt-controls, a, button, input, textarea, select, code[data-md-ref]";
 
 function surfaceOf(el: HTMLElement): CmdClickSource {
   if (el.closest(".rg-panel")) return "results";

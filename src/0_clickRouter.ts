@@ -13,6 +13,8 @@ export type CmdClickRequest = {
   fallback?: string;
   /** The tmux client cell of a terminal click; boop resolves pane, sessions and roots from it. */
   cell?: ClickCell;
+  /** The markdown file the token was written in; boop resolves from its roots first. */
+  doc?: string;
 };
 
 export type CmdClickRoute = {

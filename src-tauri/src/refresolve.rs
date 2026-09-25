@@ -8,13 +8,14 @@ pub async fn resolve_ref_impl(
     cwd: String,
     sessions: Option<Vec<String>>,
     cell: Option<ClickCell>,
+    doc: Option<String>,
 ) -> Result<ResolveResult, String> {
     let cell = cell.map(|cell| ClickCell {
         socket: cell.socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty())),
         ..cell
     });
     tauri::async_runtime::spawn_blocking(move || {
-        click::resolve_click(&token, cell.as_ref(), &cwd, &sessions.unwrap_or_default()).result
+        click::resolve_click(&token, cell.as_ref(), &cwd, &sessions.unwrap_or_default(), doc.as_deref()).result
     })
     .await
     .map_err(|e| e.to_string())

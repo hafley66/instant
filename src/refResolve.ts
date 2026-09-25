@@ -9,12 +9,12 @@ export type { ClickCell, RefSource, ResolvedRef, ResolveResult } from "./ipc/con
 const RESOLVE_TTL_MS = 1_000;
 const pending = new Map<string, { at: number; result: Promise<ResolveResult> }>();
 
-export function resolveRef(token: string, cwd: string, sessions: string[] = [], cell?: ClickCell): Promise<ResolveResult> {
-  const key = `${cwd} ${sessions.join(",")} ${cell ? `${cell.session}:${cell.col},${cell.row}` : ""} ${token}`;
+export function resolveRef(token: string, cwd: string, sessions: string[] = [], cell?: ClickCell, doc?: string): Promise<ResolveResult> {
+  const key = `${cwd} ${sessions.join(",")} ${cell ? `${cell.session}:${cell.col},${cell.row}` : ""} ${doc ?? ""} ${token}`;
   const hit = pending.get(key);
   if (hit && Date.now() - hit.at < RESOLVE_TTL_MS) return hit.result;
   const result = clickRpc
-    .resolveRef({ token, cwd, sessions, cell })
+    .resolveRef({ token, cwd, sessions, cell, doc })
     .catch(() => ({ kind: "miss" }) as ResolveResult);
   pending.set(key, { at: Date.now(), result });
   return result;

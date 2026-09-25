@@ -59,7 +59,7 @@ import {
 import { probeToolGaps, readDismissed, rememberDismissed, shouldNotify } from "./0_toolGaps";
 import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, showNotice, logLine } from "./core";
 import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore, openDocumentHrefInInstant } from "./preview";
-import { wireDomCmdClick } from "./clickrules";
+import { openDocumentRef, wireDomCmdClick } from "./clickrules";
 import {
   tabs,
   openTab,
@@ -304,6 +304,7 @@ async function main() {
     readImage: (path) => invoke<string>("read_image", { path }),
     listDir: (path) => invoke<{ entries: FsEntry[] }>("list_dir", { path }),
     openHref: openDocumentHrefInInstant,
+    openCodeRef: openDocumentRef,
     openPath: runtimePorts.openPath,
     watchFile: (path, onChange, recursive) => claimFsWatch(path, onChange, recursive),
     FileTree,
