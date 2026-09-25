@@ -160,11 +160,12 @@ export function findDiagramFences(term: Terminal): DiagramFence[] {
       const next = stripTuiBullet(lines[end + 1].text);
       const trimmed = next.trim();
       if (!trimmed) {
-        // A block whose first code row sits at column 0 has no indentation to
-        // bound it, so `indent < 0` never fires and the block would run to the
-        // end of the buffer, swallowing every diagram after it. A blank row is
-        // the only boundary left. Indented blocks keep their internal blanks.
-        if (codeIndent === 0) break;
+        // A blank row ends a mermaid block: Claude indents the prose after a
+        // stripped fence as deep as its code, so indentation alone let the
+        // block run into the next paragraph. A zero-indent block has no other
+        // boundary at all. Indented D2 keeps its internal blanks, which
+        // separate its declaration groups.
+        if (codeIndent === 0 || label === "mermaid") break;
         end++;
         continue;
       }

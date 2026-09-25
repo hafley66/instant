@@ -754,6 +754,24 @@ describe("stripped fence boundaries", () => {
       `);
   });
 
+  it("ends a stripped mermaid fence at the first blank row before same-indent prose", () => {
+    const rows = [
+      "● The flow:",
+      "  mermaid",
+      "  flowchart TD",
+      "    A --> B",
+      "",
+      "  The flow above feeds the planner, which reads the index first.",
+      "  A second paragraph at the same indent as the diagram code.",
+    ];
+    expect(findDiagramFences(terminalWithRows(rows, 0, 24)).map((fence) => `${fence.start}-${fence.end}`))
+      .toMatchInlineSnapshot(`
+        [
+          "1-3",
+        ]
+      `);
+  });
+
   it("ends stripped and inferred fences at bullet, prompt and dedented rows", () => {
     const rows = [
       "  mermaid",
