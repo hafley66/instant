@@ -548,6 +548,7 @@ function overlayRig(rows: string[], scanning = false) {
     querySelector: (selector: string) => selector === ".xterm-screen" ? screen : null,
   } as unknown as HTMLElement;
   let onWrite: (() => void) | null = null;
+  let onScroll: (() => void) | null = null;
   const term = {
     rows: 24,
     buffer: {
@@ -560,7 +561,7 @@ function overlayRig(rows: string[], scanning = false) {
       },
     },
     onWriteParsed: (cb: () => void) => { onWrite = cb; return { dispose() {} }; },
-    onScroll: () => ({ dispose() {} }),
+    onScroll: (cb: () => void) => { onScroll = cb; return { dispose() {} }; },
     onResize: () => ({ dispose() {} }),
   } as unknown as Terminal;
   const projection = {
@@ -570,7 +571,7 @@ function overlayRig(rows: string[], scanning = false) {
     scanning,
   };
   const overlay = new TerminalDiagramOverlay(term, host, undefined, projection);
-  return { overlay, projection, frames, write: () => onWrite!(), elements: created };
+  return { overlay, projection, frames, term, write: () => onWrite!(), scroll: () => onScroll!(), elements: created };
 }
 
 describe("diagram overlay idle render", () => {
@@ -827,6 +828,87 @@ describe("stripped fence boundaries", () => {
       }
     `);
     overlay.clearRetry();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("diagram overlay across scans", () => {
+  it("keeps a painted stripped fence on screen while later scans run and the pane keeps writing", async () => {
+    vi.stubGlobal("window", { mermaid: { initialize: vi.fn(), render: vi.fn().mockResolvedValue({ svg: '<svg viewBox="0 0 30 10"></svg>' }) } });
+    const rows = ["• mermaid", "  flowchart LR", "    A --> B", "", "✻ Thinking… (1s)"];
+    const { overlay, projection, frames, write, scroll } = overlayRig(rows);
+    const flush = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      while (frames.length) {
+        frames.shift()!(0);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+    const onScreen = () => ({
+      hidden: overlay.root.hidden,
+      diagrams: (overlay.root.children as unknown as Array<Record<string, any>>).map((element) => element.dataset.bufferStart),
+    });
+    await flush();
+    const trace = [onScreen()];
+    // Claude's spinner row repaints while the turn ledger rescans the pane.
+    for (let tick = 2; tick <= 4; tick++) {
+      projection.scanning = true;
+      rows[4] = `✻ Thinking… (${tick}s)`;
+      write();
+      scroll();
+      await flush();
+      trace.push(onScreen());
+      projection.scanning = false;
+      projection.settled.next();
+      await flush();
+      trace.push(onScreen());
+    }
+    expect(trace).toMatchInlineSnapshot(`
+      [
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+        {
+          "diagrams": [
+            "0",
+          ],
+          "hidden": false,
+        },
+      ]
+    `);
     vi.unstubAllGlobals();
   });
 });

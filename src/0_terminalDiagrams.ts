@@ -414,6 +414,8 @@ export class TerminalDiagramOverlay {
   lightboxSequence = 0;
   hideRequested = false;
   lastPaintedFingerprint = "";
+  // Plan keys of the fences the last paint drew; a scan holds these on screen.
+  paintedKeys = new Set<string>();
   retryTimer: ReturnType<typeof setTimeout> | null = null;
   retryDelayMs = 2_000;
 
@@ -594,8 +596,11 @@ export class TerminalDiagramOverlay {
     // whose source rows no longer match. A current ledger region wins, keeping
     // its turn locator. D2 arrow inference stays excluded; only a mermaid start
     // keyword is specific enough to read as a diagram without a fence.
+    // A scan holds back a stripped fence that is not yet on screen, so a ledger
+    // region can claim it first; one already drawn stays drawn, or every scan
+    // during PTY activity would erase it until the scan settled.
     const direct = findDiagramFences(this.term).filter((fence) => {
-      if (fence.stripped && this.projection?.scanning) return false;
+      if (fence.stripped && this.projection?.scanning) return this.paintedKeys.has(diagramElementKey(fence, dark));
       if (!fence.inferred) return true;
       if (fence.language !== "mermaid") return false;
       return !projected.some((region) =>
@@ -679,6 +684,9 @@ export class TerminalDiagramOverlay {
       }
     }));
     if (generation !== this.generation) return;
+    this.paintedKeys = new Set(visibleFences
+      .filter((_, index) => !rendered[index].error)
+      .map((fence) => diagramElementKey(fence, dark)));
     // A content-inferred block that fails to parse is prose that happened to
     // open with a diagram keyword, so it drops silently rather than pinning an
     // error box on the pane. Only an explicit or ledger-backed failure retries.
