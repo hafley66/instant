@@ -38,6 +38,13 @@ export function registerBuiltin() {
         set: (on) => settings.inlineDiagrams.$(on),
       },
       {
+        id: "mdStickyHeaders",
+        label: "Markdown: sticky section headers",
+        hint: "section headers stay pinned, stacked by level, while their section is in view",
+        get: () => settings.mdStickyHeaders.$(),
+        set: (on) => settings.mdStickyHeaders.$(on),
+      },
+      {
         id: "panicButton",
         label: "Panic button",
         hint: "red STFU button, bottom right; pastes into the visible tmux pane",

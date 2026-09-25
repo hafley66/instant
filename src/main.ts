@@ -322,7 +322,7 @@ async function main() {
     useAppState: () => {
       // useApp keeps this a hook call so the panel re-renders with the dock.
       useApp();
-      return { dark: settings.mode.$() === "dark", panelZoom: settings.panelZoom.$() };
+      return { dark: settings.mode.$() === "dark", panelZoom: settings.panelZoom.$(), mdStickyHeaders: settings.mdStickyHeaders.$() };
     },
     openMdPanel: addMdPanel,
     mdPanelId,

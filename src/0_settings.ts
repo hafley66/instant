@@ -88,6 +88,7 @@ export const settings = {
   clipboardFromTerminal: setting("clipboardFromTerminal", true),
   inlineDiagrams: setting("inlineDiagrams", true),
   inlineDiagramInference: setting<DiagramInference>("inlineDiagramInference", "labels"),
+  mdStickyHeaders: setting("mdStickyHeaders", true),
   boopOnlyActive: setting("boopOnlyActive", true),
   inlineStructuredSelectors: setting("inlineStructuredSelectors", true),
 
