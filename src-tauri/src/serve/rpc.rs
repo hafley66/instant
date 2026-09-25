@@ -446,6 +446,10 @@ pub fn dispatch(
             let p: RunClickArgs = parse(name, params)?;
             res(run_click_impl(p.command, p.cwd))
         }
+        "run_fence_command" => {
+            let p: RunFenceCommandArgs = parse(name, params)?;
+            res(crate::fence_command::execute(&p.command, &p.language, &p.text, p.columns))
+        }
         "log_append" => {
             let p: LogAppendArgs = parse(name, params)?;
             tracing::info!(target: "instant::frontend", "{}", p.line);
@@ -995,6 +999,15 @@ struct OpenTargetArgs {
 struct RunClickArgs {
     command: String,
     cwd: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunFenceCommandArgs {
+    command: String,
+    language: String,
+    text: String,
+    columns: u32,
 }
 
 #[derive(Deserialize)]

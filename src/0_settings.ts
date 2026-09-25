@@ -28,6 +28,7 @@ import {
   type WtAgent,
   type WtView,
 } from "./state";
+import type { MdFenceCommand } from "@hafley66/md/plugins";
 
 // One-time key migrations. These rewrite localStorage and must run before any
 // signal below reads it, which module evaluation order guarantees.
@@ -124,6 +125,7 @@ export const settings = {
   aiEnabled: setting("aiEnabled", true),
   autoResume: setting("autoResume", true),
   clickRules: setting<ClickRule[]>("clickRules", DEFAULT_CLICK_RULES),
+  fenceCommands: setting<MdFenceCommand[] | null>("fenceCommands", null),
 
   // sprefa
   sprefaScope: setting<SprefaScopeItem[]>("sprefaScope", []),

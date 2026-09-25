@@ -16,6 +16,7 @@ import { RefChoicesPanel } from "./refChoicesPanel";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
 import { launcherOf } from "./0_clickLaunchers";
 import { settings } from "./0_settings";
+import { openFenceCommandConfigPanel } from "./1_fenceCommandConfig";
 
 const clickRules = (): ClickRule[] => settings.clickRules.$() ?? DEFAULT_CLICK_RULES;
 
@@ -325,12 +326,16 @@ function renderClickOutput(el: HTMLElement, query: string, output: string, cwd: 
     `</div>` +
     `<div class="rg-sub">ran <code>${escapeHtml(rule.command)}</code> · ` +
     `<a class="rg-grep" href="#">grep it</a> · ` +
-    `<a class="rg-cfg" href="#">config</a></div>` +
+    `<a class="rg-cfg" href="#">config</a> · <a class="rg-fence-cfg" href="#">fence commands</a></div>` +
     `<div class="rg-body">${body || '<div class="rg-plain">no matches</div>'}</div>`;
 
   el.querySelector<HTMLElement>(".rg-cfg")?.addEventListener("click", (e) => {
     e.preventDefault();
     openClickConfigPanel();
+  });
+  el.querySelector<HTMLElement>(".rg-fence-cfg")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openFenceCommandConfigPanel();
   });
   // The path rungs answered, and the answer was wrong: run the rule anyway.
   el.querySelector<HTMLElement>(".rg-grep")?.addEventListener("click", (e) => {
@@ -433,6 +438,7 @@ function renderClickConfig(el: HTMLElement) {
     `<div class="rg-body rg-cfg-body">` +
     `<div class="rg-cfg-help">First rule whose <b>pattern</b> (JS regex) matches the clicked token wins; ` +
     `<code>$1</code> is the token (shell-quoted) substituted into <b>command</b>. Any stdout opens a results panel.</div>` +
+    `<div class="rg-cfg-help"><a class="rg-fence-cfg" href="#">fence commands</a></div>` +
     `<textarea class="rg-cfg-ta" spellcheck="false"></textarea>` +
     `<div class="rg-cfg-row"><button class="rg-cfg-save">save</button>` +
     `<button class="rg-cfg-reset">reset</button><span class="rg-cfg-msg"></span></div>` +
@@ -440,6 +446,10 @@ function renderClickConfig(el: HTMLElement) {
   const ta = el.querySelector<HTMLTextAreaElement>(".rg-cfg-ta")!;
   const msg = el.querySelector<HTMLElement>(".rg-cfg-msg")!;
   ta.value = JSON.stringify(rules, null, 2);
+  el.querySelector<HTMLElement>(".rg-fence-cfg")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openFenceCommandConfigPanel();
+  });
   el.querySelector<HTMLElement>(".rg-cfg-save")?.addEventListener("click", () => {
     try {
       const parsed = JSON.parse(ta.value) as ClickRule[];

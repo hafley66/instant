@@ -6,6 +6,7 @@
 import { createStore } from "./store";
 import type { SortState } from "./table";
 import type { HarnessId } from "./harnessTypes";
+import type { MdFenceCommand } from "@hafley66/md/plugins";
 
 export type { SortState };
 
@@ -246,6 +247,14 @@ export const DEFAULT_CLICK_RULES: ClickRule[] = [
   // as a regex (which errors on unbalanced parens etc.). -e: so a token starting
   // with `-` (e.g. --flag) isn't taken as an rg flag.
   { pattern: ".", command: 'f=$1; if [ -e "${f%%:*}" ]; then code -g $1; else rg -nF -e $1; fi' },
+];
+
+export const DEFAULT_FENCE_COMMANDS: MdFenceCommand[] = [
+  { match: "^(ts|tsx|js|jsx|json|css|scss|md|yaml|yml)$", command: "prettier --print-width $WIDTH --stdin-filepath x.$LANG < $1", as: "replace" },
+  { match: "^(rust|rs)$", command: "rustfmt --edition 2021 --config max_width=$WIDTH < $1", as: "replace" },
+  { match: "^(py|python)$", command: "ruff format --line-length $WIDTH - < $1", as: "replace" },
+  { match: "^go$", command: "golines -m $WIDTH $1", as: "replace" },
+  { match: "^(sh|bash|zsh)$", command: "shellcheck -f gcc $1", as: "annotate" },
 ];
 
 // Safe boot: skip reading persisted state so a corrupt value (e.g. a dock layout

@@ -17,5 +17,5 @@
   "sprefa": ["sprefa_schema", "sprefa_ping", "sprefa_eval", "sprefa_query_sql", "sprefa_rel_source"],
   "squares": ["squares_watch", "squares_unwatch"],
   "deps": ["tool_status"],
-  "shell": ["screenshot", "open_target", "run_click", "log_append", "log_path", "log_reveal"]
+  "shell": ["screenshot", "open_target", "run_click", "run_fence_command", "log_append", "log_path", "log_reveal"]
 }

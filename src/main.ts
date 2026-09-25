@@ -35,6 +35,7 @@ import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
 import { liveProbe } from "./0_liveProbe";
 import { registerMdview } from "./mdview";
 import { installMdviewHost, setMdLogEmit, type MdviewHost } from "./mdview/ports";
+import { fenceCommandHost } from "./1_fenceCommandHost";
 import { registerPaint } from "./paintPanel";
 import { openRustdocBrowser } from "./0_rustdoc";
 import { isFilePickerOpen } from "./overlayGuard";
@@ -302,6 +303,8 @@ async function main() {
   const mdviewHost: MdviewHost & {
     repoRootFor(path: string): Promise<string | null>;
   } = {
+    get mdPlugins() { return fenceCommandHost.mdPlugins; },
+    runFenceCommand: fenceCommandHost.runFenceCommand,
     readText: (path) => invoke<string>("read_text", { path }),
     repoRootFor: (path) => invoke<string | null>("repo_root", { path }),
     readImage: (path) => invoke<string>("read_image", { path }),

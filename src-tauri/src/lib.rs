@@ -1,5 +1,7 @@
 #![deny(clippy::disallowed_methods)]
 mod activity;
+#[path = "0_fence_command.rs"]
+mod fence_command;
 #[path = "0_proc.rs"]
 pub mod proc;
 #[path = "0_observe.rs"]
@@ -1055,6 +1057,7 @@ pub fn run() {
             open_target,
             run_click,
             log_append,
+            fence_command::run_fence_command,
             log_path,
             log_reveal,
             deps::tool_status,

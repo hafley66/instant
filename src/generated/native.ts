@@ -120,6 +120,7 @@ export type CommandName =
   | "screenshot"
   | "open_target"
   | "run_click"
+  | "run_fence_command"
   | "log_append"
   | "log_path"
   | "log_reveal";
@@ -318,6 +319,7 @@ export namespace commands {
     export const screenshot = "screenshot";
     export const openTarget = "open_target";
     export const runClick = "run_click";
+    export const runFenceCommand = "run_fence_command";
     export const logAppend = "log_append";
     export const logPath = "log_path";
     export const logReveal = "log_reveal";
