@@ -1083,17 +1083,18 @@ pub async fn rename_session_window(name: String, title: String) -> Result<(), St
     .map_err(|e| e.to_string())?
 }
 
-/// A claude/opencode process running directly on a real terminal, outside any
-/// tmux session — typed straight into Terminal.app/iTerm rather than opened
-/// through instant. The frontend flags these so an off-the-grid agent doesn't
-/// go unnoticed, and offers to adopt the cwd as a proper tracked tmux session.
+/// A harness session running directly on a real terminal, outside any tmux
+/// session: typed straight into Terminal.app/iTerm rather than opened through
+/// instant. Named by the harness's own live registry (boop-harness
+/// `LiveSessions`), so every harness with a registry is covered.
 #[derive(Serialize, Clone)]
 pub struct RogueSession {
     pid: i32,
     tty: String,     // bare device name, e.g. "ttys023"
-    command: String, // "claude" | "opencode"
-    args: String,    // full command line, for display
+    command: String, // harness id: "claude" | "omp" | "codex" | ...
+    args: String,    // "<harness> <session_id>", for display
     cwd: Option<String>,
+    session_id: String,
 }
 
 /// ttys already inside SOME tmux session: the default socket (the user's own
@@ -1135,9 +1136,9 @@ fn process_cwd(pid: i32) -> Option<String> {
         .find_map(|l| l.strip_prefix('n').map(|s| s.to_string()))
 }
 
-/// claude/opencode processes attached to a real terminal that isn't part of
-/// any tmux session. Lets the frontend surface "you're running an agent off
-/// the grid" and offer to adopt its cwd into a tracked tmux worktree session.
+/// Harness sessions attached to a real terminal that isn't part of any tmux
+/// session. Lets the frontend surface "you're running an agent off the grid"
+/// and offer to adopt it into a tracked tmux worktree session.
 #[tauri::command]
 pub async fn rogue_agent_sessions() -> Vec<RogueSession> {
     tauri::async_runtime::spawn_blocking(rogue_agent_sessions_blocking)
@@ -1146,36 +1147,30 @@ pub async fn rogue_agent_sessions() -> Vec<RogueSession> {
 }
 
 fn rogue_agent_sessions_blocking() -> Vec<RogueSession> {
-    let known_ttys = tmux_ttys();
-    let Ok(out) = crate::proc::Proc::new("ps", crate::proc::Label::Other)
-        .args(["-axo", "pid=,tty=,args="])
-        .run()
-    else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut it = line.split_whitespace();
-            let pid: i32 = it.next()?.parse().ok()?;
-            let tty = it.next()?.to_string();
-            if tty == "??" || known_ttys.contains(&tty) {
-                return None;
-            }
-            let args = it.collect::<Vec<_>>().join(" ");
-            let bin = args.split_whitespace().next()?.rsplit('/').next()?;
-            if bin != "claude" && bin != "opencode" {
-                return None;
-            }
-            Some(RogueSession {
-                pid,
-                tty,
-                command: bin.to_string(),
-                args,
-                cwd: process_cwd(pid),
-            })
-        })
-        .collect()
+    let registry = boop_harness::Registry::discover();
+    boop_harness::live::off_tmux_sessions(
+        registry.all().iter().map(|harness| harness.live()),
+        &tmux_ttys(),
+        boop_harness::live::ps_ttys,
+    )
+    .into_iter()
+    .map(|off| {
+        let pid = off.session.pid.unwrap_or_default() as i32;
+        let command = off.session.harness.to_string();
+        RogueSession {
+            pid,
+            tty: off.tty,
+            args: format!("{command} {}", off.session.session_id),
+            command,
+            cwd: off
+                .session
+                .cwd
+                .map(|cwd| cwd.display().to_string())
+                .or_else(|| process_cwd(pid)),
+            session_id: off.session.session_id,
+        }
+    })
+    .collect()
 }
 
 #[cfg(test)]

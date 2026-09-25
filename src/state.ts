@@ -163,16 +163,17 @@ export interface Session {
   title: string; // what tmux shows for the active pane (#{pane_title}, else a renamed #{window_name}); "" when uninformative
 }
 
-// A claude/opencode process on a real terminal outside any tmux session (Rust
-// pty::RogueSession) — typed straight into Terminal.app/iTerm rather than
-// opened through instant. Surfaced so it can be "adopted" into a tracked tmux
-// worktree session instead of running off the grid.
+// A harness session on a real terminal outside any tmux session (Rust
+// pty::RogueSession, named by the harness's own live registry) — typed straight
+// into Terminal.app/iTerm rather than opened through instant. Surfaced so it can
+// be "adopted" into a tracked tmux worktree session instead of running off the grid.
 export interface RogueSession {
   pid: number;
   tty: string;
-  command: string;
+  command: string; // harness id
   args: string;
   cwd: string | null;
+  session_id: string;
 }
 
 // A label + the shell command it launches, offered when opening a worktree
@@ -206,7 +207,7 @@ export interface WorktreeRow {
 
 export interface AppState {
   sessions: Session[]; // live tmux sessions (runtime)
-  rogueSessions: RogueSession[]; // claude/opencode running outside any tmux session (runtime, polled)
+  rogueSessions: RogueSession[]; // harness sessions running outside any tmux session (runtime, polled)
   terminalTabs: TabMeta[]; // open terminal tabs (runtime; xterm lives in engine)
   worktrees: WorktreeRow[]; // last scan result (runtime)
   activity: Event[]; // unified activity timeline (runtime)

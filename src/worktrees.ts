@@ -282,8 +282,8 @@ export async function refreshRogue() {
 
 // Pull a rogue process's cwd into a tracked tmux session: resolve it to the
 // worktree it sits in (if any), then open it like any other worktree launch.
-// If the harness has an on-disk conversation for that cwd already (the rogue
-// process's own history), resume it instead of starting blank. This doesn't
+// The harness's registry named the session, so the tmux session resumes that
+// exact conversation instead of starting blank. This doesn't
 // touch the rogue process itself — there's no portable way to reparent a tty
 // into tmux — so the old terminal window is left for the user to close.
 async function adoptRogue(r: RogueSession) {
@@ -298,8 +298,7 @@ async function adoptRogue(r: RogueSession) {
   const clone = matched?.clone ?? wtPath;
   const branch = matched?.branch ?? "";
   const adapter = harnessForCommand(r.command);
-  const sid = adapter ? await adapter.resolve(wtPath).catch(() => null) : null;
-  const cmd = sid && adapter ? adapter.resume(sid) : r.command;
+  const cmd = adapter ? adapter.resume(r.session_id) : r.command;
   await openWorktree(clone, branch, wtPath, cmd, true);
   flashStatus(`adopted ${r.command} · pid ${r.pid} — close the old terminal window`);
 }
