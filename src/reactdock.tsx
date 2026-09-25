@@ -381,6 +381,8 @@ function stripDynamicHusks() {
       } else {
         const instance = panelInstanceForId(p.id);
         if (instance && !instance.restorable) api.removePanel(p);
+        // A layout saved before the instance declared keepAlive carries no renderer.
+        else if (instance?.keepAlive) p.api.setRenderer("always");
       }
     }
   } finally {
