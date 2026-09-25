@@ -95,19 +95,13 @@ export type SoftPathLink = {
   range: RowRange;
 };
 
-// Agent TUIs sometimes wrap Markdown themselves before writing to the PTY.
-// Those continuation rows are separate logical terminal lines, so isWrapped is
-// false and joinWrappedRows must leave them alone. Reconstruct only the narrow
-// shape produced for a path: the last token of one row ends at that row's text,
-// the first token of the next row begins after indentation, and concatenating
-// them is still an openable, whitespace-free path. The returned range covers
-// only the fragment on the requested row; each row gets its own xterm link but
-// both activate with the complete path.
+// A TUI-wrapped path: a row-ending token with a `/` joins the next row's first
+// token (prose may follow a path-like one); one-token rows pass the chain on.
 export function softWrappedPathLink(
   rows: WrapRow[],
   requestedIndex: number,
   openable: (text: string) => boolean,
-): SoftPathLink | null {
+): SoftPathLink[] {
   const tokens = rows.map((row) => scanLineTokens(row.text));
   const fragments = rows.map((row, index) => {
     const rowTokens = tokens[index];
@@ -117,35 +111,62 @@ export function softWrappedPathLink(
       end: row.text.trimEnd().length,
     };
   });
-  const joins = (leftIndex: number): boolean => {
+  const single = (index: number) => fragments[index].first === fragments[index].last;
+  function joins(leftIndex: number): boolean {
     const left = fragments[leftIndex];
     const right = fragments[leftIndex + 1];
     if (!left?.last || !right?.first) return false;
     if (rows[leftIndex + 1].isWrapped) return false;
     if (left.last.end !== left.end) return false;
-    if (right.first !== right.last) return false;
+    // Prose after the fragment: the fragment itself must look like a path.
+    if (right.first !== right.last && !openable(right.first.text)) return false;
     const combined = left.last.text + right.first.text;
-    return left.last.text.includes("/") && !/[\s'"`()<>[\]{}]/.test(combined) && openable(combined);
-  };
-
-  let start = requestedIndex;
-  while (start > 0 && joins(start - 1)) start--;
-  let end = requestedIndex;
-  while (end + 1 < rows.length && joins(end)) end++;
-  if (start === end) return null;
-
-  const parts = [];
-  for (let index = start; index <= end; index++) {
-    const token = index === start ? fragments[index].last : fragments[index].first;
-    if (!token) return null;
-    parts.push(token.text);
+    // A one-token row inside a chain carries the head's `/`.
+    const pathy = left.last.text.includes("/") || (single(leftIndex) && leftIndex > 0 && joins(leftIndex - 1));
+    return pathy && !/[\s'"`()<>[\]{}]/.test(combined) && openable(combined);
   }
-  const requested = requestedIndex === start
-    ? fragments[requestedIndex].last
-    : fragments[requestedIndex].first;
-  if (!requested) return null;
-  return {
-    text: parts.join(""),
-    range: { rowIndex: requestedIndex, startCol: requested.start, endCol: requested.end },
+  // The first row of the chain through `index`'s first token.
+  const headOf = (index: number) => {
+    let start = index;
+    while (start > 0 && joins(start - 1)) {
+      start--;
+      if (!single(start)) break;
+    }
+    return start;
   };
+  // The last row of the chain through `index`'s last token.
+  const tailOf = (index: number) => {
+    let end = index;
+    while (end + 1 < rows.length && joins(end)) {
+      end++;
+      if (!single(end)) break;
+    }
+    return end;
+  };
+  const link = (start: number, end: number): SoftPathLink | null => {
+    if (start === end) return null;
+    const parts = [];
+    for (let index = start; index <= end; index++) {
+      const token = index === start ? fragments[index].last : fragments[index].first;
+      if (!token) return null;
+      parts.push(token.text);
+    }
+    const requested = requestedIndex === start
+      ? fragments[requestedIndex].last
+      : fragments[requestedIndex].first;
+    if (!requested) return null;
+    return {
+      text: parts.join(""),
+      range: { rowIndex: requestedIndex, startCol: requested.start, endCol: requested.end },
+    };
+  };
+
+  if (!fragments[requestedIndex]?.first) return [];
+  const head = headOf(requestedIndex);
+  if (single(requestedIndex)) {
+    const one = link(head, tailOf(requestedIndex));
+    return one ? [one] : [];
+  }
+  return [link(head, requestedIndex), link(requestedIndex, tailOf(requestedIndex))]
+    .filter((found): found is SoftPathLink => found !== null);
 }

@@ -41,8 +41,8 @@ describe("softWrappedPathLink", () => {
 
   it("gives both TUI-wrapped rows the complete path with their local underline", () => {
     expect([
-      softWrappedPathLink(rows, 0, (text) => text.includes("/")),
-      softWrappedPathLink(rows, 1, (text) => text.includes("/")),
+      ...softWrappedPathLink(rows, 0, (text) => text.includes("/")),
+      ...softWrappedPathLink(rows, 1, (text) => text.includes("/")),
     ]).toMatchInlineSnapshot(`
       [
         {
@@ -69,7 +69,7 @@ describe("softWrappedPathLink", () => {
     expect(softWrappedPathLink([
       row("source src/preview.ts"),
       row("  then continue.md"),
-    ], 0, (text) => text.includes("/"))).toBeNull();
+    ], 0, (text) => text.includes("/"))).toEqual([]);
   });
 });
 

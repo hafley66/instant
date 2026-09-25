@@ -221,7 +221,7 @@ function openRefChoices(
   paths: string[],
   line: number | undefined,
   cwd: string,
-  via: "exact" | "fuzzy" | "worktree" = "exact",
+  via: "exact" | "fuzzy" | "worktree" | "sibling" = "exact",
   worktrees: string[] = [],
 ) {
   const key = `rg:${token}`;

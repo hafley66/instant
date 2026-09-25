@@ -101,7 +101,7 @@ export interface RefChoicesPanelProps {
   token: string;
   paths: string[];
   line?: number;
-  via: "exact" | "fuzzy" | "worktree";
+  via: "exact" | "fuzzy" | "worktree" | "sibling";
   worktrees?: string[];
   onOpen: (path: string, line?: number) => void;
   onGrep: () => void;
@@ -160,7 +160,7 @@ export function RefChoicesPanel(props: RefChoicesPanelProps) {
   ];
 
   const count = `${paths.length} candidate${paths.length === 1 ? "" : "s"}`;
-  const tags = worktrees.length ? ` on ${worktrees.join(", ")}` : "";
+  const tags = worktrees.length ? ` ${via === "sibling" ? "in" : "on"} ${worktrees.join(", ")}` : "";
   const command = `${via === "fuzzy" ? "fzf" : "resolve"} ${token} (${count}${tags})`;
   return (
     <>

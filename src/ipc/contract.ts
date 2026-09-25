@@ -8,7 +8,7 @@ export type RefSource = "touched" | "absolute" | "cwd" | "session" | "repo" | "w
 export type ResolvedRef = { path: string; line?: number; source: RefSource };
 export type ResolveResult =
   | { kind: "hit"; ref: ResolvedRef }
-  | { kind: "choices"; paths: string[]; line?: number; via: "exact" | "fuzzy" | "worktree"; worktrees?: string[] }
+  | { kind: "choices"; paths: string[]; line?: number; via: "exact" | "fuzzy" | "worktree" | "sibling"; worktrees?: string[] }
   | { kind: "absent"; repo: string; rev: string; path: string; subject: string }
   | { kind: "miss" };
 

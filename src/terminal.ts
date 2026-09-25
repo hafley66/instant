@@ -51,15 +51,8 @@ import {
 } from "./reactdock";
 import { cmdClickRouter, dispatchClick, clickIntent } from "./clickrules";
 import { openExternal, revealExternal } from "./0_openExternal";
-import { tokenAtColumn, widenAcrossSpaces } from "./termTokens";
-import {
-  joinWrappedRows,
-  capWrappedRows,
-  softWrappedPathLink,
-  wrappedLinkSpans,
-  MAX_WRAP_ROWS,
-  type WrapRow,
-} from "./termWrapJoin";
+import { bufferClickToken, softPathRows, wrappedLineRows } from "./termBufferToken";
+import { softWrappedPathLink, wrappedLinkSpans } from "./termWrapJoin";
 import { resolveRef, type ClickCell } from "./refResolve";
 import { termCellAt } from "./0_termCell";
 import { bracketedPaste } from "./promptQuote";
@@ -560,58 +553,6 @@ export function termCellPoint(id: string, row: number, col: number): { x: number
   return { x: rect.left + (col + 0.5) * cellW, y: rect.top + (row + 0.5) * cellH };
 }
 
-// The logical line a buffer row belongs to, as its row texts plus which index
-// the requested row holds. Walks BACK while the row is a wrap continuation to
-// find the line's first row, then FORWARD collecting each following wrapped row.
-// The walk is capped (see MAX_WRAP_ROWS): a continuation longer than that
-// degrades to the single requested row so a bad buffer can't become a wide scan.
-// Per-row text uses trimRight for the line's LAST row and untrimmed for rows
-// that continue, so mid-line spaces survive and joined offsets stay true.
-function wrappedLineRows(id: string, bufferRow: number): { rows: WrapRow[]; index: number; start: number } | null {
-  const term = tabs.get(id)?.term;
-  if (!term) return null;
-  const buf = term.buffer.active;
-  if (!buf.getLine(bufferRow)) return null;
-
-  let start = bufferRow;
-  while (start > 0 && buf.getLine(start)?.isWrapped) start--;
-
-  const collected: WrapRow[] = [];
-  let clickedIndex = -1;
-  let overCap = false;
-  for (let b = start, n = 0; ; b++, n++) {
-    const line = buf.getLine(b);
-    if (!line) break;
-    if (b === bufferRow) clickedIndex = n;
-    const continued = buf.getLine(b + 1)?.isWrapped ?? false;
-    collected.push({ text: line.translateToString(!continued), isWrapped: line.isWrapped });
-    if (!continued) break;
-    if (n + 1 >= MAX_WRAP_ROWS) {
-      overCap = true;
-      break;
-    }
-  }
-  if (clickedIndex < 0) return null;
-  const capped = capWrappedRows(collected, clickedIndex, overCap);
-  return { rows: capped.rows, index: capped.index, start };
-}
-
-function softPathRows(id: string, bufferRow: number): { rows: WrapRow[]; index: number; start: number } | null {
-  const term = tabs.get(id)?.term;
-  if (!term) return null;
-  const buf = term.buffer.active;
-  const radius = 4;
-  const start = Math.max(0, bufferRow - radius);
-  const end = Math.min(buf.length - 1, bufferRow + radius);
-  const rows: WrapRow[] = [];
-  for (let row = start; row <= end; row++) {
-    const line = buf.getLine(row);
-    if (!line) return null;
-    rows.push({ text: line.translateToString(true), isWrapped: line.isWrapped });
-  }
-  return { rows, index: bufferRow - start, start };
-}
-
 // A diagram label sits over terminal rows it does not belong to, so hover and
 // ⌘-click hand those points to the DOM router (clickrules.ts) instead.
 function overDiagram(e: { target: EventTarget | null }): boolean {
@@ -627,33 +568,11 @@ function wordAt(id: string, clientX: number, clientY: number): string {
   return wordSpanAt(id, clientX, clientY).wide;
 }
 
-// The clicked token two ways: `wide` grows an unquoted path across spaces
-// (`/var/x/Screenshot 2026-09-04 at 8.24.07 PM.png`), `narrow` is the bare
-// whitespace-delimited word. The resolver tries wide first, narrow on a miss.
 function wordSpanAt(id: string, clientX: number, clientY: number): { wide: string; narrow: string } {
   const t = tabs.get(id);
   if (!t) return { wide: "", narrow: "" };
   const { col, bufferRow } = cellOf(t, clientX, clientY);
-  const buf = t.term.buffer.active;
-  const softRows = softPathRows(id, bufferRow);
-  const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
-  if (soft && col >= soft.range.startCol && col < soft.range.endCol) {
-    // `soft.text` may chain several rows (a TUI wrap rejoined), and a block of
-    // complete paths satisfies the same shape test. `narrow` stays the word on
-    // the clicked row, so a join nothing on disk backs falls back to the path
-    // under the pointer instead of the stitched run.
-    const rowText = buf.getLine(bufferRow)?.translateToString(true) ?? "";
-    const rowSpan = tokenAtColumn(rowText, col);
-    return { wide: soft.text, narrow: rowSpan?.text ?? soft.text };
-  }
-  const wrapped = wrappedLineRows(id, bufferRow);
-  if (!wrapped) return { wide: "", narrow: "" };
-  const joined = joinWrappedRows(wrapped.rows);
-  const offset = joined.rowStartOffsets[wrapped.index] + col;
-  const span = tokenAtColumn(joined.text, offset);
-  if (!span) return { wide: "", narrow: "" };
-  const wide = widenAcrossSpaces(joined.text, span);
-  return { wide: wide.text, narrow: span.text };
+  return bufferClickToken(t.term.buffer.active, bufferRow, col, looksOpenable);
 }
 
 function cellOf(t: { el: HTMLElement; term: Terminal }, clientX: number, clientY: number) {
@@ -1018,7 +937,7 @@ export function openTab(
     provideLinks(y, cb) {
       // y is 1-based absolute row; join the whole wrapped logical line so a
       // path split across rows resolves as one token.
-      const wrapped = wrappedLineRows(id, y - 1);
+      const wrapped = wrappedLineRows(term.buffer.active, y - 1);
       if (!wrapped) return cb(undefined);
       // CmdClickGestureTracker owns activation on pointerup. The link provider
       // supplies xterm's underline and hit range only. Dispatching here as well
@@ -1043,9 +962,8 @@ export function openTab(
           };
         },
       );
-      const softRows = softPathRows(id, y - 1);
-      const soft = softRows && softWrappedPathLink(softRows.rows, softRows.index, looksOpenable);
-      if (soft) {
+      const softRows = softPathRows(term.buffer.active, y - 1);
+      for (const soft of softRows ? softWrappedPathLink(softRows.rows, softRows.index, looksOpenable) : []) {
         const startX = soft.range.startCol + 1;
         const endX = soft.range.endCol;
         const existing = links.find((link) =>
