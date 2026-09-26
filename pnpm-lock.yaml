@@ -15,50 +15,53 @@ importers:
   .:
     dependencies:
       '@hafley66/boop-xterm':
-        specifier: 0.0.1-dev.1790389451610
-        version: 0.0.1-dev.1790389451610(@xterm/xterm@6.0.0)
+        specifier: 0.0.1-dev.1790389689806
+        version: 0.0.1-dev.1790389689806(@xterm/xterm@6.0.0)
       '@hafley66/d2':
-        specifier: 0.1.0-dev.1790302366305
-        version: 0.1.0-dev.1790302366305
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806
       '@hafley66/grapht':
-        specifier: 0.1.0-dev.1790302365146
-        version: 0.1.0-dev.1790302365146(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
       '@hafley66/grapht-model':
-        specifier: 0.1.0-dev.1790302361706
-        version: 0.1.0-dev.1790302361706
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806
       '@hafley66/grapht-render-cytoscape':
-        specifier: 0.1.0-dev.1790389451610
-        version: 0.1.0-dev.1790389451610(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
       '@hafley66/grid':
         specifier: 0.1.8-dev.1790302363463
-        version: 0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+        version: 0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389689806)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
       '@hafley66/json-rx':
         specifier: 0.1.2-dev.1790302364181
-        version: 0.1.2-dev.1790302364181(@hafley66/trace@0.1.0-dev.1790389451610)(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)(vite@8.1.5)
+        version: 0.1.2-dev.1790302364181(@hafley66/trace@0.1.0-dev.1790389689806)(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)(vite@8.1.5)
       '@hafley66/marbler':
         specifier: 0.0.3-dev.1790342041910
-        version: 0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790389451610)(vite@8.1.5)
+        version: 0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790389689806)(vite@8.1.5)
       '@hafley66/md':
-        specifier: 0.1.2-dev.1790389451610
-        version: 0.1.2-dev.1790389451610(ca3b6d1302a90d23e138c2a79cc12d62)
+        specifier: 0.1.2-dev.1790389689806
+        version: 0.1.2-dev.1790389689806(952ae7bdc199baee7e67a0f2a4732d73)
       '@hafley66/mmd':
-        specifier: 0.1.0-dev.1790302366017
-        version: 0.1.0-dev.1790302366017
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806
       '@hafley66/path':
         specifier: 0.1.0-dev.1790302359457
         version: 0.1.0-dev.1790302359457
       '@hafley66/signal-grid':
-        specifier: 0.1.0-dev.1790360384473
-        version: 0.1.0-dev.1790360384473(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790389451610)(@hafley66/xdom@0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790389689806)(@hafley66/xdom@0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
+      '@hafley66/signal-marbles':
+        specifier: 0.0.1-dev.1790389689806
+        version: 0.0.1-dev.1790389689806(@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/signals':
-        specifier: 0.1.1-dev.1790302362050
-        version: 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.1-dev.1790389689806
+        version: 0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       '@hafley66/trace':
-        specifier: 0.1.0-dev.1790389451610
-        version: 0.1.0-dev.1790389451610
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806
       '@hafley66/xdom':
-        specifier: 0.1.0-dev.1790302362680
-        version: 0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+        specifier: 0.1.0-dev.1790389689806
+        version: 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       '@oddbird/css-anchor-positioning':
         specifier: ^0.9.0
         version: 0.9.0
@@ -411,30 +414,23 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hafley66/boop-xterm@0.0.1-dev.1790389451610':
-    resolution: {integrity: sha512-oGDx0AX7Z1Un8g5tolBVIo5a3oTdbiI7c99ES+YD+yXmwIS/CJJwp7E8S98PeG0raPn1gR3Meec0wGtEeZ/NFg==}
+  '@hafley66/boop-xterm@0.0.1-dev.1790389689806':
+    resolution: {integrity: sha512-PgP8on0YF0foqTioG+BSwP5KAqW0N28yoGqz//2+jJ40gw8gA91Rpa0L1862+J9jwZV1PkJvp753CSWSvhWDAg==}
     peerDependencies:
       '@xterm/xterm': ^6.0.0
 
-  '@hafley66/d2@0.1.0-dev.1790302366305':
-    resolution: {integrity: sha512-4rcDQv3lh63zIYV8Y6zLNqnK/3jP177jFVHS3EAF7gRoUdXexIqxc+yKKK8fce1RGpELC34xwSu50ZR9uDscDg==}
+  '@hafley66/d2@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-ajgGHhpRdSjoAe3WhpsZNs2H1g/sYAKl9/bN+N+Y+Q+o2B3oRfNxilXaoyo8bvMuxCqGCT6DW21/MSvmQVK+dQ==}
 
-  '@hafley66/grapht-model@0.1.0':
-    resolution: {integrity: sha512-gf2fpkekzpEQA+IkZfCi1+kQdtgZdLiEitK0IYX/c0j+rfz1s9/ooMY7Y11VC2S9aF3Tw4sZtPqiBoeLOJxXVQ==}
+  '@hafley66/grapht-model@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-3Y1tGRrAZ42OqMMnQ7/5FbFSEcnrMucu2RJLvXE1DL1mFBWGXcAuUxPhwbpdiQCDGsjS9s2Qzft95EGzaBIexw==}
 
-  '@hafley66/grapht-model@0.1.0-dev.1790302361706':
-    resolution: {integrity: sha512-+aWrhhmpBeBSI6kWwy92WWIbkexueB2UezdxH5+2zAfoBMJ4XuETcFRV3IbSPJVoS6Kz8BV9RYk/nglNGzAITA==}
-
-  '@hafley66/grapht-render-cytoscape@0.1.0-dev.1790389451610':
-    resolution: {integrity: sha512-o2csPq5etMkJzCaH9Pb+S4OX5Wy4DHyDxjaCDUmReyM4q6CDo5enu7oJ30E+eFwzuWB9WFnlhhk9t6fGwo/Q5A==}
+  '@hafley66/grapht-render-cytoscape@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-dlM3G0+qEG4vtRyg9eGxIh3a5ajwr34FaQ7EKCbS+KptIrrnon7Mg9809ROV3l9TsQqO2nNa0brEdBUyuby0XQ==}
     hasBin: true
 
-  '@hafley66/grapht@0.1.0':
-    resolution: {integrity: sha512-D4dbkZbQnwV8Hl4cmwJtrNseRdRlva9XnjEf9wHTUWSJ8aGmI14McMIj6Bzo0C0GxS4l3G3rcosBkJf7Ww/DUw==}
-    hasBin: true
-
-  '@hafley66/grapht@0.1.0-dev.1790302365146':
-    resolution: {integrity: sha512-Gjm3tRJLmxGVVWk7tuiSl4nhC5rUAHc9TnAk8O6RXaEQ2gaF3wod531yZne8XttmvR5nHqqg7EK9Jh6DQDLOkQ==}
+  '@hafley66/grapht@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-7LoHdVWIbTs7/a7xEvt8Bs06qGvc4jXGfWezF3fYfSvP89FpeZl9N1pJyVca5eEvst3KFq+4xRH/biRXpbbB0A==}
     hasBin: true
     peerDependencies:
       react: '>=18.0.0'
@@ -462,8 +458,8 @@ packages:
   '@hafley66/marbler@0.0.3-dev.1790342041910':
     resolution: {integrity: sha512-iwDS0LbWqCRPoQl/O/wBXx3Tijd93iTyxiap8mpsywN/pntofrvmRRYK8d4rvWQJnFNHNz6XqXOnfg7gAqQGKA==}
 
-  '@hafley66/md@0.1.2-dev.1790389451610':
-    resolution: {integrity: sha512-1F1QqakLB5y42ge+zWOHJidyG71GL0W10fr4MPcdr977KwG6+ESqtqPVdExjd/QFXyG1Q5+D3RjDWMwDdHcOBQ==}
+  '@hafley66/md@0.1.2-dev.1790389689806':
+    resolution: {integrity: sha512-6HKQtHACZIKNJ8hSV1wD5aVsScANtmrcBmyGbGl8UCvtHsW/0d1z2XFeg1svaK8blg69OafvHYpX9SyjXPDzlQ==}
     peerDependencies:
       '@hafley66/d2': '>=0.1.0'
       '@hafley66/grapht': '>=0.1.0'
@@ -492,20 +488,26 @@ packages:
       diff:
         optional: true
 
-  '@hafley66/mmd@0.1.0-dev.1790302366017':
-    resolution: {integrity: sha512-2x4YQ16hyPtT+iWPUR0d2GM/09CaC39WkVihAqgfYBxU6SYOZ/0OlCnBncZtEPYgOCsS/FRVvw1sK5hoTC2BiA==}
+  '@hafley66/mmd@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-k2H6kBffSTdK5FE19sMa1H7eG+cW18JAJQysU2U9FRctcexkVLUuqgij79gFNzbt48pHenLFsO4zDRo/omV2Cg==}
+
+  '@hafley66/path@0.1.0':
+    resolution: {integrity: sha512-aNzb/lDLk1xk7F1J93qAx48KtehsJD27xbP5p4JSGNAeDJgwWWvw+0v7qeZIuDV91jTnxcruvSkL7BaN7ZDZaw==}
 
   '@hafley66/path@0.1.0-dev.1790302359457':
     resolution: {integrity: sha512-F4mxy40LmaChJRBibu2CPaWGYouQHFmyIAS2l7dkVvMv4BXr3aLFZ73+wJAYd8QXha6VaNwsYFZxx6SXM9h8Ew==}
 
-  '@hafley66/scene@0.0.1-dev.1790302362366':
-    resolution: {integrity: sha512-+vSFPuoQz/eoOgt7rqNghwkqD6zv2FS66iRrejbJbpUfLAFvv7zp7EBqhpZ64h7fyJenacgqWBCihtYEoCEZqg==}
+  '@hafley66/scene@0.0.1':
+    resolution: {integrity: sha512-XaZ4iyTtjRCs4IityRbr5MWpSmBdErvtMD0LLY9UyqEA73/JquobrupcfUYuTH+Z5V4buOz26j3OhF62ye52yQ==}
     peerDependencies:
-      '@hafley66/grapht-model': '>=0.1.0-0'
+      pixi.js: ^8.9.0
       rxjs: ^7.8.0
+    peerDependenciesMeta:
+      pixi.js:
+        optional: true
 
-  '@hafley66/signal-grid@0.1.0-dev.1790360384473':
-    resolution: {integrity: sha512-MYO1Z/7JR9U70tBDNi63atlqfZAm1w8BxAyhXb5jPTKpJ9zq6m5uY80gIXVaBUIBmYZ9XBsTN8RpBItM/AoyaA==}
+  '@hafley66/signal-grid@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-RfAEyZsu3+m5kTqjOHBpl1/4VNNahcPCplRnQU/BUA2aFDzWOA6Y0bCeW6lzllC2qkoF2WKZQ/vUM5gbrJ96lQ==}
     peerDependencies:
       '@hafley66/path': '>=0.1.0'
       '@hafley66/signals': 0.1.1-dev.1790302362050
@@ -523,6 +525,14 @@ packages:
       react-dom:
         optional: true
 
+  '@hafley66/signal-marbles@0.0.1-dev.1790389689806':
+    resolution: {integrity: sha512-PuzsiXaJSKOalpc7zurNZcwlKu4SJGfqOlt3JFn10eFbw9jwiuksCTkSsSyDkhafWHUxuCMhGZ5+1s1KqrriEg==}
+    peerDependencies:
+      '@hafley66/signals': 0.1.1-dev.1790302362050
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
+      rxjs: ^7.8.0
+
   '@hafley66/signals@0.1.1-dev.1790302362050':
     resolution: {integrity: sha512-NHNUGKJkYYNgFhtvCzZPJAtnlyjTM/iW/4VPGeLaFnV4f0j0w85s74GbBpJfkhUxd91f05dhSOBh1dddhHm3hw==}
     peerDependencies:
@@ -538,8 +548,23 @@ packages:
       vite:
         optional: true
 
-  '@hafley66/trace@0.1.0-dev.1790389451610':
-    resolution: {integrity: sha512-VxWjs5xVk9YhHQ3jhMWD//75P8vyMatmXt7C207dGf2E2sj6cKfKAVd/kz4RclPOc+l+/3wqWT8hZaY0dO5M0g==}
+  '@hafley66/signals@0.1.1-dev.1790389689806':
+    resolution: {integrity: sha512-nYYNbGSTzqpBCcjOcmESjvBuCu2tWGRyC9pSOMLbISMthTlLg3mvFQALUmSeAt+UUq294UDYDLsdGWv480EK4A==}
+    peerDependencies:
+      '@hafley66/trace': '>=0.1.0'
+      '@logtape/logtape': ^2.3.3
+      react: '>=18.0.0'
+      vite: '>=5.0.0'
+    peerDependenciesMeta:
+      '@logtape/logtape':
+        optional: true
+      react:
+        optional: true
+      vite:
+        optional: true
+
+  '@hafley66/trace@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-1fruC2D7GyeM1AB6DJqxs01yjHX4j+LW5ezff+BZSlyZByNKioI6fNyaIxCd0IUZ1wWUMoG0G49CtzKXNMRhFQ==}
     peerDependencies:
       '@logtape/logtape': ^2.3.3
     peerDependenciesMeta:
@@ -554,8 +579,8 @@ packages:
       react:
         optional: true
 
-  '@hafley66/xdom@0.1.0-dev.1790302362680':
-    resolution: {integrity: sha512-/OUYUc+HWumqtlfG+uwZ7MSbizqaXy9QGKad96d2KvjHsUVlJI7I9PxRa8u9yM5P21BUSNL+5t1ts4zfoh3TWg==}
+  '@hafley66/xdom@0.1.0-dev.1790389689806':
+    resolution: {integrity: sha512-eHVBklxuVljcI4RUBURhFStSFXHNM4JZcq16zTE1nfm5GlSadDkgFdBiHeEagyRwKIg6AFC+dkWtgqSB7zstcA==}
     peerDependencies:
       react: '>=18.0.0'
     peerDependenciesMeta:
@@ -3111,21 +3136,17 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hafley66/boop-xterm@0.0.1-dev.1790389451610(@xterm/xterm@6.0.0)':
+  '@hafley66/boop-xterm@0.0.1-dev.1790389689806(@xterm/xterm@6.0.0)':
     dependencies:
       '@xterm/xterm': 6.0.0
 
-  '@hafley66/d2@0.1.0-dev.1790302366305':
+  '@hafley66/d2@0.1.0-dev.1790389689806':
     dependencies:
-      '@hafley66/grapht-model': 0.1.0-dev.1790302361706
+      '@hafley66/grapht-model': 0.1.0-dev.1790389689806
     transitivePeerDependencies:
       - supports-color
 
-  '@hafley66/grapht-model@0.1.0':
-    dependencies:
-      zod: 4.4.3
-
-  '@hafley66/grapht-model@0.1.0-dev.1790302361706':
+  '@hafley66/grapht-model@0.1.0-dev.1790389689806':
     dependencies:
       remark-parse: 11.0.0
       unified: 11.0.5
@@ -3133,11 +3154,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@hafley66/grapht-render-cytoscape@0.1.0-dev.1790389451610(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/grapht-render-cytoscape@0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
     dependencies:
-      '@hafley66/grapht': 0.1.0
-      '@hafley66/grapht-model': 0.1.0
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/grapht': 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+      '@hafley66/grapht-model': 0.1.0-dev.1790389689806
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       cytoscape: 3.34.0
       dompurify: 3.4.14
       playwright: 1.63.0
@@ -3146,19 +3167,18 @@ snapshots:
     transitivePeerDependencies:
       - '@hafley66/trace'
       - '@logtape/logtape'
+      - graphology-types
+      - pixi.js
       - react
+      - react-dom
+      - supports-color
       - vite
 
-  '@hafley66/grapht@0.1.0':
+  '@hafley66/grapht@0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
     dependencies:
-      string-argv: 0.3.2
-      zod: 4.4.3
-
-  '@hafley66/grapht@0.1.0-dev.1790302365146(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
-    dependencies:
-      '@hafley66/grapht-model': 0.1.0-dev.1790302361706
-      '@hafley66/scene': 0.0.1-dev.1790302362366(@hafley66/grapht-model@0.1.0-dev.1790302361706)(rxjs@7.8.2)
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/grapht-model': 0.1.0-dev.1790389689806
+      '@hafley66/scene': 0.0.1(pixi.js@8.20.1)(rxjs@7.8.2)
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       cytoscape: 3.34.0
       cytoscape-fcose: 2.2.0(cytoscape@3.34.0)
       graphology: 0.26.0
@@ -3172,13 +3192,14 @@ snapshots:
       - '@hafley66/trace'
       - '@logtape/logtape'
       - graphology-types
+      - pixi.js
       - supports-color
       - vite
 
-  '@hafley66/grid@0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/grid@0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389689806)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0-dev.1790302359457
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       '@hafley66/virtualizations': 0.1.0-dev.1790302360770(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-virtual': 3.14.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -3194,10 +3215,10 @@ snapshots:
       - react-dom
       - vite
 
-  '@hafley66/grid@0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)':
+  '@hafley66/grid@0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389689806)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0-dev.1790302359457
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.8)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.8)(vite@8.1.5)
       '@hafley66/virtualizations': 0.1.0-dev.1790302360770(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-virtual': 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -3213,11 +3234,11 @@ snapshots:
       - react-dom
       - vite
 
-  '@hafley66/json-rx@0.1.2-dev.1790302364181(@hafley66/trace@0.1.0-dev.1790389451610)(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)(vite@8.1.5)':
+  '@hafley66/json-rx@0.1.2-dev.1790302364181(@hafley66/trace@0.1.0-dev.1790389689806)(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)(vite@8.1.5)':
     dependencies:
       '@emotion/react': 11.14.0(@types/react@19.2.17)(react@19.2.7)
       '@emotion/styled': 11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7)
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       '@mui/icons-material': 7.3.11(@mui/material@7.3.11(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react@19.2.17)(react@19.2.7)
       '@mui/material': 7.3.11(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@rjsf/core': 6.7.0(@rjsf/utils@6.7.0(react@19.2.7))(react@19.2.7)
@@ -3241,10 +3262,10 @@ snapshots:
       - vite
       - vue
 
-  '@hafley66/marbler@0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790389451610)(vite@8.1.5)':
+  '@hafley66/marbler@0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790389689806)(vite@8.1.5)':
     dependencies:
-      '@hafley66/grid': 0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.8)(vite@8.1.5)
+      '@hafley66/grid': 0.1.8-dev.1790302363463(@hafley66/trace@0.1.0-dev.1790389689806)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.8)(vite@8.1.5)
       '@tanstack/react-table': 9.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       pixi.js: 8.20.1
       react: 19.2.8
@@ -3256,17 +3277,17 @@ snapshots:
       - '@logtape/logtape'
       - vite
 
-  '@hafley66/md@0.1.2-dev.1790389451610(ca3b6d1302a90d23e138c2a79cc12d62)':
+  '@hafley66/md@0.1.2-dev.1790389689806(952ae7bdc199baee7e67a0f2a4732d73)':
     dependencies:
-      '@hafley66/d2': 0.1.0-dev.1790302366305
-      '@hafley66/grapht': 0.1.0-dev.1790302365146(@hafley66/trace@0.1.0-dev.1790389451610)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
-      '@hafley66/grapht-model': 0.1.0-dev.1790302361706
-      '@hafley66/grapht-render-cytoscape': 0.1.0-dev.1790389451610(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
-      '@hafley66/mmd': 0.1.0-dev.1790302366017
-      '@hafley66/signal-grid': 0.1.0-dev.1790360384473(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790389451610)(@hafley66/xdom@0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
-      '@hafley66/trace': 0.1.0-dev.1790389451610
-      '@hafley66/xdom': 0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/d2': 0.1.0-dev.1790389689806
+      '@hafley66/grapht': 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+      '@hafley66/grapht-model': 0.1.0-dev.1790389689806
+      '@hafley66/grapht-render-cytoscape': 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
+      '@hafley66/mmd': 0.1.0-dev.1790389689806
+      '@hafley66/signal-grid': 0.1.0-dev.1790389689806(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790389689806)(@hafley66/xdom@0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
+      '@hafley66/signals': 0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/trace': 0.1.0-dev.1790389689806
+      '@hafley66/xdom': 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
       '@terrastruct/d2': 0.1.33
       dockview: 6.6.1(react@19.2.7)
@@ -3281,42 +3302,57 @@ snapshots:
       rxjs: 7.8.2
       streamdown: 2.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       unified: 11.0.5
+    optionalDependencies:
+      '@hafley66/signal-marbles': 0.0.1-dev.1790389689806(@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
     transitivePeerDependencies:
       - '@logtape/logtape'
       - supports-color
 
-  '@hafley66/mmd@0.1.0-dev.1790302366017':
+  '@hafley66/mmd@0.1.0-dev.1790389689806':
     dependencies:
-      '@hafley66/grapht-model': 0.1.0-dev.1790302361706
+      '@hafley66/grapht-model': 0.1.0-dev.1790389689806
       mermaid: 11.16.0
       playwright: 1.62.1
     transitivePeerDependencies:
       - supports-color
 
+  '@hafley66/path@0.1.0':
+    dependencies:
+      zod: 4.4.3
+
   '@hafley66/path@0.1.0-dev.1790302359457':
     dependencies:
       zod: 4.4.3
 
-  '@hafley66/scene@0.0.1-dev.1790302362366(@hafley66/grapht-model@0.1.0-dev.1790302361706)(rxjs@7.8.2)':
+  '@hafley66/scene@0.0.1(pixi.js@8.20.1)(rxjs@7.8.2)':
     dependencies:
-      '@hafley66/grapht-model': 0.1.0-dev.1790302361706
       rxjs: 7.8.2
+    optionalDependencies:
+      pixi.js: 8.20.1
 
-  '@hafley66/signal-grid@0.1.0-dev.1790360384473(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790389451610)(@hafley66/xdom@0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
+  '@hafley66/signal-grid@0.1.0-dev.1790389689806(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790389689806)(@hafley66/xdom@0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
     dependencies:
       '@hafley66/path': 0.1.0-dev.1790302359457
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
-      '@hafley66/trace': 0.1.0-dev.1790389451610
-      '@hafley66/xdom': 0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/signals': 0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/trace': 0.1.0-dev.1790389689806
+      '@hafley66/xdom': 0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       rxjs: 7.8.2
     optionalDependencies:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
 
-  '@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/signal-marbles@0.0.1-dev.1790389689806(@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
+    dependencies:
+      '@hafley66/signals': 0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      rxjs: 7.8.2
+      zod: 4.4.3
+
+  '@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0-dev.1790302359457
-      '@hafley66/trace': 0.1.0-dev.1790389451610
+      '@hafley66/trace': 0.1.0-dev.1790389689806
       history: 5.3.0
       immer: 10.2.0
       lodash: 4.18.1
@@ -3325,10 +3361,10 @@ snapshots:
       react: 19.2.7
       vite: 8.1.5
 
-  '@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.8)(vite@8.1.5)':
+  '@hafley66/signals@0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.8)(vite@8.1.5)':
     dependencies:
       '@hafley66/path': 0.1.0-dev.1790302359457
-      '@hafley66/trace': 0.1.0-dev.1790389451610
+      '@hafley66/trace': 0.1.0-dev.1790389689806
       history: 5.3.0
       immer: 10.2.0
       lodash: 4.18.1
@@ -3337,7 +3373,19 @@ snapshots:
       react: 19.2.8
       vite: 8.1.5
 
-  '@hafley66/trace@0.1.0-dev.1790389451610':
+  '@hafley66/signals@0.1.1-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)':
+    dependencies:
+      '@hafley66/path': 0.1.0
+      '@hafley66/trace': 0.1.0-dev.1790389689806
+      history: 5.3.0
+      immer: 10.2.0
+      lodash: 4.18.1
+      rxjs: 7.8.2
+    optionalDependencies:
+      react: 19.2.7
+      vite: 8.1.5
+
+  '@hafley66/trace@0.1.0-dev.1790389689806':
     dependencies:
       rxjs: 7.8.2
 
@@ -3357,10 +3405,10 @@ snapshots:
     transitivePeerDependencies:
       - react-dom
 
-  '@hafley66/xdom@0.1.0-dev.1790302362680(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)':
+  '@hafley66/xdom@0.1.0-dev.1790389689806(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)':
     dependencies:
-      '@hafley66/path': 0.1.0-dev.1790302359457
-      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389451610)(react@19.2.7)(vite@8.1.5)
+      '@hafley66/path': 0.1.0
+      '@hafley66/signals': 0.1.1-dev.1790302362050(@hafley66/trace@0.1.0-dev.1790389689806)(react@19.2.7)(vite@8.1.5)
       rxjs: 7.8.2
     optionalDependencies:
       react: 19.2.7
