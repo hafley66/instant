@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./reactdock", () => ({ activeGroupEl: vi.fn() }));
 vi.mock("./generated/native", () => ({ invoke: vi.fn() }));
-vi.mock("./0_terminalFonts", () => ({ terminalFontCss: vi.fn(() => "") }));
+vi.mock("@hafley66/boop-xterm", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@hafley66/boop-xterm")>()),
+  terminalFontCss: vi.fn(() => ""),
+}));
 vi.mock("./0_settings", () => ({ settings: {} }));
 
 // Repo convention (vitest.config.ts): stub the browser globals core.ts's

@@ -5,7 +5,11 @@ vi.mock("./generated/native", () => ({ invoke: ports.invoke }));
 vi.mock("react-dom/client", () => ({ createRoot: ports.create }));
 vi.mock("./1_FileImageViewer", () => ({ FileImageViewer: () => null }));
 vi.mock("./0_MonacoCodeViewer", () => ({ MonacoCodeViewer: () => null }));
-vi.mock("@hafley66/md", () => ({ renderD2: vi.fn(), renderMermaidSvg: vi.fn() }));
+vi.mock("@hafley66/md", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@hafley66/md")>()),
+  renderD2: vi.fn(),
+  renderMermaidSvg: vi.fn(),
+}));
 vi.mock("./core", () => ({ IMAGE_EXTS: new Set(["svg", "png"]), escapeHtml: (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\"/g, "&quot;") }));
 vi.mock("./0_settings", () => ({ settings: { mode: { $: () => ports.mode } } }));
 import { disposePreview, renderPathInto, previewTextByNode } from "./2_previewRenderer";

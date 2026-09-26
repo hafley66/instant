@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Subject } from "rxjs";
 import type { Terminal } from "@xterm/xterm";
 import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, projectedDiagramIsCurrent, renderDiagram, svgAspectRatio, TerminalDiagramOverlay, type DiagramFence } from "./0_terminalDiagrams";
-import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import type { ProjectedTurnRegion } from "@hafley66/boop-xterm";
 import type { TurnVisibilityEvent } from "./0_terminalTurnVisibility";
 
 function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): Terminal {

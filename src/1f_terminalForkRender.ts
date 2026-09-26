@@ -1,6 +1,6 @@
 import type { Signal as SignalOf } from "@hafley66/signals";
 import { Subscription } from "rxjs";
-import { rowOnScreen, rowTop, type TerminalRowGeometry } from "./0_terminalRowGeometry";
+import { rowOnScreen, rowTop, type TerminalRowGeometry } from "@hafley66/boop-xterm";
 import type { GutterPaint } from "./1a2_terminalContextGutter";
 import type { BoopTurnCommentFork } from "./1b_terminalContextSync";
 import type { PlacedAnnotation } from "./1d_terminalTurnMarks";

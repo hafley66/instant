@@ -1,5 +1,6 @@
 import { debounceTime, filter, interval, share, Subject, type Observable, Subscription } from "rxjs";
-import { projectTurnRegions, regionAtBufferRow, type ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import type { BoopTurn, VisibleTurn } from "@hafley66/boop-xterm";
+import { projectTurnRegions, regionAtBufferRow, type ProjectedTurnRegion } from "@hafley66/boop-xterm";
 import type { LogicalLine, TmuxPane, XtermViewport } from "./00a_terminalIntersection";
 import {
   growAnchors,
@@ -10,33 +11,11 @@ import {
   normalizeTurnLine,
   sourceLines,
   type TurnMatch,
-} from "./0a_terminalTurnMatching";
+} from "@hafley66/boop-xterm";
 
-export { normalizeTurnLine } from "./0a_terminalTurnMatching";
+export { normalizeTurnLine } from "@hafley66/boop-xterm";
 
-export type BoopTurn = {
-  session: string;
-  harness: string;
-  turn: number;
-  ts: number;
-  role: string;
-  said: string;
-  session_scope?: "root" | "child" | "unknown";
-  parent_session?: string | null;
-};
-
-export type VisibleTurn = BoopTurn & {
-  id: string;
-  bufferStart: number;
-  bufferEnd: number;
-  anchorStart: number;
-  anchorEnd: number;
-  regions: ProjectedTurnRegion[];
-  confidence: "anchored" | "extended";
-  source: "xterm+boop" | "xterm+tmux+boop";
-  clippedAbove?: boolean;
-  clippedBelow?: boolean;
-};
+export type { BoopTurn, VisibleTurn } from "@hafley66/boop-xterm";
 
 export type TurnVisibilityEvent = {
   visible: VisibleTurn[];

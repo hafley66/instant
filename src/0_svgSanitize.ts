@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { normalizeSvgEntities } from "./0_svgViewport";
+import { normalizeSvgEntities } from "@hafley66/md";
 
 const FOREIGN_OBJECT = /<foreignObject\b[^>]*>([\s\S]*?)<\/foreignObject>/gi;
 const EMPTY_FOREIGN_OBJECT = /(<foreignObject\b[^>]*>)[\s\S]*?(<\/foreignObject>)/gi;

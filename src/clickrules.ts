@@ -10,7 +10,7 @@ import { addPreviewPanel } from "./reactdock";
 import { escapeHtml, flashStatus, shQuote } from "./core";
 import { openPathInInstant, openPreviewPanel, previewOrigin } from "./preview";
 import { getFocusedTermId, tabMetaById } from "./terminal";
-import { tokenAtColumn } from "./termTokens";
+import { tokenAtColumn } from "@hafley66/boop-xterm";
 import { resolveRef, type ClickCell } from "./refResolve";
 import { RefChoicesPanel } from "./refChoicesPanel";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";

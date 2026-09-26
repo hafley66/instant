@@ -4,7 +4,7 @@ import {
   readRowGeometry,
   rowTop,
   type TerminalRowGeometry,
-} from "./0_terminalRowGeometry";
+} from "@hafley66/boop-xterm";
 import { turnsAcrossRange, type TerminalContextQueue } from "./1a_terminalContextQueue";
 import { gutter_check_px, gutter_offset_px, type GutterPaint } from "./1a2_terminalContextGutter";
 

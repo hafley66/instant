@@ -26,8 +26,11 @@ vi.mock("./0_openExternal", () => ({
   revealExternal: vi.fn(),
 }));
 vi.mock("./1_FileImageViewer", () => ({ FileImageViewer: () => null }));
-vi.mock("@hafley66/md", () => ({ renderD2: vi.fn() }));
-vi.mock("./0_d2Preview", () => ({ resolveD2Preview: vi.fn() }));
+vi.mock("@hafley66/md", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@hafley66/md")>()),
+  renderD2: vi.fn(),
+  resolveD2Preview: vi.fn(),
+}));
 vi.mock("./0_MonacoCodeViewer", () => ({ MonacoCodeViewer: () => null }));
 vi.mock("./browser", () => ({ openBrowserTab: (...a: unknown[]) => openBrowserTab(...a) }));
 vi.mock("./0_settings", () => ({

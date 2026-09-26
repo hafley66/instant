@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { wheelZooms } from "./0_PanZoomViewport";
 import { sanitizeSvgDocument } from "./0_svgSanitize";
-import { panSvgBox, svgBoxAtZoom, svgCssTransform, svgFitBox, svgMinimumZoom, svgNeedsRepaint, svgPaintBox, svgNativeBox, svgSourceBox, type SvgBox } from "./0_svgViewport";
+import { panSvgBox, svgBoxAtZoom, svgCssTransform, svgFitBox, svgMinimumZoom, svgNeedsRepaint, svgPaintBox, svgNativeBox, svgSourceBox, type SvgBox } from "@hafley66/md";
 import { openExternal, openExternalUrl } from "./0_openExternal";
 import { showError } from "./core";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";

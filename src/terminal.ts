@@ -51,10 +51,10 @@ import {
 } from "./reactdock";
 import { cmdClickRouter, dispatchClick, clickIntent } from "./clickrules";
 import { openExternal, revealExternal } from "./0_openExternal";
-import { bufferClickToken, softPathRows, wrappedLineRows } from "./termBufferToken";
-import { softWrappedPathLink, wrappedLinkSpans } from "./termWrapJoin";
+import { bufferClickToken, softPathRows, wrappedLineRows } from "@hafley66/boop-xterm";
+import { softWrappedPathLink, wrappedLinkSpans } from "@hafley66/boop-xterm";
 import { resolveRef, type ClickCell } from "./refResolve";
-import { termCellAt } from "./0_termCell";
+import { termCellAt } from "@hafley66/boop-xterm";
 import { bracketedPaste } from "./promptQuote";
 import {
   registerZoomKind,
@@ -944,7 +944,7 @@ export function openTab(
       // supplies xterm's underline and hit range only. Dispatching here as well
       // opens media twice and races two preview renders for one gesture.
       const activate = () => {};
-      // One scanner owns the span boundaries (see termTokens.ts), so the
+      // One scanner owns the span boundaries (see the token scanner), so the
       // underline covers the path and stops there: hovering `Update(src/x.ts)`
       // highlights `src/x.ts`, never the call envelope around it.
       const links: ILink[] = wrappedLinkSpans(wrapped.rows, (text) => looksOpenable(text)).map(

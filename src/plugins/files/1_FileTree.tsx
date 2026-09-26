@@ -5,8 +5,7 @@ import { GridTree } from "@hafley66/grid/react";
 import { z } from "zod";
 import { invoke, type CommandName } from "../../generated/native";
 import type { FsEntry } from "../../state";
-import { isMarkdownPath, markdownHeadingRows, type MarkdownHeadingRow } from "../../0_markdownTree";
-import { openMarkdownPanel } from "@hafley66/md";
+import { isMarkdownPath, markdownHeadingRows, openMarkdownPanel, type MarkdownHeadingRow } from "@hafley66/md";
 import { buildFileRows, type FileTreeModelRow } from "./0_FileTreeModel";
 import "./1_FileTree.css";
 

@@ -5,7 +5,7 @@
 import { store, type FsEntry, type Skin } from "./state";
 import { activeGroupEl } from "./reactdock";
 import { invoke } from "./generated/native";
-import { terminalFontCss } from "./0_terminalFonts";
+import { terminalFontCss } from "@hafley66/boop-xterm";
 import { settings } from "./0_settings";
 
 export const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
