@@ -7,22 +7,11 @@ import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { commandEndpoint, commands, invoke } from "./generated/native";
 import { Signal, type Signal as SignalType } from "@hafley66/signals";
-import { merge, map, tap, type Subscription } from "rxjs";
-import { createBoopXtermPane, type BoopXtermPane, type BoopXtermPorts, type HarnessId, type LineAnchorModel, type PinnedSelectionModel, type TurnVisibilityModel } from "@hafley66/boop-xterm";
+import { merge, map, filter, takeUntil, tap, type Subscription } from "rxjs";
+import { createBoopXtermView, graphicsOverlayStream, forkCommand, forkMenuTargets, forkedLane, selectionClientId, turnsAcrossRange, FORK_PRESET, type BoopXtermView, type BoopXtermPorts, type GraphicsOverlayModel, type GraphicsFrame, type HarnessId, type PromptContextItem, type ContextSyncModel, type TurnPanelTarget } from "@hafley66/boop-xterm";
 import { store, type OpenTab } from "./state";
-import { GraphicsOverlay } from "./graphics";
-import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
-import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
-import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
 import { turnDebug } from "./0_turnDebugSettings";
 import { agentSquares, squaresOptions } from "./0_agentSquaresSettings";
-import { TerminalAgentSquares } from "./1_agentSquares";
-import { TerminalContextQueue, type PromptContextItem } from "./1a_terminalContextQueue";
-import { TerminalContextSync } from "./1b_terminalContextSync";
-import { TerminalHoverCheck } from "./1c_terminalHoverCheck";
-import { TerminalTurnMarks } from "./1d_terminalTurnMarks";
-import { FORK_PRESET } from "./1e_terminalForkMarks";
-import { forkCommand, forkMenuTargets, forkedLane, selectionClientId, TerminalForkRender } from "./1f_terminalForkRender";
 import { forkRender } from "./0_forkRenderSettings";
 import { currentForkPreset, forkPresetStore, forkPresets, presetGroups } from "./1g_forkPresetMenu";
 import { openForkPanel } from "./1h_forkPanel";
@@ -55,7 +44,6 @@ import { bufferClickToken, softPathRows, wrappedLineRows } from "@hafley66/boop-
 import { softWrappedPathLink, wrappedLinkSpans } from "@hafley66/boop-xterm";
 import { resolveRef, type ClickCell } from "./refResolve";
 import { termCellAt } from "@hafley66/boop-xterm";
-import { bracketedPaste } from "./promptQuote";
 import {
   registerZoomKind,
   setZoomTargetResolver,
@@ -69,7 +57,9 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { applyTags, askForkNote, sessionsForTab, warmTurns } from "./favorites";
+import { applyTags, askForkNote, askTags, boopTurnsForSession, favoriteBoopTurn, favoriteSources, sessionsForTab, turnTags, warmTurns } from "./favorites";
+import { nativeEvent$ } from "./reactive/nativeTransport";
+import { liveProbe } from "./0_liveProbe";
 import { CmdClickGestureTracker } from "./0_clickRouter";
 import { InspectorMachine, type InspectorEvent } from "./0_inspectorState";
 import { nextClosedOrder } from "./0_reopenOrder";
@@ -89,11 +79,8 @@ export type Tab = {
   fit: FitAddon;
   el: HTMLElement;
   graphics?: boolean;
-  overlay?: GraphicsOverlay;
-  diagrams?: TerminalDiagramOverlay;
-  structured?: TerminalStructuredOverlay;
-  turnVisibility?: TurnVisibilityModel;
-  pane?: BoopXtermPane;
+  overlay?: GraphicsOverlayModel;
+  view?: BoopXtermView;
   paneHost?: {
     paneVisible: SignalType<boolean>;
     paneClosed: SignalType<boolean>;
@@ -103,16 +90,8 @@ export type Tab = {
     selectionClear: SignalType<void>;
   };
   paneEffects?: Subscription;
-  turnDebugOverlay?: TerminalTurnDebugOverlay;
-  agentSquares?: TerminalAgentSquares;
-  lineAnchors?: LineAnchorModel;
-  contextQueue?: TerminalContextQueue;
-  contextSync?: TerminalContextSync;
-  hoverCheck?: TerminalHoverCheck;
-  turnMarks?: TerminalTurnMarks;
-  forkPaint?: TerminalForkRender;
   cmdClickGesture?: CmdClickGestureTracker;
-  pinnedSelection?: PinnedSelectionModel;
+  pendingSelections: Map<string, (commentId: number | null) => void>;
   harness: HarnessObservation;
   paneSession: PaneSessionBinding | null;
   outputTail: string;
@@ -122,33 +101,9 @@ export type Tab = {
   forkPreset?: string;
 };
 
-const structuredOverlaysEnabled = false;
-
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
 export const tabs = new Map<string, Tab>();
-
-export function syncInlineDiagramOverlays() {
-  for (const tab of tabs.values()) tab.diagrams?.syncEnabled();
-}
-export function syncInlineStructuredSelectors() {
-  for (const tab of tabs.values()) tab.contextQueue?.paintSelections();
-}
-
-// Construction IS the on-switch: while turnDebug.on reads false no overlay
-// exists, so nothing subscribes to turnVisibility.changes or the xterm events.
-function applyTurnDebugOverlay(tab: Tab) {
-  const wanted = turnDebug.on.$() && !tab.graphics && !!tab.turnVisibility;
-  if (wanted && !tab.turnDebugOverlay && tab.turnVisibility) {
-    tab.turnDebugOverlay = new TerminalTurnDebugOverlay(tab.term, tab.el, tab.turnVisibility);
-  } else if (!wanted && tab.turnDebugOverlay) {
-    tab.turnDebugOverlay.dispose();
-    tab.turnDebugOverlay = undefined;
-  }
-}
-export function syncTurnDebugOverlays() {
-  for (const tab of tabs.values()) applyTurnDebugOverlay(tab);
-}
 
 /// The strip measures in the pane's own rows and has no terminal handle, so the
 /// pane carries the count xterm is on: one row is then `.xterm-screen` over that
@@ -157,8 +112,7 @@ function stampPaneRows(el: HTMLElement, term: Terminal) {
   el.dataset.rows = String(term.rows);
 }
 
-/// How long the gutter takes to open or close. Mirrors `--asq-move` in
-/// `1_agentSquares.css`.
+/// How long the gutter takes to open or close.
 const GUTTER_MOVE_MS = 260;
 
 /// The gutter is `padding-right` on the pane, so xterm's grid has to be measured
@@ -174,39 +128,6 @@ function refitForGutter(tab: Tab) {
   }, GUTTER_MOVE_MS + 60);
 }
 
-// The strip is on for a terminal whose pane has a boop session. The feed reads
-// the pane the pty already streams (`squares_watch`), so a tab with no tmux —
-// graphics, a dead pane, a shell that never bound — has nothing to watch and
-// gets no strip. A pane that rebinds to another session restarts its strip: the
-// squares belong to one session's turns.
-function applyAgentSquares(tab: Tab) {
-  const session = tab.paneSession?.session;
-  if (agentSquares.on.$() && !tab.graphics && session) {
-    const input = { pty: tab.id, session, target: tab.tmuxTarget ?? tab.name, socket: undefined };
-    const options = squaresOptions();
-    if (tab.agentSquares) {
-      // A settings change arrives here too: the strip compares the options and
-      // restarts its watcher only when they differ from the ones it holds.
-      void tab.agentSquares.retarget(input, options);
-      return;
-    }
-    // The strip calls back on its own class flip — that is when the pane's
-    // usable width changes, and it can happen well after this call, once the
-    // watcher has a pane to give the strip.
-    const strip = new TerminalAgentSquares(tab.el, input, options, () => refitForGutter(tab));
-    tab.agentSquares = strip;
-    void strip.start().catch((error) => console.warn("[squares] watch failed", error));
-    return;
-  }
-  if (tab.agentSquares) {
-    void tab.agentSquares.dispose().catch(() => {});
-    tab.agentSquares = undefined;
-  }
-}
-
-export function syncAgentSquares() {
-  for (const tab of tabs.values()) applyAgentSquares(tab);
-}
 
 /// The pane's cwd as tmux reports it now. The store's copy refreshes only when
 /// the sessions panel shows or a tab opens, so a `cd` typed since then would
@@ -218,10 +139,29 @@ async function liveCwd(id: string): Promise<string> {
 
 /// The fork verb runs in the tab's cwd, so the lane branches from the repo the
 /// pane stands in; the re-pull paints it on the next gutter tick.
-async function runFork(commentId: number, cwd: string, sync: TerminalContextSync) {
+async function runFork(commentId: number, cwd: string, sync: ContextSyncModel) {
   const lane = await spawnFork(commentId, FORK_PRESET, cwd);
   if (lane) openForkPanel(lane, FORK_PRESET);
-  sync.activate();
+  sync.refresh.$(undefined);
+}
+
+async function toggleTurnFavorite(target: TurnPanelTarget) {
+  const parts = /^turn:(.*):(\d+)$/.exec(target.source);
+  const turn = target.turn ?? (parts
+    ? (await boopTurnsForSession(parts[1])).find((row) => row.turn === Number(parts[2]))
+    : undefined);
+  if (!turn) {
+    flashStatus("favorite: that turn is outside the ledger window");
+    return;
+  }
+  await favoriteBoopTurn(turn);
+}
+
+async function editTurnTags(target: TurnPanelTarget) {
+  const note = await askTags("tags for this turn");
+  if (!note) return;
+  const applied = await applyTags(note, target.source);
+  flashStatus(applied.length ? `tagged ${applied.join(", ")}` : "no tag in that text");
 }
 
 /// One fork spawn, reported as it went: the lane name on success, the boop
@@ -282,7 +222,6 @@ function setPaneSessionBinding(id: string, binding: PaneSessionBinding | null) {
   const tab = tabs.get(id);
   if (!tab) return;
   tab.paneSession = binding;
-  applyAgentSquares(tab);
   const meta = tabMetaById(id);
   const live = store.get().sessions.find((session) => session.name === tab.name);
   setTerminalHarness(tab, detectHarness(meta?.command, live?.commands?.[0], tab.outputTail));
@@ -617,16 +556,9 @@ export function openTab(
     // activate), which read as "reopen does nothing" with no error anywhere.
     // Self-heal: drop the orphaned entry and fall through to build fresh.
     const stale = tabs.get(id);
-    stale?.overlay?.dispose();
-    stale?.diagrams?.dispose();
-    stale?.structured?.dispose();
-    stale?.forkPaint?.dispose();
-    stale?.contextSync?.dispose();
-    stale?.contextQueue?.dispose();
     stale?.paneHost?.paneClosed.$(true);
-    stale?.paneEffects?.unsubscribe();
-    stale?.turnDebugOverlay?.dispose();
-    void stale?.agentSquares?.dispose();
+    if (!stale?.view) stale?.paneEffects?.unsubscribe();
+    for (const resolve of stale?.pendingSelections.values() ?? []) resolve(null);
     stale?.cmdClickGesture?.dispose();
     stale?.term.dispose();
     stale?.el.remove();
@@ -763,7 +695,7 @@ export function openTab(
   const graphics = opts.graphics ?? /^\s*awrit\b/.test(cmd ?? "");
   const live = store.get().sessions.find((s) => s.name === name);
   const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
-  const overlay = graphics ? new GraphicsOverlay(el) : undefined;
+  const overlay = graphics ? graphicsOverlayStream(el, id, nativeEvent$<GraphicsFrame>("pty-graphics")) : undefined;
   const tmuxTarget = opts.tmuxTarget;
   const paneHost = graphics ? undefined : {
     paneVisible: Signal(activeId() === id),
@@ -781,95 +713,75 @@ export function openTab(
     boop_sync_session: commandEndpoint("boop_sync_session"),
     boop_locate_turns: commandEndpoint("boop_locate_turns"),
     scroll_session: commandEndpoint("scroll_session"),
+    boop_turn_comments: commandEndpoint("boop_turn_comments"),
+    boop_turn_annotations: commandEndpoint("boop_turn_annotations"),
+    boop_turn_comment_forks: commandEndpoint("boop_turn_comment_forks"),
+    boop_turn_comment_upsert: commandEndpoint("boop_turn_comment_upsert"),
+    boop_turn_comment_delete: commandEndpoint("boop_turn_comment_delete"),
+    boop_turn_comments_sent: commandEndpoint("boop_turn_comments_sent"),
+    squares_watch: commandEndpoint("squares_watch"),
+    squares_unwatch: commandEndpoint("squares_unwatch"),
+    boop_mux_exit_copy_mode: commandEndpoint("boop_mux_exit_copy_mode"),
+    write_pty: commandEndpoint("write_pty"),
+    "squares-update": nativeEvent$("squares-update"),
     ...paneHost,
     clipboardEnabled: settings.clipboardFromTerminal,
+    inlineDiagrams: settings.inlineDiagrams,
+    diagramInference: settings.inlineDiagramInference,
+    inlineStructuredSelectors: settings.inlineStructuredSelectors,
+    structuredOverlayEnabled: Signal(false),
+    turnDebugEnabled: turnDebug.on,
+    agentSquaresEnabled: agentSquares.on,
+    squaresOptions: Signal(() => squaresOptions()),
+    favoriteSources,
+    turnTags,
+    forkLivePane: forkRender.livePane,
+    tabName: Signal(name),
+    sessionIds: paneHost.tabSessionIds,
   };
-  const pane = ports ? createBoopXtermPane(term, el, {
-    id, target: tmuxTarget ?? name, socket: null,
+  const view = ports ? createBoopXtermView(term, el, {
+    id, target: tmuxTarget ?? name, socket: null, graphics,
   }, ports) : undefined;
-  const turnVisibility = pane?.visibility;
-  const lineAnchors = pane?.anchors;
-  const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
-    term,
-    el,
-    undefined,
-    turnVisibility,
-    () => settings.inlineDiagrams.$(),
-    () => settings.inlineDiagramInference.$(),
-  );
-  const structured = graphics || !turnVisibility || !structuredOverlaysEnabled
-    ? undefined
-    : new TerminalStructuredOverlay(term, el, turnVisibility);
-  const contextQueue = graphics || !turnVisibility || !lineAnchors ? undefined : new TerminalContextQueue(
-    term,
-    el,
-    turnVisibility,
-    lineAnchors,
-    // formatQueuedContext composes a multi-line body, and a bare \n written to
-    // a pty is Enter (tmux squashes \r/\n alike), so this used to submit the
-    // prompt once per line instead of filling it. Bracketed paste inserts the
-    // newlines as editable text; see promptQuote.ts.
-    //
-    // A pane parked in tmux copy-mode routes the paste to the scrollback viewer
-    // and it never reaches the input bar, so leave the mode first. The command
-    // is a no-op on a pane that is in no mode, and it resolves even when there
-    // is no tmux at all, so the write is not gated on it succeeding.
-    //
-    // The write's outcome is the send's outcome: the queue clears on resolve
-    // and keeps its rows on reject.
-    (text) => {
-      const body = bracketedPaste(text);
-      const settled = graphics
-        ? Promise.resolve()
-        : invoke(commands.boop_mux.boopMuxExitCopyMode, {
-            target: tmuxTarget ?? name, socket: null,
-          }).catch(() => {});
-      return settled
-        .then(() => invoke(commands.pty.writePty, { id, data: body }))
-        .then(() => { term.focus(); });
-    },
-    () => settings.inlineStructuredSelectors.$(),
-  );
-  const contextSync = !contextQueue ? undefined : new TerminalContextSync(
-    contextQueue,
-    name,
-    async () => (await sessionsForTab(id)).map((session) => session.sessionId),
-  );
-  const hoverCheck = !contextQueue ? undefined : new TerminalHoverCheck(contextQueue);
-  const turnMarks = !contextQueue || !contextSync ? undefined : new TerminalTurnMarks(
-    contextQueue,
-    contextSync.annotations,
-    contextSync.forks,
-    (event, entries) => showContextMenu(event.clientX, event.clientY, forkMenuTargets(entries).map((target) => ({
-      label: `Fork "${target.label}" → ${FORK_PRESET}`,
-      action: () => void liveCwd(id).then((cwd) => runFork(target.commentId, cwd, contextSync)),
-    }))),
-  );
-  const forkPaint = !contextQueue || !turnMarks ? undefined : new TerminalForkRender(contextQueue, {
-    livePane: forkRender.livePane,
-    placedForks: () => turnMarks.placedForks,
-    capture: (target) => invoke<string>(commands.boop_mux.boopMuxCapture, { target, socket: null }),
-  });
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, pane, paneHost, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, cmdClickGesture, pinnedSelection: pane?.pinned, harness, paneSession: null, outputTail: "" });
-  if (pane) {
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, view, paneHost,
+    cmdClickGesture, pendingSelections: new Map(), harness, paneSession: null, outputTail: "" });
+  if (view && paneHost) {
     const tab = tabs.get(id)!;
     tab.paneEffects = merge(
-      pane.effects,
-      pane.paneSession.$.pipe(tap((state) => setPaneSessionBinding(id, state.data ?? null)), map(() => void 0)),
-      pane.wheel.activity.$.pipe(tap(() => diagrams?.viewportScrolled()), map(() => void 0)),
-      pane.pinned.copy.$.pipe(tap((text) => {
-        if (text) void navigator.clipboard.writeText(text).catch(() => {});
-      }), map(() => void 0)),
+      view.effects,
+      merge(
+        view.pane.paneSession.$.pipe(tap((state) => setPaneSessionBinding(id, state.data ?? null)), map(() => void 0)),
+        view.pane.pinned.copy.$.pipe(tap((text) => {
+          if (text) void navigator.clipboard.writeText(text).catch(() => {});
+        }), map(() => void 0)),
+        view.turnMarks.menuRequested.$.pipe(filter((request) => request !== undefined), tap((request) =>
+          showContextMenu(request.clientX, request.clientY, forkMenuTargets(request.entries).map((target) => ({
+            label: `Fork "${target.label}" → ${FORK_PRESET}`,
+            action: () => void liveCwd(id).then((cwd) => runFork(target.commentId, cwd, view.contextSync)),
+          })))), map(() => void 0)),
+        view.turnPanel.favoriteToggle.$.pipe(filter((target) => target !== undefined), tap((target) => {
+          void toggleTurnFavorite(target);
+        }), map(() => void 0)),
+        view.turnPanel.tagEdit.$.pipe(filter((target) => target !== undefined), tap((target) => {
+          void editTurnTags(target);
+        }), map(() => void 0)),
+        view.contextSync.selectionWritten.$.pipe(filter((written) => written !== undefined), tap((written) => {
+          tab.pendingSelections.get(written.clientId)?.(written.commentId);
+          tab.pendingSelections.delete(written.clientId);
+        }), map(() => void 0)),
+        view.agentSquares.gutterChanged.$.pipe(tap(() => refitForGutter(tab)), map(() => void 0)),
+        view.agentSquares.painted.$.pipe(filter((detail) => detail !== undefined), tap((detail) =>
+          liveProbe.record({ kind: "render", name: "squares.frame", detail })), map(() => void 0)),
+      ).pipe(takeUntil(paneHost.paneClosed.$.pipe(filter(Boolean)))),
     ).subscribe();
     void sessionsForTab(id).then((sessions) => {
-      if (tabs.get(id) === tab) paneHost?.tabSessionIds.$(sessions.map((session) => session.sessionId));
+      if (tabs.get(id) === tab) paneHost.tabSessionIds.$(sessions.map((session) => session.sessionId));
     });
+  } else if (overlay) {
+    tabs.get(id)!.paneEffects = overlay.effects.subscribe();
   }
-  applyTurnDebugOverlay(tabs.get(id)!);
-  applyAgentSquares(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
   el.dataset.harnessConfidence = harness.confidence;
 
@@ -1152,8 +1064,8 @@ export function openTab(
           navigator.clipboard.writeText(term.getSelection()).catch(console.error);
           return false;
         }
-        if (pane?.pinned.text.$()) {
-          navigator.clipboard.writeText(pane.pinned.text.$()).catch(console.error);
+        if (view?.pane.pinned.text.$()) {
+          navigator.clipboard.writeText(view.pane.pinned.text.$()).catch(console.error);
           return false;
         }
         void invoke<string>(commands.pty.tmuxBuffer)
@@ -1245,10 +1157,8 @@ export function onTermShown(id: string) {
   });
   requestAnimationFrame(() => {
     t.fit.fit();
-    t.diagrams?.activate();
-    t.contextQueue?.activate();
-    t.contextSync?.activate();
-    t.turnDebugOverlay?.schedule();
+    t.view?.diagramInputs.activate.$(undefined);
+    t.view?.contextSync.refresh.$(undefined);
     invoke("resize_pty", {
       id, cols: t.term.cols, rows: t.term.rows, ...cellDims(t.term),
     }).catch(() => {});
@@ -1297,18 +1207,10 @@ export function onTermClosed(id: string) {
   const t = tabs.get(id);
   if (!t) return;
   const name = t.name;
-  t.overlay?.dispose();
-  t.diagrams?.dispose();
-  t.structured?.dispose();
-  t.forkPaint?.dispose();
-  t.turnMarks?.dispose();
-  t.hoverCheck?.dispose();
-  t.contextSync?.dispose();
-  t.contextQueue?.dispose();
   t.paneHost?.paneClosed.$(true);
-  t.paneEffects?.unsubscribe();
-  t.turnDebugOverlay?.dispose();
-  void t.agentSquares?.dispose();
+  if (!t.view) t.paneEffects?.unsubscribe();
+  for (const resolve of t.pendingSelections.values()) resolve(null);
+  t.pendingSelections.clear();
   t.cmdClickGesture?.dispose();
   t.term.dispose();
   t.el.remove();
@@ -1367,31 +1269,32 @@ export function pasteToActive(data: string) {
 /// panes.
 export function termSelectionText(id: string): string {
   const tab = tabs.get(id);
-  return tab?.term.getSelection() || tab?.pinnedSelection?.text.$() || "";
+  return tab?.term.getSelection() || tab?.view?.pane.pinned.text.$() || "";
 }
 
 /// Capture before a menu can blur the terminal or a TUI repaint clears the pin.
 export function terminalSelectionSnapshot(id: string) {
   const tab = tabs.get(id);
   const text = termSelectionText(id);
-  if (!tab?.contextQueue || !text) return null;
+  if (!tab?.view || !text) return null;
   const rows = selectionRows(tab);
-  return tab.contextQueue.snapshotFor(text, rows[0], rows[1]);
+  return { text, turnIds: turnsAcrossRange(tab.view.pane.visibility.state.visible.$(), rows[0], rows[1]) };
 }
 
 export function askAboutSelection(id: string, snapshot = terminalSelectionSnapshot(id)) {
   const tab = tabs.get(id);
-  if (!tab?.contextQueue || !snapshot) return;
-  const queued = tab.contextQueue.addSelection(snapshot);
+  if (!tab?.view || !snapshot) return;
+  const queued = snapshot.text ? `selection:${crypto.randomUUID()}` : null;
+  if (queued) tab.view.contextQueue.add.$({ ...snapshot, id: queued });
   tab.paneHost?.selectionClear.$(undefined);
-  if (queued) tab.contextQueue.focusNote(queued);
+  if (queued) tab.view.contextQueue.focusNote.$(queued);
   else tab.term.focus();
 }
 
 /// The buffer rows a selection covers: the pinned overlay's own rows where it
 /// holds the selection, else the whole viewport.
 function selectionRows(tab: Tab): readonly [number, number] {
-  const pinned = tab.pane?.runtime.selection.selection.$();
+  const pinned = tab.view?.pane.runtime.selection.selection.$();
   return pinned
     ? [Math.min(pinned.anchor.row, pinned.focus.row), Math.max(pinned.anchor.row, pinned.focus.row)] as const
     : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
@@ -1402,9 +1305,9 @@ function selectionRows(tab: Tab): readonly [number, number] {
 export async function commentForSelection(id: string, note?: string): Promise<number | null> {
   const tab = tabs.get(id);
   const text = termSelectionText(id);
-  if (!tab?.contextQueue || !tab.contextSync || !text) return null;
+  if (!tab?.view || !text) return null;
   const rows = selectionRows(tab);
-  const snapshot = tab.contextQueue.snapshotFor(text, rows[0], rows[1]);
+  const snapshot = { text, turnIds: turnsAcrossRange(tab.view.pane.visibility.state.visible.$(), rows[0], rows[1]) };
   tab.paneHost?.selectionClear.$(undefined);
   tab.term.clearSelection();
   const item: PromptContextItem = {
@@ -1415,14 +1318,17 @@ export async function commentForSelection(id: string, note?: string): Promise<nu
     enabled: true,
     note: note?.trim() || undefined,
   };
-  return (await tab.contextSync.sendSelection(item)) || null;
+  return new Promise<number | null>((resolve) => {
+    tab.pendingSelections.set(item.id, resolve);
+    tab.view!.contextSync.sendSelection.$(item);
+  });
 }
 
 /// Select text, right-click, pick a preset: the comment row the fork verb keys
 /// off is written here, sent, and forked in one step the reader never sees.
 export async function forkSelection(id: string, preset: string, note?: string) {
   const tab = tabs.get(id);
-  if (!tab?.contextQueue || !tab.contextSync || !termSelectionText(id)) return;
+  if (!tab?.view || !termSelectionText(id)) return;
   const commentId = await commentForSelection(id, note);
   if (!commentId) {
     flashStatus("fork: the selection did not store");
@@ -1432,7 +1338,7 @@ export async function forkSelection(id: string, preset: string, note?: string) {
   forkRender.lastPreset.$(preset);
   const lane = await spawnFork(commentId, preset, await liveCwd(id));
   if (lane) openForkPanel(lane, preset);
-  tab.contextSync.activate();
+  tab.view.contextSync.refresh.$(undefined);
 }
 
 /// Ask for the note with the shared tag prompt, then fork. Esc or empty forks

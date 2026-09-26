@@ -24,9 +24,8 @@ export default defineConfig({
     include: ["scripts/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx", "extension/src/**/*.test.ts"],
     restoreMocks: true,
     unstubGlobals: true,
-    // marbler's dist side-effect-imports its css; inlining routes that through
-    // vite's transform, which stubs it, instead of node's ESM loader, which
-    // rejects the .css extension.
-    server: { deps: { inline: [/@hafley66\/marbler/, /@hafley66\/md/] } },
+    // marbler, md, and boop-xterm load CSS through package imports. Inlining
+    // routes those imports through Vite's transform instead of Node's loader.
+    server: { deps: { inline: [/@hafley66\/marbler/, /@hafley66\/md/, /@hafley66\/boop-xterm/] } },
   },
 });

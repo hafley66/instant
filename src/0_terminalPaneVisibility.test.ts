@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { Terminal } from "@xterm/xterm";
-import { createBoopXtermPane, type BoopXtermPorts, type HarnessId } from "@hafley66/boop-xterm";
+import { createBoopXtermPane, type BoopXtermPorts, type DiagramInference, type HarnessId, type SquaresOptions } from "@hafley66/boop-xterm";
 import { Endpoint, Signal, type Serializable } from "@hafley66/signals";
 import { of } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
@@ -20,6 +20,17 @@ function ports() {
     boop_sync_session: endpoint("boop_sync_session"),
     boop_locate_turns: endpoint("boop_locate_turns"),
     scroll_session: endpoint("scroll_session"),
+    boop_turn_comments: endpoint("boop_turn_comments"),
+    boop_turn_annotations: endpoint("boop_turn_annotations"),
+    boop_turn_comment_forks: endpoint("boop_turn_comment_forks"),
+    boop_turn_comment_upsert: endpoint("boop_turn_comment_upsert"),
+    boop_turn_comment_delete: endpoint("boop_turn_comment_delete"),
+    boop_turn_comments_sent: endpoint("boop_turn_comments_sent"),
+    squares_watch: endpoint("squares_watch"),
+    squares_unwatch: endpoint("squares_unwatch"),
+    boop_mux_exit_copy_mode: endpoint("boop_mux_exit_copy_mode"),
+    write_pty: endpoint("write_pty"),
+    "squares-update": of(),
     paneVisible,
     paneClosed,
     harness: Signal<HarnessId | null>(null),
@@ -27,6 +38,18 @@ function ports() {
     tabSessionIds: Signal<string[]>([]),
     scanRequested: Signal<void>(),
     selectionClear: Signal<void>(),
+    inlineDiagrams: Signal(false),
+    diagramInference: Signal<DiagramInference>("labels"),
+    inlineStructuredSelectors: Signal(false),
+    structuredOverlayEnabled: Signal(false),
+    turnDebugEnabled: Signal(false),
+    agentSquaresEnabled: Signal(false),
+    squaresOptions: Signal<SquaresOptions>({ mode: "relative", userKeep: 4 }),
+    favoriteSources: Signal<ReadonlySet<string>>(new Set<string>()),
+    turnTags: Signal<ReadonlyMap<string, readonly string[]>>(new Map<string, readonly string[]>()),
+    forkLivePane: Signal(false),
+    tabName: Signal("pane"),
+    sessionIds: Signal<string[]>([]),
   };
   return { ...value, paneVisible, paneClosed };
 }

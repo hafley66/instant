@@ -1020,19 +1020,7 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   overflow: hidden;
   background: var(--term-bg);
 }
-/* xterm v6 (DOM renderer) sizes .xterm to its content (.xterm-screen =
-   rows * cellHeight, set by FitAddon). Forcing height:100% here made .xterm
-   taller than the screen (a 2px+ gap), and .xterm-viewport is now a vestigial
-   absolute background layer (the real scroll container is .xterm-scrollable-
-   element). Both rules are v5-era leftovers. */
-.term-diagrams {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 4;
-}
-/* --- pinned terminal selection --- */
+/* The pinned selection belongs to the wave 2 pane model. */
 .term-pinned-root {
   position: absolute;
   inset: 0;
@@ -1046,331 +1034,42 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   box-shadow: inset 0 0 0 1px rgba(139, 213, 255, .55);
   border-radius: 2px;
 }
-/* --- end pinned terminal selection --- */
-
-.term-context-root {
-  position: absolute;
-  inset: 0;
-  z-index: 7;
-  pointer-events: none;
-  font: 11px/1.3 Menlo, Monaco, monospace;
+/* Instant skin values supplied to boop-xterm's theme tokens. */
+.term-host {
+  --boop-xterm-gutter-check-size: 14px;
+  --boop-xterm-context-mark-fg: var(--accent);
+  --boop-xterm-context-mark-hover-bg: color-mix(in srgb, var(--accent) 18%, transparent);
+  --boop-xterm-context-queue-bg: var(--panel-bg);
+  --boop-xterm-context-queue-fg: var(--panel-fg);
+  --boop-xterm-context-queue-border: var(--frame-dark);
+  --boop-xterm-context-item-border: color-mix(in srgb, var(--frame-dark) 80%, transparent);
+  --boop-xterm-context-item-bg: color-mix(in srgb, var(--term-bg) 55%, transparent);
+  --boop-xterm-context-check-bg: color-mix(in srgb, var(--term-bg) 82%, white);
+  --boop-xterm-context-check-border: color-mix(in srgb, var(--accent) 72%, white);
+  --boop-xterm-context-check-fg: var(--accent);
+  --boop-xterm-context-quote-bg: color-mix(in srgb, var(--term-bg) 85%, transparent);
+  --boop-xterm-context-quote-fg: color-mix(in srgb, var(--term-fg) 85%, transparent);
+  --boop-xterm-context-note-bg: var(--term-bg);
+  --boop-xterm-context-note-fg: var(--term-fg);
+  --boop-xterm-fork-border: var(--accent);
+  --boop-xterm-fork-bg: var(--panel-bg);
+  --boop-xterm-fork-fg: var(--panel-fg);
+  --boop-xterm-fork-pane-bg: color-mix(in srgb, var(--term-bg) 88%, black);
+  --boop-xterm-fork-header-fg: var(--accent);
+  --boop-xterm-fork-header-border: color-mix(in srgb, var(--frame-dark) 70%, transparent);
+  --boop-xterm-panel-bg: var(--panel-bg);
+  --boop-xterm-panel-fg: var(--panel-fg);
+  --boop-xterm-panel-border: var(--frame-dark);
+  --boop-xterm-panel-body-bg: color-mix(in srgb, var(--term-bg) 85%, transparent);
+  --boop-xterm-panel-body-fg: color-mix(in srgb, var(--term-fg) 88%, transparent);
+  --boop-xterm-panel-body-border: color-mix(in srgb, var(--panel-fg) 30%, transparent);
+  --boop-xterm-panel-star-active: var(--accent);
+  --boop-xterm-panel-hover-bg: color-mix(in srgb, var(--panel-fg) 12%, var(--panel-bg));
+  --boop-xterm-panel-muted-fg: color-mix(in srgb, var(--panel-fg) 72%, transparent);
+  --boop-xterm-structured-modal-bg: var(--panel-bg);
+  --boop-xterm-structured-modal-fg: var(--panel-fg);
+  --boop-xterm-structured-modal-border: var(--frame-dark);
 }
-.term-context-gutter {
-  position: absolute;
-  inset: 0;
-}
-.term-context-structured-check,
-.term-context-hover-check,
-.term-context-mark,
-.term-context-queue {
-  pointer-events: auto;
-}
-/* The hover checkbox is the structured one, dimmer until checked, following
-   the pointer down the gutter. */
-.term-context-root input.term-context-hover-check { opacity: .55; }
-.term-context-root input.term-context-hover-check:hover,
-.term-context-root input.term-context-hover-check:checked { opacity: 1; }
-/* A sent comment painted back on the row it quoted. */
-.term-context-mark {
-  position: absolute;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 2px;
-  background: transparent;
-  color: var(--accent);
-  font: 12px/14px Menlo, Monaco, monospace;
-  cursor: pointer;
-  opacity: .8;
-}
-.term-context-mark:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 18%, transparent); }
-/* A comment fork drawn under the row it was forked from: the overlay shape
-   (collapsed header, click to expand) and the child pane shape. */
-.term-fork-layer { position: absolute; inset: 0; }
-.term-fork {
-  position: absolute;
-  pointer-events: auto;
-  overflow: hidden;
-  border: 1px solid var(--accent);
-  border-radius: 3px;
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-  font: 11px/16px Menlo, Monaco, monospace;
-  box-shadow: 0 6px 18px rgb(0 0 0 / .55);
-  z-index: 3;
-}
-.term-fork[data-shape="pane"] {
-  border-color: #34d399;
-  background: color-mix(in srgb, var(--term-bg) 88%, black);
-}
-.term-fork[data-state="dead"] { border-color: #b45309; }
-.term-fork-header {
-  display: block;
-  width: 100%;
-  padding: 0 6px;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  text-align: left;
-  white-space: pre;
-  cursor: pointer;
-}
-.term-fork[data-shape="pane"] .term-fork-header {
-  color: #34d399;
-  border-bottom: 1px solid color-mix(in srgb, var(--frame-dark) 70%, transparent);
-  cursor: default;
-}
-.term-fork-body {
-  margin: 0;
-  padding: 0 6px 3px;
-  white-space: pre;
-  overflow: hidden;
-}
-.term-context-queue-status {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #e2a65a;
-  font-size: 10px;
-}
-.term-context-queue[data-sending="true"] header button { opacity: .6; }
-.term-context-root input.term-context-structured-check,
-.term-context-root input.term-context-hover-check {
-  position: absolute;
-  opacity: 1;
-  margin: 1px 0 0;
-  width: 14px;
-  height: 14px;
-  appearance: none;
-  border: 1px solid color-mix(in srgb, var(--accent) 72%, white);
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--term-bg) 82%, white);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--term-bg) 65%, transparent);
-}
-.term-context-root input.term-context-structured-check:checked::after,
-.term-context-root input.term-context-hover-check:checked::after {
-  content: "✓";
-  display: block;
-  color: var(--accent);
-  font: bold 12px/11px Menlo, Monaco, monospace;
-  text-align: center;
-}
-.term-context-selection-add {
-  border: 1px solid var(--accent);
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-}
-.term-context-queue {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  width: min(420px, calc(100% - 20px));
-  max-height: 52%;
-  overflow: auto;
-  padding: 11px 12px 12px;
-  border: 1px solid var(--frame-dark);
-  border-radius: 6px;
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-  box-shadow: 0 6px 22px rgb(0 0 0 / .34);
-}
-.term-context-queue header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 8px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--frame-dark) 70%, transparent);
-}
-.term-context-queue-title {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .09em;
-  opacity: .72;
-}
-.term-context-queue header button {
-  padding: 4px 14px;
-  border: 1px solid var(--frame-dark);
-  border-radius: 4px;
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-  font: inherit;
-  cursor: pointer;
-}
-.term-context-queue header button:hover { background: color-mix(in srgb, var(--panel-fg) 12%, var(--panel-bg)); }
-
-/* One queued slice: which turn it came from, the quote as read, and the note
-   that says what to do with it. */
-.term-context-queue-item {
-  padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, var(--frame-dark) 80%, transparent);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--term-bg) 55%, transparent);
-}
-.term-context-queue-item + .term-context-queue-item { margin-top: 8px; }
-.term-context-queue-item[data-disabled="true"] { opacity: .45; }
-.term-context-queue-meta {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 7px;
-}
-.term-context-queue-turn {
-  padding: 1px 7px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  font-size: 10px;
-  letter-spacing: .04em;
-  white-space: nowrap;
-}
-.term-context-queue-turn-none { color: color-mix(in srgb, var(--panel-fg) 55%, transparent); }
-.term-context-queue-remove {
-  margin-left: auto;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  opacity: .5;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-.term-context-queue-remove:hover { opacity: 1; background: color-mix(in srgb, var(--panel-fg) 15%, transparent); }
-.term-context-queue-quote {
-  max-height: 84px;
-  margin: 0 0 7px;
-  padding: 6px 8px;
-  overflow: auto;
-  border-left: 2px solid color-mix(in srgb, var(--panel-fg) 35%, transparent);
-  background: color-mix(in srgb, var(--term-bg) 85%, transparent);
-  color: color-mix(in srgb, var(--term-fg) 85%, transparent);
-  font: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.term-context-queue textarea {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-height: 40px;
-  max-height: 110px;
-  padding: 6px 8px;
-  resize: vertical;
-  border: 1px solid var(--frame-dark);
-  border-radius: 4px;
-  background: var(--term-bg);
-  color: var(--term-fg);
-  font: inherit;
-}
-.term-context-queue textarea::placeholder { opacity: .45; }
-.term-diagram {
-  position: absolute;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 3px 8px;
-  color: var(--panel-fg);
-  background: var(--term-bg);
-  pointer-events: none;
-}
-/* Labels are the only clickable part of the click-through diagram layer: a
-   ⌘-click on one routes its text as a token (clickrules.ts). */
-.term-diagram svg text,
-.term-diagram svg tspan {
-  pointer-events: auto;
-}
-.term-diagram[data-diagram-theme="light"] {
-  color: #111827;
-  background: #f8fafc;
-}
-.term-diagram[data-diagram-theme="dark"] {
-  color: #f8fafc;
-  background: #0f172a;
-}
-.term-diagram svg {
-  display: block;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  width: 100% !important;
-  height: 100% !important;
-}
-.diagram-lightbox .diagram-vector-stage > svg {
-  max-width: none !important;
-  max-height: none !important;
-}
-.term-structured-overlays {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 5;
-}
-.term-turn-debug {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 8;
-}
-.term-turn-debug-row {
-  position: absolute;
-  box-sizing: border-box;
-  min-width: 106px;
-  padding: 0 5px;
-  white-space: pre;
-  font: 10px Menlo, Monaco, monospace;
-  text-align: left;
-  background: rgba(0, 0, 0, 0.82);
-  border-radius: 2px 0 0 2px;
-  pointer-events: none;
-}
-.term-turn-debug-row[data-span="body"] {
-  width: 2px;
-  min-width: 2px;
-  padding: 0;
-  overflow: hidden;
-  font-size: 0;
-  background: transparent;
-  border-radius: 0;
-}
-.term-structured-overlay {
-  position: absolute;
-  border: 1px solid #5c9f72;
-  color: #b9f6ca;
-  background: color-mix(in srgb, var(--term-bg) 92%, #235c35);
-  font: 12px Menlo, Monaco, monospace;
-  text-align: left;
-  padding: 4px 10px;
-  pointer-events: auto;
-}
-.term-structured-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: grid;
-  place-items: center;
-  background: #0008;
-}
-.term-structured-modal section {
-  max-width: min(900px, 90vw);
-  max-height: 80vh;
-  overflow: auto;
-  color: var(--panel-fg);
-  background: var(--panel-bg);
-  border: 2px ridge var(--frame-dark);
-  padding: 8px;
-}
-.term-structured-modal header { display: flex; justify-content: space-between; margin-bottom: 8px; }
-.term-structured-modal table { border-collapse: collapse; min-width: 480px; }
-.term-structured-modal th, .term-structured-modal td { border: 2px ridge var(--frame-dark); padding: 6px 10px; text-align: left; }
-.term-structured-modal ul { margin: 0; padding: 8px 28px; }
 /* Panels now live in dock zones (see .panel / .zone); visibility is the active
    tab's .hidden toggle, not a body[data-panel] swap. */
 .spy-spacer {
