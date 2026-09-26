@@ -27,7 +27,7 @@
     "test:replay": "pnpm test:replay:corpus && pnpm test:replay:terminal && pnpm test:replay:conversation && pnpm test:replay:agents"
   },
   "dependencies": {
-    "@hafley66/boop-xterm": "0.0.1-dev.1790445386724",
+    "@hafley66/boop-xterm": "0.0.1-dev.1790427854139",
     "@hafley66/d2": "0.1.0-dev.1790445386724",
     "@hafley66/grapht": "0.1.0-dev.1790445386724",
     "@hafley66/grapht-model": "0.1.0-dev.1790445386724",

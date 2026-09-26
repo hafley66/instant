@@ -1,4 +1,5 @@
-// Defaults OFF: the package overlay watches this signal before mounting.
+// Defaults OFF: while `on` reads false the overlay object is never constructed,
+// so 0_turnDebugOverlay.ts holds no subscription and no listener.
 import { setting } from "./0_persistedSetting"
 
 export const turnDebug = {
