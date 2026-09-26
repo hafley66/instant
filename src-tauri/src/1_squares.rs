@@ -708,6 +708,38 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
 mod tests {
     use super::*;
 
+    /// Live pane -> boop-xterm fixture: the `squares-update` frame plus the same capture with SGR.
+    /// `SQUARES_TARGET=%397 SQUARES_SESSION=<id> SQUARES_OUT=<file.json> cargo test --lib record_live_pane -- --ignored`
+    #[test]
+    #[ignore]
+    fn record_live_pane() {
+        let target = std::env::var("SQUARES_TARGET").expect("SQUARES_TARGET");
+        let session = std::env::var("SQUARES_SESSION").expect("SQUARES_SESSION");
+        let out = std::env::var("SQUARES_OUT").expect("SQUARES_OUT");
+        let options = SquaresOptions::default().merged();
+        let window = pane_window(&target, None).expect("pane window");
+        let depth = capture_depth(Some(&window));
+        let strip = project(&session, &target, None, &options).expect("project");
+        let colored = tmux_command(None)
+            .args(["capture-pane", "-p", "-e", "-S", &format!("-{depth}"), "-t", &target])
+            .run()
+            .expect("capture -e");
+        let colored: Vec<String> = String::from_utf8_lossy(&colored.stdout).lines().map(str::to_owned).collect();
+        let width = tmux_command(None)
+            .args(["display-message", "-p", "-t", &target, "#{pane_width}"])
+            .run()
+            .expect("pane width");
+        let fixture = serde_json::json!({
+            "target": target,
+            "cols": String::from_utf8_lossy(&width.stdout).trim().parse::<usize>().expect("width"),
+            "height": window.height,
+            "scroll": window.scroll,
+            "rows": colored,
+            "strip": strip,
+        });
+        std::fs::write(&out, serde_json::to_string_pretty(&fixture).expect("json")).expect("write");
+    }
+
     /// bb6c4ed3 dropped `-J` so a capture entry is one physical pane row; a
     /// joined capture would shift every square below a wrapped line.
     #[test]
