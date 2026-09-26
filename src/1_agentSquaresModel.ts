@@ -182,8 +182,8 @@ export function squaresOf(frame: Strip, geometry: SquareGeometry, recent = 0): A
       square.y = start + index * SQUARE_STEP
     })
   }
-  const before = squares.find((square) => square.id === layout.gap?.beforeId)
-  const after = squares.find((square) => square.id === layout.gap?.afterId)
+  const before = squares.find((square) => square.id === layout.gap?.before_id)
+  const after = squares.find((square) => square.id === layout.gap?.after_id)
   const gapY = before && after ? (before.y + after.y) / 2
     : before ? before.y + SQUARE_STEP / 2 : after ? after.y - SQUARE_STEP / 2 : geometry.track / 2
   return {

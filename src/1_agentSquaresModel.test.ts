@@ -45,10 +45,10 @@ const turn = (id: string, role: string, said: string, ts: number): StripTurn => 
   role,
   said,
   id,
-  bufferStart: 0,
-  bufferEnd: 0,
-  anchorStart: 0,
-  anchorEnd: 0,
+  buffer_start: 0,
+  buffer_end: 0,
+  anchor_start: 0,
+  anchor_end: 0,
   confidence: "anchored",
 })
 
@@ -58,6 +58,7 @@ const TURNS: StripTurn[] = [
 ]
 
 const frame = (layout: StripLayout, pinned: StripTurn[] = [], turns: StripTurn[] = TURNS): Strip => ({
+  pane: "%1",
   session: "s1",
   window: null,
   at: 1_700_000_000_000,

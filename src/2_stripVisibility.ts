@@ -14,7 +14,7 @@ export function stripSpans(frame: Strip, viewportY: number): TurnSpan[] {
   if (!window) return []
   const shift = viewportY - window.top
   return frame.turns
-    .filter((turn) => turn.confidence !== "pinned" && turn.bufferEnd >= window.top && turn.bufferStart <= window.bottom)
+    .filter((turn) => turn.confidence !== "pinned" && turn.buffer_end >= window.top && turn.buffer_start <= window.bottom)
     .map((turn) => ({
       session: turn.session,
       harness: turn.harness,
@@ -23,13 +23,13 @@ export function stripSpans(frame: Strip, viewportY: number): TurnSpan[] {
       role: turn.role,
       said: turn.said,
       id: turn.id,
-      bufferStart: turn.bufferStart + shift,
-      bufferEnd: turn.bufferEnd + shift,
-      anchorStart: turn.anchorStart + shift,
-      anchorEnd: turn.anchorEnd + shift,
+      bufferStart: turn.buffer_start + shift,
+      bufferEnd: turn.buffer_end + shift,
+      anchorStart: turn.anchor_start + shift,
+      anchorEnd: turn.anchor_end + shift,
       confidence: turn.confidence as "anchored" | "extended",
-      clippedAbove: turn.bufferStart < window.top,
-      clippedBelow: turn.bufferEnd > window.bottom,
+      clippedAbove: turn.buffer_start < window.top,
+      clippedBelow: turn.buffer_end > window.bottom,
     }))
 }
 

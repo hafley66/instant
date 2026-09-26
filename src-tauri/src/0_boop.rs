@@ -5,8 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-#[path = "0a_boopPresentation.rs"]
-mod presentation;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct BoopTurn {
@@ -198,11 +196,6 @@ fn sync_session(session: &str, harness: &str) -> Result<BoopSyncStat, String> {
     }
 }
 
-/// Turn visibility matches the visible pane against recent turns; a session's
-/// full history (2806 rows / 9.4MB measured 2026-08-22) re-read on every scan
-/// was instant's top CPU cost. Read only the newest window.
-const TURN_WINDOW: u64 = 300;
-
 pub(crate) fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
     turns_from(&open_store_ro()?, session)
 }
@@ -211,23 +204,7 @@ pub(crate) fn read_turns(session: &str) -> Result<Vec<BoopTurn>, String> {
 /// several times a second while its pane writes, and the session's attribute
 /// rides the same frame, so a caller with both to read opens the store once.
 pub(crate) fn turns_from(store: &Store, session: &str) -> Result<Vec<BoopTurn>, String> {
-    let last_turn: Option<u64> = store
-        .connection()
-        .query_row(
-            "SELECT MAX(t.turn) FROM agent_turn t
-             WHERE t.session_id = (SELECT id FROM dict_session WHERE value = ?1)",
-            [session],
-            |row| row.get::<_, Option<i64>>(0),
-        )
-        .map_err(|error| error.to_string())?
-        .map(|turn| turn.max(0) as u64);
-    let query = TurnQuery {
-        session: Some(session.to_string()),
-        turn_from: last_turn.map(|turn| turn.saturating_sub(TURN_WINDOW)),
-        ..Default::default()
-    };
-    let mut rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
-    presentation::classify(store, &mut rows)?;
+    let rows = boop_harness::pane::turns(store, session).map_err(|error| error.to_string())?;
     let relations = rows
         .first()
         .map(|row| cached_live_relations(&row.harness))
@@ -267,7 +244,7 @@ fn read_recent_turns(since: i64, harness: &str) -> Result<Vec<BoopTurn>, String>
         ..Default::default()
     };
     let mut rows = store.turn_rows(&query).map_err(|error| error.to_string())?;
-    presentation::classify(&store, &mut rows)?;
+    boop_harness::pane::classify(&store, &mut rows).map_err(|error| error.to_string())?;
     let relations = live_relations(harness);
     Ok(rows
         .into_iter()

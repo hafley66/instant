@@ -103,16 +103,23 @@ async fn the_strip_rides_the_events_channel() {
     // Let the server register the subscription before the push.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let rows = ["❯ hi".to_owned(), String::new(), "⏺ done".to_owned()];
+    let text = "❯ hi\n\n⏺ done\n";
+    let size = boop_mux::TerminalSize { columns: 40, rows: 2 };
+    let snapshot = boop_mux::TerminalSnapshot {
+        target: boop_mux::TerminalTarget { host: "tmux".into(), terminal: "%1".into(), incarnation: 1 },
+        generation: 0,
+        size,
+        screen: boop_mux::Screen::Primary,
+        history: boop_mux::History::Retained { rows: 1, capacity: 2000 },
+        cursor: None,
+        scroll: 0,
+        rows: boop_mux::rows_from_capture(text, text, size),
+    };
     let tags = std::collections::BTreeMap::from([("turn:s1:1".to_owned(), vec!["rust".to_owned()])]);
-    let strip = crate::squares::project_rows(
-        "s1",
-        &rows,
-        Vec::new(),
+    let strip = boop_harness::pane::PaneFrame {
         tags,
-        Some(crate::boop_tmux::PaneWindow { height: 2, scroll: 0 }),
-        &boop_turnstrip::Options::default(),
-    );
+        ..boop_harness::pane::project(&snapshot, "s1", Vec::new(), &boop_turnstrip::Options::default())
+    };
     let host: Arc<dyn Host> = host;
     crate::squares::publish(&host, &strip).expect("publish");
 

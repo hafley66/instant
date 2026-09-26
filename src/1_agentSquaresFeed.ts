@@ -31,13 +31,13 @@ export type StripTurn = {
   role: string
   said: string
   id: string
-  bufferStart: number
-  bufferEnd: number
-  anchorStart: number
-  anchorEnd: number
+  buffer_start: number
+  buffer_end: number
+  anchor_start: number
+  anchor_end: number
   /** `pinned` is a turn above the capture: it has no rows in the pane at all,
    *  so it says so rather than claiming an anchor, and its four offsets are 0. */
-  confidence: "anchored" | "extended" | "pinned"
+  confidence: "anchored" | "extended" | "pinned" | "listed"
 }
 
 /** One pushed frame. `tags` is keyed by source (`turn:<session>:<turn>`) and
@@ -50,6 +50,8 @@ export type StripTurn = {
  *  could not be read: the frame still carries spans and marks, and the strip
  *  draws nothing. */
 export type Strip = {
+  /** The tmux pane id the frame was read from. */
+  pane: string
   session: string
   at: number
   rows: number
@@ -61,7 +63,7 @@ export type Strip = {
   tags: Record<string, string[]>
   layout: StripLayout | null
   /** The capture rows the pane shows, inclusive: a turn's row on screen is
-   *  `bufferStart - window.top`. `null` whenever `layout` is. */
+   *  `buffer_start - window.top`. `null` whenever `layout` is. */
   window: { top: number; bottom: number } | null
 }
 
@@ -101,10 +103,10 @@ export type StripLayout =
     }
 
 export type ToolGap = {
-  beforeId: string | null
-  afterId: string | null
-  startRow: number
-  endRow: number
+  before_id: string | null
+  after_id: string | null
+  start_row: number
+  end_row: number
 }
 
 export type SquaresWatch = {
