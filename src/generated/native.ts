@@ -3,7 +3,8 @@
 import { firstValueFrom } from "rxjs";
 import type { Serializable } from "@hafley66/signals";
 import type {
-  BoopSyncStat, BoopTurn, LogicalLine, PaneSessionBinding, TurnSpan,
+  BoopSyncStat, BoopTurn, BoopTurnComment, BoopTurnCommentFork,
+  LogicalLine, PaneSessionBinding, SquaresOptions, TurnSpan,
 } from "@hafley66/boop-xterm";
 import type { Endpoint } from "@hafley66/signals";
 import { createRequestEndpoint } from "../reactive/0_requestTransport";
@@ -138,6 +139,16 @@ export type BoopXtermCommandIO = {
   boop_sync_session: { input: { session: string; harness: string }; output: BoopSyncStat };
   boop_locate_turns: { input: { lines: LogicalLine[]; turns: BoopTurn[] }; output: TurnSpan[] };
   scroll_session: { input: { name: string; up: boolean; lines: number }; output: void };
+  boop_turn_comments: { input: { tab: string; sessions: string[] }; output: BoopTurnComment[] };
+  boop_turn_annotations: { input: { sessions: string[] }; output: BoopTurnComment[] };
+  boop_turn_comment_forks: { input: { commentIds: number[] }; output: BoopTurnCommentFork[] };
+  boop_turn_comment_upsert: { input: { comment: BoopTurnComment }; output: number };
+  boop_turn_comment_delete: { input: { clientId: string }; output: void };
+  boop_turn_comments_sent: { input: { clientIds: string[] }; output: void };
+  squares_watch: { input: { pty: string; session: string; target: string; socket?: string; options: SquaresOptions }; output: void };
+  squares_unwatch: { input: { pty: string }; output: void };
+  boop_mux_exit_copy_mode: { input: { target: string; socket: string | null }; output: boolean };
+  write_pty: { input: { id: string; data: string }; output: void };
 };
 
 export function commandEndpoint<N extends keyof BoopXtermCommandIO>(
