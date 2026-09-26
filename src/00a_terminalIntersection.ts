@@ -1,9 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
+import type { LogicalLine } from "@hafley66/boop-xterm";
 import { merge, Observable, Subject, takeUntil } from "rxjs";
 import { invoke } from "./generated/native";
 import type { PaneSessionBinding } from "./0a_terminalHarnessBinding";
 
-export type LogicalLine = { text: string; start: number; end: number };
+export type { LogicalLine } from "@hafley66/boop-xterm";
 export type ViewportChange = {
   kind: "write" | "scroll" | "resize";
   cols: number;

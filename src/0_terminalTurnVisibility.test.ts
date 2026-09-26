@@ -12,7 +12,7 @@ import type { LogicalLine, ViewportChange, XtermViewport } from "./00a_terminalI
 import ompChaotic from "../labs/turn-identity/fixtures/omp-chaotic.json";
 import ompChaoticGolden from "../labs/turn-identity/fixtures/omp-chaotic.golden.json";
 import ompChaoticTurns from "../labs/turn-identity/fixtures/omp-chaotic.turns.json";
-import { boopContent, sourceLines } from "./0a_terminalTurnMatching";
+import { boopContent, sourceLines } from "@hafley66/boop-xterm";
 
 const turn = (turn: number, said: string): BoopTurn => ({
   session: "session-a", harness: "codex", turn, ts: turn, role: "assistant", said,

@@ -9,7 +9,7 @@ import {
   shiftSpans,
   TerminalScanShift,
   type TerminalRowGeometry,
-} from "./0_terminalRowGeometry";
+} from "@hafley66/boop-xterm";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
 import type { PromptContextItem } from "./1a_terminalContextQueue";
 

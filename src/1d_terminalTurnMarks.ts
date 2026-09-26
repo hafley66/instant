@@ -1,7 +1,7 @@
 import type { Signal as SignalOf } from "@hafley66/signals";
 import { Subscription } from "rxjs";
 import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
-import { gutterLeft, rowOnScreen, rowTop } from "./0_terminalRowGeometry";
+import { gutterLeft, rowOnScreen, rowTop } from "@hafley66/boop-xterm";
 import type { VisibleTurn } from "./0_terminalTurnVisibility";
 import type { TerminalContextQueue } from "./1a_terminalContextQueue";
 import { gutter_offset_px, type GutterPaint } from "./1a2_terminalContextGutter";

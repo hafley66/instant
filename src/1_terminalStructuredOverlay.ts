@@ -1,6 +1,6 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import type { Subscription } from "rxjs";
-import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import type { ProjectedTurnRegion } from "@hafley66/boop-xterm";
 import type { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
 
 type StructuredRegion = ProjectedTurnRegion & { kind: "table" | "list" };

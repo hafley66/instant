@@ -5,7 +5,7 @@ import { debounceTime, merge, Subject, tap, type Subscription } from "rxjs";
 import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
-import type { ProjectedTurnRegion } from "./00_terminalTurnRegions";
+import type { ProjectedTurnRegion } from "@hafley66/boop-xterm";
 import type { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
 
 export type DiagramLanguage = "mermaid" | "d2";

@@ -1,13 +1,13 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import type { Subscription } from "rxjs";
-import { regionAtBufferRow, type TurnRegionKind } from "./00_terminalTurnRegions";
+import { regionAtBufferRow, type TurnRegionKind } from "@hafley66/boop-xterm";
 import {
   bufferRowAtClientY,
   readRowGeometry,
   rowTop,
   shiftSpans,
   TerminalScanShift,
-} from "./0_terminalRowGeometry";
+} from "@hafley66/boop-xterm";
 import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
 // Type only: the card reaches `favorites` and through it the app's DOM modules,
 // and this overlay is imported by pure node unit tests (`rowTags`, `turnHue`,
