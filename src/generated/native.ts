@@ -2,6 +2,10 @@
 // Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
 import { firstValueFrom } from "rxjs";
 import type { Serializable } from "@hafley66/signals";
+import type {
+  BoopSyncStat, BoopTurn, LogicalLine, PaneSessionBinding, TurnSpan,
+} from "@hafley66/boop-xterm";
+import type { Endpoint } from "@hafley66/signals";
 import { createRequestEndpoint } from "../reactive/0_requestTransport";
 import {
   nativeCommandUrl,
@@ -125,6 +129,24 @@ export type CommandName =
   | "log_path"
   | "log_reveal";
 
+// Command payloads follow the Rust command parameters and serde field names.
+export type BoopXtermCommandIO = {
+  boop_mux_session: { input: { target: string; socket: string | null }; output: PaneSessionBinding | null };
+  boop_mux_capture: { input: { target: string; socket: string | null }; output: string };
+  boop_turns: { input: { session: string }; output: BoopTurn[] };
+  boop_turns_recent: { input: { since: number; harness: string }; output: BoopTurn[] };
+  boop_sync_session: { input: { session: string; harness: string }; output: BoopSyncStat };
+  boop_locate_turns: { input: { lines: LogicalLine[]; turns: BoopTurn[] }; output: TurnSpan[] };
+  scroll_session: { input: { name: string; up: boolean; lines: number }; output: void };
+};
+
+export function commandEndpoint<N extends keyof BoopXtermCommandIO>(
+  command: N,
+): Endpoint<BoopXtermCommandIO[N]["input"], BoopXtermCommandIO[N]["output"]>;
+export function commandEndpoint<I extends NativeCommandInput, O>(
+  command: keyof BoopXtermCommandIO,
+): Endpoint<I, O>;
+export function commandEndpoint<T = unknown>(command: CommandName): Endpoint<NativeCommandInput, T>;
 export function commandEndpoint<T = unknown>(
   command: CommandName,
 ) {
