@@ -47,7 +47,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     resumeFlag: "--resume", stableSessionIdFlag: "--session-id",
     hasExplicitSession: (s) => /\s--(?:resume|session-id|continue|from-pr)\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*Claude|(?:^|\n)\s*⏺\s+(?:I'll|I|Let|We)\b/.test(s),
-    resume: (sessionId) => `claude --resume ${sessionId}`,
+    resume: (sessionId) => `boop tui claude --bin claude -- --resume ${sessionId}`,
     lane: (brief, model) => interactiveLane("claude", "interactive", brief, model),
   },
   {
@@ -58,7 +58,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     resumeFlag: "--session",
     hasExplicitSession: (s) => /\s--session\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*╭─[^\n]*(?:OpenCode|Open Code)|(?:^|\n)\s*┃[^\n]*(?:OpenCode|Open Code)/.test(s),
-    resume: (sessionId) => `opencode --session ${sessionId}`,
+    resume: (sessionId) => `boop tui opencode --bin opencode -- --session ${sessionId}`,
     lane: (brief, requestedModel) => {
       const model = requestedModel ?? "openrouter/deepseek/deepseek-v4-flash-0731";
       return {
@@ -78,7 +78,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     resumeFlag: "--resume",
     hasExplicitSession: (s) => /\s(?:-r|--resume)(?:\s|=|$)/.test(s),
     matchesOutput: () => false,
-    resume: (sessionId) => `omp --resume ${sessionId}`,
+    resume: (sessionId) => `boop tui omp --bin omp -- --resume ${sessionId}`,
     lane: (brief, model) => interactiveLane("omp", "interactive", brief, model),
   },
   {
@@ -89,7 +89,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     resumeFlag: "resume",
     hasExplicitSession: (s) => /\s+resume(?:\s|$)/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*(?:OpenAI Codex|╭─[^\n]*Codex)/.test(s),
-    resume: (sessionId) => `codex resume ${sessionId}`,
+    resume: (sessionId) => `boop tui codex --bin codex -- resume ${sessionId}`,
     lane: (brief, model) => interactiveLane("codex", "interactive", brief, model),
   },
   {
@@ -100,7 +100,7 @@ export const harnessDefinitions: HarnessDefinition[] = [
     resumeFlag: "--session",
     hasExplicitSession: (s) => /\s--session\b/.test(s),
     matchesOutput: (s) => /(?:^|\n)\s*(?:Kimi Code|Moonshot AI)/.test(s),
-    resume: (sessionId) => `kimi --session ${sessionId}`,
+    resume: (sessionId) => `boop tui kimi --bin kimi -- --session ${sessionId}`,
     lane: (brief, model) => interactiveLane("kimi", "interactive", brief, model),
   },
 ];

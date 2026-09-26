@@ -71,3 +71,25 @@ describe("HarnessDefinition.lane", () => {
     `);
   });
 });
+
+describe("HarnessDefinition.resume", () => {
+  it("registers resumed Claude sessions with boop", () => {
+    expect(harnessDefinitionById.claude.resume("session-123")).toMatchInlineSnapshot(`"boop tui claude --bin claude -- --resume session-123"`);
+  });
+
+  it("registers resumed Codex sessions with boop", () => {
+    expect(harnessDefinitionById.codex.resume("session-123")).toMatchInlineSnapshot(`"boop tui codex --bin codex -- resume session-123"`);
+  });
+
+  it("registers resumed Kimi sessions with boop", () => {
+    expect(harnessDefinitionById.kimi.resume("session-123")).toMatchInlineSnapshot(`"boop tui kimi --bin kimi -- --session session-123"`);
+  });
+
+  it("registers resumed OMP sessions with boop", () => {
+    expect(harnessDefinitionById.omp.resume("session-123")).toMatchInlineSnapshot(`"boop tui omp --bin omp -- --resume session-123"`);
+  });
+
+  it("registers resumed OpenCode sessions with boop", () => {
+    expect(harnessDefinitionById.opencode.resume("session-123")).toMatchInlineSnapshot(`"boop tui opencode --bin opencode -- --session session-123"`);
+  });
+});
