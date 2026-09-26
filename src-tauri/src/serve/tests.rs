@@ -118,7 +118,7 @@ async fn the_strip_rides_the_events_channel() {
     let tags = std::collections::BTreeMap::from([("turn:s1:1".to_owned(), vec!["rust".to_owned()])]);
     let strip = boop_harness::pane::PaneFrame {
         tags,
-        ..boop_harness::pane::project(&snapshot, "s1", Vec::new(), &boop_turnstrip::Options::default())
+        ..boop_harness::pane::project(&snapshot, "s1", Vec::new(), &Default::default(), &boop_turnstrip::Options::default())
     };
     let host: Arc<dyn Host> = host;
     crate::squares::publish(&host, &strip).expect("publish");

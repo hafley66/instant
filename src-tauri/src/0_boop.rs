@@ -980,6 +980,7 @@ pub(crate) fn to_turnvis(turn: BoopTurn) -> boop_turnvis::BoopTurn {
         ts: turn.ts,
         role: turn.role,
         said: turn.said,
+        aliases: Vec::new(),
     }
 }
 
