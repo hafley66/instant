@@ -134,6 +134,9 @@ pub struct Strip {
     /// `None` only when the pane's height could not be read, so the client can
     /// tell "no strip" from "an empty strip".
     pub layout: Option<Layout>,
+    /// The capture rows the pane shows right now, inclusive: a turn's
+    /// `bufferStart - window.top` is its row on screen. `None` with `layout`.
+    pub window: Option<Viewport>,
 }
 
 /// The pane's own physical rows, without `-J`: a wrapped line stays one entry
@@ -200,6 +203,7 @@ pub fn project_rows(
     let pins = pinned_of(&turns, options);
     let pin_ids: Vec<String> = pins.iter().map(|turn| turn_id(turn)).collect();
     let listed = listed_of(&turns);
+    let visible_window = window.as_ref().and_then(|window| window_viewport(rows.len(), window));
     let layout = window.and_then(|window| {
         window_layout(&lines, &located, &pin_ids, &listed, rows.len(), window, options)
     });
@@ -244,6 +248,7 @@ pub fn project_rows(
         pinned,
         tags,
         layout,
+        window: visible_window,
     }
 }
 
@@ -350,16 +355,7 @@ fn window_layout(
     window: PaneWindow,
     options: &Options,
 ) -> Option<Layout> {
-    let height = window.height.min(rows);
-    if height == 0 {
-        return None;
-    }
-    let scroll = window.scroll.min(rows - height);
-    let bottom = (rows - 1 - scroll) as i64;
-    let viewport = Viewport {
-        top: bottom - height as i64 + 1,
-        bottom,
-    };
+    let viewport = window_viewport(rows, &window)?;
     let turn_rows: Vec<TurnRow> = located
         .iter()
         .map(|turn| boop_turnstrip::rows_of(lines, turn, viewport))
@@ -372,6 +368,18 @@ fn window_layout(
         viewport.top,
         options,
     ))
+}
+
+/// The capture rows a pane of `window.height` shows `window.scroll` rows up
+/// from the bottom of a capture of `rows` rows.
+fn window_viewport(rows: usize, window: &PaneWindow) -> Option<Viewport> {
+    let height = window.height.min(rows);
+    if height == 0 {
+        return None;
+    }
+    let scroll = window.scroll.min(rows - height);
+    let bottom = (rows - 1 - scroll) as i64;
+    Some(Viewport { top: bottom - height as i64 + 1, bottom })
 }
 
 /// One source per pushed turn, so the marks ride on the same frame.

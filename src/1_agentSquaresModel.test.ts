@@ -59,6 +59,7 @@ const TURNS: StripTurn[] = [
 
 const frame = (layout: StripLayout, pinned: StripTurn[] = [], turns: StripTurn[] = TURNS): Strip => ({
   session: "s1",
+  window: null,
   at: 1_700_000_000_000,
   rows: 40,
   turns,

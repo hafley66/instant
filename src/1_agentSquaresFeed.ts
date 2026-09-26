@@ -60,6 +60,9 @@ export type Strip = {
   pinned: StripTurn[]
   tags: Record<string, string[]>
   layout: StripLayout | null
+  /** The capture rows the pane shows, inclusive: a turn's row on screen is
+   *  `bufferStart - window.top`. `null` whenever `layout` is. */
+  window: { top: number; bottom: number } | null
 }
 
 /** One square's place in the strip, in the server's own numbers. */

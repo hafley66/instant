@@ -7,13 +7,14 @@ import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { commandEndpoint, commands, invoke } from "./generated/native";
 import { Signal, type Signal as SignalType } from "@hafley66/signals";
-import { merge, map, tap, type Subscription } from "rxjs";
+import { EMPTY, merge, map, tap, type Subscription } from "rxjs";
 import { createBoopXtermPane, type BoopXtermPane, type BoopXtermPorts, type HarnessId, type LineAnchorModel, type PinnedSelectionModel, type TurnVisibilityModel } from "@hafley66/boop-xterm";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
 import { TerminalStructuredOverlay } from "./1_terminalStructuredOverlay";
 import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
+import { stripVisibility } from "./2_stripVisibility";
 import { turnDebug } from "./0_turnDebugSettings";
 import { agentSquares, squaresOptions } from "./0_agentSquaresSettings";
 import { TerminalAgentSquares } from "./1_agentSquares";
@@ -787,7 +788,7 @@ export function openTab(
   const pane = ports ? createBoopXtermPane(term, el, {
     id, target: tmuxTarget ?? name, socket: null,
   }, ports) : undefined;
-  const turnVisibility = pane?.visibility;
+  const turnVisibility = pane ? stripVisibility(term, () => tabs.get(id)?.paneSession?.session) : undefined;
   const lineAnchors = pane?.anchors;
   const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
     term,
@@ -858,6 +859,7 @@ export function openTab(
     const tab = tabs.get(id)!;
     tab.paneEffects = merge(
       pane.effects,
+      turnVisibility?.effects ?? EMPTY,
       pane.paneSession.$.pipe(tap((state) => setPaneSessionBinding(id, state.data ?? null)), map(() => void 0)),
       pane.wheel.activity.$.pipe(tap(() => diagrams?.viewportScrolled()), map(() => void 0)),
       pane.pinned.copy.$.pipe(tap((text) => {

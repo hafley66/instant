@@ -7,6 +7,7 @@ import { squaresFeed, type Strip } from "./1_agentSquaresFeed"
 const frame = (session: string, rows: number): Strip => ({
   session,
   at: 1_700_000_000_000,
+  window: null,
   rows,
   turns: [
     {
@@ -130,6 +131,7 @@ describe("the strip's feed", () => {
               "turn": 2,
             },
           ],
+          "window": null,
         },
         {
           "at": 1700000000000,
@@ -197,6 +199,7 @@ describe("the strip's feed", () => {
               "turn": 2,
             },
           ],
+          "window": null,
         },
       ]
     `)
