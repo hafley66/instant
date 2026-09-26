@@ -8,7 +8,7 @@ import {
   shiftSpans,
   TerminalScanShift,
 } from "@hafley66/boop-xterm";
-import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
+import type { TurnVisibilityModel, VisibleTurn } from "@hafley66/boop-xterm";
 // Type only: the card reaches `favorites` and through it the app's DOM modules,
 // and this overlay is imported by pure node unit tests (`rowTags`, `turnHue`,
 // `shiftSpans`), so the class is loaded when a reader first clicks a row.
@@ -102,12 +102,12 @@ export class TerminalTurnDebugOverlay {
   constructor(
     readonly term: Terminal,
     readonly host: HTMLElement,
-    readonly projection: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
+    readonly projection: Pick<TurnVisibilityModel, "state" | "changes">,
   ) {
     this.root.className = "term-turn-debug";
     host.appendChild(this.root);
     this.scan = new TerminalScanShift(term);
-    this.subscription = projection.changes.subscribe(() => {
+    this.subscription = projection.changes.$.subscribe(() => {
       this.markScan();
       this.schedule();
     });
@@ -162,7 +162,7 @@ export class TerminalTurnDebugOverlay {
     if (!geometry) return;
     const cellHeight = geometry.cellHeight;
     const tags = rowTags(
-      shiftSpans(this.projection.visible, this.bufferShift()),
+      shiftSpans(this.projection.state.visible.$(), this.bufferShift()),
       geometry.viewportY,
       geometry.rows,
       this.pointerRow,
@@ -214,11 +214,11 @@ export class TerminalTurnDebugOverlay {
   async openPanel(row: HTMLElement, event: MouseEvent) {
     const id = row.dataset.turnId ?? "";
     if (!id) return;
-    const turn = this.projection.visible.find((candidate) => candidate.id === id) ?? null;
+    const turn = this.projection.state.visible.$().find((candidate) => candidate.id === id) ?? null;
     // A row whose turn left the projection between the paint and the click still
     // carries its number, and every turn this overlay draws belongs to the pane's
     // one session. A row with neither cannot name a source, so it opens nothing.
-    const session = turn?.session ?? this.projection.visible[0]?.session ?? "";
+    const session = turn?.session ?? this.projection.state.visible.$()[0]?.session ?? "";
     const number = turn ? turn.turn : Number(row.dataset.turn);
     if (!session || !number) return;
     const source = `turn:${session}:${number}`;

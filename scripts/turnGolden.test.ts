@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { locateVisibleTurns, normalizeTurnLine, type BoopTurn } from "../src/0_terminalTurnVisibility";
-import type { LogicalLine } from "../src/00a_terminalIntersection";
+import { locateVisibleTurns, normalizeTurnLine, type BoopTurn } from "@hafley66/boop-xterm";
+import type { LogicalLine } from "@hafley66/boop-xterm";
 
 // The one artifact the TypeScript matcher and the Rust port both assert
 // against. `EMIT_GOLDEN=1 npx vitest run scripts/turnGolden.test.ts` rewrites

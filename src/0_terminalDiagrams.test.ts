@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { Subject } from "rxjs";
+import { Signal } from "@hafley66/signals";
 import type { Terminal } from "@xterm/xterm";
 import { diagramElementAtPoint, diagramElementKey, findDiagramFences, loadMermaid, mergeLocatedDiagrams, projectedDiagramIsCurrent, renderDiagram, svgAspectRatio, TerminalDiagramOverlay, type DiagramFence } from "./0_terminalDiagrams";
 import type { ProjectedTurnRegion } from "@hafley66/boop-xterm";
-import type { TurnVisibilityEvent } from "./0_terminalTurnVisibility";
+import type { TurnVisibilityEvent, VisibleTurn } from "@hafley66/boop-xterm";
 
 function terminalWithRows(rows: string[], viewportY = 0, height = rows.length): Terminal {
   const lines = rows.map((text) => ({
@@ -446,10 +446,10 @@ describe("diagram overlay flicker (diagnostic lane)", () => {
       querySelector: () => null,
     } as unknown as HTMLElement;
     const projection = {
-      visible: [],
-      changes: new Subject<TurnVisibilityEvent>(),
-      settled: new Subject<void>(),
-      scanning: false,
+      state: Signal({ visible: [] as VisibleTurn[] }),
+      changes: Signal<TurnVisibilityEvent>(),
+      settled: Signal<void>(),
+      scanning: Signal(false),
     };
     const overlay = new TerminalDiagramOverlay(term, host, undefined, projection);
 
@@ -565,10 +565,10 @@ function overlayRig(rows: string[], scanning = false) {
     onResize: () => ({ dispose() {} }),
   } as unknown as Terminal;
   const projection = {
-    visible: [],
-    changes: new Subject<TurnVisibilityEvent>(),
-    settled: new Subject<void>(),
-    scanning,
+    state: Signal({ visible: [] as VisibleTurn[] }),
+    changes: Signal<TurnVisibilityEvent>(),
+    settled: Signal<void>(),
+    scanning: Signal(scanning),
   };
   const overlay = new TerminalDiagramOverlay(term, host, undefined, projection);
   return { overlay, projection, frames, term, write: () => onWrite!(), scroll: () => onScroll!(), elements: created };
@@ -681,8 +681,8 @@ describe("diagram overlay scan settle", () => {
       }
     `);
 
-    projection.scanning = false;
-    projection.settled.next();
+    projection.scanning.$(false);
+    projection.settled.$(undefined);
     await flush();
     expect({ fingerprint: overlay.lastPaintedFingerprint, painted: painted() }).toMatchInlineSnapshot(`
       {
@@ -870,14 +870,14 @@ describe("diagram overlay across scans", () => {
     const trace = [onScreen()];
     // Claude's spinner row repaints while the turn ledger rescans the pane.
     for (let tick = 2; tick <= 4; tick++) {
-      projection.scanning = true;
+      projection.scanning.$(true);
       rows[4] = `✻ Thinking… (${tick}s)`;
       write();
       scroll();
       await flush();
       trace.push(onScreen());
-      projection.scanning = false;
-      projection.settled.next();
+      projection.scanning.$(false);
+      projection.settled.$(undefined);
       await flush();
       trace.push(onScreen());
     }
@@ -956,9 +956,9 @@ describe("diagram overlay across scans", () => {
       write();
       await new Promise((resolve) => setTimeout(resolve, 120));
       frames.splice(0).forEach((frame) => frame(0));
-      projection.scanning = false;
-      projection.settled.next();
-      projection.scanning = true;
+      projection.scanning.$(false);
+      projection.settled.$(undefined);
+      projection.scanning.$(true);
       await settle();
       trace.push(onScreen());
     }

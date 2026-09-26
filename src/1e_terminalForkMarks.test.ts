@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
-import type { VisibleTurn } from "./0_terminalTurnVisibility";
+import type { VisibleTerminalLine } from "@hafley66/boop-xterm";
+import type { VisibleTurn } from "@hafley66/boop-xterm";
 import type { BoopTurnComment, BoopTurnCommentFork } from "./1b_terminalContextSync";
 import { placeAnnotations, type PlacedAnnotation } from "./1d_terminalTurnMarks";
 import { forkBlock, placeForks, wrapText } from "./1e_terminalForkMarks";

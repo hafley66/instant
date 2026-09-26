@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BoopTurn } from "../src/0_terminalTurnVisibility";
+import type { BoopTurn } from "@hafley66/boop-xterm";
 
 export const realClaudeTranscript = join(
   dirname(fileURLToPath(import.meta.url)),

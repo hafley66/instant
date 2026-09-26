@@ -24,7 +24,7 @@ vi.mock("./generated/native", () => ({
 }));
 import { TerminalContextSync } from "./1b_terminalContextSync";
 import type { PromptContextItem } from "./1a_terminalContextQueue";
-import type { VisibleTurn } from "./0_terminalTurnVisibility";
+import type { VisibleTurn } from "@hafley66/boop-xterm";
 import {
   diffItems,
   rowShowsOn,

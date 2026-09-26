@@ -5,7 +5,10 @@
 // with browser tabs.
 import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { commands, invoke } from "./generated/native";
+import { commandEndpoint, commands, invoke } from "./generated/native";
+import { Signal, type Signal as SignalType } from "@hafley66/signals";
+import { merge, map, tap, type Subscription } from "rxjs";
+import { createBoopXtermPane, type BoopXtermPane, type BoopXtermPorts, type HarnessId, type LineAnchorModel, type PinnedSelectionModel, type TurnVisibilityModel } from "@hafley66/boop-xterm";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
@@ -14,7 +17,6 @@ import { TerminalTurnDebugOverlay } from "./0_turnDebugOverlay";
 import { turnDebug } from "./0_turnDebugSettings";
 import { agentSquares, squaresOptions } from "./0_agentSquaresSettings";
 import { TerminalAgentSquares } from "./1_agentSquares";
-import { TerminalLineAnchors } from "./00b_terminalLineAnchors";
 import { TerminalContextQueue, type PromptContextItem } from "./1a_terminalContextQueue";
 import { TerminalContextSync } from "./1b_terminalContextSync";
 import { TerminalHoverCheck } from "./1c_terminalHoverCheck";
@@ -26,8 +28,6 @@ import { currentForkPreset, forkPresetStore, forkPresets, presetGroups } from ".
 import { openForkPanel } from "./1h_forkPanel";
 import { showContextMenu, type CtxItem } from "./ctxmenu";
 import { clickRpc } from "./ipc/contract";
-import { TerminalWheelRouter } from "./0_terminalWheel";
-import { TerminalPinnedSelection } from "./0_terminalPinnedSelection";
 import { runMatchingCommand } from "./keymap";
 import {
   sessionId,
@@ -69,19 +69,12 @@ import { nudgeZoom, resetZoom } from "./overlay";
 import { inlineSnippetHtml } from "./inlinePreview";
 import { openPreviewPanel } from "./preview";
 import { browserTabs } from "./browser";
-import { applyTags, askForkNote, boopCandidateTurns, boopTurnsForSession, boopTurnsForTab, invalidateBoopTurns, sessionsForTab, warmTurns } from "./favorites";
-import {
-  selectProjectionTurns,
-  TerminalTurnVisibilityV2,
-  type TurnSpan,
-} from "./0_terminalTurnVisibility";
-import { NativeTmuxPane, XtermViewportAdapter } from "./00a_terminalIntersection";
+import { applyTags, askForkNote, sessionsForTab, warmTurns } from "./favorites";
 import { CmdClickGestureTracker } from "./0_clickRouter";
 import { InspectorMachine, type InspectorEvent } from "./0_inspectorState";
 import { nextClosedOrder } from "./0_reopenOrder";
 import { tabTitle, reflowPinnedTabs } from "./tabs";
 import { detectHarness, trimOutputTail, type HarnessObservation } from "./harness";
-import { projectionTurnSources } from "./0b_ompTurnBinding";
 import { resolvedTerminalHarness, type PaneSessionBinding } from "./0a_terminalHarnessBinding";
 import { externalShellOpenSessionArgs, externalViewerTarget, viewerFailureAction, viewerNeedsRetarget } from "./0_externalShells";
 import { renderSessionActive, refreshSessions } from "./worktrees";
@@ -99,20 +92,27 @@ export type Tab = {
   overlay?: GraphicsOverlay;
   diagrams?: TerminalDiagramOverlay;
   structured?: TerminalStructuredOverlay;
-  turnVisibility?: TerminalTurnVisibilityV2;
-  syncTurns?: () => Promise<void>;
+  turnVisibility?: TurnVisibilityModel;
+  pane?: BoopXtermPane;
+  paneHost?: {
+    paneVisible: SignalType<boolean>;
+    paneClosed: SignalType<boolean>;
+    harness: SignalType<HarnessId | null>;
+    tabSessionIds: SignalType<string[]>;
+    scanRequested: SignalType<void>;
+    selectionClear: SignalType<void>;
+  };
+  paneEffects?: Subscription;
   turnDebugOverlay?: TerminalTurnDebugOverlay;
   agentSquares?: TerminalAgentSquares;
-  viewport?: XtermViewportAdapter;
-  lineAnchors?: TerminalLineAnchors;
+  lineAnchors?: LineAnchorModel;
   contextQueue?: TerminalContextQueue;
   contextSync?: TerminalContextSync;
   hoverCheck?: TerminalHoverCheck;
   turnMarks?: TerminalTurnMarks;
   forkPaint?: TerminalForkRender;
   cmdClickGesture?: CmdClickGestureTracker;
-  wheel?: TerminalWheelRouter;
-  pinnedSelection?: TerminalPinnedSelection;
+  pinnedSelection?: PinnedSelectionModel;
   harness: HarnessObservation;
   paneSession: PaneSessionBinding | null;
   outputTail: string;
@@ -265,9 +265,9 @@ function setTerminalHarness(tab: Tab, observed: HarnessObservation) {
   if (tab.harness.id !== previousHarness) {
     if (tab.harness.id) {
       void warmTurns(tab.id);
-      void tab.syncTurns?.();
     }
-    tab.turnVisibility?.schedule();
+    tab.paneHost?.harness.$(tab.harness.id);
+    tab.paneHost?.scanRequested.$(undefined);
   }
   tab.el.dataset.harness = tab.harness.id ?? "unknown";
   tab.el.dataset.harnessConfidence = tab.harness.confidence;
@@ -623,14 +623,11 @@ export function openTab(
     stale?.forkPaint?.dispose();
     stale?.contextSync?.dispose();
     stale?.contextQueue?.dispose();
-    stale?.lineAnchors?.dispose();
+    stale?.paneHost?.paneClosed.$(true);
+    stale?.paneEffects?.unsubscribe();
     stale?.turnDebugOverlay?.dispose();
     void stale?.agentSquares?.dispose();
-    stale?.turnVisibility?.dispose();
-    stale?.viewport?.dispose();
     stale?.cmdClickGesture?.dispose();
-    stale?.wheel?.dispose();
-    stale?.pinnedSelection?.dispose();
     stale?.term.dispose();
     stale?.el.remove();
     tabs.delete(id);
@@ -768,62 +765,30 @@ export function openTab(
   const harness = detectHarness(opts.command ?? cmd, live?.commands?.[0]);
   const overlay = graphics ? new GraphicsOverlay(el) : undefined;
   const tmuxTarget = opts.tmuxTarget;
-  const viewport = graphics ? undefined : new XtermViewportAdapter(term);
-  const tmuxPane = graphics ? undefined : new NativeTmuxPane(
-    tmuxTarget ?? name,
-    undefined,
-    (binding) => setPaneSessionBinding(id, binding),
-  );
-  const turnVisibility = graphics || !viewport ? undefined : new TerminalTurnVisibilityV2(
-    viewport,
-    async () => {
-      const session_id = await tmuxPane?.session() ?? null;
-      const activeHarness = tabs.get(id)?.harness.id ?? harness.id;
-      const exactOnly = activeHarness === "omp";
-      const [paneTurns, tabTurns, candidateTurns] = await Promise.all([
-        session_id ? boopTurnsForSession(session_id) : Promise.resolve([]),
-        session_id || exactOnly ? Promise.resolve([]) : boopTurnsForTab(id),
-        activeHarness && !exactOnly ? boopCandidateTurns(activeHarness) : Promise.resolve([]),
-      ]);
-      const sources = projectionTurnSources(
-        activeHarness,
-        session_id,
-        paneTurns,
-        tabTurns,
-        candidateTurns,
-      );
-      return selectProjectionTurns(sources.direct, sources.candidates);
-    },
-    tmuxPane,
-    (lines, turns) => invoke<TurnSpan[]>(commands.boop.boopLocateTurns, { lines, turns }),
-    () => void syncTurns?.(),
-  );
-  let syncTurnsAt = Number.NEGATIVE_INFINITY;
-  let syncTurnsPending: Promise<void> | null = null;
-  const syncTurns = graphics || !tmuxPane || !turnVisibility ? undefined : () => {
-    if (syncTurnsPending) return syncTurnsPending;
-    if (performance.now() - syncTurnsAt < 1_000) return Promise.resolve();
-    syncTurnsPending = (async () => {
-      const session = await tmuxPane.session();
-      const activeHarness = tabs.get(id)?.harness.id ?? harness.id;
-      if (!session || !activeHarness) return;
-      syncTurnsAt = performance.now();
-      const stat = await invoke<{ written: number; dropped: number }>(
-        commands.boop.boopSyncSession,
-        { session, harness: activeHarness },
-      );
-      // Ingest runs on every leased write tick; only a store change is worth
-      // a fresh read and a rescan. The native side wakes this session's
-      // squares feed on the same condition.
-      if (!stat.written && !stat.dropped) return;
-      invalidateBoopTurns(session);
-      turnVisibility.schedule();
-    })().catch(() => {}).finally(() => {
-      syncTurnsPending = null;
-    });
-    return syncTurnsPending;
+  const paneHost = graphics ? undefined : {
+    paneVisible: Signal(activeId() === id),
+    paneClosed: Signal(false),
+    harness: Signal<HarnessId | null>(harness.id),
+    tabSessionIds: Signal<string[]>([]),
+    scanRequested: Signal<void>(),
+    selectionClear: Signal<void>(),
   };
-  const lineAnchors = graphics || !viewport ? undefined : new TerminalLineAnchors(term, viewport);
+  const ports: BoopXtermPorts | undefined = paneHost && {
+    boop_mux_session: commandEndpoint("boop_mux_session"),
+    boop_mux_capture: commandEndpoint("boop_mux_capture"),
+    boop_turns: commandEndpoint("boop_turns"),
+    boop_turns_recent: commandEndpoint("boop_turns_recent"),
+    boop_sync_session: commandEndpoint("boop_sync_session"),
+    boop_locate_turns: commandEndpoint("boop_locate_turns"),
+    scroll_session: commandEndpoint("scroll_session"),
+    ...paneHost,
+    clipboardEnabled: settings.clipboardFromTerminal,
+  };
+  const pane = ports ? createBoopXtermPane(term, el, {
+    id, target: tmuxTarget ?? name, socket: null,
+  }, ports) : undefined;
+  const turnVisibility = pane?.visibility;
+  const lineAnchors = pane?.anchors;
   const diagrams = graphics ? undefined : new TerminalDiagramOverlay(
     term,
     el,
@@ -888,24 +853,21 @@ export function openTab(
   const cmdClickGesture = new CmdClickGestureTracker();
   cmdClickGesture.events.subscribe((event) => cmdClickRouter.gestures.next(event));
   el.dataset.cmdClickGesture = "pointerup";
-  const wheel = graphics ? undefined : new TerminalWheelRouter(
-    term,
-    (up, lines) => { void invoke(commands.pty.scrollSession, { name: tmuxTarget ?? name, up, lines }).catch(() => {}); },
-    () => {
-      diagrams?.viewportScrolled();
-      turnVisibility?.schedule();
-    },
-  );
-  // Autocopy at mouse-up plus a highlight that stays put, matching what a pane
-  // whose TUI paints its own selection (claude) already gives the reader.
-  const pinnedSelection = graphics ? undefined : new TerminalPinnedSelection(term, el, {
-    copy: (text) => {
-      if (!settings.clipboardFromTerminal.$()) return;
-      void navigator.clipboard.writeText(text).catch(() => {});
-    },
-  });
-  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, viewport, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, syncTurns, cmdClickGesture, wheel, pinnedSelection, harness, paneSession: null, outputTail: "" });
-  void syncTurns?.();
+  tabs.set(id, { id, name, tmuxTarget, term, fit, el, graphics, overlay, diagrams, structured, pane, paneHost, lineAnchors, contextQueue, contextSync, hoverCheck, turnMarks, forkPaint, turnVisibility, cmdClickGesture, pinnedSelection: pane?.pinned, harness, paneSession: null, outputTail: "" });
+  if (pane) {
+    const tab = tabs.get(id)!;
+    tab.paneEffects = merge(
+      pane.effects,
+      pane.paneSession.$.pipe(tap((state) => setPaneSessionBinding(id, state.data ?? null)), map(() => void 0)),
+      pane.wheel.activity.$.pipe(tap(() => diagrams?.viewportScrolled()), map(() => void 0)),
+      pane.pinned.copy.$.pipe(tap((text) => {
+        if (text) void navigator.clipboard.writeText(text).catch(() => {});
+      }), map(() => void 0)),
+    ).subscribe();
+    void sessionsForTab(id).then((sessions) => {
+      if (tabs.get(id) === tab) paneHost?.tabSessionIds.$(sessions.map((session) => session.sessionId));
+    });
+  }
   applyTurnDebugOverlay(tabs.get(id)!);
   applyAgentSquares(tabs.get(id)!);
   el.dataset.harness = harness.id ?? "unknown";
@@ -1122,7 +1084,7 @@ export function openTab(
     // backgrounded windows are suppressed, and a paired dock-activation record
     // is collapsed by the dedup window.
     recordBoopFocus(boopFocusTarget({ name, tmuxTarget }), Date.now(), replaying || document.hidden);
-    void tabs.get(id)?.syncTurns?.();
+    tabs.get(id)?.paneHost?.scanRequested.$(undefined);
   });
   term.textarea?.addEventListener("blur", () => {
     if (focusedTermId === id) focusedTermId = null;
@@ -1190,8 +1152,8 @@ export function openTab(
           navigator.clipboard.writeText(term.getSelection()).catch(console.error);
           return false;
         }
-        if (pinnedSelection?.hasSelection()) {
-          navigator.clipboard.writeText(pinnedSelection.text()).catch(console.error);
+        if (pane?.pinned.text.$()) {
+          navigator.clipboard.writeText(pane.pinned.text.$()).catch(console.error);
           return false;
         }
         void invoke<string>(commands.pty.tmuxBuffer)
@@ -1264,6 +1226,7 @@ function focusTermSoon(id: string) {
 export function onTermShown(id: string) {
   const b = browserTabs.get(id);
   if (b) {
+    for (const tab of tabs.values()) tab.paneHost?.paneVisible.$(false);
     setActive(id);
     touchTab(id);
     requestAnimationFrame(() => b.view.focus());
@@ -1272,11 +1235,14 @@ export function onTermShown(id: string) {
   }
   const t = tabs.get(id);
   if (!t) return;
+  for (const tab of tabs.values()) tab.paneHost?.paneVisible.$(tab.id === id);
   setActive(id);
   touchTab(id);
   logTabVisit(t.name);
   void warmTurns(id); // warm the ledger so right-click turn-identify stays sync
-  void t.syncTurns?.();
+  void sessionsForTab(id).then((sessions) => {
+    if (tabs.get(id) === t) t.paneHost?.tabSessionIds.$(sessions.map((session) => session.sessionId));
+  });
   requestAnimationFrame(() => {
     t.fit.fit();
     t.diagrams?.activate();
@@ -1339,14 +1305,11 @@ export function onTermClosed(id: string) {
   t.hoverCheck?.dispose();
   t.contextSync?.dispose();
   t.contextQueue?.dispose();
-  t.lineAnchors?.dispose();
+  t.paneHost?.paneClosed.$(true);
+  t.paneEffects?.unsubscribe();
   t.turnDebugOverlay?.dispose();
   void t.agentSquares?.dispose();
-  t.turnVisibility?.dispose();
-  t.viewport?.dispose();
   t.cmdClickGesture?.dispose();
-  t.wheel?.dispose();
-  t.pinnedSelection?.dispose();
   t.term.dispose();
   t.el.remove();
   tabs.delete(id);
@@ -1401,10 +1364,10 @@ export function pasteToActive(data: string) {
 /// Whichever selection is live for a tab. A pane whose app owns the mouse has
 /// xterm's own selection disabled and the pinned overlay holds the text
 /// instead, so a caller that reads only one of the two is blind on half the
-/// panes (see 0_terminalPinnedSelection.ts).
+/// panes.
 export function termSelectionText(id: string): string {
   const tab = tabs.get(id);
-  return tab?.term.getSelection() || tab?.pinnedSelection?.text() || "";
+  return tab?.term.getSelection() || tab?.pinnedSelection?.text.$() || "";
 }
 
 /// Capture before a menu can blur the terminal or a TUI repaint clears the pin.
@@ -1420,7 +1383,7 @@ export function askAboutSelection(id: string, snapshot = terminalSelectionSnapsh
   const tab = tabs.get(id);
   if (!tab?.contextQueue || !snapshot) return;
   const queued = tab.contextQueue.addSelection(snapshot);
-  tab.pinnedSelection?.clear();
+  tab.paneHost?.selectionClear.$(undefined);
   if (queued) tab.contextQueue.focusNote(queued);
   else tab.term.focus();
 }
@@ -1428,7 +1391,7 @@ export function askAboutSelection(id: string, snapshot = terminalSelectionSnapsh
 /// The buffer rows a selection covers: the pinned overlay's own rows where it
 /// holds the selection, else the whole viewport.
 function selectionRows(tab: Tab): readonly [number, number] {
-  const pinned = tab.pinnedSelection?.selection;
+  const pinned = tab.pane?.runtime.selection.selection.$();
   return pinned
     ? [Math.min(pinned.anchor.row, pinned.focus.row), Math.max(pinned.anchor.row, pinned.focus.row)] as const
     : [tab.term.buffer.active.viewportY, tab.term.buffer.active.viewportY + tab.term.rows - 1] as const;
@@ -1442,7 +1405,7 @@ export async function commentForSelection(id: string, note?: string): Promise<nu
   if (!tab?.contextQueue || !tab.contextSync || !text) return null;
   const rows = selectionRows(tab);
   const snapshot = tab.contextQueue.snapshotFor(text, rows[0], rows[1]);
-  tab.pinnedSelection?.clear();
+  tab.paneHost?.selectionClear.$(undefined);
   tab.term.clearSelection();
   const item: PromptContextItem = {
     id: selectionClientId(tab.name, snapshot.text, snapshot.turnIds),

@@ -6,7 +6,7 @@ import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { DiagramLightbox, diagramSvgMarkup, mermaidTheme, renderD2, type DiagramLightboxEntry } from "@hafley66/md";
 import { liveProbe } from "./0_liveProbe";
 import type { ProjectedTurnRegion } from "@hafley66/boop-xterm";
-import type { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
+import type { TurnVisibilityModel } from "@hafley66/boop-xterm";
 
 export type DiagramLanguage = "mermaid" | "d2";
 export type DiagramFence = {
@@ -435,7 +435,7 @@ export class TerminalDiagramOverlay {
     readonly term: Terminal,
     readonly host: HTMLElement,
     readonly layout: TerminalDiagramLayout = defaultTerminalDiagramLayout,
-    readonly projection?: Pick<TerminalTurnVisibilityV2, "visible" | "changes" | "settled" | "scanning">,
+    readonly projection?: Pick<TurnVisibilityModel, "state" | "changes" | "settled" | "scanning">,
     readonly enabled: () => boolean = () => true,
     public inference: () => DiagramInference = () => "labels",
   ) {
@@ -447,8 +447,8 @@ export class TerminalDiagramOverlay {
     // queue behind a paint still rendering and run after the next scan starts,
     // so the settle itself admits the stripped fences it saw.
     if (projection) this.activitySubscription = merge(
-      projection.changes,
-      projection.settled.pipe(tap(() => {
+      projection.changes.$,
+      projection.settled.$.pipe(tap(() => {
         const dark = darkBackground(this.host);
         this.settledKeys = new Set(findDiagramFences(this.term, this.inference())
           .filter((fence) => fence.stripped)
@@ -608,7 +608,7 @@ export class TerminalDiagramOverlay {
     const viewportTop = this.term.buffer.active.viewportY;
     const viewportEnd = viewportTop + this.term.rows - 1;
     const dark = darkBackground(this.host);
-    const projected = this.projection?.visible.flatMap((turn) => turn.regions
+    const projected = this.projection?.state.visible.$().flatMap((turn) => turn.regions
       .filter((region): region is ProjectedTurnRegion & { kind: "mermaid" | "d2" } =>
         (region.kind === "mermaid" || region.kind === "d2") && projectedDiagramIsCurrent(this.term, region))
       .map((region) => this.fenceFor(region))) ?? [];
@@ -623,7 +623,7 @@ export class TerminalDiagramOverlay {
     // region can claim it first; one already drawn stays drawn, or every scan
     // during PTY activity would erase it until the scan settled.
     const direct = findDiagramFences(this.term, this.inference()).filter((fence) => {
-      if (fence.stripped && this.projection?.scanning) {
+      if (fence.stripped && this.projection?.scanning.$()) {
         const key = diagramElementKey(fence, dark);
         return this.paintedKeys.has(key) || this.settledKeys.has(key);
       }

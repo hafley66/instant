@@ -15,7 +15,7 @@
 import { flashStatus } from "./core"
 import { invoke } from "./generated/native"
 import { applyTags, askTags, boopFavorites, boopTurnsForSession, favoriteBoopTurn } from "./favorites"
-import type { BoopTurn } from "./0_terminalTurnVisibility"
+import type { BoopTurn } from "@hafley66/boop-xterm"
 import type { TurnMark } from "./1_agentSquaresMarks"
 import { createElement, Fragment, useEffect, useMemo, useState } from "react"
 import { flushSync } from "react-dom"

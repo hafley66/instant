@@ -3,6 +3,7 @@
 // prompt, JS-driven window edge resize (macOS gives no native handles), and the
 // contextual right-click menu items.
 import { invoke } from "./generated/native";
+import { bufferRowAtPoint, turnAtBufferRow } from "@hafley66/boop-xterm";
 import { runtimePorts } from "./reactive/ports";
 import { type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
@@ -373,8 +374,12 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
     const diagram = pointedTab?.[1].diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY)
       ?? (id ? tabs.get(id)?.diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY) : null);
     const meta = id ? tabMetaById(id) : null;
-    const projectedTurn = id
-      ? tabs.get(id)?.turnVisibility?.turnAtClientPoint(lastCtxX, lastCtxY) ?? null
+    const pane = id ? tabs.get(id)?.pane : undefined;
+    const projectedTurn = pane
+      ? turnAtBufferRow(
+          pane.visibility.state.visible.$(),
+          bufferRowAtPoint(pane.viewport.snapshot.geometry.$(), { clientX: lastCtxX, clientY: lastCtxY }),
+        )
       : null;
     const selection = id ? terminalSelectionSnapshot(id) : null;
     const turnItems: CtxItem[] = [];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
+import type { VisibleTerminalLine } from "@hafley66/boop-xterm";
 import { gutter_offset_px, hoverLineId, hoverTargetAt, screenRowAt } from "./1c_terminalHoverCheck";
 
 const line = (id: string, start: number, end: number, text: string): VisibleTerminalLine =>

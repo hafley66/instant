@@ -1,6 +1,6 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import { Subscription } from "rxjs";
-import type { TerminalLineAnchors, VisibleTerminalLine } from "./00b_terminalLineAnchors";
+import type { LineAnchorModel, VisibleTerminalLine } from "@hafley66/boop-xterm";
 import {
   gutterLeft,
   readRowGeometry,
@@ -10,7 +10,7 @@ import {
   TerminalScanShift,
   type TerminalRowGeometry,
 } from "@hafley66/boop-xterm";
-import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
+import type { TurnVisibilityModel, VisibleTurn } from "@hafley66/boop-xterm";
 import type { PromptContextItem } from "./1a_terminalContextQueue";
 
 /// How far left of the cell grid the gutter checkboxes sit.
@@ -109,8 +109,8 @@ export type ContextGutterHost = {
   term: Terminal;
   host: HTMLElement;
   gutter: HTMLElement;
-  projection: Pick<TerminalTurnVisibilityV2, "visible" | "changes">;
-  anchors: TerminalLineAnchors;
+  projection: Pick<TurnVisibilityModel, "state" | "changes">;
+  anchors: LineAnchorModel;
   items: Map<string, PromptContextItem>;
   enabled: () => boolean;
   toggleStructured: (selectable: StructuredSelectable, checked: boolean) => void;
@@ -132,11 +132,11 @@ export class TerminalContextGutter {
 
   constructor(readonly queue: ContextGutterHost) {
     this.scan = new TerminalScanShift(queue.term);
-    this.subscription.add(queue.projection.changes.subscribe(() => {
+    this.subscription.add(queue.projection.changes.$.subscribe(() => {
       this.scan.mark();
       this.schedule();
     }));
-    this.subscription.add(queue.anchors.visible.$.subscribe(() => this.schedule()));
+    this.subscription.add(queue.anchors.state.visible.$.subscribe(() => this.schedule()));
     this.disposables = [
       queue.term.onScroll(() => this.schedule()),
       queue.term.onResize(() => this.schedule()),
@@ -176,9 +176,9 @@ export class TerminalContextGutter {
   paint() {
     const geometry = readRowGeometry(this.queue.term, this.queue.host);
     if (!geometry) return;
-    const lines = this.queue.anchors.visible.$();
+    const lines = this.queue.anchors.state.visible.$();
     const turns = this.queue.enabled()
-      ? shiftSpans(this.queue.projection.visible, this.scan.shift())
+      ? shiftSpans(this.queue.projection.state.visible.$(), this.scan.shift())
       : [];
     const selectables = structuredSelectables(turns, lines);
     const left = gutterLeft(geometry, gutter_offset_px);

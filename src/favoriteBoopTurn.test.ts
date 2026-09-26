@@ -17,7 +17,7 @@ vi.mock("./0a_terminalSessionCandidates", () => ({ boundSessionFirst: vi.fn((s: 
 vi.mock("./0_settings", () => ({ settings: { resumeTabs: { $: () => ({}) }, active: { $: () => null } } }));
 
 const { favoriteBoopTurn } = await import("./favorites");
-import type { BoopTurn } from "./0_terminalTurnVisibility";
+import type { BoopTurn } from "@hafley66/boop-xterm";
 
 const turn: BoopTurn = { session: "sess-a", harness: "opencode", turn: 3, ts: 1, role: "assistant", said: "hi" };
 

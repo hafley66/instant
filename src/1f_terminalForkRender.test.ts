@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
 import { Signal } from "@hafley66/signals";
-import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
+import type { VisibleTerminalLine } from "@hafley66/boop-xterm";
 import type { TerminalRowGeometry } from "@hafley66/boop-xterm";
-import type { VisibleTurn } from "./0_terminalTurnVisibility";
+import type { VisibleTurn } from "@hafley66/boop-xterm";
 import type { GutterPaint } from "./1a2_terminalContextGutter";
 import type { BoopTurnComment, BoopTurnCommentFork } from "./1b_terminalContextSync";
 import { placeAnnotations, type PlacedAnnotation } from "./1d_terminalTurnMarks";

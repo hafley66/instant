@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 import { afterEach, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
-import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
-import { Subject } from "rxjs";
+import type { LineAnchorModel, TurnVisibilityEvent, VisibleTurn } from "@hafley66/boop-xterm";
+import { Signal } from "@hafley66/signals";
 vi.mock("./1a2_terminalContextGutter", () => ({ TerminalContextGutter: class { schedule() {} dispose() {} } }));
 import { TerminalContextQueue } from "./1a_terminalContextQueue";
 
@@ -14,8 +14,8 @@ function mount() {
   queue = new TerminalContextQueue(
     { clearSelection: vi.fn() } as unknown as Terminal,
     host,
-    { visible: [], changes: new Subject() } as ConstructorParameters<typeof TerminalContextQueue>[2],
-    {} as TerminalLineAnchors,
+    { state: Signal({ visible: [] as VisibleTurn[] }), changes: Signal<TurnVisibilityEvent>() },
+    {} as LineAnchorModel,
     vi.fn(),
     () => true,
   );

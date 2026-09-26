@@ -13,8 +13,8 @@ import { tabs, tabMetaById, tabCwds } from "./terminal";
 import { openWorktree, resumeLaunch, sessionsForWorktree } from "./worktrees";
 import { harnessAdapter, harnessesForCommand, type HarnessId } from "./harness";
 import { boundSessionFirst, type ResolvedSession } from "./0a_terminalSessionCandidates";
-import type { BoopTurn } from "./0_terminalTurnVisibility";
-import type { BoopFavorite } from "./00a_terminalIntersection";
+import type { BoopTurn } from "@hafley66/boop-xterm";
+import type { BoopFavorite } from "./0_boopFavorite";
 import { settings } from "./0_settings";
 
 /// A favorite row as `boop_favorites` sends it today: the shared type predates

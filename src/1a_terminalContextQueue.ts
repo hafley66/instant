@@ -1,8 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
 import { Signal } from "@hafley66/signals";
 import { Observable, Subject } from "rxjs";
-import type { TerminalLineAnchors } from "./00b_terminalLineAnchors";
-import type { TerminalTurnVisibilityV2, VisibleTurn } from "./0_terminalTurnVisibility";
+import type { LineAnchorModel } from "@hafley66/boop-xterm";
+import type { TurnVisibilityModel, VisibleTurn } from "@hafley66/boop-xterm";
 import { turnHue } from "./0_turnDebugOverlay";
 import { TerminalContextGutter, type StructuredSelectable } from "./1a2_terminalContextGutter";
 
@@ -72,8 +72,8 @@ export class TerminalContextQueue {
   constructor(
     readonly term: Terminal,
     readonly host: HTMLElement,
-    readonly projection: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
-    readonly anchors: TerminalLineAnchors,
+    readonly projection: Pick<TurnVisibilityModel, "state" | "changes">,
+    readonly anchors: LineAnchorModel,
     /// Resolves once the pty took the body; a rejection keeps the queue.
     readonly paste: (text: string) => Promise<void> | void,
     readonly enabled: () => boolean,
@@ -174,7 +174,7 @@ export class TerminalContextQueue {
   /// text it overlaps, so a queued pinned selection reads the same as one xterm
   /// made.
   snapshotFor(text: string, startRow: number, endRow: number): Pick<TerminalSelectionSnapshot, "text" | "turnIds"> {
-    return { text, turnIds: turnsAcrossRange(this.projection.visible, startRow, endRow) };
+    return { text, turnIds: turnsAcrossRange(this.projection.state.visible.$(), startRow, endRow) };
   }
 
   toggleStructured(selectable: StructuredSelectable, checked: boolean) {
@@ -193,7 +193,6 @@ export class TerminalContextQueue {
   }
 
   activate() {
-    this.anchors.refresh();
     this.gutterPaint.schedule();
   }
 
@@ -215,7 +214,7 @@ export class TerminalContextQueue {
       return [chip];
     }
     return item.turnIds.map((id) => {
-      const turn = this.projection.visible.find((visible) => visible.id === id);
+      const turn = this.projection.state.visible.$().find((visible) => visible.id === id);
       const chip = document.createElement("span");
       chip.className = "term-context-queue-turn";
       chip.dataset.turnId = id;

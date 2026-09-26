@@ -10,7 +10,7 @@ import { TreeTable, type TreeColumn } from "./treetable";
 import type { SortingState, ExpandedState } from "@tanstack/react-table";
 import type { SessionSort, SessionSortKey, Fav } from "./state";
 import type { HarnessId } from "./harnessTypes";
-import type { BoopFavorite } from "./00a_terminalIntersection";
+import type { BoopFavorite } from "./0_boopFavorite";
 
 // ---- tmux v2 ----
 export interface TmuxRow {

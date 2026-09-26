@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rowTags, turnHue } from "./0_turnDebugOverlay";
-import type { VisibleTurn } from "./0_terminalTurnVisibility";
+import type { VisibleTurn } from "@hafley66/boop-xterm";
 
 const visibleTurn = (
   turn: number,

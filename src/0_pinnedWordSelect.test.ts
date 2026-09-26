@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { wordSpanAt, lineSpanAt } from "./0_terminalPinnedSelection";
+import { wordSpanAt, lineSpanAt } from "@hafley66/boop-xterm";
 
 // A tmux/codex pane row, trailing blanks and all, as translateToString gives it.
 const ROW = "const shift = spans.map((s) => s.row);     ";

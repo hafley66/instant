@@ -1,4 +1,4 @@
-import type { VisibleTerminalLine } from "./00b_terminalLineAnchors";
+import type { VisibleTerminalLine } from "@hafley66/boop-xterm";
 import {
   gutterLeft,
   readRowGeometry,
@@ -80,7 +80,7 @@ export class TerminalHoverCheck {
     if (pointer.x >= column && pointer.x < column + gutter_check_px) return;
     const row = screenRowAt(geometry.screen, geometry.rows, pointer.x, pointer.y);
     if (row === null) return this.hide();
-    const line = hoverTargetAt(this.queue.anchors.visible.$(), geometry.viewportY + row);
+    const line = hoverTargetAt(this.queue.anchors.state.visible.$(), geometry.viewportY + row);
     if (!line || this.queue.gutterPaint.paintedLineIds.has(line.id)) return this.hide();
     this.show(line, geometry);
   }
@@ -110,7 +110,7 @@ export class TerminalHoverCheck {
         id,
         kind: "line",
         text: line.text,
-        turnIds: turnsAcrossRange(this.queue.projection.visible, line.bufferStart, line.bufferEnd),
+        turnIds: turnsAcrossRange(this.queue.projection.state.visible.$(), line.bufferStart, line.bufferEnd),
       });
       return;
     }

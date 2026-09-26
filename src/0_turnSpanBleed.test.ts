@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { locateVisibleTurns, normalizeTurnLine } from "./0_terminalTurnVisibility";
-import type { LogicalLine } from "./00a_terminalIntersection";
+import { locateVisibleTurns, normalizeTurnLine } from "@hafley66/boop-xterm";
+import type { LogicalLine } from "@hafley66/boop-xterm";
 
 const screenOf = (rows: string[], from = 0): LogicalLine[] =>
   rows.map((text, index) => ({ text, start: from + index, end: from + index }));

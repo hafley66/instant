@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { shiftSpans, rowTags } from "./0_turnDebugOverlay";
-import type { VisibleTurn } from "./0_terminalTurnVisibility";
+import type { VisibleTurn } from "@hafley66/boop-xterm";
 
 const turn = (id: string, start: number, end: number): VisibleTurn => ({
   session: "s1",

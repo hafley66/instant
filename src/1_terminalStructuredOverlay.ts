@@ -1,7 +1,7 @@
 import type { IDisposable, Terminal } from "@xterm/xterm";
 import type { Subscription } from "rxjs";
 import type { ProjectedTurnRegion } from "@hafley66/boop-xterm";
-import type { TerminalTurnVisibilityV2 } from "./0_terminalTurnVisibility";
+import type { TurnVisibilityModel } from "@hafley66/boop-xterm";
 
 type StructuredRegion = ProjectedTurnRegion & { kind: "table" | "list" };
 
@@ -35,11 +35,11 @@ export class TerminalStructuredOverlay {
   constructor(
     readonly term: Terminal,
     readonly host: HTMLElement,
-    readonly projection: Pick<TerminalTurnVisibilityV2, "visible" | "changes">,
+    readonly projection: Pick<TurnVisibilityModel, "state" | "changes">,
   ) {
     this.root.className = "term-structured-overlays";
     host.appendChild(this.root);
-    this.subscription = projection.changes.subscribe(() => this.paint());
+    this.subscription = projection.changes.$.subscribe(() => this.paint());
     this.disposables = [
       term.onScroll(() => this.paint()),
       term.onResize(() => this.paint()),
@@ -49,7 +49,7 @@ export class TerminalStructuredOverlay {
   }
 
   regions(): StructuredRegion[] {
-    return this.projection.visible.flatMap((turn) => turn.regions.filter(
+    return this.projection.state.visible.$().flatMap((turn) => turn.regions.filter(
       (region): region is StructuredRegion => region.kind === "table" || region.kind === "list",
     ));
   }

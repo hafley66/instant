@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { locateVisibleTurns, dropTmuxStatusRow } from "./0_terminalTurnVisibility";
-import type { LogicalLine } from "./00a_terminalIntersection";
-import type { BoopTurn } from "./0_terminalTurnVisibility";
+import { locateVisibleTurns, dropTmuxStatusRow } from "@hafley66/boop-xterm";
+import type { LogicalLine } from "@hafley66/boop-xterm";
+import type { BoopTurn } from "@hafley66/boop-xterm";
 
 const turn = (n: number, said: string): BoopTurn => ({
   session: "session-a",

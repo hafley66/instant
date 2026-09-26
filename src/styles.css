@@ -1032,7 +1032,7 @@ body[data-skin="xp"][data-mode="dark"] .act-chips .act-chip.on {
   pointer-events: none;
   z-index: 4;
 }
-/* --- pinned terminal selection (src/0_terminalPinnedSelection.ts) --- */
+/* --- pinned terminal selection --- */
 .term-pinned-root {
   position: absolute;
   inset: 0;

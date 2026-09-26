@@ -38,7 +38,6 @@ vi.mock("./0_terminalDiagrams", () => ({ TerminalDiagramOverlay: class {} }));
 vi.mock("./1_terminalStructuredOverlay", () => ({ TerminalStructuredOverlay: class {} }));
 vi.mock("./0_turnDebugOverlay", () => ({ TerminalTurnDebugOverlay: class {} }));
 vi.mock("./0_turnDebugSettings", () => ({ turnDebug: {} }));
-vi.mock("./00b_terminalLineAnchors", () => ({ TerminalLineAnchors: class {} }));
 vi.mock("./1a_terminalContextQueue", () => ({ TerminalContextQueue: class {} }));
 vi.mock("./1b_terminalContextSync", () => ({ TerminalContextSync: class {} }));
 vi.mock("./1c_terminalHoverCheck", () => ({ TerminalHoverCheck: class {} }));
@@ -46,8 +45,6 @@ vi.mock("./1d_terminalTurnMarks", () => ({ TerminalTurnMarks: class {} }));
 vi.mock("./0_forkRenderSettings", () => ({ forkRender: { livePane: { $: () => false }, lastPreset: { $: vi.fn() } } }));
 vi.mock("./1g_forkPresetMenu", () => ({ currentForkPreset: vi.fn(), forkPresetStore: {}, forkPresets: vi.fn(), presetGroups: vi.fn() }));
 vi.mock("./ctxmenu", () => ({ showContextMenu: vi.fn() }));
-vi.mock("./0_terminalWheel", () => ({ TerminalWheelRouter: class {} }));
-vi.mock("./0_terminalPinnedSelection", () => ({ TerminalPinnedSelection: class {} }));
 vi.mock("./keymap", () => ({ runMatchingCommand: vi.fn() }));
 vi.mock("./reactdock", () => ({ addTermPanel: vi.fn(), focusTermPanel: vi.fn(), removeTermPanel: vi.fn(), hasTermPanel: vi.fn(), activePanelId: vi.fn(), activePanelChangedTime: vi.fn(), termPanelId: vi.fn() }));
 vi.mock("./clickrules", () => ({ cmdClickRouter: {}, dispatchClick: vi.fn(), clickIntent: vi.fn() }));
@@ -74,8 +71,6 @@ vi.mock("./favorites", () => ({
   askForkNote: (p: string) => askText(p),
   boopCandidateTurns: vi.fn(), boopTurnsForSession: vi.fn(), boopTurnsForTab: vi.fn(), invalidateBoopTurns: vi.fn(), sessionsForTab: vi.fn(), warmTurns: vi.fn(),
 }));
-vi.mock("./0_terminalTurnVisibility", () => ({ selectProjectionTurns: vi.fn(), TerminalTurnVisibilityV2: class {} }));
-vi.mock("./00a_terminalIntersection", () => ({ NativeTmuxPane: class {}, XtermViewportAdapter: class {} }));
 vi.mock("./0_clickRouter", () => ({ CmdClickGestureTracker: class {} }));
 vi.mock("./0_inspectorState", () => ({ InspectorMachine: class {} }));
 vi.mock("./0_reopenOrder", () => ({ nextClosedOrder: vi.fn() }));
