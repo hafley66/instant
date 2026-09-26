@@ -7,7 +7,7 @@
 import "xp.css";
 import "./0_sourceFonts.css";
 import "./0_stfuButton.css";
-import "./1_agentSquares.css";
+import "@hafley66/boop-xterm/theme.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
 import { hasTauriInternals, listenNativeEvent } from "./reactive/nativeTransport";
@@ -28,7 +28,7 @@ import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
 import { mountStfuButton } from "./0_stfuButton";
 import { panic, cycleSetting, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
-import { DIAGRAM_INFERENCE } from "./0_terminalDiagrams";
+import { DIAGRAM_INFERENCE } from "@hafley66/boop-xterm";
 import { turnDebug } from "./0_turnDebugSettings";
 import { forkRender } from "./0_forkRenderSettings";
 import { useLiveProbeLifecycle, useLiveProbeRender } from "./1_LiveProbe";
@@ -43,7 +43,6 @@ import { installKeymap, type Command } from "./keymap";
 import { browserKeyNotices } from "./0_browserKeyNotice";
 import { openPalette, isPaletteOpen } from "./palette";
 import { openJumpPalette, isJumpOpen } from "./jumpPalette";
-import { type GraphicsFrame } from "./graphics";
 import { cdpPerf } from "./cdp";
 import { claimFsWatch } from "./fsWatch";
 import { registerZoomKind, resetPanelZoom } from "./panelZoom";
@@ -408,11 +407,6 @@ async function main() {
       if (left === 0) term.write(chunk.chunk, ack);
       else term.write(chunk.chunk);
     }
-  });
-
-  // Kitty graphics frames resolved by the Rust proxy (graphics sessions only).
-  await listenNativeEvent<GraphicsFrame>("pty-graphics", (e) => {
-    tabs.get(e.payload.id)?.overlay?.push(e.payload);
   });
 
   // CDP engine failed to launch/attach a browser tab.

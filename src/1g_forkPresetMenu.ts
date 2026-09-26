@@ -7,7 +7,7 @@ import {
 } from "./0_navMenu";
 import { navMenuStore } from "./0_navMenuStore";
 import { forkRender } from "./0_forkRenderSettings";
-import { FORK_PRESET } from "./1e_terminalForkMarks";
+import { FORK_PRESET } from "@hafley66/boop-xterm";
 import { commands, invoke } from "./generated/native";
 
 /// One row of `boop config presets --format json`.

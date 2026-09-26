@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shiftSpans, rowTags } from "./0_turnDebugOverlay";
+import { shiftSpans, rowTags } from "@hafley66/boop-xterm";
 import type { VisibleTurn } from "@hafley66/boop-xterm";
 
 const turn = (id: string, start: number, end: number): VisibleTurn => ({

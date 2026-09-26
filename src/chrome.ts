@@ -3,7 +3,7 @@
 // prompt, JS-driven window edge resize (macOS gives no native handles), and the
 // contextual right-click menu items.
 import { invoke } from "./generated/native";
-import { bufferRowAtPoint, turnAtBufferRow } from "@hafley66/boop-xterm";
+import { bufferRowAtPoint, diagramElementAtPoint, turnAtBufferRow } from "@hafley66/boop-xterm";
 import { runtimePorts } from "./reactive/ports";
 import { type SprefaScopeKind } from "./state";
 import { allPanels } from "./plugin";
@@ -15,7 +15,7 @@ export { askText } from "./core";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
 import { agentSquares, type SquaresMode } from "./0_agentSquaresSettings";
-import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, terminalSelectionSnapshot, askAboutSelection, commentForSelection, forkSelectionItem, syncInlineDiagramOverlays, syncInlineStructuredSelectors, syncTurnDebugOverlays, syncAgentSquares } from "./terminal";
+import { tabs, tabMetaById, cellDims, pasteToActive, termSelectionText, terminalSelectionSnapshot, askAboutSelection, commentForSelection, forkSelectionItem } from "./terminal";
 import { captureToPrompt, openSendPicker } from "./capture";
 import {
   applyTags,
@@ -126,7 +126,6 @@ export function syncInlineDiagrams() {
   const button = $("#diagram-toggle") as HTMLButtonElement;
   button.classList.toggle("active", settings.inlineDiagrams.$());
   button.setAttribute("aria-pressed", String(settings.inlineDiagrams.$()));
-  syncInlineDiagramOverlays();
 }
 
 /** Subscribes the panic settings to their DOM. Each fires once on subscribe, so
@@ -152,7 +151,6 @@ export function bindTurnDebugChrome() {
     const button = $("#turn-debug-toggle") as HTMLButtonElement;
     button.classList.toggle("active", on);
     button.setAttribute("aria-pressed", String(on));
-    syncTurnDebugOverlays();
   });
 }
 
@@ -169,20 +167,16 @@ export function bindAgentSquaresChrome() {
     button.classList.toggle("active", on);
     button.setAttribute("aria-pressed", String(on));
     mode.hidden = !on;
-    syncAgentSquares();
   });
   agentSquares.mode.$.subscribe((value) => {
     mode.value = value;
-    syncAgentSquares();
   });
-  agentSquares.userKeep.$.subscribe(() => syncAgentSquares());
 }
 
 export function syncInlineStructured() {
   const button = $("#structured-overlay-toggle") as HTMLButtonElement;
   button.classList.toggle("active", settings.inlineStructuredSelectors.$());
   button.setAttribute("aria-pressed", String(settings.inlineStructuredSelectors.$()));
-  syncInlineStructuredSelectors();
 }
 
 // Window edge/corner grips. decorations:false means macOS gives no native
@@ -371,10 +365,11 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
   // overlays whose event target may be retargeted outside the terminal subtree.
   if (target.closest(".term-host") || pointedTab) {
     const id = pointedTab?.[0] ?? activeId();
-    const diagram = pointedTab?.[1].diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY)
-      ?? (id ? tabs.get(id)?.diagrams?.diagramAtClientPoint(lastCtxX, lastCtxY) : null);
+    const diagram = id ? diagramElementAtPoint(
+      Array.from(tabs.get(id)?.el.querySelectorAll<HTMLElement>(".term-diagram") ?? []), lastCtxX, lastCtxY,
+    ) : null;
     const meta = id ? tabMetaById(id) : null;
-    const pane = id ? tabs.get(id)?.pane : undefined;
+    const pane = id ? tabs.get(id)?.view?.pane : undefined;
     const projectedTurn = pane
       ? turnAtBufferRow(
           pane.visibility.state.visible.$(),
@@ -414,8 +409,8 @@ export function ctxItemsFor(target: HTMLElement): CtxItem[] {
     }
     return [
       ...(diagram ? [{
-        label: `Expand ${diagram.language === "d2" ? "D2" : "Mermaid"} diagram`,
-        action: () => { if (id) tabs.get(id)?.diagrams?.openAtClientY(lastCtxY); },
+        label: `Expand ${diagram.dataset.language === "d2" ? "D2" : "Mermaid"} diagram`,
+        action: () => { if (id) tabs.get(id)?.view?.diagram.openAt.$({ clientX: null, clientY: lastCtxY }); },
       } satisfies CtxItem, { sep: true } satisfies CtxItem] : []),
       ...turnItems,
       // Selection lands in the terminal's "next message" queue instead of the

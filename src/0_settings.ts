@@ -8,7 +8,7 @@
 // saved by earlier builds load unchanged.
 import { setting } from "./0_persistedSetting";
 import type { HarnessId } from "./harnessTypes";
-import type { DiagramInference } from "./0_terminalDiagrams";
+import type { DiagramInference } from "@hafley66/boop-xterm";
 import {
   SAFE_BOOT,
   DEFAULT_CLICK_RULES,

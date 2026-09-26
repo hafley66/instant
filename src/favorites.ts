@@ -16,6 +16,8 @@ import { boundSessionFirst, type ResolvedSession } from "./0a_terminalSessionCan
 import type { BoopTurn } from "@hafley66/boop-xterm";
 import type { BoopFavorite } from "./0_boopFavorite";
 import { settings } from "./0_settings";
+import { Signal } from "@hafley66/signals";
+import type { TurnMark } from "@hafley66/boop-xterm";
 
 /// A favorite row as `boop_favorites` sends it today: the shared type predates
 /// the tag column the panel reads.
@@ -119,6 +121,22 @@ const boopTurnReads = new Map<string, Promise<BoopTurn[]>>();
 const boopCandidateCache = new Map<string, { readAt: number; turns: BoopTurn[] }>();
 const boopCandidateReads = new Map<string, Promise<BoopTurn[]>>();
 export let boopFavorites: BoopFavorite[] = [];
+export const favoriteSources = Signal<ReadonlySet<string>>(new Set<string>());
+export const turnTags = Signal<ReadonlyMap<string, readonly string[]>>(new Map<string, readonly string[]>());
+
+export function cachedMarks(source: string): TurnMark {
+  return {
+    favorite: boopFavorites.some((favorite) => favorite.source === source),
+    tags: [...(turnTags.$().get(source) ?? [])],
+  };
+}
+
+function cacheFavoriteTags(favorites: BoopFavorite[]) {
+  const next = new Map(turnTags.$());
+  for (const favorite of favorites) next.set(favorite.source, favorite.tags ?? []);
+  turnTags.$(next);
+  favoriteSources.$(new Set(favorites.map((favorite) => favorite.source)));
+}
 // Where each session's ledger actually lives (the cwd that resolved it), keyed by
 // `editor:session_id`. fav_add needs this cwd so a favorite resumes in the right
 // folder — paths[0] (tabMetaById) can be a subdir the session wasn't keyed under.
@@ -189,6 +207,7 @@ export async function favoriteBoopTurn(turn: BoopTurn, note?: string): Promise<v
   const source = `turn:${turn.session}:${turn.turn}`;
   await invoke<BoopFavorite[]>("boop_favorite_toggle", { turn, note: note ?? "" }).then(async (favorites) => {
     boopFavorites = favorites;
+    cacheFavoriteTags(favorites);
     store.set({ aiFavs: [...store.get().aiFavs] });
     if (!wasFavorite && note?.trim()) {
       await applyTags(note, source);
@@ -229,7 +248,13 @@ export function askForkNote(placeholder: string): Promise<string | null> {
 /// kept. The note text lands wherever its caller stores it; tags are additive.
 export async function applyTags(note: string, source: string): Promise<string[]> {
   if (!note.trim()) return [];
-  return invoke<string[]>("boop_tags_apply", { note, source }).catch(() => [] as string[]);
+  const applied = await invoke<string[]>("boop_tags_apply", { note, source }).catch(() => [] as string[]);
+  if (applied.length) {
+    const next = new Map(turnTags.$());
+    next.set(source, [...new Set([...(next.get(source) ?? []), ...applied])]);
+    turnTags.$(next);
+  }
+  return applied;
 }
 
 export function isBoopTurnFav(turn: Pick<BoopTurn, "session" | "turn">): boolean {
@@ -528,6 +553,7 @@ export function refreshFavorites() {
   Promise.all([invoke<Fav[]>("fav_list"), invoke<BoopFavorite[]>("boop_favorites")])
     .then(([favs, favorites]) => {
       boopFavorites = favorites;
+      cacheFavoriteTags(favorites);
       store.set({ aiFavs: favs });
     })
     .catch(() => {});

@@ -33,15 +33,7 @@ vi.mock("./core", () => ({
 }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
-vi.mock("./graphics", () => ({ GraphicsOverlay: class {} }));
-vi.mock("./0_terminalDiagrams", () => ({ TerminalDiagramOverlay: class {} }));
-vi.mock("./1_terminalStructuredOverlay", () => ({ TerminalStructuredOverlay: class {} }));
-vi.mock("./0_turnDebugOverlay", () => ({ TerminalTurnDebugOverlay: class {} }));
 vi.mock("./0_turnDebugSettings", () => ({ turnDebug: {} }));
-vi.mock("./1a_terminalContextQueue", () => ({ TerminalContextQueue: class {} }));
-vi.mock("./1b_terminalContextSync", () => ({ TerminalContextSync: class {} }));
-vi.mock("./1c_terminalHoverCheck", () => ({ TerminalHoverCheck: class {} }));
-vi.mock("./1d_terminalTurnMarks", () => ({ TerminalTurnMarks: class {} }));
 vi.mock("./0_forkRenderSettings", () => ({ forkRender: { livePane: { $: () => false }, lastPreset: { $: vi.fn() } } }));
 vi.mock("./1g_forkPresetMenu", () => ({ currentForkPreset: vi.fn(), forkPresetStore: {}, forkPresets: vi.fn(), presetGroups: vi.fn() }));
 vi.mock("./ctxmenu", () => ({ showContextMenu: vi.fn() }));
@@ -60,7 +52,6 @@ vi.mock("@hafley66/boop-xterm", async (importOriginal) => ({
   MAX_WRAP_ROWS: 0,
 }));
 vi.mock("./refResolve", () => ({ resolveRef: vi.fn() }));
-vi.mock("./promptQuote", () => ({ bracketedPaste: vi.fn() }));
 vi.mock("./panelZoom", () => ({ registerZoomKind: vi.fn(), setZoomTargetResolver: vi.fn(), setChromeZoom: vi.fn(), resolveZoomTarget: vi.fn(), panelZoomGesture: vi.fn(), panelZoomResetGesture: vi.fn(), zoomFactorFor: vi.fn() }));
 vi.mock("./overlay", () => ({ nudgeZoom: vi.fn(), resetZoom: vi.fn() }));
 vi.mock("./inlinePreview", () => ({ inlineSnippetHtml: vi.fn() }));
@@ -82,7 +73,9 @@ vi.mock("./1h_forkPanel", () => ({ openForkPanel: (lane: string, preset: string)
 
 const { forkSelection, forkSelectionWithNote, tabs } = await import("./terminal");
 
-const fakeTab = () => ({
+const fakeTab = () => {
+  const pendingSelections = new Map<string, (commentId: number | null) => void>();
+  return ({
   name: "tab-1",
   harness: { id: "opencode" },
   term: {
@@ -91,15 +84,24 @@ const fakeTab = () => ({
     buffer: { active: { viewportY: 0 } },
     rows: 24,
   },
-  contextQueue: {
-    snapshotFor: (text: string) => ({ text, turnIds: ["sess-a:3"] }),
+  view: {
+    pane: {
+      pinned: { text: { $: () => "" } },
+      runtime: { selection: { selection: { $: () => null } } },
+      visibility: { state: { visible: { $: () => [{ id: "sess-a:3", anchorStart: 0, anchorEnd: 23 }] } } },
+    },
+    contextSync: {
+      sendSelection: { $: (item: { id: string; note?: string }) => {
+        void sendSelection(item);
+        queueMicrotask(() => pendingSelections.get(item.id)?.(47));
+      } },
+      refresh: { $: vi.fn() },
+    },
   },
-  contextSync: {
-    sendSelection: sendSelection,
-    activate: vi.fn(),
-  },
-  pinnedSelection: undefined,
+  paneHost: { selectionClear: { $: vi.fn() } },
+  pendingSelections,
 });
+};
 
 beforeEach(() => {
   flashed.length = 0;
