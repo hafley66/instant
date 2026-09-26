@@ -7,7 +7,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./state", () => ({ store: { get: () => ({}), set: vi.fn(), sub: vi.fn() } }));
 vi.mock("./reactdock", () => ({ activeGroupEl: () => null }));
 vi.mock("./generated/native", () => ({ invoke: vi.fn() }));
-vi.mock("@hafley66/boop-xterm", () => ({ terminalFontCss: () => "" }));
+vi.mock("@hafley66/boop-xterm", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@hafley66/boop-xterm")>()),
+  terminalFontCss: () => "",
+}));
 vi.mock("./0_settings", () => ({ settings: { active: { $: () => null } } }));
 
 const { askText } = await import("./core");
