@@ -1,5 +1,4 @@
 use boop_mux::{Multiplexer, Tmux};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) fn tmux_command(socket: Option<&str>) -> crate::proc::Proc {
     crate::proc::Proc::tmux_bare(socket, crate::proc::Label::TmuxControl)
@@ -8,7 +7,11 @@ pub(crate) fn tmux_command(socket: Option<&str>) -> crate::proc::Proc {
 #[tauri::command]
 pub async fn boop_mux_capture(target: String, socket: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let socket = socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        let socket = socket.or_else(|| {
+            std::env::var("INSTANT_TMUX_SOCKET")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
         Tmux.capture_pane(socket.as_deref(), &target, None)
             .map_err(|error| error.to_string())
     })
@@ -29,8 +32,11 @@ pub async fn boop_mux_exit_copy_mode(
     socket: Option<String>,
 ) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let socket = socket
-            .or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        let socket = socket.or_else(|| {
+            std::env::var("INSTANT_TMUX_SOCKET")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
         leave_copy_mode(socket.as_deref(), &target)
     })
     .await
@@ -71,68 +77,45 @@ pub async fn boop_mux_send_keys(
     mode: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let socket = socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty()));
+        let socket = socket.or_else(|| {
+            std::env::var("INSTANT_TMUX_SOCKET")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
         let pane = match target {
             Some(target) if !target.is_empty() => target,
-            _ => Tmux.current_pane(socket.as_deref()).ok_or("no visible tmux pane")?,
+            _ => Tmux
+                .current_pane(socket.as_deref())
+                .ok_or("no visible tmux pane")?,
         };
         let mode = mode.unwrap_or_else(|| "clear".to_string());
         // Every mode below types at the pane, and a pane in copy-mode consumes
         // keystrokes itself.
         leave_copy_mode(socket.as_deref(), &pane)?;
         if mode == "escape" {
-            return send_key(socket.as_deref(), &pane, "Escape").map(|()| pane);
+            Tmux.send_key_named(socket.as_deref(), &pane, "Escape")
+                .map_err(|error| error.to_string())?;
+            return Ok(pane);
         }
         if mode == "clear" {
             // C-u kills the line in readline and in both TUI composers, so the
             // paste lands on an empty prompt rather than appended to a draft.
-            send_key(socket.as_deref(), &pane, "C-u")?;
+            Tmux.send_key_named(socket.as_deref(), &pane, "C-u")
+                .map_err(|error| error.to_string())?;
         }
-        paste_body(socket.as_deref(), &pane, &body)?;
+        Tmux.send_text(socket.as_deref(), &pane, &body)
+            .map_err(|error| error.to_string())?;
         std::thread::sleep(SUBMIT_GAP);
-        send_key(socket.as_deref(), &pane, "Enter").map(|()| pane)
+        Tmux.send_key_named(socket.as_deref(), &pane, "Enter")
+            .map_err(|error| error.to_string())?;
+        Ok(pane)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-// boop-harness gap: keystroke delivery. `Multiplexer::{send_keys_literal,
-// send_key_named}` were cut with `send_native`; instant still pastes at a pane.
+// Give the TUI a short window to consume the paste before submitting it.
 const SUBMIT_GAP: std::time::Duration = std::time::Duration::from_millis(400);
-static PASTE_SEQ: AtomicU64 = AtomicU64::new(0);
-
-fn send_key(socket: Option<&str>, pane: &str, key: &str) -> Result<(), String> {
-    run(tmux_command(socket).args(["send-keys", "-t", pane, key]))
-}
-
-/// A tmux buffer pasted in bracketed-paste mode, so a multi-line body reaches a
-/// TUI composer as one paste rather than as a run of submits.
-fn paste_body(socket: Option<&str>, pane: &str, body: &str) -> Result<(), String> {
-    let buffer = format!(
-        "instant-{}-{}",
-        std::process::id(),
-        PASTE_SEQ.fetch_add(1, Ordering::Relaxed)
-    );
-    let loaded = crate::proc::Proc::tmux_bare(socket, crate::proc::Label::TmuxPaste)
-        .args(["load-buffer", "-b", &buffer, "-"])
-        .feed(body.as_bytes())?;
-    if !loaded.status.success() {
-        return Err(String::from_utf8_lossy(&loaded.stderr).trim().to_string());
-    }
-    let pasted = run(tmux_command(socket).args([
-        "paste-buffer",
-        "-d",
-        "-p",
-        "-b",
-        &buffer,
-        "-t",
-        pane,
-    ]));
-    if pasted.is_err() {
-        let _ = tmux_command(socket).args(["delete-buffer", "-b", &buffer]).run();
-    }
-    pasted
-}
 
 fn run(command: crate::proc::Proc) -> Result<(), String> {
     Ok(command.ok()?)
