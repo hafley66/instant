@@ -3,12 +3,13 @@
 // protocol for graphics tabs), the OSC-52 clipboard bridge, per-terminal font
 // zoom, and the dockview panel lifecycle (activate / show / close / fit) shared
 // with browser tabs.
+import { isTerminalContentRow } from "@hafley66/boop-xterm";
 import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { commandEndpoint, commands, invoke } from "./generated/native";
 import { Signal, type Signal as SignalType } from "@hafley66/signals";
 import { EMPTY, merge, map, tap, type Subscription } from "rxjs";
-import { createBoopXtermPane, type BoopXtermPane, type BoopXtermPorts, type HarnessId, type LineAnchorModel, type PinnedSelectionModel, type TurnVisibilityModel } from "@hafley66/boop-xterm";
+import { createBoopXtermPane, type BoopXtermPane, type BoopXtermPanePorts, type HarnessId, type LineAnchorModel, type PinnedSelectionModel, type TurnVisibilityModel } from "@hafley66/boop-xterm";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
 import { TerminalDiagramOverlay } from "./0_terminalDiagrams";
@@ -54,7 +55,7 @@ import { cmdClickRouter, dispatchClick, clickIntent } from "./clickrules";
 import { openExternal, revealExternal } from "./0_openExternal";
 import { bufferClickToken, softPathRows, wrappedLineRows } from "@hafley66/boop-xterm";
 import { softWrappedPathLink, wrappedLinkSpans } from "@hafley66/boop-xterm";
-import { resolveRef, type ClickCell } from "./refResolve";
+import { cachedRef, type ClickCell } from "./refResolve";
 import { termCellAt } from "@hafley66/boop-xterm";
 import { bracketedPaste } from "./promptQuote";
 import {
@@ -117,6 +118,7 @@ export type Tab = {
   harness: HarnessObservation;
   paneSession: PaneSessionBinding | null;
   outputTail: string;
+  opening?: Promise<unknown>;
   /// Set when Instant spawned this pane as a fork lane: the preset it runs.
   /// The fork menu reads it so a fork of a fork repeats its own conversation's
   /// preset (1g_forkPresetMenu.mainPreset).
@@ -573,6 +575,7 @@ function wordSpanAt(id: string, clientX: number, clientY: number): { wide: strin
   const t = tabs.get(id);
   if (!t) return { wide: "", narrow: "" };
   const { col, bufferRow } = cellOf(t, clientX, clientY);
+  if (!isTerminalContentRow(t.term, bufferRow)) return { wide: "", narrow: "" };
   return bufferClickToken(t.term.buffer.active, bufferRow, col, looksOpenable);
 }
 
@@ -774,8 +777,9 @@ export function openTab(
     scanRequested: Signal<void>(),
     selectionClear: Signal<void>(),
   };
-  const ports: BoopXtermPorts | undefined = paneHost && {
+  const ports: BoopXtermPanePorts | undefined = paneHost && {
     boop_mux_session: commandEndpoint("boop_mux_session"),
+    boop_mux_status: commandEndpoint("boop_mux_status"),
     boop_mux_capture: commandEndpoint("boop_mux_capture"),
     boop_turns: commandEndpoint("boop_turns"),
     boop_turns_recent: commandEndpoint("boop_turns_recent"),
@@ -902,6 +906,7 @@ export function openTab(
     provideLinks(y, cb) {
       // y is 1-based absolute row; join the whole wrapped logical line so a
       // path split across rows resolves as one token.
+      if (!isTerminalContentRow(term, y - 1)) return cb(undefined);
       const wrapped = wrappedLineRows(term.buffer.active, y - 1);
       if (!wrapped) return cb(undefined);
       // CmdClickGestureTracker owns activation on pointerup. The link provider
@@ -982,7 +987,7 @@ export function openTab(
       inspector.style.left = `${Math.max(8, Math.min(e.clientX + 12, window.innerWidth - inspectorW - 8))}px`;
       inspector.style.top = `${Math.max(8, Math.min(e.clientY + 14, window.innerHeight - inspectorH - 8))}px`;
       try { inspector.showPopover(); } catch { inspector.dataset.open = "1"; }
-      void resolveRef(token, cwd, [], clickCellAt(id, e.clientX, e.clientY)).then((result) => {
+      void Promise.resolve(cachedRef(token, cwd, [], clickCellAt(id, e.clientX, e.clientY))).then((result) => {
         if (request !== inspectorRequest) return;
         if (result.kind === "choices") {
           inspectorRef = null;
@@ -1026,6 +1031,7 @@ export function openTab(
     "pointerdown",
     (e) => {
       if (!e.metaKey || e.button !== 0 || overDiagram(e)) return;
+      inspectorSend("click-dispatched");
       const sel = term.getSelection().trim();
       const span = wordSpanAt(id, e.clientX, e.clientY);
       const word = sel || span.wide;
@@ -1178,6 +1184,8 @@ export function openTab(
   const cwd = opts.cwd ?? null;
   recordTab(name, command, cwd, graphics, opts.viewer ?? false, tmuxTarget); // survives reload; tmux session outlives the webview
   requestAnimationFrame(() => {
+    const openingTab = tabs.get(id);
+    if (openingTab?.term !== term) return;
     fit.fit();
     const { cols, rows } = term;
     const dimensions = cellDims(term);
@@ -1189,7 +1197,7 @@ export function openTab(
           ...dimensions,
         })
       : { id, name, tmuxTarget, command, cwd, cols, rows, graphics, attachOnly: false, ...dimensions };
-    invoke("open_session", request).catch((error) => {
+    openingTab.opening = invoke("open_session", request).catch((error) => {
       console.error(error);
       showError("terminal", error);
       if (viewerFailureAction(opts.viewer ?? false) === "remove") {
@@ -1327,6 +1335,7 @@ export function onTermClosed(id: string) {
   // so remain-on-exit does not leak it. Kill of a live pane stays explicit.
   const target = t.tmuxTarget ?? name;
   closeChain = closeChain
+    .then(() => t.opening).catch(() => {})
     .then(() => invoke("close_pty", { id }).catch(() => {}))
     .then(() => invoke("reap_dead_target", { target }).catch(() => {}));
   if (activeId() === id) {

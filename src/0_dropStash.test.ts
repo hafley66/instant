@@ -13,7 +13,7 @@ vi.mock("./reactive/ports", () => ({
 }));
 vi.mock("./terminal", () => ({
   tabs: openTabs,
-  pasteToActive: (data: string) => written.push(data),
+  sendTextToTab: (_id: string, data: string) => written.push(data),
 }));
 vi.mock("./capture", () => ({ cancelHide: vi.fn() }));
 vi.mock("./sprefa", () => ({ addScope: vi.fn() }));

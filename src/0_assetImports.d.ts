@@ -8,3 +8,8 @@ declare module "*.css";
 declare module "pdfjs-dist/build/pdf.mjs" {
   export * from "pdfjs-dist/types/src/pdf.d.ts";
 }
+
+declare module "*?worker" {
+  const WorkerConstructor: { new (): Worker };
+  export default WorkerConstructor;
+}

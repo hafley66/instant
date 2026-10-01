@@ -3,6 +3,9 @@
 
 #![allow(clippy::disallowed_methods)]
 
+#[path = "1_proc_bounded.rs"]
+mod bounded;
+
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;

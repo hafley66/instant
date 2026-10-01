@@ -246,7 +246,7 @@ export const DEFAULT_CLICK_RULES: ClickRule[] = [
   // -F: match the token literally so punctuation (foo(), arr[0], a.b) isn't read
   // as a regex (which errors on unbalanced parens etc.). -e: so a token starting
   // with `-` (e.g. --flag) isn't taken as an rg flag.
-  { pattern: ".", command: 'f=$1; if [ -e "${f%%:*}" ]; then code -g $1; else rg -nF -e $1; fi' },
+  { pattern: ".", command: 'f=$1; if [ -e "${f%%:*}" ]; then code -g $1; else rg --threads 2 --max-filesize 1M --max-count 100 -nF -e $1; fi' },
 ];
 
 export const DEFAULT_FENCE_COMMANDS: MdFenceCommand[] = [

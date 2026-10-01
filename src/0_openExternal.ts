@@ -10,10 +10,11 @@ export async function openExternal(path: string): Promise<void> {
   }
 }
 
-export async function openExternalUrl(url: string): Promise<void> {
+export async function openExternalUrl(url: string, openWith?: string): Promise<void> {
   await runtimePorts.window.hide();
   try {
-    await runtimePorts.openUrl(url);
+    if (openWith) await runtimePorts.openUrl(url, openWith);
+    else await runtimePorts.openUrl(url);
   } catch (error) {
     await runtimePorts.window.show();
     throw error;

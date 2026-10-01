@@ -470,12 +470,8 @@ async function main() {
     if (app && app !== "instant") store.set({ frontmostApp: app });
   });
 
-  // Summon: replay entrance animation + refocus active terminal.
+  // Summon: refocus and refit the active terminal immediately.
   await listenNativeEvent("summoned", () => {
-    const app = document.getElementById("app")!;
-    app.classList.remove("summon-in");
-    void app.offsetWidth; // restart the CSS animation
-    app.classList.add("summon-in");
     refreshSessions();
     // Window may reappear at a new size/position; refit so the grid (and the
     // tmux pane behind it) matches, otherwise the TUI draws clipped.

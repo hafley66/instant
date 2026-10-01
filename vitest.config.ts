@@ -27,6 +27,6 @@ export default defineConfig({
     // marbler's dist side-effect-imports its css; inlining routes that through
     // vite's transform, which stubs it, instead of node's ESM loader, which
     // rejects the .css extension.
-    server: { deps: { inline: [/@hafley66\/marbler/, /@hafley66\/md/] } },
+    server: { deps: { inline: [/@hafley66\/marbler/, /@hafley66\/md/, /@hafley66\/boop-xterm/, /@hafley66\/signal-grid/] } },
   },
 });

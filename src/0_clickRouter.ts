@@ -86,6 +86,7 @@ export class CmdClickRouter {
   readonly routed = new Subject<CmdClickRoutedEvent>();
   readonly gestures = new Subject<CmdClickGestureEvent>();
   routes: CmdClickRoute[] = [];
+  pending = new Map<string, Promise<string | null>>();
 
   register(route: CmdClickRoute) {
     this.routes.push(route);
@@ -97,7 +98,16 @@ export class CmdClickRouter {
     if (index >= 0) this.routes.splice(index, 1);
   }
 
-  async dispatch(request: CmdClickRequest): Promise<string | null> {
+  dispatch(request: CmdClickRequest): Promise<string | null> {
+    const key = JSON.stringify({ ...request, token: request.token.trim() });
+    const running = this.pending.get(key);
+    if (running) return running;
+    const result = this.route(request).finally(() => this.pending.delete(key));
+    this.pending.set(key, result);
+    return result;
+  }
+
+  async route(request: CmdClickRequest): Promise<string | null> {
     const normalized = { ...request, token: request.token.trim() };
     if (!normalized.token) return null;
     for (const route of this.routes) {

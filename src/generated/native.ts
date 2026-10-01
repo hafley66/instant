@@ -3,7 +3,7 @@
 import { firstValueFrom } from "rxjs";
 import type { Serializable } from "@hafley66/signals";
 import type {
-  BoopSyncStat, BoopTurn, LogicalLine, PaneSessionBinding, TurnSpan,
+  BoopSyncStat, BoopTurn, LogicalLine, PaneSessionBinding, TurnSpan, TmuxStatus,
 } from "@hafley66/boop-xterm";
 import type { Endpoint } from "@hafley66/signals";
 import { createRequestEndpoint } from "../reactive/0_requestTransport";
@@ -99,6 +99,7 @@ export type CommandName =
   | "boop_search_status"
   | "boop_search_sync"
   | "boop_mux_capture"
+  | "boop_mux_status"
   | "boop_mux_session"
   | "boop_mux_send_keys"
   | "boop_mux_exit_copy_mode"
@@ -132,6 +133,7 @@ export type CommandName =
 // Command payloads follow the Rust command parameters and serde field names.
 export type BoopXtermCommandIO = {
   boop_mux_session: { input: { target: string; socket: string | null }; output: PaneSessionBinding | null };
+  boop_mux_status: { input: { target: string; socket: string | null }; output: TmuxStatus | null };
   boop_mux_capture: { input: { target: string; socket: string | null }; output: string };
   boop_turns: { input: { session: string }; output: BoopTurn[] };
   boop_turns_recent: { input: { since: number; harness: string }; output: BoopTurn[] };
@@ -295,6 +297,7 @@ export namespace commands {
 
   export namespace boop_mux {
     export const boopMuxCapture = "boop_mux_capture";
+    export const boopMuxStatus = "boop_mux_status";
     export const boopMuxSession = "boop_mux_session";
     export const boopMuxSendKeys = "boop_mux_send_keys";
     export const boopMuxExitCopyMode = "boop_mux_exit_copy_mode";

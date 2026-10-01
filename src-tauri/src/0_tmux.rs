@@ -19,6 +19,14 @@ pub async fn boop_mux_capture(target: String, socket: Option<String>) -> Result<
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+pub async fn boop_mux_status(target: String, socket: Option<String>) -> Result<Option<boop_mux::StatusGeometry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let socket = socket.or_else(|| crate::proc::configured_tmux_socket());
+        Tmux.status_geometry(socket.as_deref(), &target)
+    }).await.map_err(|error| error.to_string())
+}
+
 /// Return a pane to its live screen before anything is typed at it.
 ///
 /// A pane parked in copy-mode routes every keystroke to copy-mode, so a paste

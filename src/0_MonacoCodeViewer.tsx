@@ -2,7 +2,10 @@ import { useEffect, useRef } from "react";
 import { Signal, SignalCreator } from "@hafley66/signals";
 import { useSignal } from "@hafley66/signals/react";
 import { Observable, scan } from "rxjs";
+import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import { invoke } from "./generated/native";
+
+globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
 type EditorEvent =
   | { type: "opening"; id: string; path: string }
@@ -68,13 +71,17 @@ function editorLifetime(host: HTMLElement, props: MonacoCodeViewerProps): Observ
     void Promise.all([
       import("monaco-editor/editor"),
       import("monaco-editor/features/find/register"),
+      import("monaco-editor/features/wordHighlighter/register"),
       import("monaco-editor/languages/definitions/register.all"),
     ]).then(([monaco]) => {
+      if (cancelled) return;
       const model = monaco.editor.createModel(props.text, monacoLanguage(props.path), monaco.Uri.file(props.path));
       const editor = monaco.editor.create(host, {
         model,
         automaticLayout: false,
         minimap: { enabled: false },
+        occurrencesHighlight: "singleFile",
+        selectionHighlight: true,
         scrollBeyondLastLine: false,
         theme: props.dark ? "vs-dark" : "vs",
       });

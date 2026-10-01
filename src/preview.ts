@@ -150,6 +150,10 @@ function ensureInst(path: string, line?: number): PreviewInst {
   // returns to the originating panel (internal routing).
   el.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
+    if (t.closest(".fs-external")) {
+      void openExternal(path).catch(console.error);
+      return;
+    }
     const cp = t.closest<HTMLElement>(".fs-copy");
     if (cp) {
       const text = previewTextByNode.get(el);

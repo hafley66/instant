@@ -1,28 +1,44 @@
-// The renderer half of ⌘-click resolution: a token goes to boop_harness::click,
-// which owns every filesystem question.
+// File resolution is click-driven. Hover reads completed results without starting
+// filesystem walks or subprocesses while the pointer crosses terminal output.
 import { clickRpc, type ClickCell, type ResolveResult } from "./ipc/contract";
 
 export type { ClickCell, RefSource, ResolvedRef, ResolveResult } from "./ipc/contract";
 
-// ⌘-hover fires per token across a wall of output, so identical questions asked
-// inside the same second are answered once.
-const RESOLVE_TTL_MS = 1_000;
-const pending = new Map<string, { at: number; result: Promise<ResolveResult> }>();
+const RESOLVE_TTL_MS = 10_000;
+const pending = new Map<string, Promise<ResolveResult>>();
+const completed = new Map<string, { at: number; result: ResolveResult }>();
+const keyOf = (token: string, cwd: string, sessions: string[], cell?: ClickCell, doc?: string) =>
+  JSON.stringify([token, cwd, sessions, cell, doc]);
 
-export function resolveRef(token: string, cwd: string, sessions: string[] = [], cell?: ClickCell, doc?: string): Promise<ResolveResult> {
-  const key = `${cwd} ${sessions.join(",")} ${cell ? `${cell.session}:${cell.col},${cell.row}` : ""} ${doc ?? ""} ${token}`;
-  const hit = pending.get(key);
-  if (hit && Date.now() - hit.at < RESOLVE_TTL_MS) return hit.result;
-  const result = clickRpc
-    .resolveRef({ token, cwd, sessions, cell, doc })
-    .catch(() => ({ kind: "miss" }) as ResolveResult);
-  pending.set(key, { at: Date.now(), result });
-  return result;
+export function cachedRef(token: string, cwd: string, sessions: string[] = [], cell?: ClickCell, doc?: string): ResolveResult {
+  const hit = completed.get(keyOf(token, cwd, sessions, cell, doc));
+  return hit && Date.now() - hit.at < RESOLVE_TTL_MS ? hit.result : { kind: "miss" };
 }
 
-// Drop the resolver's index, both sides. Called when a preview's watch reports a
-// change, so a file created since the last walk resolves immediately.
+export function resolveRef(token: string, cwd: string, sessions: string[] = [], cell?: ClickCell, doc?: string): Promise<ResolveResult> {
+  const key = keyOf(token, cwd, sessions, cell, doc);
+  const running = pending.get(key);
+  if (running) return running;
+  const hit = completed.get(key);
+  if (hit && Date.now() - hit.at < RESOLVE_TTL_MS) return Promise.resolve(hit.result);
+  const result = clickRpc.resolveRef({ token, cwd, sessions, cell, doc }).then((result) => {
+    // An invalidation during the request prevents an obsolete cache insertion.
+    if (pending.get(key) === promise) {
+      completed.delete(key);
+      completed.set(key, { at: Date.now(), result });
+      if (completed.size > 256) completed.delete(completed.keys().next().value!);
+    }
+    return result;
+  });
+  const promise = result.finally(() => {
+    if (pending.get(key) === promise) pending.delete(key);
+  });
+  pending.set(key, promise);
+  return promise;
+}
+
 export function clearRefCaches() {
   pending.clear();
+  completed.clear();
   void clickRpc.clearRefIndex().catch(() => {});
 }

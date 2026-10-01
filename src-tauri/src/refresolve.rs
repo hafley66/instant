@@ -10,11 +10,14 @@ pub async fn resolve_ref_impl(
     cell: Option<ClickCell>,
     doc: Option<String>,
 ) -> Result<ResolveResult, String> {
+    static RESOLVERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let permit = RESOLVERS.try_acquire().map_err(|_| "File lookup already running; retry when it finishes".to_string())?;
     let cell = cell.map(|cell| ClickCell {
         socket: cell.socket.or_else(|| std::env::var("INSTANT_TMUX_SOCKET").ok().filter(|value| !value.is_empty())),
         ..cell
     });
     tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
         click::resolve_click(&token, cell.as_ref(), &cwd, &sessions.unwrap_or_default(), doc.as_deref()).result
     })
     .await

@@ -355,6 +355,10 @@ pub fn dispatch(
         }
 
         // boop_mux
+        "boop_mux_status" => {
+            let p: BoopMuxTargetArgs = parse(name, params)?;
+            res(wait(crate::boop_tmux::boop_mux_status(p.target, p.socket)))
+        }
         "boop_mux_capture" => {
             let p: BoopMuxTargetArgs = parse(name, params)?;
             res(wait(crate::boop_tmux::boop_mux_capture(p.target, p.socket)))
@@ -1093,6 +1097,8 @@ fn open_target_impl(target: String, cwd: String) -> Result<String, String> {
 }
 
 fn run_click_impl(command: String, cwd: String) -> Result<String, String> {
+    static RUNNING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = RUNNING.try_lock().map_err(|_| "A click command is already running".to_string())?;
     let dir = match cwd.trim() {
         "" => std::env::var("HOME").unwrap_or_else(|_| ".".into()),
         c => c.to_string(),
@@ -1102,13 +1108,8 @@ fn run_click_impl(command: String, cwd: String) -> Result<String, String> {
         .arg(&command)
         .cwd(&dir)
         .env("PATH", crate::pty::path_env())
-        .run()?;
-    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
-    const CAP: usize = 200_000;
-    if s.len() > CAP {
-        s.truncate(CAP);
-        s.push_str("\n… (truncated)");
-    }
+        .run_bounded(std::time::Duration::from_secs(5), 200_000)?;
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = stderr.lines().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();

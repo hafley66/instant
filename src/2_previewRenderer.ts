@@ -68,7 +68,7 @@ export async function renderPathInto(node: HTMLElement, path: string, line?: num
   const back = origin ? `<button class="fs-back" data-origin="${escapeHtml(origin)}">← back</button> ` : "";
   const media = !line && (IMAGE_EXTS.has(ext) || ext === "pdf");
   const copy = media ? "" : `<button class="fs-copy" title="copy text">copy</button> `;
-  const meta = `<div class="fs-preview-meta">${back}${copy}<span class="fs-preview-name">${escapeHtml(name)}</span><br><span>${escapeHtml(line ? `${path}:${line}` : path)}</span></div>`;
+  const meta = `<div class="fs-preview-meta">${back}${copy}<button class="fs-external" title="Open in external application" aria-label="Open in external application">↗</button> <span class="fs-preview-name">${escapeHtml(name)}</span><br><span>${escapeHtml(line ? `${path}:${line}` : path)}</span></div>`;
   if (!rendered.has(node)) node.innerHTML = meta + empty("loading…");
   let kind = "code", data = "", displayPath = path, text: string | undefined;
   try {

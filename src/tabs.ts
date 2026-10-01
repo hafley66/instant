@@ -190,14 +190,10 @@ export function openTabAtPwd() {
   const name = activeTabName();
   const sess = name ? store.get().sessions.find((s) => s.name === name) : undefined;
   const cwd = (sess?.paths ?? [])[0] ?? null;
-  const taken = new Set<string>([
-    ...store.get().sessions.map((s) => s.name),
-    ...[...tabs.values()].map((t) => t.name),
-  ]);
   const base = cwd ? tmuxName(baseName(cwd)) : "shell";
-  let fresh = base;
-  let n = 2;
-  while (taken.has(fresh)) fresh = `${base}-${n++}`;
+  // The session list is asynchronous and closed sessions remain alive. A new
+  // tab must never reuse a name from a stale list and attach through tmux -A.
+  const fresh = `${base}-${crypto.randomUUID()}`;
   openTab(fresh, { cwd });
   refreshSessions();
 }

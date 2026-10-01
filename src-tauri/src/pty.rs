@@ -39,12 +39,10 @@ struct PtyHandle {
     name: String,
     writer: SharedWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
-    /// Some only for direct-spawn graphics sessions (awrit). tmux sessions leave
-    /// this None: closing their pty detaches the client, the server lives on. A
-    /// direct child (awrit) catches SIGHUP, so dropping the master won't kill it
-    /// — we must kill it explicitly on close or it orphans and holds its
-    /// single-instance profile lock.
-    child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
+    /// Terminate the owned PTY child on close. In tmux mode this is the client;
+    /// its server and session survive. The reader holds a cloned master fd, so
+    /// dropping only this handle does not detach that client.
+    child: Option<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
 }
 
 fn direct_pty_mode() -> bool {
@@ -134,8 +132,9 @@ fn tmux_target_session(target: &str) -> Result<String, String> {
 }
 
 fn tmux_target_session_on_socket(target: &str, socket: Option<&str>) -> Result<String, String> {
+    let exact = boop_mux::exact_pane_target(target);
     let out = tmux_cmd_for_socket(socket)
-        .args(["display-message", "-p", "-t", target, "#{session_name}"])
+        .args(["display-message", "-p", "-t", &exact, "#{session_name}"])
         .env("PATH", path_env())
         .run()
         .map_err(|e| e.to_string())?;
@@ -696,21 +695,12 @@ pub fn open_session_impl(
         }
     }
 
-    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
-    // Direct PTYs own their child; tmux mode owns only a client and deliberately
-    // leaves the tmux server/session alive across webview reloads.
-    let child = if graphics || direct_pty_mode() {
-        Some(child)
-    } else {
-        // Not ours to own, but dropping the handle leaves the client a zombie
-        // holding a task port for the life of the app. Wait on it off-thread.
-        let mut orphan = child;
-        std::thread::spawn(move || {
-            let _ = orphan.wait();
-        });
-        None
-    };
+    let killer = child.clone_killer();
+    // Reap every child after natural exit or explicit close without holding
+    // the PTY map lock while it is alive.
+    std::thread::spawn(move || { let _ = child.wait(); });
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: SharedWriter = Arc::new(Mutex::new(
@@ -723,7 +713,7 @@ pub fn open_session_impl(
             name: name.clone(),
             writer: writer.clone(),
             master: pair.master,
-            child,
+            child: Some(killer),
         },
     );
 

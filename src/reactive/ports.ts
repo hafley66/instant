@@ -44,7 +44,7 @@ export interface RuntimePorts {
   setRailHealth(state: StatusState): void;
   openPath(path: string): Promise<void>;
   revealItemInDir(path: string): Promise<void>;
-  openUrl(url: string): Promise<void>;
+  openUrl(url: string, openWith?: string): Promise<void>;
   homeDir(): Promise<string>;
   emit(event: string, payload?: unknown): Promise<void>;
   findWindow(label: string): Promise<AuxWindow | null>;
@@ -84,7 +84,7 @@ export function tauriPorts(): RuntimePorts {
     setRailHealth,
     openPath: (path) => tauriOpenPath(path),
     revealItemInDir: (path) => tauriRevealItemInDir(path),
-    openUrl: (url) => tauriOpenUrl(url),
+    openUrl: (url, openWith) => tauriOpenUrl(url, openWith),
     homeDir: () => tauriHomeDir(),
     emit: (event, payload) => tauriEmit(event, payload),
     findWindow: async (label) => {

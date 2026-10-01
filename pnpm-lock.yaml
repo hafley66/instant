@@ -15,8 +15,8 @@ importers:
   .:
     dependencies:
       '@hafley66/boop-xterm':
-        specifier: 0.0.1-dev.1790427854139
-        version: 0.0.1-dev.1790427854139(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(rxjs@7.8.2)
+        specifier: file:../hafley-rxjs/packages/boop-xterm
+        version: file:../hafley-rxjs/packages/boop-xterm(@hafley66/md@0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda))(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/d2':
         specifier: 0.1.0-dev.1790445386724
         version: 0.1.0-dev.1790445386724
@@ -414,11 +414,14 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hafley66/boop-xterm@0.0.1-dev.1790427854139':
-    resolution: {integrity: sha512-JRCdBV0gODmAHcnj3qIHM32Lr8rUoCv4Fv1aosntL+RTfU4jD/cuipFOFalGoGMaCXP051oDEUwg7TxbEjAETQ==}
+  '@hafley66/boop-xterm@file:../hafley-rxjs/packages/boop-xterm':
+    resolution: {directory: ../hafley-rxjs/packages/boop-xterm, type: directory}
     peerDependencies:
+      '@hafley66/md': '>=0.1.2'
       '@hafley66/signals': 0.1.1-dev.1790445386724
       '@xterm/xterm': ^6.0.0
+      react: '>=19.2.7'
+      react-dom: '>=19.2.7'
       rxjs: '>=7.8.0'
 
   '@hafley66/d2@0.1.0-dev.1790445386724':
@@ -3126,10 +3129,13 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hafley66/boop-xterm@0.0.1-dev.1790427854139(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(rxjs@7.8.2)':
+  '@hafley66/boop-xterm@file:../hafley-rxjs/packages/boop-xterm(@hafley66/md@0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda))(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
     dependencies:
+      '@hafley66/md': 0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda)
       '@hafley66/signals': 0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5)
       '@xterm/xterm': 6.0.0
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
       rxjs: 7.8.2
 
   '@hafley66/d2@0.1.0-dev.1790445386724':

@@ -74,3 +74,16 @@ describe("CmdClickGestureTracker", () => {
       `);
   });
 });
+
+it("coalesces repeated clicks until the full route has finished", async () => {
+  const router = new CmdClickRouter();
+  let finish!: (handled: boolean) => void;
+  const handle = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+  router.register({ id: "search", handle });
+  const request = { token: "missing", cwd: "/repo", source: "terminal" as const };
+  const first = router.dispatch(request);
+  const repeat = router.dispatch(request);
+  finish(true);
+  expect({ same: first === repeat, result: await first, calls: handle.mock.calls.length, pending: router.pending.size })
+    .toEqual({ same: true, result: "search", calls: 1, pending: 0 });
+});

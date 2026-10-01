@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { Terminal } from "@xterm/xterm";
-import { createBoopXtermPane, type BoopXtermPorts, type HarnessId } from "@hafley66/boop-xterm";
+import { createBoopXtermPane, type BoopXtermPanePorts, type HarnessId } from "@hafley66/boop-xterm";
 import { Endpoint, Signal, type Serializable } from "@hafley66/signals";
 import { of } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
@@ -12,7 +12,7 @@ function ports() {
   }, (request) => of({ status: 200, body: request.url === "boop_mux_session" ? null : [] }));
   const paneVisible = Signal(true);
   const paneClosed = Signal(false);
-  const value: BoopXtermPorts = {
+  const value: BoopXtermPanePorts = {
     boop_mux_session: endpoint("boop_mux_session"),
     boop_mux_capture: endpoint("boop_mux_capture"),
     boop_turns: endpoint("boop_turns"),

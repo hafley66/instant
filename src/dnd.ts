@@ -14,7 +14,7 @@ import {
   unstashed,
   type StashedDrop,
 } from "./0_dropStash";
-import { tabs, pasteToActive } from "./terminal";
+import { tabs, sendTextToTab } from "./terminal";
 import { cancelHide } from "./capture";
 import { addScope } from "./sprefa";
 import { clickRpc } from "./ipc/contract";
@@ -26,6 +26,7 @@ let draggingIn = false;
 export const isDraggingIn = () => draggingIn;
 let dropWatchdog: number | undefined;
 let dragGeneration = 0;
+let dropTarget: string | null = null;
 
 export async function wireOsDrop() {
   const main = runtimePorts.window;
@@ -34,6 +35,7 @@ export async function wireOsDrop() {
 
   const standDown = () => {
     draggingIn = false;
+    dropTarget = null;
     dragGeneration += 1;
     if (dropWatchdog !== undefined) {
       clearTimeout(dropWatchdog);
@@ -49,13 +51,15 @@ export async function wireOsDrop() {
     if (!e.dataTransfer?.types.includes("Files")) return;
     if (draggingIn) return;
     draggingIn = true;
+    dropTarget = activeId();
     const generation = ++dragGeneration;
     cancelHide(); // the catcher taking the drag must not auto-hide us
-    const pos = await main.outerPosition();
-    const size = await main.outerSize();
+    const [pos, size] = await Promise.all([main.outerPosition(), main.outerSize()]);
     if (!draggingIn || generation !== dragGeneration) return;
-    await catcher.setPosition(pos.x, pos.y);
-    await catcher.setSize(size.width, size.height);
+    await Promise.all([
+      catcher.setPosition(pos.x, pos.y),
+      catcher.setSize(size.width, size.height),
+    ]);
     if (!draggingIn || generation !== dragGeneration) return;
     await catcher.show();
     if (!draggingIn || generation !== dragGeneration) {
@@ -82,6 +86,7 @@ export async function wireOsDrop() {
   }>(
     "os-file-drop",
     (e) => {
+      const id = dropTarget;
       dismiss();
       cancelHide();
       const { paths, position, drops } = e.payload;
@@ -92,7 +97,6 @@ export async function wireOsDrop() {
         for (const path of paths) addScope({ kind: "file", value: path });
         return;
       }
-      const id = activeId();
       if (!id) return;
       void dropIntoTerminal(id, paths, drops);
     },
@@ -140,6 +144,6 @@ export async function dropIntoTerminal(
     }
     logLine(dropLogLine(drop, failure ? `typed after paste failed: ${failure}` : "pasted"));
   }
-  if (typed.length) pasteToActive(typed.map(pathArg).join(" ") + " ");
+  if (typed.length) await sendTextToTab(id, typed.map(pathArg).join(" ") + " ");
   tab?.term.focus();
 }

@@ -52,7 +52,7 @@ export INSTANT_REAL_PORT="$port" INSTANT_REAL_SOCKET="$socket"
 export INSTANT_SERVE_BIN="${INSTANT_SERVE_BIN:-$HOME/.cache/cargo-target/feature-serve-bin/debug/instant-serve}"
 export REAL_BOOP="${REAL_BOOP:-$HOME/.cargo/bin/boop}"
 export INSTANT_FORK_STUB_LOG="/tmp/$socket/fork-stub.log"
-export INSTANT_REAL_STUB_PATH="$PWD/e2e-real/stub-bin"
+export INSTANT_REAL_STUB_PATH="${INSTANT_REAL_STUB_PATH:-$PWD/e2e-real/stub-bin}"
 mkdir -p "/tmp/$socket"
 : > "$INSTANT_FORK_STUB_LOG"
 

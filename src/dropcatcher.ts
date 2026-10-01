@@ -11,6 +11,7 @@ import { invoke } from "./generated/native";
 import { STASH_DROP_COMMAND, dropPath, unstashed, type StashedDrop } from "./0_dropStash";
 
 let idleTimer: number | undefined;
+let stashing = false;
 
 const clearIdle = () => {
   if (idleTimer !== undefined) clearTimeout(idleTimer);
@@ -37,15 +38,24 @@ const stash = (paths: string[]): Promise<StashedDrop[]> =>
   invoke<StashedDrop[]>(STASH_DROP_COMMAND, { paths }).catch(() => paths.map(unstashed));
 
 void runtimePorts.webview.onDragDrop(async (p) => {
+  if (stashing) return;
   if (p.type === "drop") {
+    stashing = true;
     clearIdle();
-    const drops = await stash(p.paths);
-    await runtimePorts.emit("os-file-drop", {
-      paths: drops.map(dropPath),
-      position: { x: p.position.x, y: p.position.y },
-      drops,
-    });
-    await runtimePorts.window.hide();
+    try {
+      const pending = stash(p.paths);
+      // Release the full-window catcher while the native copy finishes.
+      await runtimePorts.window.hide();
+      const drops = await pending;
+      await runtimePorts.emit("os-file-drop", {
+        paths: drops.map(dropPath),
+        position: { x: p.position.x, y: p.position.y },
+        drops,
+      });
+    } finally {
+      stashing = false;
+      await runtimePorts.window.hide();
+    }
   } else if (p.type === "leave") {
     // Drag left the app without dropping; re-arm the main window and step aside.
     await cancelDrop();

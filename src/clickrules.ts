@@ -14,6 +14,8 @@ import { tokenAtColumn } from "@hafley66/boop-xterm";
 import { resolveRef, type ClickCell } from "./refResolve";
 import { RefChoicesPanel } from "./refChoicesPanel";
 import { CmdClickRouter, type CmdClickSource } from "./0_clickRouter";
+import { openExternalUrl } from "./0_openExternal";
+import { clickUrl } from "./0_clickUrl";
 import { launcherOf } from "./0_clickLaunchers";
 import { settings } from "./0_settings";
 import { openFenceCommandConfigPanel } from "./1_fenceCommandConfig";
@@ -34,6 +36,16 @@ export function clickIntent(rawToken: string): string {
 }
 
 export const cmdClickRouter = new CmdClickRouter();
+
+cmdClickRouter.register({
+  id: "browser",
+  async handle({ token }) {
+    const url = clickUrl(token);
+    if (!url) return false;
+    await openExternalUrl(url, "Google Chrome");
+    return true;
+  },
+});
 
 cmdClickRouter.register({
   id: "file",
@@ -77,19 +89,34 @@ cmdClickRouter.register({
 
 // The rule half of the ladder: whatever the token is, run its configured command
 // (the catch-all greps) and adopt the stdout into a results panel.
+const emptySearches = new Map<string, number>();
 export async function runClickRule(token: string, cwd: string): Promise<boolean> {
   const rule = clickRuleFor(token);
   if (!rule) return false;
-  const command = rule.command.replace(/\$1/g, () => shQuote(token));
+  if (!cwd.trim() && /\brg\b/.test(rule.command)) {
+    flashStatus("Search needs a terminal working directory");
+    return true;
+  }
+  const command = rule.command
+    .replace("rg -nF -e $1", "rg --threads 2 --max-filesize 1M --max-count 100 -nF -e $1")
+    .replace(/\$1/g, () => shQuote(token));
   const launcher = launcherOf(rule.command);
+  const searchKey = JSON.stringify([cwd, command]);
+  const grep = !launcher && /\brg\b/.test(rule.command);
+  const cachedEmpty = grep && (emptySearches.get(searchKey) ?? 0) > Date.now();
   let out = "";
   try {
-    out = await clickRpc.runClick({ command, cwd });
+    if (!cachedEmpty) out = await clickRpc.runClick({ command, cwd });
   } catch (e) {
     // rg and grep exit 1 for "no match" and print nothing on stderr. That is
     // an empty result, which the panel names below, and not an error line.
     const text = String(e);
     out = /exit 1:\s*$/.test(text.trim()) ? "" : text;
+  }
+  if (grep && !out.trim() && !cachedEmpty) {
+    emptySearches.delete(searchKey);
+    emptySearches.set(searchKey, Date.now() + 10_000);
+    if (emptySearches.size > 128) emptySearches.delete(emptySearches.keys().next().value!);
   }
   // A launcher that printed nothing did its job in another app: a URL is in
   // the browser now, a path is in the editor. An empty tab here would only
@@ -131,7 +158,10 @@ export async function openDocumentRef(token: string, doc: string): Promise<void>
 }
 
 export function dispatchClick(rawToken: string, cwd: string, source: CmdClickSource = "unknown", sessions: string[] = [], fallback?: string, cell?: ClickCell) {
-  return cmdClickRouter.dispatch({ token: rawToken, cwd, source, sessions, fallback, cell });
+  return cmdClickRouter.dispatch({ token: rawToken, cwd, source, sessions, fallback, cell }).catch((error) => {
+    flashStatus(String(error));
+    return null;
+  });
 }
 
 // cwd to search from when a ⌘-click happens outside a terminal: the focused
