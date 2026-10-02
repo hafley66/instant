@@ -158,6 +158,9 @@ importers:
       tinykeys:
         specifier: ^4.0.0
         version: 4.0.0
+      tldts:
+        specifier: 7.4.10
+        version: 7.4.10
       unified:
         specifier: ^11.0.5
         version: 11.0.5

@@ -37,6 +37,14 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         {
+          "url": "http://*",
+          "app": "Google Chrome"
+        },
+        {
+          "url": "https://*",
+          "app": "Google Chrome"
+        },
+        {
           "url": "http://*"
         },
         {

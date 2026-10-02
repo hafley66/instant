@@ -1059,7 +1059,12 @@ pub fn run() {
             deps::tool_status,
             doc_service::rustdoc_open,
         ])
-        .build(tauri::generate_context!())
+        .build({
+            // Track permissions in rustc dep-info as well as the build script:
+            // compiler caches must invalidate the generated context when they change.
+            const _: &str = include_str!("../capabilities/default.json");
+            tauri::generate_context!()
+        })
         .expect("error while building tauri application")
         .run(|app, event| {
             // Tear down the shared headless Chrome when the app exits so it

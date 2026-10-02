@@ -11,14 +11,10 @@ export async function openExternal(path: string): Promise<void> {
 }
 
 export async function openExternalUrl(url: string, openWith?: string): Promise<void> {
+  openWith ??= /^https?:\/\//i.test(url) ? "Google Chrome" : undefined;
+  if (openWith) await runtimePorts.openUrl(url, openWith);
+  else await runtimePorts.openUrl(url);
   await runtimePorts.window.hide();
-  try {
-    if (openWith) await runtimePorts.openUrl(url, openWith);
-    else await runtimePorts.openUrl(url);
-  } catch (error) {
-    await runtimePorts.window.show();
-    throw error;
-  }
 }
 
 /** Show the file in Finder without hiding Instant: the user is picking, not leaving. */

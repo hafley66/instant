@@ -31,7 +31,7 @@ export function clickRuleFor(rawToken: string): ClickRule | null {
 
 export function clickIntent(rawToken: string): string {
   const token = rawToken.trim();
-  if (/^(?:https?:\/\/|www\.)/i.test(token)) return "open URL";
+  if (clickUrl(token)) return "open URL";
   return clickRuleFor(token) ? "run configured action from terminal cwd" : "search from terminal cwd";
 }
 

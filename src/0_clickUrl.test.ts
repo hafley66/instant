@@ -17,3 +17,29 @@ it("routes network addresses ahead of file lookup without treating filenames as 
       ]
     `);
 });
+
+it("recognizes domains and local hostnames while preserving source references", () => {
+  expect([
+    "example.com", "docs.example.co.uk/guide?q=1#intro", "server.local:8080/path",
+    "my-server:3000", "app.test", "README.md", "main.rs", "script.sh",
+    "main.ts:42", "src/main.rs", "obj.method", "user@example.com",
+    "example.com:99999", "https://example.com/a b",
+  ].map(clickUrl)).toMatchInlineSnapshot(`
+    [
+      "https://example.com/",
+      "https://docs.example.co.uk/guide?q=1#intro",
+      "http://server.local:8080/path",
+      "http://my-server:3000/",
+      "http://app.test/",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]
+  `);
+});
