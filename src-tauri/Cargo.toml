@@ -44,12 +44,12 @@ tungstenite = "0.29"
 arboard = "3"
 notify = "8.2"
 ignore = "0.4"
-boop-mux = { path = "../../hafley-rs/crates/boop-mux" }
-boop-store = { path = "../../hafley-rs/crates/boop-store", default-features = false, features = ["agent-read"] }
-boop-harness = { path = "../../hafley-rs/crates/boop-harness" }
-boop-turnvis = { path = "../../hafley-rs/crates/boop-turnvis" }
-boop-turnstrip = { path = "../../hafley-rs/crates/boop-turnstrip" }
-hafley-observe = { path = "../../hafley-rs/crates/hafley-observe" }
+boop-mux = { version = "=0.0.9-dev.20261003.1", registry = "hafley" }
+boop-store = { version = "=0.0.2-dev.20261003.1", registry = "hafley", default-features = false, features = ["agent-read"] }
+boop-harness = { version = "=0.0.2-dev.20261003.1", registry = "hafley" }
+boop-turnvis = { version = "=0.1.0-dev.20261003.1", registry = "hafley" }
+boop-turnstrip = { version = "=0.1.0-dev.20261003.1", registry = "hafley" }
+hafley-observe = { version = "=0.1.2-dev.20261003.1", registry = "hafley" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
 axum = { version = "0.8", features = ["ws"] }

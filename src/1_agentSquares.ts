@@ -96,7 +96,6 @@ export class TerminalAgentSquares {
   private gap = document.createElement("div")
   private entries = new Map<string, Entry>()
   private frames?: Subscription
-  private stop?: () => Promise<void>
   private disposed = false
   private panel?: TurnPanel
   /** The square the panel was last opened for. A click on that square is the
@@ -176,7 +175,9 @@ export class TerminalAgentSquares {
     this.el.append(this.host)
     this.el.classList.add("asq-open")
     this.onGutter()
-    this.stop = await watchSquares(this.input, this.options)
+    // Opening the sidebar requests a fresh first frame. The pane owns the
+    // watcher lifetime so hiding the sidebar keeps turn attribution running.
+    await watchSquares(this.input, this.options)
   }
 
   /** One server frame in. A reader inside the strip is reading a drawing the
@@ -240,8 +241,6 @@ export class TerminalAgentSquares {
     this.resize = undefined
     if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame)
     this.resizeFrame = 0
-    const stop = this.stop
-    this.stop = undefined
     for (const entry of this.entries.values()) {
       entry.subscription.unsubscribe()
       entry.el.remove()
@@ -253,7 +252,6 @@ export class TerminalAgentSquares {
     this.el.classList.remove("asq-open")
     this.host.remove()
     this.onGutter()
-    await stop?.()
   }
 
   /** Open one square's turn panel, or close it when it is already the panel's.

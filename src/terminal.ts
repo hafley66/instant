@@ -3,12 +3,12 @@
 // protocol for graphics tabs), the OSC-52 clipboard bridge, per-terminal font
 // zoom, and the dockview panel lifecycle (activate / show / close / fit) shared
 // with browser tabs.
-import { isTerminalContentRow } from "@hafley66/boop-xterm";
+import { isTerminalContentRow, squaresWatchEffects } from "@hafley66/boop-xterm";
 import { Terminal, type ILink } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { commandEndpoint, commands, invoke } from "./generated/native";
 import { Signal, type Signal as SignalType } from "@hafley66/signals";
-import { EMPTY, merge, map, tap, type Subscription } from "rxjs";
+import { EMPTY, combineLatest, merge, map, tap, type Subscription } from "rxjs";
 import { createBoopXtermPane, type BoopXtermPane, type BoopXtermPanePorts, type HarnessId, type LineAnchorModel, type PinnedSelectionModel, type TurnVisibilityModel } from "@hafley66/boop-xterm";
 import { store, type OpenTab } from "./state";
 import { GraphicsOverlay } from "./graphics";
@@ -864,6 +864,12 @@ export function openTab(
     tab.paneEffects = merge(
       pane.effects,
       turnVisibility?.effects ?? EMPTY,
+      squaresWatchEffects(id, combineLatest([pane.paneSession.data.$, agentSquares.mode.$, agentSquares.userKeep.$]).pipe(
+        map(([binding, mode, userKeep]) => binding?.session ? {
+          pty: id, session: binding.session, target: tmuxTarget ?? name,
+          options: { mode, userKeep },
+        } : null),
+      ), (command, input) => invoke(command, input)),
       pane.paneSession.$.pipe(tap((state) => setPaneSessionBinding(id, state.data ?? null)), map(() => void 0)),
       pane.wheel.activity.$.pipe(tap(() => diagrams?.viewportScrolled()), map(() => void 0)),
       pane.pinned.copy.$.pipe(tap((text) => {

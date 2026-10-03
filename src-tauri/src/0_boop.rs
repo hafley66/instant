@@ -641,8 +641,7 @@ fn fork_reply(store: &Store, lane: &str) -> (Option<String>, Option<BoopTurnComm
             .prepare(
                 "SELECT t.turn, t.said FROM agent_turn t
                    JOIN dict_session ds ON ds.id = t.session_id
-                   JOIN dict_role r ON r.id = t.role_id
-                  WHERE ds.value = ?1 AND r.value = 'assistant'
+                  WHERE ds.value = ?1 AND t.role = 'assistant'
                     AND t.said IS NOT NULL AND t.said != ''
                   ORDER BY t.turn DESC LIMIT 1",
             )
@@ -833,15 +832,6 @@ fn read_favorites() -> Result<Vec<BoopFavorite>, String> {
     Ok(favorites)
 }
 
-fn remove_favorite_source(source: &str) -> Result<(), String> {
-    let store = open_store_rw()?;
-    store
-        .connection()
-        .execute("DELETE FROM agent_favorite WHERE source=?1", [source])
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn boop_favorite_add(turn: BoopTurn) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || add_favorite(&turn, ""))
@@ -860,11 +850,13 @@ pub async fn boop_favorites() -> Result<Vec<BoopFavorite>, String> {
 pub async fn boop_favorite_toggle(turn: BoopTurn, note: Option<String>) -> Result<Vec<BoopFavorite>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let source = format!("turn:{}:{}", turn.session, turn.turn);
-        if read_favorites()?
-            .iter()
-            .any(|favorite| favorite.source == source)
+        if let Some(favorite) = read_favorites()?
+            .into_iter()
+            .find(|favorite| favorite.source == source)
         {
-            remove_favorite_source(&source)?;
+            open_store_rw()?
+                .favorite_delete(favorite.favorite_id)
+                .map_err(|error| error.to_string())?;
         } else {
             add_favorite(&turn, note.as_deref().unwrap_or(""))?;
         }
@@ -1497,11 +1489,10 @@ fn read_agent_touches(sessions: &[String], limit: usize) -> Result<Vec<AgentTouc
         .collect();
     let mut statement = connection
         .prepare(&format!(
-            "SELECT p.value, s.value, t.turn, t.ts, COALESCE(v.value, '')
+            "SELECT p.value, s.value, t.turn, t.ts, COALESCE(t.verb, '')
                FROM agent_touch t
                JOIN dict_path p ON p.id = t.path_id
                JOIN dict_session s ON s.id = t.session_id
-               LEFT JOIN dict_verb v ON v.id = t.verb_id
               WHERE {}
               ORDER BY t.ts DESC, t.turn DESC",
             filter.join(" OR ")

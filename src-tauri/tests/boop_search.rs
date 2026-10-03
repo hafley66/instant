@@ -19,16 +19,14 @@ fn fixture() -> Fixture {
     let store = Store::open(boop.clone()).expect("real boop-store schema");
     let conn = store.connection();
     conn.execute_batch(
-        "INSERT OR IGNORE INTO dict_role (value) VALUES ('user'), ('assistant'), ('tool');
-         INSERT OR IGNORE INTO dict_harness (value) VALUES ('claude');
-         INSERT OR IGNORE INTO dict_cwd (value) VALUES ('/work/repo');
+        "INSERT OR IGNORE INTO dict_cwd (value) VALUES ('/work/repo');
          INSERT INTO dict_session (value) VALUES ('sess-a'), ('sess-b');
-         INSERT INTO agent_session (session_id, harness_id, nickname, cwd_id, started_ts)
-           SELECT id, (SELECT id FROM dict_harness WHERE value = 'claude'), 'alpha',
+         INSERT INTO agent_session (session_id, harness, nickname, cwd_id, started_ts)
+           SELECT id, 'claude', 'alpha',
                   (SELECT id FROM dict_cwd WHERE value = '/work/repo'), 1000
            FROM dict_session WHERE value = 'sess-a';
-         INSERT INTO agent_session (session_id, harness_id, nickname, cwd_id, started_ts)
-           SELECT id, (SELECT id FROM dict_harness WHERE value = 'claude'), NULL, NULL, 2000
+         INSERT INTO agent_session (session_id, harness, nickname, cwd_id, started_ts)
+           SELECT id, 'claude', NULL, NULL, 2000
            FROM dict_session WHERE value = 'sess-b';",
     )
     .unwrap();
@@ -41,9 +39,9 @@ fn add_turn(boop: &Path, session: &str, turn: i64, ts: i64, role: &str, said: &s
     store
         .connection()
         .execute(
-            "INSERT INTO agent_turn (session_id, turn, ts, role_id, said)
+            "INSERT INTO agent_turn (session_id, turn, ts, role, said)
              VALUES ((SELECT id FROM dict_session WHERE value = ?1), ?2, ?3,
-                     (SELECT id FROM dict_role WHERE value = ?4), ?5)",
+                     ?4, ?5)",
             params![session, turn, ts, role, said],
         )
         .unwrap();

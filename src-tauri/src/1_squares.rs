@@ -251,6 +251,7 @@ fn run(host: Arc<dyn Host>, args: SquaresWatchArgs, listener: Receiver<()>) {
             }
             Err(why) => {
                 stat.failed += 1;
+                tracing::error!(session = args.session, target = args.target, error = why, "squares_projection_failed");
                 eprintln!("squares feed for {}: {why}", args.session);
             }
         }

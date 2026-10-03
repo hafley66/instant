@@ -475,7 +475,9 @@ dependencies = [
 
 [[package]]
 name = "boop-acp"
-version = "0.0.2"
+version = "0.0.2-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "93f0e7205cdfe68f6564301aacd42a7fd1ec3fcc81cd450ad4d1f51cf936a7c4"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -489,7 +491,9 @@ dependencies = [
 
 [[package]]
 name = "boop-harness"
-version = "0.0.2"
+version = "0.0.2-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "e415f4d79e42e52a0650a5e8a458faa4107b3ff4e4df185d8a8448391ce30cac"
 dependencies = [
  "anyhow",
  "boop-acp",
@@ -519,7 +523,9 @@ dependencies = [
 
 [[package]]
 name = "boop-mux"
-version = "0.0.9"
+version = "0.0.9-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "0a8063f1a8b8a6113d1d73885a76254659a345856a61251e8d3f75ac268d83f1"
 dependencies = [
  "anyhow",
  "ignore",
@@ -531,11 +537,14 @@ dependencies = [
 
 [[package]]
 name = "boop-store"
-version = "0.0.2"
+version = "0.0.2-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "befd9150b2264f0a9f79f485f68de1513fdfe360903aab6beb7c20cba917f409"
 dependencies = [
  "anyhow",
  "boop-mux",
  "dirs 5.0.1",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",
@@ -543,11 +552,14 @@ dependencies = [
  "time",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
 name = "boop-turnstrip"
-version = "0.1.0"
+version = "0.1.0-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "e55f5b1502f1b1c26659b4c9386df7a823b3d9f3e132371e3424b116b096661d"
 dependencies = [
  "boop-mux",
  "boop-turnvis",
@@ -556,7 +568,9 @@ dependencies = [
 
 [[package]]
 name = "boop-turnvis"
-version = "0.1.0"
+version = "0.1.0-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "5ef4c69b2942738e591e966c72ff5b9443f94bfc502b848753800eb0a855745c"
 dependencies = [
  "aho-corasick",
  "serde",
@@ -2010,7 +2024,9 @@ dependencies = [
 
 [[package]]
 name = "hafley-observe"
-version = "0.1.2"
+version = "0.1.2-dev.20261003.1"
+source = "sparse+http://127.0.0.1:8000/api/v1/crates/"
+checksum = "9a011a0758c50239731306c7afab223587b4b01e30f8cba2f2bbc17bc1d2f2eb"
 dependencies = [
  "libc",
  "opentelemetry",
@@ -2025,6 +2041,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-tunnel",
+ "tracking-allocator",
 ]
 
 [[package]]
@@ -5462,6 +5479,16 @@ checksum = "507bbab1fc2c9e606543558f5656b62e8014ba7e0ffa68b9484511b6871019c5"
 dependencies = [
  "serde",
  "tracing-core",
+]
+
+[[package]]
+name = "tracking-allocator"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b61e0cb3385e17df7db29c565b40fd0350dfe8a076c7eea83d416e30cfd0581"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

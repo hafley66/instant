@@ -15,8 +15,8 @@ importers:
   .:
     dependencies:
       '@hafley66/boop-xterm':
-        specifier: file:../hafley-rxjs/packages/boop-xterm
-        version: file:../hafley-rxjs/packages/boop-xterm(@hafley66/md@0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda))(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
+        specifier: 0.0.1-dev.20261003.3
+        version: 0.0.1-dev.20261003.3(@hafley66/md@0.1.2-dev.1790825608002(f2690ebce371ac936dd1a360f7ea6cda))(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/d2':
         specifier: 0.1.0-dev.1790445386724
         version: 0.1.0-dev.1790445386724
@@ -39,8 +39,8 @@ importers:
         specifier: 0.0.3-dev.1790342041910
         version: 0.0.3-dev.1790342041910(@hafley66/trace@0.1.0-dev.1790445386724)(vite@8.1.5)
       '@hafley66/md':
-        specifier: 0.1.2-dev.1790445386724
-        version: 0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda)
+        specifier: 0.1.2-dev.1790825608002
+        version: 0.1.2-dev.1790825608002(f2690ebce371ac936dd1a360f7ea6cda)
       '@hafley66/mmd':
         specifier: 0.1.0-dev.1790445386724
         version: 0.1.0-dev.1790445386724
@@ -417,8 +417,8 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hafley66/boop-xterm@file:../hafley-rxjs/packages/boop-xterm':
-    resolution: {directory: ../hafley-rxjs/packages/boop-xterm, type: directory}
+  '@hafley66/boop-xterm@0.0.1-dev.20261003.3':
+    resolution: {integrity: sha512-iMuaNM9HhoEaQXGWcnfFfEeN6rbQUUCN0X2on/N2B8pfuKAhRLb6GYoQTi5Nc93wD9tlVMgKKI5C3zcImctc+Q==}
     peerDependencies:
       '@hafley66/md': '>=0.1.2'
       '@hafley66/signals': 0.1.1-dev.1790445386724
@@ -466,8 +466,8 @@ packages:
   '@hafley66/marbler@0.0.3-dev.1790342041910':
     resolution: {integrity: sha512-iwDS0LbWqCRPoQl/O/wBXx3Tijd93iTyxiap8mpsywN/pntofrvmRRYK8d4rvWQJnFNHNz6XqXOnfg7gAqQGKA==}
 
-  '@hafley66/md@0.1.2-dev.1790445386724':
-    resolution: {integrity: sha512-jrpSkVZQuK6tvxduBs5h5qDa4N2RpbbVteYEOWv2cCOOcDS56GpmHj83TOeyhZC6oRQnZYF7fXYp/iTf8dJWUA==}
+  '@hafley66/md@0.1.2-dev.1790825608002':
+    resolution: {integrity: sha512-jA2odR1u5BcSPs04p7QyTiuU2Ys6UyUcR8rD41PX08Q6I1VqIA3vSWhT3SrcNU0RbuCxFeMZSC5OknYKm6/X4g==}
     peerDependencies:
       '@hafley66/d2': '>=0.1.0'
       '@hafley66/grapht': '>=0.1.0'
@@ -557,6 +557,14 @@ packages:
       react:
         optional: true
       vite:
+        optional: true
+
+  '@hafley66/trace@0.1.0':
+    resolution: {integrity: sha512-mV9K22U/PklXkSeotif04cmWRpnWdg9aBZ61qOWM09eL53fEwdHCJcdyJqbgPYqJoEWRDvsINxF7dFX8v0eLBA==}
+    peerDependencies:
+      '@logtape/logtape': ^2.3.3
+    peerDependenciesMeta:
+      '@logtape/logtape':
         optional: true
 
   '@hafley66/trace@0.1.0-dev.1790445386724':
@@ -3132,9 +3140,9 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hafley66/boop-xterm@file:../hafley-rxjs/packages/boop-xterm(@hafley66/md@0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda))(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
+  '@hafley66/boop-xterm@0.0.1-dev.20261003.3(@hafley66/md@0.1.2-dev.1790825608002(f2690ebce371ac936dd1a360f7ea6cda))(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@xterm/xterm@6.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)':
     dependencies:
-      '@hafley66/md': 0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda)
+      '@hafley66/md': 0.1.2-dev.1790825608002(f2690ebce371ac936dd1a360f7ea6cda)
       '@hafley66/signals': 0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5)
       '@xterm/xterm': 6.0.0
       react: 19.2.7
@@ -3278,7 +3286,7 @@ snapshots:
       - '@logtape/logtape'
       - vite
 
-  '@hafley66/md@0.1.2-dev.1790445386724(f2690ebce371ac936dd1a360f7ea6cda)':
+  '@hafley66/md@0.1.2-dev.1790825608002(f2690ebce371ac936dd1a360f7ea6cda)':
     dependencies:
       '@hafley66/d2': 0.1.0-dev.1790445386724
       '@hafley66/grapht': 0.1.0-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(pixi.js@8.20.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.1.5)
@@ -3287,7 +3295,7 @@ snapshots:
       '@hafley66/mmd': 0.1.0-dev.1790445386724
       '@hafley66/signal-grid': 0.1.0-dev.1790445386724(@hafley66/path@0.1.0-dev.1790302359457)(@hafley66/signals@0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(@hafley66/trace@0.1.0-dev.1790445386724)(@hafley66/xdom@0.1.0-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rxjs@7.8.2)
       '@hafley66/signals': 0.1.1-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5)
-      '@hafley66/trace': 0.1.0-dev.1790445386724
+      '@hafley66/trace': 0.1.0
       '@hafley66/xdom': 0.1.0-dev.1790445386724(@hafley66/trace@0.1.0-dev.1790445386724)(react@19.2.7)(vite@8.1.5)
       '@streamdown/code': 1.1.1(react@19.2.7)
       '@terrastruct/d2': 0.1.33
@@ -3374,6 +3382,10 @@ snapshots:
     optionalDependencies:
       react: 19.2.8
       vite: 8.1.5
+
+  '@hafley66/trace@0.1.0':
+    dependencies:
+      rxjs: 7.8.2
 
   '@hafley66/trace@0.1.0-dev.1790445386724':
     dependencies:

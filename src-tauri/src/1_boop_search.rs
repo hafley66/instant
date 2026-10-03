@@ -160,11 +160,10 @@ pub fn sync_index(
                     .map_err(|error| error.to_string())?;
                 conn.execute(
                     "INSERT OR IGNORE INTO turn_ref (session_id, turn, ts, role)
-                     SELECT t.session_id, t.turn, t.ts, r.value
+                     SELECT t.session_id, t.turn, t.ts, t.role
                      FROM boop.agent_turn t
-                     JOIN boop.dict_role r ON r.id = t.role_id
                      WHERE t.session_id = ?1 AND t.turn > ?2
-                       AND r.value IN ('user', 'assistant')
+                       AND t.role IN ('user', 'assistant')
                        AND t.said IS NOT NULL AND t.said <> ''
                      ORDER BY t.turn",
                     params![session_id, mark],
@@ -272,7 +271,7 @@ pub fn search(
                 ORDER BY r.ts DESC
                 LIMIT ?3
             )
-            SELECT ds.value, dh.value, dc.value, s.nickname,
+            SELECT ds.value, s.harness, dc.value, s.nickname,
                    hit.turn, hit.ts, hit.role, t.said,
                    (SELECT MAX(a.ts) FROM boop.agent_turn a WHERE a.session_id = hit.session_id),
                    (SELECT COUNT(*) FROM boop.agent_turn a WHERE a.session_id = hit.session_id)
@@ -280,7 +279,6 @@ pub fn search(
             JOIN boop.agent_turn t ON t.session_id = hit.session_id AND t.turn = hit.turn
             JOIN boop.agent_session s ON s.session_id = hit.session_id
             JOIN boop.dict_session ds ON ds.id = hit.session_id
-            JOIN boop.dict_harness dh ON dh.id = s.harness_id
             LEFT JOIN boop.dict_cwd dc ON dc.id = s.cwd_id
             ORDER BY hit.ts DESC",
         )
