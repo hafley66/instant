@@ -20,6 +20,11 @@ Instant links schema-38 sibling code against the schema-40 live store. Turn proj
 
 Schema 40 consumer queries repaired; favorite deletion uses favorite_delete by ID. Pane-owned attribution survives sidebar closure, and idle chat bindings trigger ingestion. Exact clicked chat resolves its touched repository worktrees. Local live probe projects squares, resolves the reported HTML, and adds/removes an assistant favorite without leaving a test favorite. Boop click tests: 10 passed; boop-xterm suite: 184 passed before restoring the existing feed test, then 4 targeted tests passed; search integration: 3 passed, 1 ignored. Typecheck, web build and native build passed. Dev-safe startup and final cargo-check in progress.
 
+### 2026-10-03T14:22:37Z · @codex
+
+Daily-driver checkout advanced to repaired main with original overlapping manifests backed up in /private/tmp/instant-driver-before-turn-repair; markdown pin and unrelated source edits preserved. Automatic rebuild exposed rcargo forwarding Cargo to Spark, which cannot reach local Kellnr. Dev recipes now set RCARGO_OFF=1, matching the verified dev-safe startup environment. Existing driver requires one restart to inherit the environment.
+
+
 ## Resolution
 
 ### 2026-10-03T14:20:03Z · @codex
