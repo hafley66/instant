@@ -835,6 +835,10 @@ function DockApp() {
   });
 }
 
+// Dataflow hop 7/10 — dock/layout owner (src/reactdock.tsx).
+// Dockview is the layout ground truth: onReady restores settings.dockJSON (or
+// builds a default), persist() writes it back, and terminals/previews adopt JS
+// content nodes pooled outside the dock JSON.
 export function mountReactDock(el: HTMLElement) {
   createRoot(el).render(createElement(DockApp));
   setTimeout(() => {
