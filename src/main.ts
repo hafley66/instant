@@ -223,6 +223,10 @@ const TAB_COMMANDS: Command[] = [
   })),
 ];
 
+// Dataflow hop 1/10 — composition root (src/main.ts).
+// All boot wiring is this one function, in consequence order: mount the panic
+// button, resolve home + config, subscribe settings signals, register plugins,
+// mount the dock, then attach the global side effects last.
 async function main() {
   // Panic button: pastes a stop message into the visible tmux pane. Mounted first
   // so it survives a later boot failure, which is exactly when you want it.
