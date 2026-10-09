@@ -23,6 +23,9 @@ export interface Store<S extends object> {
   readonly changed$: Observable<(keyof S)[]>;
 }
 
+// Dataflow hop 4/10 — runtime app state (src/store.ts).
+// createStore is a Signal behind get/set/subscribe plus a per-key changed$
+// stream; listeners fire only for keys whose value actually changed.
 export function createStore<S extends object>(initial: S): Store<S> {
   const state = Signal(initial);
   const changed = new Subject<(keyof S)[]>();
