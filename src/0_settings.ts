@@ -69,6 +69,9 @@ try {
 
 export type ResumeTabs = Record<string, { editor: HarnessId; sessionId: string }>;
 
+// Dataflow hop 5/10 — durable config (src/0_settings.ts).
+// Every persisted value is its own StorageSignal declared here; boot re-applies
+// them by subscribing, and each signal replays its current value on subscribe.
 export const settings = {
   // appearance
   skin: setting<Skin>("skin", "xp"),
