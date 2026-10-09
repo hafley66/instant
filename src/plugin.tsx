@@ -137,6 +137,10 @@ const commandList: PluginCommand[] = [];
 const routeList: PluginRoute[] = [];
 const tabOverrideList: TabOverride[] = [];
 
+// Dataflow hop 6/10 — plugin registry (src/plugin.tsx).
+// registerPlugin accumulates panels, instances, config options, status probes,
+// commands, routes and tab overrides into flat lists; dockComponents() later
+// wraps each panel in PanelErrorBoundary for a dockview component.
 export function registerPlugin(p: Plugin) {
   const previous = pluginMap.get(p.id);
   pluginMap.set(
