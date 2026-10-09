@@ -8,6 +8,10 @@ import { startStatusPolling } from "./statusPolling";
 
 let runtime: Subscription | undefined;
 
+// Dataflow hop 9/10 — owned subscription runtime (src/reactive/runtime.ts).
+// startReactiveRuntime builds the event bus + status polling and returns the
+// one teardown the app honors (bound to beforeunload); every other global
+// listener is attached ad hoc in main.ts and never torn down.
 export function startReactiveRuntime(ports: RuntimePorts = runtimePorts): () => void {
   runtime?.unsubscribe();
   const bus = createEventBus<AppEvents>();
