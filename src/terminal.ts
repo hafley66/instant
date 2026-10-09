@@ -129,6 +129,10 @@ const structuredOverlaysEnabled = false;
 
 // Runtime registry of live terminals. These are resources, not serializable app
 // state, so they stay out of the store; the active tab *id* lives in the store.
+// Dataflow hop 8/10 — live terminal registry (src/terminal.ts).
+// tabs maps each `s:<name>` session id to its live xterm Tab. openTab creates,
+// onTermClosed tears down and stacks it for reopen; this Map is bookkeeping
+// beside dockview's panel tree.
 export const tabs = new Map<string, Tab>();
 
 export function syncInlineDiagramOverlays() {
