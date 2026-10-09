@@ -202,6 +202,9 @@ export function browserPorts(transport: NativeTransport): RuntimePorts {
 
 // Chosen the same way as the transport: Tauri internals present = real window
 // and opener APIs; a plain browser gets stubs over the ws transport.
+// Dataflow hop 3/10 — runtime ports (src/reactive/ports.ts).
+// Every direct @tauri-apps/* call (window, webview, opener, path, dpi) funnels
+// through this one object; a plain browser gets stubs over the ws transport.
 export const runtimePorts: RuntimePorts = hasTauriInternals()
   ? tauriPorts()
   : browserPorts(pickTransport());
