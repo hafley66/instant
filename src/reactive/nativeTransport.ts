@@ -61,6 +61,10 @@ function wsUrl(): string {
 // calls share the socket, pending map, and event listeners.
 const wsTransports = new Map<string, NativeTransport>();
 
+// Dataflow hop 2/10 — the native edge (src/reactive/nativeTransport.ts).
+// Every command/event in the app funnels through one NativeTransport chosen by
+// pickTransport(): Tauri invoke/listen inside the shell, JSON-RPC over
+// ws://127.0.0.1:47777/ws in a plain browser. No caller picks its own edge.
 export function pickTransport(): NativeTransport {
   if (hasTauriInternals()) return tauriTransport();
   const url = wsUrl();
