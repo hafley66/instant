@@ -42,6 +42,10 @@ let onFire: KeymapFire | undefined;
 // Bind every command on `target` (default window). ignore:() => false so combos
 // fire even while a form/terminal element is focused — the xterm handler then
 // stops propagation for matched combos so they don't double-run.
+// Dataflow hop 10/10 — central command table (src/keymap.ts).
+// installKeymap binds one table (TAB_COMMANDS + pluginCommands + panelCommands)
+// on the window and matches combos inside xterm's key handler so bindings are
+// not typed into the pty.
 export function installKeymap(commands: Command[], target: Window = window, fire?: KeymapFire): void {
   unbind?.();
   registered = commands;
