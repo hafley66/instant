@@ -46,7 +46,7 @@ import { openJumpPalette, isJumpOpen } from "./jumpPalette";
 import { type GraphicsFrame } from "./graphics";
 import { cdpPerf } from "./cdp";
 import { claimFsWatch } from "./fsWatch";
-import { registerZoomKind, resetPanelZoom } from "./panelZoom";
+import { registerZoomKind, resetPanelZoom, setPanelZoom } from "./panelZoom";
 import { readPluginState, savePluginState } from "./pluginState";
 import { useApp } from "./useStore";
 import {
@@ -323,6 +323,7 @@ async function main() {
     useLifecycleProbe: useLiveProbeLifecycle,
     recordOperation: (name, detail) => liveProbe.record({ kind: "operation", name, detail }),
     registerZoomKind,
+    setPanelZoom,
     resetPanelZoom,
     readPluginState,
     savePluginState,

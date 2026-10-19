@@ -147,6 +147,44 @@ test("cmd+/-/0 zoom the markdown preview opened from a focused terminal", async 
   expect(pageErrors).toEqual([]);
 });
 
+test("cmd+wheel zooms and shift+wheel pans the markdown preview", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+  await boot(page);
+  await openDocFromPane(page);
+  const content = page.locator(".mdview-content");
+  await expandDoc(page);
+  const codeBody = page.locator('[data-streamdown="code-block-body"]').first();
+  await expect(codeBody).toBeVisible();
+  await expect.poll(async () => codeBody.evaluate((el) => el.scrollWidth > el.clientWidth), { timeout: 10_000 }).toBe(true);
+
+  // ⌘+wheel over the reading pane writes a continuous factor through the
+  // same store the ⌘+/−/0 keys use; one tick of -120 clamps at the kind max.
+  await page.locator(".mdview-head").hover();
+  await page.keyboard.down("Meta");
+  await page.mouse.wheel(0, -120);
+  await page.keyboard.up("Meta");
+  await expect.poll(async () => Number(await contentZoom(page)), { timeout: 10_000 }).toBeCloseTo(2.5, 1);
+  await expect(page.getByTitle("content zoom — reset (⌘0)")).toHaveText("250%");
+
+  // shift+wheel over the wide fence pans it sideways and leaves the document
+  await codeBody.hover();
+  // hover() may scroll the document to reveal the fence; sample after it.
+  const scrollTop = await content.evaluate((el) => el.scrollTop);
+  await page.keyboard.down("Shift");
+  await page.mouse.wheel(0, 120);
+  await page.keyboard.up("Shift");
+  await expect.poll(async () => codeBody.evaluate((el) => el.scrollLeft), { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(await content.evaluate((el) => el.scrollTop)).toBe(scrollTop);
+
+  // Plain wheel is untouched: the document keeps native scroll.
+  await page.locator(".mdview-head").hover();
+  await page.mouse.wheel(0, 120);
+  await expect.poll(async () => content.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBeGreaterThan(scrollTop);
+  expect(pageErrors).toEqual([]);
+  await shot(page, "mdzoom-07-wheel");
+});
+
 test("a terminal the user is typing in still zooms its own font", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
