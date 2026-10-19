@@ -57,7 +57,7 @@ signing-setup:
 # Build, sign, and replace /Applications/instant.app with the shared local
 # Instant Dev identity. On a second Mac, pass the exported .p12 once.
 install-local p12="":
-    ./scripts/1_install-local.sh "{{p12}}"
+    RCARGO_OFF=1 RUSTUP_TOOLCHAIN=stable ./scripts/1_install-local.sh "{{p12}}"
 
 # one-time: local push-to-talk dictation (Handy, https://handy.computer — open
 # source, fully on-device, no audio leaves the machine). Alternative to Claude
@@ -83,15 +83,24 @@ serve-browser port="47777" *args:
 build:
     corepack pnpm@10.12.4 run build
 
-# release bundle (.app/.dmg) via Tauri
+# release bundle (.app/.dmg) via Tauri. Tauri's bundler resolves the binary at
+# <target-dir>/release, but rcargo builds into target/rcargo/<triple>, so pin
+# CARGO_TARGET_DIR (which makes rcargo exec plain local cargo) and go local.
 bundle:
-    corepack pnpm@10.12.4 run tauri build
+    RCARGO_OFF=1 RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR="{{justfile_directory()}}/src-tauri/target" corepack pnpm@10.12.4 run tauri build
 
 # update every release version, commit, and tag. Pushing the printed commands
 # invokes the macOS release workflow, which builds Apple Silicon + Intel DMGs.
 cut version:
     ./scripts/0_release.sh {{version}}
 
+
+# release.yml on this machine (runner-outage path): worktrees pinned to TAG
+# (default: newest tag), both arches built locally, DMGs + installer uploaded
+# to that tag's GitHub release. Run `just cut X.Y.Z` and push main + the tag
+# first. Nothing is committed here — this only uploads assets.
+release-local tag="":
+    ./scripts/2_release_local.sh {{tag}}
 # Disabled while dl6 replaces dl:
 # todos:
 #     dl --no-daemon --apply

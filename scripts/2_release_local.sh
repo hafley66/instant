@@ -42,7 +42,7 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
   rustup target add "$target"
   # tauri's own dmg bundler drives Finder through AppleScript and dies in a
   # headless shell, so bundle only the .app and press the dmg with hdiutil.
-  corepack pnpm@10.12.4 tauri build --target "$target" --bundles app
+  RCARGO_OFF=1 CARGO_TARGET_DIR="$PWD/src-tauri/target" corepack pnpm@10.12.4 tauri build --target "$target" --bundles app
   bundle="src-tauri/target/$target/release/bundle"
   stage="$bundle/dmg-stage"
   dmg="$bundle/dmg/instant_${version}_${arch}.dmg"

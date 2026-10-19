@@ -47,6 +47,10 @@ if [ -d "$INSTALLED_APP" ]; then
 fi
 
 cd "$REPO_ROOT"
+# Tauri's bundler reads the binary from <target-dir>/release; rcargo builds into
+# target/rcargo/<triple> and fetches the binary to a temp dir instead, so pin
+# CARGO_TARGET_DIR (makes rcargo exec plain local cargo) and stay local.
+RCARGO_OFF=1 CARGO_TARGET_DIR="$REPO_ROOT/src-tauri/target" \
 corepack pnpm@10.12.4 tauri build \
   --bundles app \
   --config '{"bundle":{"macOS":{"signingIdentity":"Instant Dev"}}}'

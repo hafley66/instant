@@ -39,6 +39,13 @@ jobs:
           - runner: macos-14
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
+    # The repo's .cargo/config.toml names kellnr at 192.168.1.67:8001, a LAN
+    # address a runner cannot reach, and 127.0.0.1:8000 is shadowed by a tunnel
+    # agent on the Macs. So stand up a runner-local kellnr here and let env
+    # (which beats the config file) point cargo at it.
+    env:
+      CARGO_REGISTRIES_HAFLEY_INDEX: sparse+http://127.0.0.1:8001/api/v1/crates/
+      CARGO_REGISTRIES_HAFLEY_TOKEN: kellnr
     steps:
       - uses: actions/checkout@v4
 
@@ -69,9 +76,78 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/kellnr
+          key: kellnr-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Start the runner-local kellnr registry
+        run: |
+          test -x "$HOME/.cargo/bin/kellnr" || cargo install kellnr --locked
+          mkdir -p "$RUNNER_TEMP/kellnr-data"
+          cat > "$RUNNER_TEMP/kellnr.toml" <<'EOF'
+          [setup]
+          admin_pwd = "admin"
+
+          [registry]
+          data_dir = ""
+          auth_required = false
+          new_crates_restricted = false
+          allow_ownerless_crates = false
+
+          [local]
+          ip = "127.0.0.1"
+          port = 8001
+
+          [origin]
+          hostname = "127.0.0.1"
+          port = 8001
+          protocol = "http"
+          path = ""
+
+          [log]
+          format = "compact"
+          level = "warn"
+          level_web_server = "warn"
+
+          [docs]
+          enabled = false
+
+          [proxy]
+          enabled = false
+
+          [postgresql]
+          enabled = false
+
+          [s3]
+          enabled = false
+
+          [oauth2]
+          enabled = false
+
+          [toolchain]
+          enabled = false
+          EOF
+          "$HOME/.cargo/bin/kellnr" start -c "$RUNNER_TEMP/kellnr.toml" -d "$RUNNER_TEMP/kellnr-data" &
+          for _ in $(seq 90); do
+            curl -sf http://127.0.0.1:8001/api/v1/crates/config.json >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8001/api/v1/crates/config.json >/dev/null
+
+      # Crates reference each other by path, so a first pass publishes only the
+      # leaves; later passes walk up the graph. Failures are retried, not fatal.
+      - name: Seed the registry with the pinned hafley crates
+        run: |
+          cd "$(dirname "$GITHUB_WORKSPACE")/hafley-rs"
+          for _ in 1 2 3 4 5 6 7 8; do
+            for m in crates/*/Cargo.toml; do
+              cargo publish --manifest-path "$m" --registry hafley --no-verify --allow-dirty || true
+            done
+          done
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
-
       - name: Check tag and package versions
         run: |
           version="${GITHUB_REF_NAME#v}"
