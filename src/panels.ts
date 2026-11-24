@@ -11,7 +11,8 @@ import { StatusPanelV2, registerBuiltinStatus } from "./status";
 import { panic } from "./0_panicSettings";
 import { cdpPerf } from "./cdp";
 import { setBrowserPerf } from "./browser";
-import { refreshSessions, scanWorktreesIfNeeded } from "./worktrees";
+import { refreshSessions } from "./worktrees";
+import { worktreePanelShown } from "./1_worktreeScan";
 import { ConfigPanelV2 } from "./activity";
 import { registerFavoritesPlugin } from "./favorites";
 import { settings } from "./0_settings";
@@ -93,7 +94,7 @@ export function registerBuiltin() {
         iconLabel: "Worktrees",
         html: "",
         component: WorktreesPanelV2,
-        onShow: () => scanWorktreesIfNeeded(),
+        onShow: () => worktreePanelShown.next(),
       },
       {
         id: "activity",

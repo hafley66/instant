@@ -122,14 +122,30 @@ export function listenNativeEvent<Payload>(
 // Hot native events become a teardown-aware Observable at the adapter. The
 // subscription owns both the late async registration and the native unlisten.
 export function nativeEvent$<Payload>(event: string): Observable<Payload> {
-  return new Observable<Payload>((subscriber) => {
+  return nativeEventGate<Payload>(event).events$;
+}
+
+// `listening` settles once the first subscription's native listener is registered,
+// for boot steps that must not run before the backend can reach the page.
+export function nativeEventGate<Payload>(event: string): {
+  events$: Observable<Payload>;
+  listening: Promise<void>;
+} {
+  let registered!: () => void;
+  const listening = new Promise<void>((resolve) => (registered = resolve));
+  const events$ = new Observable<Payload>((subscriber) => {
     let unlisten: NativeUnlistenFn | undefined;
     void listenNativeEvent<Payload>(event, ({ payload }) => subscriber.next(payload))
       .then((nextUnlisten) => {
         if (subscriber.closed) nextUnlisten();
         else unlisten = nextUnlisten;
+        registered();
       })
-      .catch((error: unknown) => subscriber.error(error));
+      .catch((error: unknown) => {
+        registered();
+        subscriber.error(error);
+      });
     return () => unlisten?.();
   });
+  return { events$, listening };
 }

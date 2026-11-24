@@ -1,4 +1,4 @@
-import { EMPTY, from, fromEvent, merge, Observable, race, Subscription, timer } from "rxjs"
+import { EMPTY, from, fromEvent, merge, Observable, race, timer } from "rxjs"
 import {
   catchError,
   filter,
@@ -58,8 +58,8 @@ const LONG_PRESS_MS = 350
 /** Sliding further than this before the timer fires cancels the gesture. */
 const SLOP_PX = 6
 
-/** Mounts the desk button into `host` and returns a teardown. */
-export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = {}): () => void {
+/** Builds the desk button in `host` now; the returned flow runs it and removes it on unsubscribe. */
+export function stfuButtonFlow(host: HTMLElement, options: StfuButtonOptions = {}): Observable<unknown> {
   const opts = { ...DEFAULTS, ...options }
   const stage = document.createElement("div")
   stage.className = "stfu-stage"
@@ -191,7 +191,6 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
         )
       }),
     )
-    .subscribe()
 
   // exhaustMap is the point: a send in flight swallows further clicks, so the
   // disabled-flag juggling disappears and a mashed button sends once.
@@ -227,7 +226,6 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
         ),
       ),
     )
-    .subscribe()
 
   // Replaces the old :hover unit rule. Pointer capture during a drag retargets
   // boundary events to the cap, so the enter/leave pair stays balanced.
@@ -241,15 +239,6 @@ export function mountStfuButton(host: HTMLElement, options: StfuButtonOptions = 
         applyCap()
       }),
     )
-    .subscribe()
 
-  const teardown = new Subscription()
-  teardown.add(gestures)
-  teardown.add(sends)
-  teardown.add(hovers)
-
-  return () => {
-    teardown.unsubscribe()
-    stage.remove()
-  }
+  return merge(gestures, sends, hovers).pipe(finalize(() => stage.remove()))
 }

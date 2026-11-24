@@ -1,4 +1,4 @@
-import { Subject, Subscription, exhaustMap, takeUntil, timer } from "rxjs";
+import { defer, exhaustMap, from, map, timer, type Observable } from "rxjs";
 import type { StatusProbe } from "../plugin";
 import type { ApplicationEventBus } from "./eventBus";
 import type { StatusRow } from "./statusModel";
@@ -21,28 +21,23 @@ export async function checkStatusProbes(probes: StatusProbe[]): Promise<StatusRo
   );
 }
 
-export function startStatusPolling(
+// Polls on a fixed interval and never overlaps: a poll still in flight swallows
+// the ticks behind it. Unsubscribing drops a late response before it is emitted.
+export function statusPolling(
   bus: ApplicationEventBus,
   probes: () => StatusProbe[],
   pollMs = STATUS_POLL_MS,
-): Subscription {
-  const stopped = new Subject<void>();
-  let sequence = 0;
-  const polling = timer(0, pollMs)
-    .pipe(
-      takeUntil(stopped),
-      exhaustMap(async () => {
+): Observable<void> {
+  return defer(() => {
+    let sequence = 0;
+    return timer(0, pollMs).pipe(
+      exhaustMap(() => {
         const current = ++sequence;
         bus.emit("status.poll.requested", { sequence: current });
-        const rows = await checkStatusProbes(probes());
-        bus.emit("status.poll.completed", { sequence: current, rows });
+        return from(checkStatusProbes(probes())).pipe(
+          map((rows) => bus.emit("status.poll.completed", { sequence: current, rows })),
+        );
       }),
-    )
-    .subscribe();
-  polling.add(() => {
-    stopped.next();
-    stopped.complete();
+    );
   });
-  return polling;
 }
-

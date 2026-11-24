@@ -24,7 +24,8 @@ import { browserFileUrl, expandHome } from "./0_htmlFileUrl";
 import { documentHref } from "./0_documentHref";
 import { openExternal, openExternalUrl } from "./0_openExternal";
 import { isKnownInstantKind, opensExternally } from "./0_externalKinds";
-import { shareReplay, type Subscription } from "rxjs";
+import { shareReplay, type Observable, type Subscription } from "rxjs";
+import { sink } from "./reactive/0_root";
 import { visibleFileWatch$ } from "./0_visibleFileWatch";
 import { settings } from "./0_settings";
 
@@ -342,13 +343,13 @@ async function renderDiffInto(node: HTMLElement, wtPath: string) {
 // On theme flip, re-render the open previews so syntax colors track light/dark
 // (the line-numbered source view is shiki-colored too now). Closed instances keep
 // their cached node; reopening re-renders. Diff panels are shiki-colored too.
-export function initPreviewThemeSync() {
-  settings.mode.$.subscribe(() => {
+export function previewThemeFlow(): Observable<unknown> {
+  return settings.mode.$.pipe(sink(() => {
     for (const [path, inst] of previewInsts) {
       if (isPreviewOpen(path)) renderPathInto(inst.el, path, inst.line);
     }
     for (const [key, inst] of diffInsts) {
       if (isPreviewOpen(key)) renderDiffInto(inst.el, key.slice("diff:".length));
     }
-  });
+  }));
 }
