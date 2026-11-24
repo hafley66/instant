@@ -10,7 +10,7 @@ import {
   type PanelDef,
   type RailChild,
 } from "./plugin";
-import { EMPTY, type Observable } from "rxjs";
+import { EMPTY, defer, type Observable } from "rxjs";
 import { sink } from "./reactive/0_root";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -277,10 +277,12 @@ function wireVisibilityMenu(actbar: HTMLElement): void {
 }
 
 export function railFlow(): Observable<unknown> {
-  rebuild();
-  const actbar = document.getElementById("actbar");
-  if (!actbar) return EMPTY;
-  wireDragReorder(actbar);
-  wireVisibilityMenu(actbar);
-  return settings.pluginState.$.pipe(sink(() => onPluginStateChange()));
+  return defer(() => {
+    rebuild();
+    const actbar = document.getElementById("actbar");
+    if (!actbar) return EMPTY;
+    wireDragReorder(actbar);
+    wireVisibilityMenu(actbar);
+    return settings.pluginState.$.pipe(sink(() => onPluginStateChange()));
+  });
 }

@@ -1,4 +1,4 @@
-import { EMPTY, from, fromEvent, merge, Observable, race, timer } from "rxjs"
+import { defer, EMPTY, from, fromEvent, merge, Observable, race, timer } from "rxjs"
 import {
   catchError,
   filter,
@@ -58,8 +58,12 @@ const LONG_PRESS_MS = 350
 /** Sliding further than this before the timer fires cancels the gesture. */
 const SLOP_PX = 6
 
-/** Builds the desk button in `host` now; the returned flow runs it and removes it on unsubscribe. */
+/** Subscribing builds the desk button in `host`; unsubscribing removes it. */
 export function stfuButtonFlow(host: HTMLElement, options: StfuButtonOptions = {}): Observable<unknown> {
+  return defer(() => stfuButton(host, options))
+}
+
+function stfuButton(host: HTMLElement, options: StfuButtonOptions): Observable<unknown> {
   const opts = { ...DEFAULTS, ...options }
   const stage = document.createElement("div")
   stage.className = "stfu-stage"

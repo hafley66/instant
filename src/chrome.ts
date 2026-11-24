@@ -167,17 +167,17 @@ export function turnDebugChromeFlow(): Observable<unknown> {
  *  visibility. Each subscription fires once on subscribe, so this replaces both
  *  the store subscriptions and their initial sync calls. */
 export function agentSquaresChromeFlow(): Observable<unknown> {
-  const mode = $("#squares-mode") as HTMLSelectElement;
+  const mode = () => $("#squares-mode") as HTMLSelectElement;
   return merge(
     agentSquares.on.$.pipe(sink((on) => {
       const button = $("#squares-toggle") as HTMLButtonElement;
       button.classList.toggle("active", on);
       button.setAttribute("aria-pressed", String(on));
-      mode.hidden = !on;
+      mode().hidden = !on;
       syncAgentSquares();
     })),
     agentSquares.mode.$.pipe(sink((value) => {
-      mode.value = value;
+      mode().value = value;
       syncAgentSquares();
     })),
     agentSquares.userKeep.$.pipe(sink(() => syncAgentSquares())),
