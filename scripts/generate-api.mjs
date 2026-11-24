@@ -42,6 +42,7 @@ const baseUrl = spec.servers?.[0]?.url;
 if (!baseUrl) throw new Error("OpenAPI spec requires servers[0].url");
 
 const operations = [];
+const operationNames = [];
 for (const [path, item] of Object.entries(spec.paths ?? {})) {
   for (const [method, operation] of Object.entries(item)) {
     const name = operation.operationId;
@@ -57,6 +58,7 @@ for (const [path, item] of Object.entries(spec.paths ?? {})) {
     const inputName = requestSchema ? "input" : "_input";
     const operationBaseUrl = operation.servers?.[0]?.url ?? baseUrl;
     const requestBody = requestSchema ? ", body: input as unknown as Serializable" : "";
+    const inputBack = requestSchema ? "request.body as unknown as Input" : "undefined";
     const sse = mediaType === "text/event-stream"
       ? `\n    export const connect = (EventSourceImpl: typeof EventSource = EventSource) =>\n      new EventSourceImpl(url);`
       : "";
@@ -65,25 +67,52 @@ for (const [path, item] of Object.entries(spec.paths ?? {})) {
     export const url = ${JSON.stringify(operationBaseUrl)} + ${JSON.stringify(path)};
     export type Input = ${input};
     export type Output = ${output};
+    export const meta = {
+      operationId: ${JSON.stringify(name)},
+      method,
+      path: ${JSON.stringify(path)},
+      server: ${JSON.stringify(operationBaseUrl)},
+      responseMediaType: ${JSON.stringify(mediaType)},
+      operation: spec.paths[${JSON.stringify(path)}].${method},
+    } as const;
 ${sse}
-    export const endpoint: EndpointConfig<Input, Output> = {
+    export const endpoint: Operation<Input, Output, typeof meta> = {
+      meta,
       request: (${inputName}) => ({ url, method${requestBody} }),
+      input: (${requestSchema ? "request" : "_request"}) => ${inputBack},
       decode: (response) => {
         if (response.status < 200 || response.status >= 300) {
           throw new HttpStatusError(response.status);
         }
         return response.body as unknown as Output;
       },
+      encode: (output) => ({
+        status: 200,
+        headers: { "content-type": meta.responseMediaType },
+        body: output as unknown as Serializable,
+      }),
     };
   }`);
+    operationNames.push(name);
   }
 }
 
 const generated = `// Generated from openapi/instant-http.json by scripts/generate-api.mjs.
 // Do not edit by hand. Run: corepack pnpm@10.12.4 api:generate
-import type { EndpointConfig, Serializable } from "@hafley66/signals";
+import type { EndpointConfig, EndpointRequest, EndpointResponse, Serializable } from "@hafley66/signals";
 
 export const baseUrl = ${JSON.stringify(baseUrl)};
+
+// The source document, kept whole so a later generator or test tool can read it.
+export const spec = ${JSON.stringify(spec, null, 2)} as const;
+
+// request/decode run in the client; input/encode are their inverses, for a
+// tool that stands in for the server or reads a recorded exchange.
+export type Operation<I, O, M = unknown> = EndpointConfig<I, O> & {
+  meta: M;
+  input: (request: EndpointRequest) => I;
+  encode: (output: O) => EndpointResponse;
+};
 
 export class HttpStatusError extends Error {
   constructor(readonly status: number) {
@@ -100,6 +129,10 @@ ${schemas}
 export namespace paths {
 ${operations.join("\n\n")}
 }
+
+export const operations = {
+${operationNames.map((name) => `  ${name}: paths.${name}.endpoint,`).join("\n")}
+};
 `;
 
 if (process.argv.includes("--check")) {
