@@ -1,30 +1,20 @@
-import { Subscription } from "rxjs";
+import { defer, finalize, merge, type Observable } from "rxjs";
 import { statusProbes } from "../plugin";
+import { sink } from "./0_root";
 import { createEventBus } from "./eventBus";
 import type { AppEvents } from "./events";
 import { runtimePorts, type RuntimePorts } from "./ports";
 import { aggregateHealth, statusRows } from "./statusModel";
-import { startStatusPolling } from "./statusPolling";
+import { statusPolling } from "./statusPolling";
 
-let runtime: Subscription | undefined;
-
-// Dataflow hop 9/10 — owned subscription runtime (src/reactive/runtime.ts).
-// startReactiveRuntime builds the event bus + status polling and returns the
-// one teardown the app honors (bound to beforeunload); every other global
-// listener is attached ad hoc in main.ts and never torn down.
-export function startReactiveRuntime(ports: RuntimePorts = runtimePorts): () => void {
-  runtime?.unsubscribe();
-  const bus = createEventBus<AppEvents>();
-  const owned = new Subscription();
-  owned.add(startStatusPolling(bus, statusProbes));
-  owned.add(bus.on("status.poll.completed").subscribe(({ rows }) => statusRows.$(rows)));
-  owned.add(aggregateHealth.$.subscribe((health) => ports.setRailHealth(health)));
-  owned.add(() => bus.close());
-  runtime = owned;
-  return () => {
-    owned.unsubscribe();
-    if (runtime === owned) runtime = undefined;
-  };
+export function statusFlow(ports: RuntimePorts = runtimePorts): Observable<unknown> {
+  return defer(() => {
+    const bus = createEventBus<AppEvents>();
+    return merge(
+      bus.on("status.poll.completed").pipe(sink(({ rows }) => statusRows.$(rows))),
+      aggregateHealth.$.pipe(sink((health) => ports.setRailHealth(health))),
+      statusPolling(bus, statusProbes),
+    ).pipe(finalize(() => bus.close()));
+  });
 }
-// todo(lifecycle): add per-stream error isolation and runtime diagnostics
-// todo(boundary): move remaining recurring application work into runtime-owned subscriptions
+// todo(boundary): move per-terminal, per-panel, and per-component subscriptions into root-owned flows

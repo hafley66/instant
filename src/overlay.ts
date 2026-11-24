@@ -7,7 +7,8 @@ import { store } from "./state";
 import { flashStatus } from "./core";
 import { overlaySizeTransition } from "./0_overlaySize";
 import { overlay } from "./0_overlaySettings";
-import { merge } from "rxjs";
+import { filter, merge, type Observable } from "rxjs";
+import { sink } from "./reactive/0_root";
 import { settings } from "./0_settings";
 
 // ---- webview zoom (chrome: rail + toolbars + non-terminal panels) ----
@@ -67,11 +68,14 @@ export function applyOverlay() {
 /** Re-applies on any settings change and on the frontmost app, which is runtime
  *  state and stays in the store. Each signal replays on subscribe, so this also
  *  covers the boot pass that restored a persisted mini/fade/follow. */
-export function bindOverlay() {
-  merge(overlay.mode.$, overlay.target.$, overlay.fade.$, overlay.mini.$).subscribe(
-    () => applyOverlay(),
-  );
-  store.subscribe(applyOverlay, ["frontmostApp"]);
+export function overlayFlow(): Observable<unknown> {
+  return merge(
+    overlay.mode.$,
+    overlay.target.$,
+    overlay.fade.$,
+    overlay.mini.$,
+    store.changed$.pipe(filter((dirty) => dirty.includes("frontmostApp"))),
+  ).pipe(sink(() => applyOverlay()));
 }
 
 export function toggleMiniMode() {

@@ -10,7 +10,7 @@ import "./0_stfuButton.css";
 import "./1_agentSquares.css";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "./generated/native";
-import { hasTauriInternals, listenNativeEvent } from "./reactive/nativeTransport";
+import { hasTauriInternals, nativeEvent$, nativeEventGate } from "./reactive/nativeTransport";
 import { runtimePorts } from "./reactive/ports";
 // CSS Anchor Positioning isn't in WebKit yet (Tauri = WKWebView); this shims
 // `anchor-name`/`position-anchor`/`anchor()`/`position-area` so tooltips and
@@ -19,14 +19,14 @@ import anchorPolyfill from "@oddbird/css-anchor-positioning/fn";
 import { store, type CaptureStatus, type Event, type Fav, type FsEntry } from "./state";
 import "@hafley66/md/style.css";
 import { allPanels, pluginCommands, registerPlugin } from "./plugin";
-import { initRail } from "./rail";
+import { railFlow } from "./rail";
 import { recordVisit } from "./nav";
 import { registerRulesPlugin } from "./rules";
 import { registerMetricsPlugin } from "./plugins/metrics";
 import { registerFilesPlugin } from "./plugins/files";
 import { FileTree } from "./plugins/files/1_FileTree";
 import { PanZoomViewport } from "./0_PanZoomViewport";
-import { mountStfuButton } from "./0_stfuButton";
+import { stfuButtonFlow } from "./0_stfuButton";
 import { panic, cycleSetting, PANIC_MODES, PANIC_SUBS } from "./0_panicSettings";
 import { DIAGRAM_INFERENCE } from "./0_terminalDiagrams";
 import { turnDebug } from "./0_turnDebugSettings";
@@ -60,7 +60,7 @@ import {
 } from "./reactdock";
 import { probeToolGaps, readDismissed, rememberDismissed, shouldNotify } from "./0_toolGaps";
 import { setHomeDir, sessionId, activeId, flashStatus, nextSkin, showError, showNotice, logLine } from "./core";
-import { initPreviewThemeSync, initPreviewWatch, initPreviewRestore, openDocumentHrefInInstant } from "./preview";
+import { previewThemeFlow, initPreviewWatch, initPreviewRestore, openDocumentHrefInInstant } from "./preview";
 import { openDocumentRef, wireDomCmdClick } from "./clickrules";
 import {
   tabs,
@@ -92,7 +92,6 @@ import {
 import {
   refreshSessions,
   refreshRogue,
-  scanWorktrees,
   renderWorktreesPanel,
   registerV2Bridges,
 } from "./worktrees";
@@ -106,7 +105,7 @@ import { isCapturing, cancelHide, scheduleHide, captureToPrompt, toggleRecording
 import {
   ZOOM_STEP,
   applyZoom,
-  bindOverlay,
+  overlayFlow,
   toggleMiniMode,
   toggleOverlayFade,
   cycleOverlayMode,
@@ -118,9 +117,9 @@ import {
   syncXpPixel,
   syncMode,
   syncInlineDiagrams,
-  bindPanicChrome,
-  bindTurnDebugChrome,
-  bindAgentSquaresChrome,
+  panicChromeFlow,
+  turnDebugChromeFlow,
+  agentSquaresChromeFlow,
   syncInlineStructured,
   applyToolbar,
   syncSidebar,
@@ -136,9 +135,11 @@ import { isDraggingIn, wireOsDrop } from "./dnd";
 import { registerSprefa } from "./sprefa";
 import { registerNav } from "./history";
 import { registerBuiltin } from "./panels";
-import { startReactiveRuntime } from "./reactive/runtime";
+import { statusFlow } from "./reactive/runtime";
 import { settings } from "./0_settings";
-import { merge } from "rxjs";
+import { Observable, filter, fromEvent, merge, scan, take, timer } from "rxjs";
+import { worktreeScanFlow, worktreeScanRequested, worktreeScanSettled } from "./1_worktreeScan";
+import { root, sink, startRoot } from "./reactive/0_root";
 
 // Toggle the per-terminal right "session sidebar" (file explorer) on the
 // focused terminal. Each terminal remembers its own open state + width.
@@ -230,21 +231,22 @@ const TAB_COMMANDS: Command[] = [
 async function main() {
   // Panic button: pastes a stop message into the visible tmux pane. Mounted first
   // so it survives a later boot failure, which is exactly when you want it.
+  startRoot(fromEvent(window, "beforeunload"));
   const stfuHost = document.getElementById("stfu-host");
   if (stfuHost) {
-    mountStfuButton(stfuHost, {
+    root.next(stfuButtonFlow(stfuHost, {
       body: () => panic.body.$(),
       mode: () => panic.mode.$(),
       position: panic.pos.$(),
       subMode: panic.sub.$(),
       onMoveEnd: (next) => panic.pos.$(next),
-    });
+    }));
   }
   // Resolve the home dir once so tildify() can stay synchronous during render.
   setHomeDir(await runtimePorts.homeDir().catch(() => ""));
   await refreshConfig();
   // On theme flip, re-render open file/diff previews so syntax colors track.
-  initPreviewThemeSync();
+  root.next(previewThemeFlow());
   // Release fs watches for preview tabs the user has closed.
   initPreviewWatch();
   // Teach the dock how to rebuild a file preview from the saved layout. Must be
@@ -253,15 +255,17 @@ async function main() {
   // Each setting replays its current value on subscribe, so these also perform
   // the initial apply that used to be a second call per sync function. config is
   // runtime state, so xpPixel merges its signal with a store subscription.
-  settings.skin.$.subscribe(syncSkin);
-  settings.mode.$.subscribe(syncMode);
-  settings.inlineDiagrams.$.subscribe(syncInlineDiagrams);
-  settings.inlineDiagramInference.$.subscribe(syncInlineDiagrams);
-  settings.inlineStructuredSelectors.$.subscribe(syncInlineStructured);
-  settings.showToolbar.$.subscribe(applyToolbar);
-  settings.sidebar.$.subscribe(syncSidebar);
-  settings.xpPixel.$.subscribe(syncXpPixel);
-  store.subscribe(() => syncXpPixel(), ["config"]);
+  const changed = (key: keyof ReturnType<typeof store.get>) =>
+    store.changed$.pipe(filter((dirty) => dirty.includes(key)));
+  root.next(settings.skin.$.pipe(sink(syncSkin)));
+  root.next(settings.mode.$.pipe(sink(syncMode)));
+  root.next(settings.inlineDiagrams.$.pipe(sink(syncInlineDiagrams)));
+  root.next(settings.inlineDiagramInference.$.pipe(sink(syncInlineDiagrams)));
+  root.next(settings.inlineStructuredSelectors.$.pipe(sink(syncInlineStructured)));
+  root.next(settings.showToolbar.$.pipe(sink(applyToolbar)));
+  root.next(settings.sidebar.$.pipe(sink(syncSidebar)));
+  root.next(settings.xpPixel.$.pipe(sink(syncXpPixel)));
+  root.next(changed("config").pipe(sink(() => syncXpPixel())));
   // dockview owns the layout; we only react: refit the active terminal
   // whenever dockview re-lays-out a group. Panel lazy-load is handled per-panel
   // via PanelDef.onShow in the plugin registry.
@@ -275,19 +279,20 @@ async function main() {
     onTermCwd: (sid) => tabMetaById(sid)?.cwd ?? null,
   });
   // worktrees is runtime; the rest are settings, so the panel listens to both.
-  store.subscribe(renderWorktreesPanel, ["worktrees"]);
+  root.next(worktreeScanFlow());
+  root.next(changed("worktrees").pipe(sink(() => renderWorktreesPanel())));
   // A tmux rename lands in list_sessions, which repaints the tab bar from it.
-  store.subscribe(syncTabTitlesFromTmux, ["sessions"]);
-  merge(
+  root.next(changed("sessions").pipe(sink(() => syncTabTitlesFromTmux())));
+  root.next(merge(
     settings.wtView.$,
     settings.wtExpanded.$,
     settings.wtFocus.$,
     settings.wtFavorites.$,
     settings.wtAgents.$,
-  ).subscribe(() => renderWorktreesPanel());
-  bindPanicChrome();
-  bindTurnDebugChrome();
-  bindAgentSquaresChrome();
+  ).pipe(sink(() => renderWorktreesPanel())));
+  root.next(panicChromeFlow());
+  root.next(turnDebugChromeFlow());
+  root.next(agentSquaresChromeFlow());
   // Re-apply the persisted recording flag to the backend (default off there).
   invoke("capture_set_enabled", { on: settings.captureEnabled.$() }).catch(
     console.error,
@@ -345,10 +350,9 @@ async function main() {
   registerV2Bridges();
   registerActivityBridge();
   refreshFavorites();
-  initRail(); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
-  const stopReactiveRuntime = startReactiveRuntime();
-  window.addEventListener("beforeunload", stopReactiveRuntime, { once: true });
-  store.subscribe(updateFavBadge, ["aiFavs"]);
+  root.next(railFlow()); // builds the rail, then wires drag-reorder + right-click visibility (src/rail.ts)
+  root.next(statusFlow());
+  root.next(changed("aiFavs").pipe(sink(() => updateFavBadge())));
   updateFavBadge();
   // Activate anchor-positioning where it's not native (WebKit) AFTER the rail
   // exists, so the polyfill discovers the .rail-tip anchors. It repositions on
@@ -375,7 +379,9 @@ async function main() {
   wireOsDrop().catch((e) => showError("wireOsDrop", e));
   // Capture the right-click Y (capture phase, before wireContextMenu's bubble
   // handler) so ctxItemsFor can map it to a terminal buffer row for turn-identify.
-  document.addEventListener("contextmenu", (e) => setLastCtxPoint(e.clientX, e.clientY), true);
+  root.next(fromEvent<MouseEvent>(document, "contextmenu", { capture: true }).pipe(
+    sink((e) => setLastCtxPoint(e.clientX, e.clientY)),
+  ));
   wireContextMenu(ctxItemsFor);
   // Harness discovery walks the on-disk Claude/Codex session stores. Large
   // stores can take seconds to scan, so never hold boot, PTY listeners, summon,
@@ -383,23 +389,24 @@ async function main() {
   void refreshSessions();
   // Scan worktrees in the background so session rows can show which worktrees
   // they've touched; re-relate sessions once the scan lands.
-  scanWorktrees().then(refreshSessions).catch(() => {});
+  root.next(worktreeScanSettled.pipe(take(1), sink(() => void refreshSessions())));
+  worktreeScanRequested.next();
   // Background poll for AI harnesses running outside tmux entirely (ps + lsof,
   // cheap). Runs regardless of which panel is open so a rogue session gets
   // flagged even if the user never opens the tmux panel to look for it.
-  refreshRogue();
-  setInterval(refreshRogue, 8000);
+  root.next(timer(0, 8000).pipe(sink(() => refreshRogue())));
 
   // Flow control: the Rust reader stops draining a pty past 64 unacked chunks
   // (pty.rs FLOW_HIGH). xterm.js runs write callbacks in order, so one ack on
   // the batch's last chunk per session covers the whole batch.
-  await listenNativeEvent<{ chunks: { id: string; chunk: string }[] }>("pty-data-batch", (e) => {
+  const ptyData = nativeEventGate<{ chunks: { id: string; chunk: string }[] }>("pty-data-batch");
+  root.next(ptyData.events$.pipe(sink(({ chunks }) => {
     const perSession = new Map<string, number>();
-    for (const chunk of e.payload.chunks) {
+    for (const chunk of chunks) {
       perSession.set(chunk.id, (perSession.get(chunk.id) ?? 0) + 1);
     }
     const remaining = new Map(perSession);
-    for (const chunk of e.payload.chunks) {
+    for (const chunk of chunks) {
       observeTerminalOutput(chunk.id, chunk.chunk);
       const left = remaining.get(chunk.id)! - 1;
       remaining.set(chunk.id, left);
@@ -413,25 +420,28 @@ async function main() {
       if (left === 0) term.write(chunk.chunk, ack);
       else term.write(chunk.chunk);
     }
-  });
+  })));
 
   // Kitty graphics frames resolved by the Rust proxy (graphics sessions only).
-  await listenNativeEvent<GraphicsFrame>("pty-graphics", (e) => {
-    tabs.get(e.payload.id)?.overlay?.push(e.payload);
-  });
+  const ptyGraphics = nativeEventGate<GraphicsFrame>("pty-graphics");
+  root.next(ptyGraphics.events$.pipe(sink((frame) => {
+    tabs.get(frame.id)?.overlay?.push(frame);
+  })));
 
   // CDP engine failed to launch/attach a browser tab.
-  await listenNativeEvent<{ id: string; error: string }>("cdp-error", (e) => {
-    console.error("[cdp]", e.payload.error);
-    flashStatus(`browser error: ${e.payload.error}`);
-  });
+  const cdpError = nativeEventGate<{ id: string; error: string }>("cdp-error");
+  root.next(cdpError.events$.pipe(sink(({ error }) => {
+    console.error("[cdp]", error);
+    flashStatus(`browser error: ${error}`);
+  })));
 
   // Global navigation history: every browser tab's URL change (link, redirect,
   // SPA pushState) lands here regardless of which tab it came from. The per-tab
   // CdpView listens to the same event for its own address bar / back-forward.
-  await listenNativeEvent<{ id: string; url: string }>("cdp-url", (e) => {
-    recordVisit(e.payload.url);
-  });
+  const cdpUrl = nativeEventGate<{ id: string; url: string }>("cdp-url");
+  root.next(cdpUrl.events$.pipe(sink(({ url }) => recordVisit(url))));
+  // The restore below opens sessions whose first output needs these listeners.
+  await Promise.all([ptyData.listening, ptyGraphics.listening, cdpError.listening, cdpUrl.listening]);
 
   // Reattach tabs that were open before the reload. The tmux sessions (and the
   // agents inside) are still alive in the Rust backend; `tmux new-session -A`
@@ -448,35 +458,33 @@ async function main() {
 
   // Each new activity row (browser ingest, os capture, file open) arrives here;
   // prepend, newest-first, capped.
-  await listenNativeEvent<Event>("activity-added", (e) => {
+  root.next(nativeEvent$<Event>("activity-added").pipe(sink((event) => {
     store.set({
-      activity: [e.payload, ...store.get().activity].slice(0, ACTIVITY_CAP),
+      activity: [event, ...store.get().activity].slice(0, ACTIVITY_CAP),
     });
-  });
+  })));
 
   // Per-gesture capture outcome (shot saved, or the reason it was skipped) —
   // drives the Activity panel's live status line + permission banner.
-  await listenNativeEvent<CaptureStatus>("capture-status", (e) => {
-    store.set({ captureStatus: e.payload });
-  });
+  root.next(nativeEvent$<CaptureStatus>("capture-status").pipe(
+    sink((captureStatus) => store.set({ captureStatus })),
+  ));
 
   // favorites.db mutated (add/remove) — refresh the mirror so any open panel
   // re-renders. The emitting command also returns the list, but this keeps
   // multiple windows / out-of-band edits in sync.
-  await listenNativeEvent<Fav[]>("favorites-changed", (e) => {
-    store.set({ aiFavs: e.payload });
-  });
+  root.next(nativeEvent$<Fav[]>("favorites-changed").pipe(sink((aiFavs) => store.set({ aiFavs }))));
 
   // Frontmost-app stream (Rust polls every 400ms). Foundation for the overlay
   // state machine: stash who's in front so panels can react to focus (e.g. raise
   // / fade when VSCode comes forward). "instant" while we're focused; ignore self.
-  await listenNativeEvent<string>("frontmost-app", (e) => {
-    const app = e.payload;
-    if (app && app !== "instant") store.set({ frontmostApp: app });
-  });
+  root.next(nativeEvent$<string>("frontmost-app").pipe(
+    filter((app) => Boolean(app) && app !== "instant"),
+    sink((frontmostApp) => store.set({ frontmostApp })),
+  ));
 
   // Summon: refocus and refit the active terminal immediately.
-  await listenNativeEvent("summoned", () => {
+  root.next(nativeEvent$("summoned").pipe(sink(() => {
     refreshSessions();
     // Window may reappear at a new size/position; refit so the grid (and the
     // tmux pane behind it) matches, otherwise the TUI draws clipped.
@@ -488,16 +496,17 @@ async function main() {
         t?.term.focus();
       });
     }
-  });
+  })));
 
   // Each terminal panel refits itself via dockview's onDidDimensionsChange
   // (wired through onTermLayout -> fitTerm), so no global ResizeObserver here.
 
   // Esc hides the popover — unless the command palette is open, where Esc just
   // closes the palette (handled on its own input, which stops propagation).
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !isPaletteOpen() && !isJumpOpen()) void runtimePorts.window.hide();
-  });
+  root.next(fromEvent<KeyboardEvent>(window, "keydown").pipe(
+    filter((e) => e.key === "Escape" && !isPaletteOpen() && !isJumpOpen()),
+    sink(() => void runtimePorts.window.hide()),
+  ));
 
   // Central keymap: binds the command table on the window. The focused-terminal
   // path is intercepted inside attachCustomKeyEventHandler (runMatchingCommand)
@@ -532,46 +541,53 @@ async function main() {
 
   // Overlay: re-apply on any change to its config or the frontmost app, then once
   // now so a persisted mini/fade/follow is restored on boot.
-  bindOverlay();
+  root.next(overlayFlow());
 
   // Right-⌘ + Right-⇧ + V: the native tap (lib.rs) swallows the combo, copies
   // the focused app's selection, and emits the text here. Write it straight into
   // the active terminal (no picker).
-  await listenNativeEvent<string>("send-highlight-text", (e) => {
+  root.next(nativeEvent$<string>("send-highlight-text").pipe(sink((text) => {
     const id = activeId();
-    const text = e.payload;
     if (!text || !text.trim()) return showError("highlight", "nothing selected to send");
     if (id) sendTextToTab(id, text + " ");
-  });
+  })));
 
   // Tray menu "Recording" item toggles capture (same path as the panel button).
-  await listenNativeEvent("toggle-record", () => toggleRecording());
+  root.next(nativeEvent$("toggle-record").pipe(sink(() => toggleRecording())));
 
   // Tray menu "AI Integrations" master switch: off hides agents from the launch
   // pickers (shell only). Persisted via the store.
-  await listenNativeEvent("toggle-ai", () => {
+  root.next(nativeEvent$("toggle-ai").pipe(sink(() => {
     const on = !settings.aiEnabled.$();
     settings.aiEnabled.$(on);
     flashStatus(`AI integrations ${on ? "on" : "off"}`);
-  });
+  })));
 
   // Click-outside dismiss: hide when the window loses focus. Gated on a prior
   // focus so it doesn't self-hide at launch, and suppressed during screenshot.
   const win = runtimePorts.window;
-  let everFocused = false;
-  await win.onFocusChanged((focused) => {
-    if (focused) {
-      everFocused = true;
-      cancelHide();
-      return;
-    }
-    if (everFocused && !isCapturing() && !isDraggingIn() && !isFilePickerOpen()) {
-      // Defer so a drag-in (which blurs us) can land; a drag-enter cancels it.
-      // Kept short so tab-away/click-out dismiss feels instant.
-      cancelHide();
-      scheduleHide(() => void win.hide(), 120);
-    }
+  const focus$ = new Observable<boolean>((subscriber) => {
+    let unlisten: (() => void) | undefined;
+    void win.onFocusChanged((focused) => subscriber.next(focused)).then((next) => {
+      if (subscriber.closed) next();
+      else unlisten = next;
+    });
+    return () => unlisten?.();
   });
+  root.next(focus$.pipe(
+    scan(
+      (state, focused) => ({ focused, everFocused: state.everFocused || focused }),
+      { focused: false, everFocused: false },
+    ),
+    sink(({ focused, everFocused }) => {
+      if (focused) return cancelHide();
+      if (everFocused && !isCapturing() && !isDraggingIn() && !isFilePickerOpen()) {
+        // Defer so a drag-in (which blurs us) can land; a drag-enter cancels it.
+        cancelHide();
+        scheduleHide(() => void win.hide(), 120);
+      }
+    }),
+  ));
 
   // Last, and unawaited: a missing rg must not delay the first paint. Silent on
   // a healthy machine, and silent again once this gap set has been dismissed.

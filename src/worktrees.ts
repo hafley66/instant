@@ -38,14 +38,9 @@ import {
 } from "./core";
 import { openDiffPanel, openPreviewPanel } from "./preview";
 import { tabs, openTab, closeTab, settleClosures, pasteToActive } from "./terminal";
-import {
-  applyWorktreeDeltaRows,
-  queryWorktreeSnapshot,
-  type WorktreeDelta,
-} from "./ghcacheSnapshot";
-import { paths as apiPaths } from "./generated/api";
 import { harnessAdapter, harnessForCommand, harnessIds, isHarnessProcess, type HarnessId } from "./harness";
 import { settings } from "./0_settings";
+import { worktreePanelShown, worktreeScanRequested } from "./1_worktreeScan";
 
 export type Session = {
   name: string;
@@ -114,16 +109,6 @@ async function autoTrackSessionPaths(paths: string[]) {
   }
 }
 
-// Drop auto-discovered rows a real scan now covers, so a later rescan doesn't
-// leave a stale duplicate sitting in autoWorktrees once the path is properly
-// scanned (its branch/dirty would also go stale without this).
-function pruneAutoWorktrees(scanned: WorktreeRow[]) {
-  const found = new Set(scanned.map((w) => w.worktree));
-  const cur = settings.autoWorktrees.$();
-  if (cur.some((w) => found.has(w.worktree))) {
-    settings.autoWorktrees.$(cur.filter((w) => !found.has(w.worktree)));
-  }
-}
 
 // The sidebar SESSIONS list mirrors the live tmux sessions (the real running
 // shells/agents), not a creator. Order the launcher rows per store.sessionSort.
@@ -536,7 +521,7 @@ function doRemoveWorktree(repo: string, wtPath: string, force: boolean) {
       // Drop a stale favorite + close any open diff/preview, then rescan.
       if (isFavWorktree(wtPath)) toggleFavWorktree(wtPath);
       flashStatus(`removed ${baseName(wtPath)}`);
-      scanWorktrees();
+      worktreeScanRequested.next();
     })
     .catch((e) => flashStatus(String(e)));
 }
@@ -879,11 +864,11 @@ export function registerV2Bridges() {
   });
   setWorktreesPanel({
     treeRows: wtTreeRows,
-    onShow: () => scanWorktreesIfNeeded(),
+    onShow: () => worktreePanelShown.next(),
     scanRoot: () => settings.scanRoot.$(),
     scan: (root) => {
       settings.scanRoot.$(root);
-      scanWorktrees();
+      worktreeScanRequested.next();
     },
     focus: () => settings.wtFocus.$(),
     toggleFocus: () => settings.wtFocus.$(!settings.wtFocus.$()),
@@ -1054,7 +1039,7 @@ function submitAddWorktree(clone: string, branch: string) {
   invoke<string>("add_worktree", { repo: clone, branch })
     .then(() => {
       store.set({ wtAddingClone: null });
-      return scanWorktrees(); // rescan picks up the new worktree row
+      worktreeScanRequested.next(); // rescan picks up the new worktree row
     })
     .catch((e) => showError("worktree", String(e)));
 }
@@ -1369,75 +1354,6 @@ export function renderWorktreesPanel() {
   renderWtAgentsEditor();
   if (wtView === "tree") renderTree(worktrees);
   else renderFlatTable(worktrees);
-}
-
-// Worktree data comes from the ghcacher daemon (HTTP snapshot + SSE push on
-// 127.0.0.1:7748) when it's running, else falls back to the local Rust git scan.
-// The daemon runs a bounded, debounced background sweep, so neither path forks
-// hundreds of `git status` on the UI's hot path.
-let wtScanning = false; // in-flight guard: stops overlapping scans stacking
-let wtScanned = false; // one scan has completed (any source) -> stop auto-refire
-let wtSse: EventSource | null = null;
-
-// Called from panel onShow paths: scan once, then stop auto-firing on every show.
-export function scanWorktreesIfNeeded() {
-  if (!wtScanned) scanWorktrees();
-}
-
-// Apply one SSE change_log frame to the worktrees store, keyed by worktree path.
-function applyWorktreeDelta(msg: WorktreeDelta) {
-  store.set({ worktrees: applyWorktreeDeltaRows(store.get().worktrees, msg) });
-}
-
-// Subscribe to ghcacher's SSE stream once; filter to worktree deltas. The browser
-// EventSource auto-reconnects; on a hard error we drop it so the next scan re-subs.
-function subscribeWorktrees() {
-  if (wtSse) return;
-  try {
-    const es = apiPaths.events.connect();
-    wtSse = es;
-    es.onmessage = (ev) => {
-      let msg: { entity_type?: string; event: string; payload: WorktreeRow | { worktree: string } };
-      try {
-        msg = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
-      if (msg.entity_type !== "worktree") return;
-      applyWorktreeDelta(msg);
-    };
-    es.onerror = () => {
-      es.close();
-      if (wtSse === es) wtSse = null;
-    };
-  } catch {
-    wtSse = null;
-  }
-}
-
-export async function scanWorktrees() {
-  if (wtScanning) return; // never stack scans (the old volley)
-  wtScanning = true;
-  try {
-    const root = settings.scanRoot.$().trim();
-    const snapshot = await queryWorktreeSnapshot(() =>
-        invoke<WorktreeRow[]>("scan_worktrees", {
-          roots: root ? [root] : [],
-          maxDepth: null,
-        }),
-    );
-    store.set({ worktrees: snapshot.rows });
-    pruneAutoWorktrees(snapshot.rows);
-    if (snapshot.source === "ghcache") {
-      subscribeWorktrees();
-    }
-    wtScanned = true;
-  } catch (e) {
-    console.error("scan_worktrees:", e);
-    wtScanned = true; // a failed scan still counts: don't auto-refire on every show
-  } finally {
-    wtScanning = false;
-  }
 }
 
 // ---- files: lazy directory listing + activity logging ----

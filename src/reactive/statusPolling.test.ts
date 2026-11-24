@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEventBus } from "./eventBus";
 import type { AppEvents } from "./events";
-import { checkStatusProbes, startStatusPolling } from "./statusPolling";
+import { checkStatusProbes, statusPolling } from "./statusPolling";
 
 afterEach(() => vi.useRealTimers());
 
@@ -12,7 +12,7 @@ describe("status polling", () => {
     const check = vi.fn(async () => ({ state: "up" as const }));
     const completed = vi.fn();
     bus.on("status.poll.completed").subscribe(completed);
-    const subscription = startStatusPolling(bus, () => [{ id: "a", label: "A", check }]);
+    const subscription = statusPolling(bus, () => [{ id: "a", label: "A", check }]).subscribe();
 
     await vi.advanceTimersByTimeAsync(0);
     expect(check).toHaveBeenCalledTimes(1);
@@ -43,7 +43,7 @@ describe("status polling", () => {
     const bus = createEventBus<AppEvents>();
     const completed = vi.fn();
     bus.on("status.poll.completed").subscribe(completed);
-    const subscription = startStatusPolling(bus, () => [{ id: "a", label: "A", check }]);
+    const subscription = statusPolling(bus, () => [{ id: "a", label: "A", check }]).subscribe();
     await vi.advanceTimersByTimeAsync(8000);
     expect(check).toHaveBeenCalledTimes(1);
     subscription.unsubscribe();

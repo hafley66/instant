@@ -12,6 +12,8 @@ import { type CtxItem } from "./ctxmenu";
 import { $, nextSkin, THEMES, termFontFamily, activeId, pathArg, flashStatus } from "./core";
 
 export { askText } from "./core";
+import { merge, type Observable } from "rxjs";
+import { sink } from "./reactive/0_root";
 import { panic } from "./0_panicSettings";
 import { turnDebug } from "./0_turnDebugSettings";
 import { agentSquares, type SquaresMode } from "./0_agentSquaresSettings";
@@ -131,29 +133,31 @@ export function syncInlineDiagrams() {
 
 /** Subscribes the panic settings to their DOM. Each fires once on subscribe, so
  *  this replaces both the store subscriptions and their initial sync calls. */
-export function bindPanicChrome() {
-  panic.on.$.subscribe((on) => {
-    const button = $("#panic-toggle") as HTMLButtonElement;
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", String(on));
-    const host = document.getElementById("stfu-host");
-    if (host) host.hidden = !on;
-  });
-  panic.sub.$.subscribe((mode) => {
-    const stage = document.querySelector(".stfu-stage") as HTMLElement | null;
-    if (stage) stage.dataset.subMode = mode;
-  });
+export function panicChromeFlow(): Observable<unknown> {
+  return merge(
+    panic.on.$.pipe(sink((on) => {
+      const button = $("#panic-toggle") as HTMLButtonElement;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-pressed", String(on));
+      const host = document.getElementById("stfu-host");
+      if (host) host.hidden = !on;
+    })),
+    panic.sub.$.pipe(sink((mode) => {
+      const stage = document.querySelector(".stfu-stage") as HTMLElement | null;
+      if (stage) stage.dataset.subMode = mode;
+    })),
+  );
 }
 
 /** Subscribes the turn-attribution debug toggle to its button and to the
  *  per-terminal overlays. The overlays only exist while the setting is true. */
-export function bindTurnDebugChrome() {
-  turnDebug.on.$.subscribe((on) => {
+export function turnDebugChromeFlow(): Observable<unknown> {
+  return turnDebug.on.$.pipe(sink((on) => {
     const button = $("#turn-debug-toggle") as HTMLButtonElement;
     button.classList.toggle("active", on);
     button.setAttribute("aria-pressed", String(on));
     syncTurnDebugOverlays();
-  });
+  }));
 }
 
 /** Subscribes the turn-strip settings to the toolbar and to the per-terminal
@@ -162,20 +166,22 @@ export function bindTurnDebugChrome() {
  *  keeps. The mode select acts on a running strip, so the toggle also owns its
  *  visibility. Each subscription fires once on subscribe, so this replaces both
  *  the store subscriptions and their initial sync calls. */
-export function bindAgentSquaresChrome() {
-  const mode = $("#squares-mode") as HTMLSelectElement;
-  agentSquares.on.$.subscribe((on) => {
-    const button = $("#squares-toggle") as HTMLButtonElement;
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", String(on));
-    mode.hidden = !on;
-    syncAgentSquares();
-  });
-  agentSquares.mode.$.subscribe((value) => {
-    mode.value = value;
-    syncAgentSquares();
-  });
-  agentSquares.userKeep.$.subscribe(() => syncAgentSquares());
+export function agentSquaresChromeFlow(): Observable<unknown> {
+  const mode = () => $("#squares-mode") as HTMLSelectElement;
+  return merge(
+    agentSquares.on.$.pipe(sink((on) => {
+      const button = $("#squares-toggle") as HTMLButtonElement;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-pressed", String(on));
+      mode().hidden = !on;
+      syncAgentSquares();
+    })),
+    agentSquares.mode.$.pipe(sink((value) => {
+      mode().value = value;
+      syncAgentSquares();
+    })),
+    agentSquares.userKeep.$.pipe(sink(() => syncAgentSquares())),
+  );
 }
 
 export function syncInlineStructured() {
